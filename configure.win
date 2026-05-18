@@ -1,6 +1,0 @@
-#!/bin/sh
-
-echo "wsiTools: OpenSlide and libvips are optional runtime system dependencies."
-echo "Install the corresponding command-line tools to enable WSI reading and conversion."
-
-exit 0

@@ -13,7 +13,7 @@ default.
 
 ```r
 # install.packages("remotes")
-remotes::install_github("tkcaccia/wsiTools")
+remotes::install_github("tkcaccia/wsiTools", upgrade = "never")
 ```
 
 From a local checkout:
@@ -21,6 +21,10 @@ From a local checkout:
 ```r
 install.packages(".", repos = NULL, type = "source")
 ```
+
+wsiTools is currently installable as a pure R package. OpenSlide and libvips are
+checked at runtime by `wsi_backends()` and related helpers, so Windows users do
+not need Rtools or WSI system libraries just to install the package.
 
 ## System dependencies
 
