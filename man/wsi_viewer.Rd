@@ -110,7 +110,8 @@ GeoJSON geometries, browser-side GeoJSON import, crosshair display,
 coordinate copying, polygon drawing, brush-style annotation painting
 including selected-ROI extension and \code{Alt} brush removal,
 selected-ROI vertex editing, name/class reassignment including custom
-annotation categories, deletion, StarDist-oriented selected-ROI export and
+annotation categories, 10-step \code{Ctrl+Z} annotation undo, deletion,
+StarDist-oriented selected-ROI export and
 segmentation GeoJSON import, distance measurement in pixels and micrometres when MPP metadata is
 available, and browser-based GeoJSON export. Optional \code{stain = "ihc"} adds an RGB
 optical-density deconvolution display with selectable stain channels,

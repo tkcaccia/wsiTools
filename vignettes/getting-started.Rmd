@@ -108,6 +108,8 @@ holding `Alt` while brushing removes from the selected annotation. Use `Edit`
 to move vertices, double-click an edge to insert a vertex, and Backspace/Delete
 to remove the active vertex. The `Name`, `Class`, and `Custom class` controls
 update the selected annotation label and category before GeoJSON export.
+`Ctrl+Z` undoes annotation edits in the viewer, with the last 10 committed
+annotation states retained.
 
 For full-resolution zooming, use tiled mode. This asks libvips to create a
 Deep Zoom tile pyramid on disk, then writes an HTML viewer that requests the

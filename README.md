@@ -148,8 +148,9 @@ annotation creates a new ROI; painting with an annotation selected extends it;
 holding `Alt` while brushing removes from the selected annotation. Use `Edit`
 to move vertices, double-click an edge to insert a vertex, and Backspace/Delete
 to remove the active vertex. The `Name`, `Class`, and `Custom class` controls
-update the selected annotation label and category before GeoJSON export. In a
-static browser viewer this opens the
+update the selected annotation label and category before GeoJSON export.
+`Ctrl+Z` undoes annotation edits in the viewer, with the last 10 committed
+annotation states retained. In a static browser viewer this opens the
 browser's normal save/download flow rather than silently writing to a server
 path.
 
