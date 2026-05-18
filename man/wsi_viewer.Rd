@@ -107,7 +107,8 @@ annotations, GeoJSON overlays, view aids, and optional stains. These cover
 pan/select modes, fit and 1:1 zoom, ROI visibility and label toggles, ROI
 opacity, ROI previous/next navigation, an annotation side window listing
 GeoJSON geometries, browser-side GeoJSON import, crosshair display,
-coordinate copying, polygon drawing, brush-style annotation painting,
+coordinate copying, polygon drawing, brush-style annotation painting
+including selected-ROI extension and \code{Alt} brush removal,
 selected-ROI vertex editing, name/class
 reassignment, deletion, StarDist-oriented selected-ROI export and
 segmentation GeoJSON import, distance measurement in pixels and micrometres when MPP metadata is

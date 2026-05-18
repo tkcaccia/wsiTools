@@ -143,7 +143,10 @@ navigation, a side window listing all GeoJSON geometries, crosshair display,
 coordinate copying, polygon drawing, and GeoJSON export. Use `GeoJSON` to open
 the geometry list; each row shows the geometry type, bounds, point count,
 source, and id. Use `Draw ROI`, click polygon vertices, double-click or press
-`Finish`, then use `Save GeoJSON`. In a static browser viewer this opens the
+`Finish`, then use `Save GeoJSON`. In `Brush` mode, painting with no selected
+annotation creates a new ROI; painting with an annotation selected extends it;
+holding `Alt` while brushing removes from the selected annotation. In a static
+browser viewer this opens the
 browser's normal save/download flow rather than silently writing to a server
 path.
 
