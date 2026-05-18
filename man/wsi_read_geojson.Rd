@@ -2,12 +2,17 @@
 % Please edit documentation in R/roi.R
 \name{wsi_read_geojson}
 \alias{wsi_read_geojson}
+\alias{read_geojson}
 \title{Read QuPath-style GeoJSON annotations}
 \usage{
 wsi_read_geojson(path)
+
+read_geojson(file)
 }
 \arguments{
 \item{path}{GeoJSON file path.}
+
+\item{file}{GeoJSON file path.}
 }
 \value{
 A \code{wsi_roi} data frame.

@@ -33,23 +33,33 @@ wsi_collect_points <- function(coords) {
 
 wsi_roi_name <- function(properties, index) {
   classification <- properties$classification$name %||% properties$class %||% properties$classification %||% NA_character_
-  properties$name %||% classification %||% sprintf("roi_%d", index)
+  properties$name %||% properties$label %||% properties$annotation_label %||% classification %||% sprintf("roi_%d", index)
 }
 
-#' Read QuPath-style GeoJSON annotations
-#'
-#' Reads GeoJSON annotations and returns lightweight ROI metadata with list
-#' columns for geometry coordinates. Polygon and multipolygon coordinates are
-#' supported in the first milestone.
-#'
-#' @param path GeoJSON file path.
-#'
-#' @return A `wsi_roi` data frame.
-#' @export
-wsi_read_geojson <- function(path) {
-  path <- wsi_validate_input_path(path)
-  geojson <- jsonlite::fromJSON(path, simplifyVector = FALSE)
+wsi_empty_roi <- function() {
+  roi <- data.frame(
+    roi_id = character(),
+    name = character(),
+    class = character(),
+    geometry_type = character(),
+    xmin = numeric(),
+    ymin = numeric(),
+    xmax = numeric(),
+    ymax = numeric(),
+    crs = character(),
+    stringsAsFactors = FALSE
+  )
+  roi$coordinates <- I(list())
+  class(roi) <- c("wsi_roi", class(roi))
+  roi
+}
+
+wsi_roi_from_geojson <- function(geojson) {
   features <- wsi_geojson_features(geojson)
+
+  if (!length(features)) {
+    return(wsi_empty_roi())
+  }
 
   rows <- lapply(seq_along(features), function(i) {
     feature <- features[[i]]
@@ -79,6 +89,122 @@ wsi_read_geojson <- function(path) {
   class(roi) <- c("wsi_roi", class(roi))
   roi
 }
+
+#' Read QuPath-style GeoJSON annotations
+#'
+#' Reads GeoJSON annotations and returns lightweight ROI metadata with list
+#' columns for geometry coordinates. Polygon and multipolygon coordinates are
+#' supported in the first milestone.
+#'
+#' @param path GeoJSON file path.
+#'
+#' @return A `wsi_roi` data frame.
+#' @export
+wsi_read_geojson <- function(path) {
+  path <- wsi_validate_input_path(path)
+  geojson <- jsonlite::fromJSON(path, simplifyVector = FALSE)
+  wsi_roi_from_geojson(geojson)
+}
+
+#' @rdname wsi_read_geojson
+#' @param file GeoJSON file path.
+#' @export
+read_geojson <- function(file) {
+  wsi_read_geojson(file)
+}
+
+#' Write ROI annotations as GeoJSON
+#'
+#' Writes `wsi_roi` objects as QuPath-compatible GeoJSON FeatureCollections.
+#'
+#' @param rois A `wsi_roi` object.
+#' @param file Output GeoJSON path.
+#' @param overwrite Whether to overwrite an existing file.
+#'
+#' @return The output path, invisibly.
+#' @export
+write_geojson <- function(rois, file, overwrite = FALSE) {
+  if (!inherits(rois, "wsi_roi")) {
+    wsi_abort("`rois` must be a `wsi_roi` object.")
+  }
+  file <- wsi_validate_output_path(file, overwrite = overwrite)
+  features <- lapply(seq_len(nrow(rois)), function(i) {
+    class_name <- rois$class[[i]]
+    properties <- list(
+      name = rois$name[[i]],
+      label = rois$name[[i]],
+      classification = list(name = class_name %||% "annotation"),
+      class = class_name
+    )
+    list(
+      type = "Feature",
+      id = rois$roi_id[[i]],
+      properties = properties,
+      geometry = list(
+        type = rois$geometry_type[[i]],
+        coordinates = rois$coordinates[[i]]
+      )
+    )
+  })
+  geojson <- list(type = "FeatureCollection", features = features)
+  jsonlite::write_json(geojson, file, auto_unbox = TRUE, pretty = TRUE, null = "null")
+  invisible(file)
+}
+
+#' @rdname write_geojson
+#' @export
+wsi_write_geojson <- write_geojson
+
+#' Assign pathology labels to ROIs
+#'
+#' @param rois A `wsi_roi` object.
+#' @param label Label to assign, for example `"tumour"`, `"stroma"`,
+#'   `"necrosis"`, `"normal"`, `"artefact"`, or `"exclusion"`.
+#' @param roi_id Optional ROI ids to update. When `NULL`, all ROIs are updated.
+#'
+#' @return A modified `wsi_roi` object.
+#' @export
+wsi_set_roi_class <- function(rois, label, roi_id = NULL) {
+  if (!inherits(rois, "wsi_roi")) {
+    wsi_abort("`rois` must be a `wsi_roi` object.")
+  }
+  if (!is.character(label) || length(label) != 1L || is.na(label) || !nzchar(label)) {
+    wsi_abort("`label` must be a single non-empty character value.")
+  }
+  idx <- if (is.null(roi_id)) {
+    seq_len(nrow(rois))
+  } else {
+    match(as.character(roi_id), rois$roi_id)
+  }
+  if (anyNA(idx)) {
+    wsi_abort("Some `roi_id` values were not found in `rois`.")
+  }
+  rois$class[idx] <- label
+  rois
+}
+
+#' Add ROI overlays to a viewer
+#'
+#' Convenience wrapper for creating a viewer with ROI overlays. Static HTML
+#' viewers cannot be modified in-place, so pass a slide and this function will
+#' create a new viewer with the ROI overlay.
+#'
+#' @param viewer A `wsi_slide` object.
+#' @param rois A `wsi_roi` object or GeoJSON path.
+#' @param ... Additional arguments passed to [wsi_viewer()].
+#'
+#' @return The HTML viewer path, invisibly.
+#' @export
+viewer_add_rois <- function(viewer, rois, ...) {
+  if (!inherits(viewer, "wsi_slide")) {
+    wsi_abort("`viewer_add_rois()` currently expects a `wsi_slide`; recreate static HTML viewers with `wsi_viewer(slide, roi = rois)`.")
+  }
+  wsi_viewer(viewer, roi = rois, ...)
+}
+
+#' @rdname viewer_add_rois
+#' @export
+wsi_viewer_add_rois <- viewer_add_rois
 
 wsi_require_sf_for_roi <- function() {
   if (!requireNamespace("sf", quietly = TRUE)) {

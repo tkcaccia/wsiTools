@@ -21,12 +21,15 @@ wsi_viewer(
   roi = NULL,
   roi_fill_alpha = 0.15,
   stain = c("none", "ihc"),
+  channels = NULL,
   hematoxylin = c(0.65, 0.704, 0.286),
   hrp = c(0.268, 0.57, 0.776),
   hematoxylin_colour = "#4b3f99",
   hrp_colour = "#8b5a2b",
   hematoxylin_strength = 1,
-  hrp_strength = 1
+  hrp_strength = 1,
+  segmentation_run_url = NULL,
+  viewer_state_url = NULL
 )
 }
 \arguments{
@@ -63,17 +66,30 @@ pixel coordinates, matching QuPath-style GeoJSON exports.}
 
 \item{roi_fill_alpha}{Fill transparency for ROI polygons.}
 
-\item{stain}{Optional stain display mode. Use \code{"ihc"} for interactive H-DAB
-color deconvolution in the browser.}
+\item{stain}{Optional stain display mode. Use \code{"ihc"} for interactive
+stain-channel color deconvolution in the browser.}
+
+\item{channels}{Optional stain channels created by \code{\link[=wsi_stain_channels]{wsi_stain_channels()}}.
+RGB brightfield deconvolution supports up to three independent channels at
+a time.}
 
 \item{hematoxylin, hrp}{RGB optical-density vectors used when
-\code{stain = "ihc"}.}
+\code{stain = "ihc"} and \code{channels} is not supplied.}
 
 \item{hematoxylin_colour, hrp_colour}{Initial display colours for the
 hematoxylin and HRP/DAB channels.}
 
 \item{hematoxylin_strength, hrp_strength}{Initial display gains for the
 hematoxylin and HRP/DAB channels.}
+
+\item{segmentation_run_url}{Optional HTTP endpoint used by the viewer's
+\verb{Start StarDist} button. The browser posts the selected ROI GeoJSON to this
+URL and expects StarDist cell GeoJSON in response. Use
+\code{\link[=wsi_stardist_server]{wsi_stardist_server()}} to create a local endpoint.}
+
+\item{viewer_state_url}{Optional HTTP endpoint used to sync annotations,
+measurements, segmentation overlays, and display state back to R. Use
+\code{\link[=wsi_viewer_live]{wsi_viewer_live()}} or \code{\link[=wsi_viewer_session]{wsi_viewer_session()}} to create this endpoint.}
 }
 \value{
 The HTML viewer path, invisibly.
@@ -86,13 +102,18 @@ disk so zooming can reveal full-resolution detail in the browser.
 }
 \details{
 The viewer includes lightweight pathology-viewer controls inspired by tools
-such as QuPath and napari: pan/select modes, fit and 1:1 zoom, ROI visibility
-and label toggles, ROI opacity, ROI previous/next navigation, an annotation
-side window listing GeoJSON geometries, crosshair display, coordinate
-copying, polygon drawing, and browser-based GeoJSON export. Optional
-\code{stain = "ihc"} adds an H-DAB
-deconvolution display with interactive hematoxylin and HRP/DAB channel
-colours and gains.
+such as QuPath and napari. Controls are grouped into menus for navigation,
+annotations, GeoJSON overlays, view aids, and optional stains. These cover
+pan/select modes, fit and 1:1 zoom, ROI visibility and label toggles, ROI
+opacity, ROI previous/next navigation, an annotation side window listing
+GeoJSON geometries, browser-side GeoJSON import, crosshair display,
+coordinate copying, polygon drawing, brush-style annotation painting,
+selected-ROI vertex editing, name/class
+reassignment, deletion, StarDist-oriented selected-ROI export and
+segmentation GeoJSON import, distance measurement in pixels and micrometres when MPP metadata is
+available, and browser-based GeoJSON export. Optional \code{stain = "ihc"} adds an RGB
+optical-density deconvolution display with selectable stain channels,
+colours, and gains. Use \code{channels} to provide multi-IHC channel definitions.
 }
 \examples{
 \dontrun{

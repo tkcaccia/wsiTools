@@ -1,0 +1,153 @@
+# wsiTools live viewer example
+#
+# This script opens a whole-slide image in the interactive viewer and keeps
+# browser-side work synchronized back into the R session:
+#   - drawn/painted/edited annotations
+#   - imported GeoJSON annotations
+#   - distance measurements
+#   - StarDist/cell segmentation overlays
+#
+# Run from R or RStudio on the remote PC:
+#
+#   source("/media/user/Lion/Lion/wsitools/example_live_viewer_sync.R")
+#
+# Or from a shell:
+#
+#   Rscript /media/user/Lion/Lion/wsitools/example_live_viewer_sync.R
+#
+# Optional environment variables:
+#   WSITOOLS_LIVE_SLIDE       Slide path. Defaults to SAPC 0052.svs in this folder.
+#   WSITOOLS_LIVE_MODE        "tiles" or "thumbnail". Defaults to "tiles".
+#   WSITOOLS_LIVE_OUTPUT      Output HTML path.
+#   WSITOOLS_STARDIST_COMMAND StarDist command, e.g. python or stardist-predict2d.
+#   WSITOOLS_STARDIST_SCRIPT  Optional Python/R script used with command.
+#   WSITOOLS_STARDIST_MODEL   StarDist model name. Defaults to 2D_versatile_he.
+
+library(wsiTools)
+
+script_file <- tryCatch(sys.frame(1)$ofile, error = function(e) NULL)
+if (is.null(script_file) || !nzchar(script_file)) {
+  file_arg <- grep("^--file=", commandArgs(FALSE), value = TRUE)
+  script_file <- if (length(file_arg)) sub("^--file=", "", file_arg[[1]]) else NULL
+}
+script_dir <- if (is.null(script_file) || !nzchar(script_file)) {
+  getwd()
+} else {
+  dirname(normalizePath(script_file, mustWork = FALSE))
+}
+slide_path <- Sys.getenv(
+  "WSITOOLS_LIVE_SLIDE",
+  file.path(script_dir, "SAPC 0052.svs")
+)
+slide_path <- normalizePath(slide_path, mustWork = FALSE)
+
+if (!file.exists(slide_path)) {
+  stop(
+    "Slide file not found: ", slide_path, "\n",
+    "Set WSITOOLS_LIVE_SLIDE to the slide you want to view."
+  )
+}
+
+mode <- Sys.getenv("WSITOOLS_LIVE_MODE", "tiles")
+if (!mode %in% c("tiles", "thumbnail")) {
+  stop("WSITOOLS_LIVE_MODE must be 'tiles' or 'thumbnail'.")
+}
+if (identical(mode, "tiles") && !wsi_has_vips()) {
+  warning("libvips is not available; falling back to WSITOOLS_LIVE_MODE='thumbnail'.")
+  mode <- "thumbnail"
+}
+
+output_html <- Sys.getenv(
+  "WSITOOLS_LIVE_OUTPUT",
+  file.path(script_dir, "SAPC_0052_live_viewer.html")
+)
+tile_dir <- file.path(script_dir, "SAPC_0052_live_viewer_tiles")
+
+message("Opening slide metadata only: ", slide_path)
+slide <- wsi_open(slide_path)
+on.exit(wsi_close(slide), add = TRUE)
+
+message("Backend status:")
+print(wsi_backends())
+
+# Optional: start a StarDist endpoint for the viewer's Segmentation -> Start StarDist button.
+# Leave WSITOOLS_STARDIST_COMMAND unset if you only want annotation/measurement sync.
+stardist_command <- Sys.getenv("WSITOOLS_STARDIST_COMMAND", "")
+stardist_script <- Sys.getenv("WSITOOLS_STARDIST_SCRIPT", "")
+stardist_model <- Sys.getenv("WSITOOLS_STARDIST_MODEL", "2D_versatile_he")
+stardist_server <- NULL
+segmentation_run_url <- NULL
+
+if (nzchar(stardist_command)) {
+  stardist_args <- if (nzchar(stardist_script)) {
+    c(stardist_script, "{input}", "{output}", "{model}")
+  } else {
+    NULL
+  }
+
+  message("Starting optional StarDist selected-ROI endpoint...")
+  stardist_server <- wsi_stardist_server(
+    slide,
+    output_dir = file.path(script_dir, "stardist_selected_roi"),
+    command = stardist_command,
+    args = stardist_args,
+    model = stardist_model,
+    wait = FALSE
+  )
+  segmentation_run_url <- stardist_server$url
+  on.exit(httpuv::stopServer(stardist_server$server), add = TRUE)
+}
+
+message("")
+message("Starting live viewer.")
+message("In the browser:")
+message("  1. Draw, brush, edit, or import GeoJSON ROIs.")
+message("  2. Use Measure -> Distance to measure between two points.")
+message("  3. If StarDist is configured, select an ROI and use Segmentation -> Start StarDist.")
+message("  4. Return to R with Esc or Ctrl+C. Synced objects will be saved below.")
+message("")
+
+session <- wsi_viewer_live(
+  slide,
+  mode = mode,
+  output = output_html,
+  tile_dir = if (identical(mode, "tiles")) tile_dir else NULL,
+  open = TRUE,
+  wait = TRUE,
+  name = "viewer_state",
+  segmentation_run_url = segmentation_run_url
+)
+
+state <- wsi_viewer_state(session)
+
+message("")
+message("Live viewer returned to R.")
+message("ROIs synced: ", nrow(state$rois))
+message("Measurements synced: ", nrow(state$measurements))
+message("Segmentation overlays synced: ", nrow(state$segmentation))
+
+roi_file <- file.path(script_dir, "viewer_state_rois.geojson")
+measurement_file <- file.path(script_dir, "viewer_state_measurements.csv")
+segmentation_file <- file.path(script_dir, "viewer_state_segmentation.geojson")
+
+if (nrow(state$rois)) {
+  write_geojson(state$rois, roi_file, overwrite = TRUE)
+  message("Saved synced ROI GeoJSON: ", roi_file)
+}
+
+if (nrow(state$measurements)) {
+  utils::write.csv(state$measurements, measurement_file, row.names = FALSE)
+  message("Saved synced measurements CSV: ", measurement_file)
+}
+
+if (nrow(state$segmentation)) {
+  write_geojson(state$segmentation, segmentation_file, overwrite = TRUE)
+  message("Saved synced segmentation GeoJSON: ", segmentation_file)
+}
+
+message("")
+message("The live objects are also available in this R session as:")
+message("  viewer_state")
+message("  viewer_state_rois")
+message("  viewer_state_measurements")
+message("  viewer_state_segmentation")

@@ -7,7 +7,8 @@
 wsi_deconvolve_region(slide, x, y, width, height, level = 0, ...)
 }
 \arguments{
-\item{slide}{A \code{wsi_slide} object.}
+\item{slide}{A \code{wsi_slide} object or a path that can be opened with
+\code{\link[=wsi_open]{wsi_open()}}.}
 
 \item{x, y, width, height, level}{Region coordinates; see \code{\link[=wsi_read_region]{wsi_read_region()}}.}
 

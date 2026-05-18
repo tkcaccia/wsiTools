@@ -95,12 +95,14 @@ viewer <- wsi_viewer(slide, width = 1600)
 coordinate readout. It visualizes a backend-generated thumbnail, so it remains
 safe for very large WSI files.
 
-The viewer toolbar provides pan/select modes, fit and 1:1 zoom, ROI and label
-toggles, ROI opacity, previous/next ROI navigation, a side window listing all
-GeoJSON geometries, crosshair display, coordinate copying, polygon drawing, and
-GeoJSON export. Use `GeoJSON` to open the geometry list; each row shows the
-geometry type, bounds, point count, source, and id. Use `Draw ROI`, click
-polygon vertices, double-click or press `Finish`, then use `Save GeoJSON`.
+The viewer toolbar is organized into menus: `Navigate`, `Annotations`,
+`GeoJSON`, `View`, and, when enabled, `Stains`. These menus group pan/select
+modes, fit and 1:1 zoom, ROI and label toggles, ROI opacity, previous/next ROI
+navigation, a side window listing all GeoJSON geometries, crosshair display,
+coordinate copying, polygon drawing, and GeoJSON export. Use `GeoJSON` to open
+the geometry list; each row shows the geometry type, bounds, point count,
+source, and id. Use `Draw ROI`, click polygon vertices, double-click or press
+`Finish`, then use `Save GeoJSON`.
 
 For full-resolution zooming, use tiled mode. This asks libvips to create a
 Deep Zoom tile pyramid on disk, then writes an HTML viewer that requests the
@@ -114,6 +116,27 @@ viewer <- wsi_viewer(
   tile_dir = "sample_viewer_tiles",
   tile_size = 512
 )
+```
+
+To compare H&E/IHC, original/processed images, serial sections, or WSI/mask
+views, use the side-by-side viewer. Zoom, pan, and cursor position are linked
+when `sync = TRUE`.
+
+```{r, eval=FALSE, purl=FALSE}
+viewer_compare(
+  "sample_he.svs",
+  "sample_ihc.svs",
+  sync = TRUE,
+  output = "he_ihc_compare.html"
+)
+```
+
+OME-Zarr directories can be opened as metadata-backed slide handles. This
+extracts dimensions and pyramid levels without decoding all chunks.
+
+```{r, eval=FALSE, purl=FALSE}
+zarr <- open_omezarr("sample.ome.zarr")
+omezarr_metadata("sample.ome.zarr")
 ```
 
 ## Deconvolving IHC stains
@@ -147,8 +170,36 @@ ihc_viewer <- wsi_viewer_ihc(
 )
 ```
 
-The toolbar provides an `IHC` toggle, separate hematoxylin and HRP/DAB channel
-visibility controls, color pickers, and gain sliders.
+The `Stains` menu provides an `IHC` toggle, separate hematoxylin and HRP/DAB
+channel visibility controls, color pickers, and gain sliders.
+
+For brightfield multiplex IHC, create selectable stain channels and pass them
+to the multi-channel viewer:
+
+```{r, eval=FALSE, purl=FALSE}
+multi_channels <- wsi_stain_channels(
+  name = c("Hematoxylin", "HRP/DAB", "Fast Red"),
+  vector = list(
+    c(0.650, 0.704, 0.286),
+    c(0.268, 0.570, 0.776),
+    c(0.213, 0.851, 0.477)
+  ),
+  colour = c("#4b3f99", "#8b5a2b", "#d73027")
+)
+
+multi_viewer <- wsi_viewer_multi_ihc(
+  slide,
+  channels = multi_channels,
+  mode = "tiles",
+  output = "sample_multi_ihc_viewer.html",
+  tile_dir = "sample_viewer_tiles"
+)
+```
+
+The `Stains` menu adds the `mIHC` toggle plus a checkbox, colour picker, and
+gain slider for every channel. RGB brightfield deconvolution can separate up to
+three independent stain vectors at once, so use assay-specific vectors for the
+markers you want to inspect.
 
 ## Generating tile grids
 
@@ -182,6 +233,44 @@ manifest <- wsi_tile(
 The returned manifest records file paths and coordinates for downstream machine
 learning or bioinformatics workflows.
 
+If you already have tile locations from a CSV file, a model, or an external
+annotation workflow, use them directly:
+
+```{r, eval=FALSE, purl=FALSE}
+coords <- data.frame(
+  tile_id = c("spot_001", "spot_002"),
+  x = c(10000, 12500),
+  y = c(20000, 21500)
+)
+
+coord_grid <- wsi_tile_grid_from_coords(
+  slide,
+  coords,
+  tile_size = 512,
+  anchor = "center"
+)
+
+manifest <- wsi_tile_from_coords(
+  slide,
+  coords,
+  output_dir = "coordinate_tiles",
+  tile_size = 512,
+  anchor = "center",
+  bounds = "trim"
+)
+```
+
+Coordinates are level-0 slide pixels. Set `anchor = "top_left"` when `x` and
+`y` are the tile corner, or `anchor = "center"` when they mark the center.
+
+For stride-based extraction, `extract_tiles()` returns coordinates unless an
+output directory is supplied.
+
+```{r, eval=FALSE, purl=FALSE}
+grid <- extract_tiles(slide, tile_size = 512, stride = 256, save_images = FALSE)
+manifest <- extract_tiles(slide, tile_size = 512, stride = 512, output_dir = "tiles")
+```
+
 ## Cropping ROIs
 
 ```{r, eval=FALSE, purl=FALSE}
@@ -209,6 +298,42 @@ viewer <- wsi_viewer_roi(
 
 ROI overlay coordinates are interpreted as level-0 slide pixels, matching
 QuPath-style GeoJSON exports.
+
+ROIs can be relabelled and written back to GeoJSON for use in QuPath or other
+pathology pipelines.
+
+```{r, eval=FALSE, purl=FALSE}
+roi <- read_geojson("annotations.geojson")
+roi <- wsi_set_roi_class(roi, "tumour", roi_id = roi$roi_id[1])
+write_geojson(roi, "annotations_relabelled.geojson", overwrite = TRUE)
+```
+
+Optional external segmentation tools remain outside wsiTools dependencies. A
+typical workflow is to export an ROI crop, run an external model, import its
+output, and display the result as an overlay.
+
+```{r, eval=FALSE, purl=FALSE}
+export_roi_crop(slide, roi, "roi_crop.png", roi_id = roi$roi_id[1])
+segmentation <- import_segmentation("model_output.geojson")
+viewer_add_segmentation(slide, segmentation, output = "segmentation_overlay.html")
+```
+
+Basic measurements and class summaries use ROI coordinates and optional pixel
+size metadata.
+
+```{r, eval=FALSE, purl=FALSE}
+cells <- data.frame(x = c(1000, 1200, 3000), y = c(800, 900, 1800))
+measure_cell_density(cells, roi, pixel_size = wsi_mpp(slide))
+summarise_rois(roi, cells = cells, pixel_size = wsi_mpp(slide), file = "roi_summary.csv")
+```
+
+For serial sections, estimate a simple affine transform from manual landmarks
+and transfer ROIs.
+
+```{r, eval=FALSE, purl=FALSE}
+transform <- estimate_transform(landmarks1, landmarks2)
+transformed_roi <- transform_rois(roi, transform)
+```
 
 ## Converting to pyramidal TIFF/OME-TIFF
 

@@ -1,10 +1,10 @@
 ## R CMD check results
 
-0 errors | 0 warnings | 0 notes
+0 errors | 0 warnings | 3 notes
 
-`R CMD check --as-cran` on the local macOS machine reports two local-environment
-NOTEs:
+`R CMD check --as-cran` on the local macOS machine reports expected NOTEs:
 
+- New submission
 - "unable to verify current time"
 - HTML validation warnings from generated help-page templates
 

@@ -24,7 +24,7 @@ The HTML viewer path, invisibly.
 Convenience wrapper around \code{\link[=wsi_read_geojson]{wsi_read_geojson()}} and \code{\link[=wsi_viewer]{wsi_viewer()}}. The
 GeoJSON is imported, converted to browser overlay coordinates, and drawn over
 the interactive viewer. By default this uses full-resolution Deep Zoom tiled
-mode so ROI outlines remain aligned while zooming. The viewer toolbar can
+mode so ROI outlines remain aligned while zooming. The viewer menus can
 toggle ROI visibility, labels, opacity, ROI navigation, a GeoJSON geometry
 side window, drawing, and GeoJSON export.
 }

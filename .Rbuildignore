@@ -9,6 +9,7 @@
 ^pkgdown$
 ^README\.Rmd$
 ^scripts$
+^manuscript$
 ^.*\.Rcheck$
 ^\.\.Rcheck$
 ^.*\.tar\.gz$

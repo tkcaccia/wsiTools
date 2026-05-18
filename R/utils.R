@@ -14,13 +14,20 @@ wsi_command_exists <- function(command) {
   nzchar(Sys.which(command))
 }
 
+wsi_system2_args <- function(args) {
+  if (!length(args)) {
+    return(character())
+  }
+  shQuote(as.character(args))
+}
+
 wsi_run_command <- function(command, args = character(), error_message = NULL) {
   if (!wsi_command_exists(command)) {
     wsi_abort(sprintf("Required command-line tool `%s` is not installed or not on PATH.", command))
   }
 
   output <- tryCatch(
-    suppressWarnings(system2(command, args = args, stdout = TRUE, stderr = TRUE)),
+    suppressWarnings(system2(command, args = wsi_system2_args(args), stdout = TRUE, stderr = TRUE)),
     error = function(err) {
       wsi_abort(
         sprintf(
@@ -51,7 +58,7 @@ wsi_command_version <- function(command, args = "--version") {
     return(NA_character_)
   }
   out <- tryCatch(
-    suppressWarnings(system2(command, args = args, stdout = TRUE, stderr = TRUE)),
+    suppressWarnings(system2(command, args = wsi_system2_args(args), stdout = TRUE, stderr = TRUE)),
     error = function(err) character()
   )
   status <- attr(out, "status", exact = TRUE) %||% 0L
@@ -205,7 +212,22 @@ wsi_require_magick <- function(reason = "read image data into R") {
 wsi_magick_to_array <- function(image) {
   wsi_require_magick("convert image data to an R array")
   raw <- magick::image_data(image, channels = "rgba")
-  aperm(as.integer(raw), c(3L, 2L, 1L)) / 255
+  dims <- dim(raw)
+  arr <- as.integer(as.vector(raw))
+  dim(arr) <- dims
+  if (length(dims) != 3L) {
+    wsi_abort("Could not convert magick image data to an RGB/RGBA array.")
+  }
+  if (dims[[1L]] <= 4L && dims[[3L]] > 4L) {
+    # magick commonly returns channel x width x height.
+    arr <- aperm(arr, c(3L, 2L, 1L))
+  } else if (dims[[3L]] <= 4L && dims[[1L]] > 4L) {
+    # Some magick/ImageMagick builds return width x height x channel.
+    arr <- aperm(arr, c(2L, 1L, 3L))
+  } else {
+    wsi_abort("Could not identify the channel dimension in magick image data.")
+  }
+  arr / 255
 }
 
 wsi_read_image_file <- function(path, format = c("array", "raster", "magick", "native")) {

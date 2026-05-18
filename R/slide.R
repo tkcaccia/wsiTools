@@ -5,8 +5,8 @@
 #' does not load the full slide into R memory.
 #'
 #' @param path Path to a WSI or large image file.
-#' @param backend Backend to use. `"auto"` prefers OpenSlide when available and
-#'   falls back to libvips.
+#' @param backend Backend to use. `"auto"` detects OME-Zarr directories, then
+#'   prefers OpenSlide when available and falls back to libvips.
 #'
 #' @return An S3 object of class `wsi_slide`.
 #' @export
@@ -16,11 +16,14 @@
 #' wsi_info(slide)
 #' wsi_close(slide)
 #' }
-wsi_open <- function(path, backend = c("auto", "openslide", "vips")) {
+wsi_open <- function(path, backend = c("auto", "openslide", "vips", "omezarr")) {
   backend <- match.arg(backend)
   path <- wsi_validate_input_path(path)
 
   if (backend == "auto") {
+    if (wsi_is_omezarr_path(path)) {
+      return(open_omezarr(path))
+    }
     candidates <- c(
       if (wsi_has_openslide()) "openslide",
       if (wsi_has_vips()) "vips"
@@ -57,7 +60,8 @@ wsi_open <- function(path, backend = c("auto", "openslide", "vips")) {
   switch(
     backend,
     openslide = wsi_openslide_open(path),
-    vips = wsi_vips_open(path)
+    vips = wsi_vips_open(path),
+    omezarr = open_omezarr(path)
   )
 }
 

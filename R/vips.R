@@ -3,7 +3,7 @@ wsi_vips_field <- function(path, field) {
     return(NA_character_)
   }
   out <- tryCatch(
-    suppressWarnings(system2("vipsheader", args = c("-f", field, path), stdout = TRUE, stderr = TRUE)),
+    suppressWarnings(system2("vipsheader", args = wsi_system2_args(c("-f", field, path)), stdout = TRUE, stderr = TRUE)),
     error = function(err) character()
   )
   status <- attr(out, "status", exact = TRUE) %||% 0L

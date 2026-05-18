@@ -2,11 +2,12 @@
 % Please edit documentation in R/stain.R
 \name{wsi_viewer_ihc}
 \alias{wsi_viewer_ihc}
-\title{View an IHC slide with interactive hematoxylin and HRP/DAB deconvolution}
+\title{View an IHC slide with interactive stain-channel deconvolution}
 \usage{
 wsi_viewer_ihc(
   slide,
   mode = c("tiles", "thumbnail"),
+  channels = NULL,
   hematoxylin = c(0.65, 0.704, 0.286),
   hrp = c(0.268, 0.57, 0.776),
   hematoxylin_colour = "#4b3f99",
@@ -22,7 +23,11 @@ wsi_viewer_ihc(
 \item{mode}{Viewer mode passed to \code{\link[=wsi_viewer]{wsi_viewer()}}. \code{"tiles"} is recommended
 for full-resolution inspection.}
 
-\item{hematoxylin, hrp}{RGB optical-density vectors.}
+\item{channels}{Optional stain channels created by \code{\link[=wsi_stain_channels]{wsi_stain_channels()}}.
+If supplied, these replace the default hematoxylin and HRP/DAB channels.}
+
+\item{hematoxylin, hrp}{RGB optical-density vectors used when \code{channels} is
+not supplied.}
 
 \item{hematoxylin_colour, hrp_colour}{Initial display colours.}
 
@@ -35,11 +40,12 @@ for full-resolution inspection.}
 The HTML viewer path, invisibly.
 }
 \description{
-Writes an HTML viewer with H-DAB color deconvolution controls. The viewer can
-show the original image or a two-channel recolored display, with separate
-toggles, colours, and gain sliders for hematoxylin and HRP/DAB. In tiled
-mode, the browser recolors only the visible Deep Zoom tiles, so the full WSI
-is not loaded into R memory.
+Writes an HTML viewer with browser-side color deconvolution controls. By
+default this uses H-DAB hematoxylin plus HRP/DAB channels. Supply \code{channels}
+to inspect one to three brightfield immunohistochemistry channels, each with
+its own visibility checkbox, display colour, and gain slider. In tiled mode,
+the browser recolors only the visible Deep Zoom tiles, so the full WSI is not
+loaded into R memory.
 }
 \examples{
 \dontrun{

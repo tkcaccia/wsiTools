@@ -1,0 +1,22 @@
+#!/usr/bin/env Rscript
+if (requireNamespace("wsiTools", quietly = TRUE)) {
+  status <- wsiTools::wsi_cli(commandArgs(trailingOnly = TRUE), quit = FALSE)
+} else {
+  cmd <- commandArgs(trailingOnly = FALSE)
+  file_arg <- grep("^--file=", cmd, value = TRUE)
+  if (!length(file_arg)) {
+    stop("The wsiTools package is not installed and the script path could not be resolved.", call. = FALSE)
+  }
+  script <- normalizePath(sub("^--file=", "", file_arg[[1L]]), mustWork = TRUE)
+  root <- normalizePath(file.path(dirname(script), ".."), mustWork = TRUE)
+  r_dir <- file.path(root, "R")
+  if (!dir.exists(r_dir)) {
+    stop("The wsiTools package is not installed and source files were not found.", call. = FALSE)
+  }
+  r_files <- sort(list.files(r_dir, pattern = "[.]R$", full.names = TRUE))
+  for (file in r_files) {
+    source(file, local = .GlobalEnv)
+  }
+  status <- wsi_cli(commandArgs(trailingOnly = TRUE), quit = FALSE)
+}
+quit(save = "no", status = status, runLast = FALSE)
