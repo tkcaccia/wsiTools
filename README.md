@@ -145,8 +145,11 @@ the geometry list; each row shows the geometry type, bounds, point count,
 source, and id. Use `Draw ROI`, click polygon vertices, double-click or press
 `Finish`, then use `Save GeoJSON`. In `Brush` mode, painting with no selected
 annotation creates a new ROI; painting with an annotation selected extends it;
-holding `Alt` while brushing removes from the selected annotation. In a static
-browser viewer this opens the
+holding `Alt` while brushing removes from the selected annotation. Use `Edit`
+to move vertices, double-click an edge to insert a vertex, and Backspace/Delete
+to remove the active vertex. The `Name`, `Class`, and `Custom class` controls
+update the selected annotation label and category before GeoJSON export. In a
+static browser viewer this opens the
 browser's normal save/download flow rather than silently writing to a server
 path.
 

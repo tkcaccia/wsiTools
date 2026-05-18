@@ -102,7 +102,12 @@ navigation, a side window listing all GeoJSON geometries, crosshair display,
 coordinate copying, polygon drawing, and GeoJSON export. Use `GeoJSON` to open
 the geometry list; each row shows the geometry type, bounds, point count,
 source, and id. Use `Draw ROI`, click polygon vertices, double-click or press
-`Finish`, then use `Save GeoJSON`.
+`Finish`, then use `Save GeoJSON`. In `Brush` mode, painting with no selected
+annotation creates a new ROI; painting with an annotation selected extends it;
+holding `Alt` while brushing removes from the selected annotation. Use `Edit`
+to move vertices, double-click an edge to insert a vertex, and Backspace/Delete
+to remove the active vertex. The `Name`, `Class`, and `Custom class` controls
+update the selected annotation label and category before GeoJSON export.
 
 For full-resolution zooming, use tiled mode. This asks libvips to create a
 Deep Zoom tile pyramid on disk, then writes an HTML viewer that requests the
