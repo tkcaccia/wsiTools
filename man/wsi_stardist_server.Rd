@@ -10,6 +10,7 @@ wsi_stardist_server(
   host = "127.0.0.1",
   port = 8787,
   path = "/segment",
+  max_tries = 20L,
   model = "2D_versatile_he",
   command = NULL,
   args = NULL,
@@ -29,9 +30,11 @@ wsi_stardist_server(
 
 \item{output_dir}{Directory for ROI crops and StarDist outputs.}
 
-\item{host, port}{Local host and port for the endpoint.}
+\item{host, port}{Local host and first port to try for the endpoint.}
 
 \item{path}{URL path used for segmentation requests.}
+
+\item{max_tries}{Number of subsequent ports to try if \code{port} is busy.}
 
 \item{model, command, args, output_type, prob_thresh, nms_thresh, overwrite, level}{Arguments passed to \code{\link[=stardist_segment_roi]{stardist_segment_roi()}}.}
 

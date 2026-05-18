@@ -19,6 +19,7 @@
 #   WSITOOLS_LIVE_SLIDE       Slide path. Defaults to SAPC 0052.svs in this folder.
 #   WSITOOLS_LIVE_MODE        "tiles" or "thumbnail". Defaults to "tiles".
 #   WSITOOLS_LIVE_OUTPUT      Output HTML path.
+#   WSITOOLS_ENABLE_STARDIST  "auto", "true", or "false". Defaults to "auto".
 #   WSITOOLS_STARDIST_COMMAND StarDist command, e.g. python or stardist-predict2d.
 #   WSITOOLS_STARDIST_SCRIPT  Optional Python/R script used with command.
 #   WSITOOLS_STARDIST_MODEL   StarDist model name. Defaults to 2D_versatile_he.
@@ -70,32 +71,30 @@ on.exit(wsi_close(slide), add = TRUE)
 message("Backend status:")
 print(wsi_backends())
 
-# Optional: start a StarDist endpoint for the viewer's Segmentation -> Start StarDist button.
-# Leave WSITOOLS_STARDIST_COMMAND unset if you only want annotation/measurement sync.
 stardist_command <- Sys.getenv("WSITOOLS_STARDIST_COMMAND", "")
 stardist_script <- Sys.getenv("WSITOOLS_STARDIST_SCRIPT", "")
 stardist_model <- Sys.getenv("WSITOOLS_STARDIST_MODEL", "2D_versatile_he")
-stardist_server <- NULL
-segmentation_run_url <- NULL
+enable_stardist <- tolower(Sys.getenv("WSITOOLS_ENABLE_STARDIST", "auto"))
+if (!enable_stardist %in% c("auto", "true", "false")) {
+  stop("WSITOOLS_ENABLE_STARDIST must be 'auto', 'true', or 'false'.")
+}
+stardist_args <- if (nzchar(stardist_script)) {
+  c(stardist_script, "{input}", "{output}", "{model}")
+} else {
+  NULL
+}
+use_stardist <- switch(
+  enable_stardist,
+  "true" = TRUE,
+  "false" = FALSE,
+  "auto" = nzchar(stardist_command) || wsi_has_stardist()
+)
 
-if (nzchar(stardist_command)) {
-  stardist_args <- if (nzchar(stardist_script)) {
-    c(stardist_script, "{input}", "{output}", "{model}")
-  } else {
-    NULL
-  }
-
-  message("Starting optional StarDist selected-ROI endpoint...")
-  stardist_server <- wsi_stardist_server(
-    slide,
-    output_dir = file.path(script_dir, "stardist_selected_roi"),
-    command = stardist_command,
-    args = stardist_args,
-    model = stardist_model,
-    wait = FALSE
-  )
-  segmentation_run_url <- stardist_server$url
-  on.exit(httpuv::stopServer(stardist_server$server), add = TRUE)
+if (use_stardist) {
+  message("StarDist selected-ROI button will be enabled in the viewer.")
+} else {
+  message("StarDist command not found; viewer will still support ROI export/import.")
+  message("To enable the button, install stardist-predict2d or set WSITOOLS_STARDIST_COMMAND.")
 }
 
 message("")
@@ -103,7 +102,7 @@ message("Starting live viewer.")
 message("In the browser:")
 message("  1. Draw, brush, edit, or import GeoJSON ROIs.")
 message("  2. Use Measure -> Distance to measure between two points.")
-message("  3. If StarDist is configured, select an ROI and use Segmentation -> Start StarDist.")
+message("  3. If StarDist is enabled, select an ROI and use Segmentation -> Start StarDist.")
 message("  4. Return to R with Esc or Ctrl+C. Synced objects will be saved below.")
 message("")
 
@@ -115,7 +114,11 @@ session <- wsi_viewer_live(
   open = TRUE,
   wait = TRUE,
   name = "viewer_state",
-  segmentation_run_url = segmentation_run_url
+  stardist = use_stardist,
+  stardist_output_dir = file.path(script_dir, "stardist_selected_roi"),
+  stardist_command = if (nzchar(stardist_command)) stardist_command else NULL,
+  stardist_args = stardist_args,
+  stardist_model = stardist_model
 )
 
 state <- wsi_viewer_state(session)

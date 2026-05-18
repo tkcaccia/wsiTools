@@ -50,6 +50,7 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "bindSegmentationControls", fixed = TRUE)
   expect_match(html, "startSegmentationForSelectedRoi", fixed = TRUE)
   expect_match(html, "segmentation_run_url", fixed = TRUE)
+  expect_match(html, "wsi_viewer_live(..., stardist = TRUE)", fixed = TRUE)
   expect_match(html, "addSegmentationGeojson", fixed = TRUE)
   expect_match(html, "stardist", fixed = TRUE)
   expect_match(html, "Measure", fixed = TRUE)
@@ -191,6 +192,16 @@ test_that("interactive viewer can be configured with a segmentation run endpoint
   expect_match(html, "http://127.0.0.1:8787/segment", fixed = TRUE)
   expect_match(html, "fetch(url", fixed = TRUE)
   expect_match(html, "Running StarDist on selected ROI", fixed = TRUE)
+})
+
+test_that("live viewer exposes a direct StarDist switch", {
+  args <- names(formals(wsi_viewer_session))
+
+  expect_true("stardist" %in% args)
+  expect_true("stardist_command" %in% args)
+  expect_true("stardist_args" %in% args)
+  expect_true("stardist_output_dir" %in% args)
+  expect_identical(formals(wsi_viewer_stardist)$stardist, TRUE)
 })
 
 test_that("interactive viewer overlays GeoJSON ROI polygons", {

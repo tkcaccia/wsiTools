@@ -3,6 +3,7 @@
 \name{wsi_viewer_session}
 \alias{wsi_viewer_session}
 \alias{wsi_viewer_live}
+\alias{wsi_viewer_stardist}
 \title{Start a live viewer session that syncs back to R}
 \usage{
 wsi_viewer_session(
@@ -15,7 +16,24 @@ wsi_viewer_session(
   path = "/viewer-state",
   max_tries = 20L,
   wait = interactive(),
-  open = interactive()
+  open = interactive(),
+  stardist = FALSE,
+  stardist_output_dir = "wsi_stardist_viewer",
+  stardist_host = host,
+  stardist_port = 8787,
+  stardist_path = "/segment",
+  stardist_max_tries = max_tries,
+  stardist_model = "2D_versatile_he",
+  stardist_command = NULL,
+  stardist_args = NULL,
+  stardist_output_type = c("auto", "geojson", "csv", "mask"),
+  stardist_prob_thresh = NULL,
+  stardist_nms_thresh = NULL,
+  stardist_level = 0,
+  stardist_crop_format = c("png", "tiff", "jpeg"),
+  stardist_backend = c("auto", "vips", "openslide"),
+  stardist_cell_radius = 8,
+  stardist_overwrite = TRUE
 )
 
 wsi_viewer_live(
@@ -28,8 +46,27 @@ wsi_viewer_live(
   path = "/viewer-state",
   max_tries = 20L,
   wait = interactive(),
-  open = interactive()
+  open = interactive(),
+  stardist = FALSE,
+  stardist_output_dir = "wsi_stardist_viewer",
+  stardist_host = host,
+  stardist_port = 8787,
+  stardist_path = "/segment",
+  stardist_max_tries = max_tries,
+  stardist_model = "2D_versatile_he",
+  stardist_command = NULL,
+  stardist_args = NULL,
+  stardist_output_type = c("auto", "geojson", "csv", "mask"),
+  stardist_prob_thresh = NULL,
+  stardist_nms_thresh = NULL,
+  stardist_level = 0,
+  stardist_crop_format = c("png", "tiff", "jpeg"),
+  stardist_backend = c("auto", "vips", "openslide"),
+  stardist_cell_radius = 8,
+  stardist_overwrite = TRUE
 )
+
+wsi_viewer_stardist(slide, ..., stardist = TRUE)
 }
 \arguments{
 \item{slide}{A \code{wsi_slide} object.}
@@ -52,6 +89,18 @@ the most reliable mode for plain R sessions. Press Esc or Ctrl+C to return
 to the console; synced objects remain in \code{envir}.}
 
 \item{open}{Whether to open the viewer with \code{\link[utils:browseURL]{utils::browseURL()}}.}
+
+\item{stardist}{If \code{TRUE}, start a local StarDist ROI endpoint for the
+viewer's \verb{Start StarDist} button. This requires \code{httpuv} and an external
+StarDist command or script.}
+
+\item{stardist_output_dir}{Directory for ROI crops and StarDist outputs.}
+
+\item{stardist_host, stardist_port, stardist_path, stardist_max_tries}{Local
+address used by the StarDist ROI endpoint.}
+
+\item{stardist_model, stardist_command, stardist_args, stardist_output_type, stardist_prob_thresh, stardist_nms_thresh, stardist_level, stardist_crop_format, stardist_backend, stardist_cell_radius, stardist_overwrite}{Arguments passed through to \code{\link[=wsi_stardist_server]{wsi_stardist_server()}} and
+\code{\link[=stardist_segment_roi]{stardist_segment_roi()}}.}
 }
 \value{
 A \code{wsi_viewer_session} object, invisibly.
@@ -61,7 +110,8 @@ Opens an interactive viewer with a local HTTP bridge. Browser-side
 annotations, imported GeoJSON, edited ROI labels/classes, distance
 measurements, and segmentation overlays are posted back to the current R
 session. The state object is an environment, so it is updated in place as new
-events arrive.
+events arrive. Set \code{stardist = TRUE} to also start a local selected-ROI
+StarDist endpoint and wire the viewer's \verb{Start StarDist} button to it.
 }
 \details{
 This live bridge is optional and requires the suggested \code{httpuv} package.
@@ -71,6 +121,9 @@ The ordinary \code{\link[=wsi_viewer]{wsi_viewer()}} remains a static HTML viewe
 \dontrun{
 slide <- wsi_open("sample.svs")
 session <- wsi_viewer_live(slide, mode = "tiles")
+
+# With StarDist available on PATH:
+session <- wsi_viewer_live(slide, mode = "tiles", stardist = TRUE)
 
 # After drawing in the browser and stopping the live loop:
 wsi_viewer_live_state_rois

@@ -390,33 +390,27 @@ result <- stardist_segment_roi(
 viewer_add_segmentation(slide, result$segmentation, output = "stardist_overlay.html")
 ```
 
-The viewer can also start segmentation directly on the selected ROI if you run
-a small local endpoint first. In one R session:
-
-```r
-server <- wsi_stardist_server(
-  "sample.svs",
-  output_dir = "stardist_server",
-  command = "python",
-  args = c("run_stardist.py", "{input}", "{output}", "{model}")
-)
-```
-
-Then create the viewer with the server URL:
+The live viewer can also start segmentation directly on the selected ROI. Start
+the viewer with `stardist = TRUE`; wsiTools starts the local R endpoint and
+wires the `Start StarDist` button automatically:
 
 ```r
 slide <- wsi_open("sample.svs")
-wsi_viewer(
+session <- wsi_viewer_live(
   slide,
   mode = "tiles",
-  segmentation_run_url = server$url,
+  stardist = TRUE,
+  stardist_command = "python",
+  stardist_args = c("run_stardist.py", "{input}", "{output}", "{model}"),
   output = "slide_with_stardist_runner.html"
 )
 ```
 
 In the viewer, select or brush an ROI, open `Segmentation`, and press
 `Start StarDist`. The selected ROI is sent to the local endpoint, StarDist runs
-on the ROI crop, and returned cell polygons are added as overlays.
+on the ROI crop, and returned cell polygons are added as overlays. If
+`stardist-predict2d` is already on `PATH`, you can omit `stardist_command` and
+`stardist_args`.
 
 The same StarDist bridge is available from the command line. From a source
 checkout use `./exec/wsitools`; from an installed package you can resolve the

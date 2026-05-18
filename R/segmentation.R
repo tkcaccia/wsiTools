@@ -694,8 +694,9 @@ wsi_http_request_body <- function(req) {
 #'
 #' @param image A `wsi_slide` object or slide path accepted by [wsi_open()].
 #' @param output_dir Directory for ROI crops and StarDist outputs.
-#' @param host,port Local host and port for the endpoint.
+#' @param host,port Local host and first port to try for the endpoint.
 #' @param path URL path used for segmentation requests.
+#' @param max_tries Number of subsequent ports to try if `port` is busy.
 #' @param model,command,args,output_type,prob_thresh,nms_thresh,overwrite,level
 #'   Arguments passed to [stardist_segment_roi()].
 #' @param crop_format Crop image format passed to [stardist_segment_roi()].
@@ -728,6 +729,7 @@ wsi_stardist_server <- function(image,
                                 host = "127.0.0.1",
                                 port = 8787,
                                 path = "/segment",
+                                max_tries = 20L,
                                 model = "2D_versatile_he",
                                 command = NULL,
                                 args = NULL,
@@ -751,6 +753,7 @@ wsi_stardist_server <- function(image,
   backend <- match.arg(backend)
   cell_radius <- wsi_check_scalar_number(cell_radius, "cell_radius", allow_zero = FALSE)
   port <- as.integer(wsi_check_scalar_number(port, "port", allow_zero = FALSE))
+  max_tries <- as.integer(wsi_check_scalar_number(max_tries, "max_tries", allow_zero = TRUE))
   if (!dir.exists(output_dir)) {
     dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
   }
@@ -815,10 +818,28 @@ wsi_stardist_server <- function(image,
     }
   )
 
-  server <- httpuv::startServer(host, port, app)
-  url <- sprintf("http://%s:%d%s", host, port, path)
+  last_error <- NULL
+  server <- NULL
+  used_port <- NULL
+  for (candidate in seq.int(port, port + max_tries)) {
+    server <- try(httpuv::startServer(host, candidate, app), silent = TRUE)
+    if (!inherits(server, "try-error")) {
+      used_port <- candidate
+      break
+    }
+    last_error <- conditionMessage(attr(server, "condition"))
+    server <- NULL
+  }
+  if (is.null(server)) {
+    wsi_abort(sprintf(
+      "Could not start StarDist endpoint near port %d: %s",
+      port,
+      last_error %||% "unknown error"
+    ))
+  }
+  url <- sprintf("http://%s:%d%s", host, used_port, path)
   out <- structure(
-    list(server = server, url = url, host = host, port = port, path = path),
+    list(server = server, url = url, host = host, port = used_port, path = path),
     class = "wsi_stardist_server"
   )
   message("wsiTools StarDist endpoint listening at ", url)

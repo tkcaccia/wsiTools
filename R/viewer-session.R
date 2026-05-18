@@ -192,7 +192,8 @@ wsi_start_viewer_state_server <- function(state, host = "127.0.0.1", port = 8788
 #' annotations, imported GeoJSON, edited ROI labels/classes, distance
 #' measurements, and segmentation overlays are posted back to the current R
 #' session. The state object is an environment, so it is updated in place as new
-#' events arrive.
+#' events arrive. Set `stardist = TRUE` to also start a local selected-ROI
+#' StarDist endpoint and wire the viewer's `Start StarDist` button to it.
 #'
 #' This live bridge is optional and requires the suggested `httpuv` package.
 #' The ordinary [wsi_viewer()] remains a static HTML viewer for file-only use.
@@ -210,6 +211,15 @@ wsi_start_viewer_state_server <- function(state, host = "127.0.0.1", port = 8788
 #'   the most reliable mode for plain R sessions. Press Esc or Ctrl+C to return
 #'   to the console; synced objects remain in `envir`.
 #' @param open Whether to open the viewer with [utils::browseURL()].
+#' @param stardist If `TRUE`, start a local StarDist ROI endpoint for the
+#'   viewer's `Start StarDist` button. This requires `httpuv` and an external
+#'   StarDist command or script.
+#' @param stardist_output_dir Directory for ROI crops and StarDist outputs.
+#' @param stardist_host,stardist_port,stardist_path,stardist_max_tries Local
+#'   address used by the StarDist ROI endpoint.
+#' @param stardist_model,stardist_command,stardist_args,stardist_output_type,stardist_prob_thresh,stardist_nms_thresh,stardist_level,stardist_crop_format,stardist_backend,stardist_cell_radius,stardist_overwrite
+#'   Arguments passed through to [wsi_stardist_server()] and
+#'   [stardist_segment_roi()].
 #'
 #' @return A `wsi_viewer_session` object, invisibly.
 #' @export
@@ -218,6 +228,9 @@ wsi_start_viewer_state_server <- function(state, host = "127.0.0.1", port = 8788
 #' \dontrun{
 #' slide <- wsi_open("sample.svs")
 #' session <- wsi_viewer_live(slide, mode = "tiles")
+#'
+#' # With StarDist available on PATH:
+#' session <- wsi_viewer_live(slide, mode = "tiles", stardist = TRUE)
 #'
 #' # After drawing in the browser and stopping the live loop:
 #' wsi_viewer_live_state_rois
@@ -228,7 +241,31 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
                                envir = parent.frame(), host = "127.0.0.1",
                                port = 8788, path = "/viewer-state",
                                max_tries = 20L, wait = interactive(),
-                               open = interactive()) {
+                               open = interactive(),
+                               stardist = FALSE,
+                               stardist_output_dir = "wsi_stardist_viewer",
+                               stardist_host = host,
+                               stardist_port = 8787,
+                               stardist_path = "/segment",
+                               stardist_max_tries = max_tries,
+                               stardist_model = "2D_versatile_he",
+                               stardist_command = NULL,
+                               stardist_args = NULL,
+                               stardist_output_type = c("auto", "geojson", "csv", "mask"),
+                               stardist_prob_thresh = NULL,
+                               stardist_nms_thresh = NULL,
+                               stardist_level = 0,
+                               stardist_crop_format = c("png", "tiff", "jpeg"),
+                               stardist_backend = c("auto", "vips", "openslide"),
+                               stardist_cell_radius = 8,
+                               stardist_overwrite = TRUE) {
+  if (!is.logical(stardist) || length(stardist) != 1L || is.na(stardist)) {
+    wsi_abort("`stardist` must be `TRUE` or `FALSE`.")
+  }
+  stardist_output_type <- match.arg(stardist_output_type)
+  stardist_crop_format <- match.arg(stardist_crop_format)
+  stardist_backend <- match.arg(stardist_backend)
+
   state <- wsi_new_viewer_state(name = name, envir = envir)
   bridge <- wsi_start_viewer_state_server(
     state = state,
@@ -238,7 +275,53 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
     max_tries = max_tries
   )
 
+  stardist_bridge <- NULL
+  session_ready <- FALSE
+  on.exit({
+    if (!isTRUE(session_ready)) {
+      if (!is.null(stardist_bridge)) {
+        try(httpuv::stopServer(stardist_bridge$server), silent = TRUE)
+      }
+      try(httpuv::stopServer(bridge$server), silent = TRUE)
+    }
+  }, add = TRUE)
+
   dots <- list(...)
+  if (isTRUE(stardist) && is.null(dots$segmentation_run_url)) {
+    command <- wsi_default_stardist_command(stardist_command)
+    if (!nzchar(command) || !wsi_command_exists(command)) {
+      wsi_abort(
+        paste0(
+          "`stardist = TRUE` needs a StarDist command that R can run. ",
+          "Install StarDist, put `stardist-predict2d` on PATH, set ",
+          "`WSITOOLS_STARDIST_COMMAND`, or pass `stardist_command` and ",
+          "`stardist_args` for your Python/script setup."
+        ),
+        class = "wsi_backend_unavailable"
+      )
+    }
+    stardist_bridge <- wsi_stardist_server(
+      image = slide,
+      output_dir = stardist_output_dir,
+      host = stardist_host,
+      port = stardist_port,
+      path = stardist_path,
+      max_tries = stardist_max_tries,
+      model = stardist_model,
+      command = stardist_command,
+      args = stardist_args,
+      output_type = stardist_output_type,
+      prob_thresh = stardist_prob_thresh,
+      nms_thresh = stardist_nms_thresh,
+      overwrite = stardist_overwrite,
+      level = stardist_level,
+      crop_format = stardist_crop_format,
+      backend = stardist_backend,
+      cell_radius = stardist_cell_radius,
+      wait = FALSE
+    )
+    dots$segmentation_run_url <- stardist_bridge$url
+  }
   dots$viewer_state_url <- bridge$url
   dots$open <- open
   dots$slide <- slide
@@ -251,18 +334,28 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
         state = state,
         html = html,
         name = name,
-        envir = envir
+        envir = envir,
+        stardist_server = stardist_bridge
       )
     ),
     class = "wsi_viewer_session"
   )
+  session_ready <- TRUE
 
   message("wsiTools live viewer sync listening at ", bridge$url)
   message("Browser edits update `", name, "` and companion objects in the chosen R environment.")
+  if (!is.null(stardist_bridge)) {
+    message("Start StarDist is enabled for selected ROIs at ", stardist_bridge$url)
+  }
 
   if (isTRUE(wait)) {
     message("Press Ctrl+C or Esc to stop the live sync loop and return to R.")
-    on.exit(httpuv::stopServer(bridge$server), add = TRUE)
+    on.exit({
+      if (!is.null(stardist_bridge)) {
+        try(httpuv::stopServer(stardist_bridge$server), silent = TRUE)
+      }
+      try(httpuv::stopServer(bridge$server), silent = TRUE)
+    }, add = TRUE)
     tryCatch(
       repeat httpuv::service(100),
       interrupt = function(e) NULL
@@ -275,6 +368,12 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
 #' @rdname wsi_viewer_session
 #' @export
 wsi_viewer_live <- wsi_viewer_session
+
+#' @rdname wsi_viewer_session
+#' @export
+wsi_viewer_stardist <- function(slide, ..., stardist = TRUE) {
+  wsi_viewer_session(slide, ..., stardist = stardist)
+}
 
 #' Read live viewer state
 #'
@@ -332,7 +431,10 @@ wsi_viewer_stop <- function(session) {
   if (!inherits(session, "wsi_viewer_session")) {
     wsi_abort("`session` must be a `wsi_viewer_session` object.")
   }
-  httpuv::stopServer(session$server)
+  if (!is.null(session$stardist_server)) {
+    try(httpuv::stopServer(session$stardist_server$server), silent = TRUE)
+  }
+  try(httpuv::stopServer(session$server), silent = TRUE)
   invisible(session)
 }
 
@@ -352,6 +454,9 @@ print.wsi_viewer_session <- function(x, ...) {
   cat(sprintf("  url: %s\n", x$url))
   cat(sprintf("  html: %s\n", x$html))
   cat(sprintf("  state: %s\n", x$name))
+  if (!is.null(x$stardist_server)) {
+    cat(sprintf("  stardist: %s\n", x$stardist_server$url))
+  }
   cat("  stop with: wsi_viewer_stop(x)\n")
   invisible(x)
 }
