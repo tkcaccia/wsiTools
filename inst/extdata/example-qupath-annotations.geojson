@@ -1,0 +1,49 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": "roi-heart-1",
+      "properties": {
+        "name": "Example ROI 1",
+        "classification": {
+          "name": "annotation"
+        }
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [8000, 9000],
+            [18000, 8500],
+            [21000, 17000],
+            [11000, 21000],
+            [8000, 9000]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "roi-heart-2",
+      "properties": {
+        "name": "Example ROI 2",
+        "classification": {
+          "name": "annotation"
+        }
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [23000, 25000],
+            [33000, 24000],
+            [35000, 35000],
+            [25000, 37000],
+            [23000, 25000]
+          ]
+        ]
+      }
+    }
+  ]
+}

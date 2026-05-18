@@ -1,0 +1,34 @@
+Package: wsiTools
+Title: Tools for Reading, Tiling, Converting and Exporting Whole-Slide Images
+Version: 0.1.0
+Authors@R: 
+    person("Stefano", role = c("aut", "cre"), email = "tkcaccia@gmail.com")
+Description: An R toolkit for memory-efficient whole-slide image access
+    and preprocessing through region-based reading, tiling, pyramidal image
+    handling, conversion and export. The package provides backend capability
+    checks and abstractions for OpenSlide, libvips, and future microscopy
+    backends without loading complete whole-slide images into R memory by
+    default.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+Depends:
+    R (>= 4.1)
+Imports:
+    cli,
+    grDevices,
+    graphics,
+    jsonlite,
+    utils
+Suggests:
+    knitr,
+    magick,
+    rmarkdown,
+    sf,
+    testthat (>= 3.0.0)
+SystemRequirements: None required for installation. Optional runtime tools:
+    OpenSlide command-line tools; libvips command-line tools; Bio-Formats
+    command-line tools.
+Config/testthat/edition: 3
+VignetteBuilder: knitr

@@ -1,0 +1,249 @@
+---
+title: "Getting started with wsiTools"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting started with wsiTools}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  eval = FALSE
+)
+```
+
+## What is a WSI?
+
+A whole-slide image (WSI) is a digitized microscopy slide. In digital pathology
+and bioimage analysis, a single file may contain billions of pixels, metadata,
+multiple pyramid levels, and associated images such as labels or macro views.
+
+## Why region-based reading is necessary
+
+Loading an entire level-0 WSI into R memory is usually impractical. wsiTools is
+therefore designed around:
+
+- metadata reads
+- pyramid levels
+- explicit rectangular region reads
+- tile-coordinate manifests
+- backend-driven thumbnails and conversion
+- streaming export where libvips supports it
+
+## Opening slides
+
+```{r, eval=FALSE, purl=FALSE}
+library(wsiTools)
+
+wsi_backends()
+
+slide <- wsi_open("sample.svs")
+slide
+```
+
+`wsi_open()` returns a lightweight `wsi_slide` object. It validates the file,
+chooses a backend, and reads metadata. It does not load the full slide.
+
+## Reading metadata
+
+```{r, eval=FALSE, purl=FALSE}
+wsi_info(slide)
+wsi_levels(slide)
+wsi_mpp(slide)
+wsi_objective_power(slide)
+```
+
+The exact metadata depends on the file and backend. OpenSlide properties are
+kept in `wsi_properties(slide)` for reproducible preprocessing pipelines.
+
+## Reading patches
+
+```{r, eval=FALSE, purl=FALSE}
+patch <- wsi_read_region(
+  slide,
+  x = 10000,
+  y = 20000,
+  width = 512,
+  height = 512,
+  level = 0,
+  format = "array"
+)
+```
+
+Coordinates are level-0 coordinates. Width and height are output pixels at the
+requested pyramid level, following the OpenSlide convention.
+
+## Creating thumbnails
+
+```{r, eval=FALSE, purl=FALSE}
+thumb <- wsi_thumbnail(slide, width = 1000, format = "magick")
+```
+
+When libvips is available, thumbnails are generated through libvips rather than
+by loading the full resolution image into R.
+
+## Viewing slides interactively
+
+```{r, eval=FALSE, purl=FALSE}
+viewer <- wsi_viewer(slide, width = 1600)
+```
+
+`wsi_viewer()` writes a self-contained HTML preview with pan, zoom, and level-0
+coordinate readout. It visualizes a backend-generated thumbnail, so it remains
+safe for very large WSI files.
+
+The viewer toolbar provides pan/select modes, fit and 1:1 zoom, ROI and label
+toggles, ROI opacity, previous/next ROI navigation, a side window listing all
+GeoJSON geometries, crosshair display, coordinate copying, polygon drawing, and
+GeoJSON export. Use `GeoJSON` to open the geometry list; each row shows the
+geometry type, bounds, point count, source, and id. Use `Draw ROI`, click
+polygon vertices, double-click or press `Finish`, then use `Save GeoJSON`.
+
+For full-resolution zooming, use tiled mode. This asks libvips to create a
+Deep Zoom tile pyramid on disk, then writes an HTML viewer that requests the
+appropriate tile resolution as you zoom.
+
+```{r, eval=FALSE, purl=FALSE}
+viewer <- wsi_viewer(
+  slide,
+  mode = "tiles",
+  output = "sample_viewer.html",
+  tile_dir = "sample_viewer_tiles",
+  tile_size = 512
+)
+```
+
+## Deconvolving IHC stains
+
+For hematoxylin plus HRP/DAB immunohistochemistry, `wsiTools` can deconvolve a
+requested patch into two stain channels:
+
+```{r, eval=FALSE, purl=FALSE}
+channels <- wsi_deconvolve_region(
+  slide,
+  x = 10000,
+  y = 20000,
+  width = 1024,
+  height = 1024
+)
+
+str(channels$hematoxylin)
+str(channels$hrp)
+```
+
+The interactive IHC viewer performs the same H-DAB deconvolution on the visible
+canvas pixels. With `mode = "tiles"`, zooming still requests Deep Zoom tiles
+rather than loading the full slide into R:
+
+```{r, eval=FALSE, purl=FALSE}
+ihc_viewer <- wsi_viewer_ihc(
+  slide,
+  mode = "tiles",
+  output = "sample_ihc_viewer.html",
+  tile_dir = "sample_viewer_tiles"
+)
+```
+
+The toolbar provides an `IHC` toggle, separate hematoxylin and HRP/DAB channel
+visibility controls, color pickers, and gain sliders.
+
+## Generating tile grids
+
+```{r, eval=FALSE, purl=FALSE}
+grid <- wsi_tile_grid(
+  slide,
+  tile_size = 512,
+  overlap = 64,
+  level = 0
+)
+
+head(grid)
+```
+
+`wsi_tile_grid()` reads no image pixels. It only returns tile coordinates,
+dimensions, downsample factors, and suggested filenames.
+
+## Extracting tiles
+
+```{r, eval=FALSE, purl=FALSE}
+manifest <- wsi_tile(
+  slide,
+  output_dir = "tiles",
+  tile_size = 512,
+  overlap = 0,
+  level = 0,
+  format = "png"
+)
+```
+
+The returned manifest records file paths and coordinates for downstream machine
+learning or bioinformatics workflows.
+
+## Cropping ROIs
+
+```{r, eval=FALSE, purl=FALSE}
+roi <- wsi_read_geojson("annotations.geojson")
+wsi_crop_roi(slide, roi, output_dir = "roi_crops", format = "tiff")
+```
+
+The first milestone supports QuPath-style GeoJSON parsing and ROI bounding
+boxes. Polygon-aware ROI operations require the optional `sf` package and will
+be expanded in future releases.
+
+GeoJSON annotations can also be drawn over the interactive viewer:
+
+```{r, eval=FALSE, purl=FALSE}
+roi <- wsi_read_geojson("annotations.geojson")
+
+viewer <- wsi_viewer_roi(
+  slide,
+  roi,
+  mode = "tiles",
+  output = "sample_roi_viewer.html",
+  tile_dir = "sample_viewer_tiles"
+)
+```
+
+ROI overlay coordinates are interpreted as level-0 slide pixels, matching
+QuPath-style GeoJSON exports.
+
+## Converting to pyramidal TIFF/OME-TIFF
+
+```{r, eval=FALSE, purl=FALSE}
+wsi_convert(
+  input = "sample.svs",
+  output = "sample.ome.tiff",
+  format = "ome-tiff",
+  pyramid = TRUE,
+  compression = "lzw"
+)
+```
+
+Conversion is handled by libvips when available. wsiTools constructs command
+arguments safely and never overwrites existing files unless
+`overwrite = TRUE`.
+
+## Practical notes on OpenSlide and libvips
+
+OpenSlide is the preferred first backend for many pathology WSI formats such as
+Aperio SVS, Hamamatsu NDPI, Leica SCN, MIRAX MRXS, and related pyramidal files,
+subject to local backend support.
+
+libvips is used for efficient thumbnails, cropping, conversion, and pyramidal
+TIFF export. OME-TIFF behavior depends on the installed libvips version and its
+TIFF writer capabilities.
+
+Always check:
+
+```{r, eval=FALSE, purl=FALSE}
+wsi_backends()
+```
+
+Close slide handles when finished:
+
+```{r, eval=FALSE, purl=FALSE}
+wsi_close(slide)
+```

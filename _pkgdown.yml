@@ -1,0 +1,39 @@
+url: https://stefano.github.io/wsiTools/
+template:
+  bootstrap: 5
+reference:
+  - title: Backend checks
+    contents:
+      - wsi_backends
+      - starts_with("wsi_has_")
+  - title: Slides and metadata
+    contents:
+      - wsi_open
+      - wsi_close
+      - wsi_info
+      - wsi_levels
+      - wsi_properties
+      - wsi_mpp
+      - wsi_objective_power
+  - title: Regions, thumbnails, tiles, and masks
+    contents:
+      - wsi_read_region
+      - wsi_read_region_grid
+      - wsi_thumbnail
+      - wsi_crop
+      - wsi_tile_grid
+      - wsi_tile
+      - wsi_tissue_mask
+  - title: ROI support
+    contents:
+      - wsi_read_geojson
+      - wsi_crop_roi
+      - wsi_tile_roi
+  - title: Conversion and export
+    contents:
+      - wsi_convert
+      - wsi_pyramid
+      - wsi_export_region
+      - wsi_export_tiles
+      - wsi_associated_images
+      - wsi_read_associated_image
