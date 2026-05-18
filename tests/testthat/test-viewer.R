@@ -312,11 +312,49 @@ test_that("interactive tiled viewer writes Deep Zoom HTML when libvips is availa
   html <- paste(readLines(output, warn = FALSE), collapse = "\n")
   expect_match(html, "full-resolution tiled viewer", fixed = TRUE)
   expect_match(html, "slide_files", fixed = TRUE)
-  expect_match(html, "drawAncestorTile", fixed = TRUE)
-  expect_match(html, "drawBleed", fixed = TRUE)
+  expect_match(html, "openseadragon.min.js", fixed = TRUE)
+  expect_match(html, "OpenSeadragon", fixed = TRUE)
+  expect_match(html, "maxImageCacheCount", fixed = TRUE)
+  expect_match(html, "prefetchNeighborTiles", fixed = TRUE)
+  expect_match(html, "placeholderFillStyle", fixed = TRUE)
+  expect_match(html, "imageToViewportCoordinates", fixed = TRUE)
+  expect_match(html, "viewportToImageCoordinates", fixed = TRUE)
+  expect_match(html, "id=\"overlay\"", fixed = TRUE)
   expect_match(html, "requestDraw", fixed = TRUE)
   expect_match(html, "loadingTiles", fixed = TRUE)
   expect_match(html, "saveGeojson", fixed = TRUE)
+})
+
+test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
+  html <- wsiTools:::wsi_tiled_viewer_html(list(
+    title = "synthetic tiled viewer",
+    subtitle = "test Deep Zoom tiles",
+    slide_width = 48,
+    slide_height = 32,
+    mpp = NULL,
+    tile_size = 16,
+    tile_format = "png",
+    tile_url_base = "synthetic_tiles/slide_files",
+    dzi = "slide.dzi",
+    max_level = 6,
+    annotation_filename = "synthetic_annotations.geojson",
+    segmentation_run_url = NULL,
+    viewer_state_url = NULL,
+    stain = list(enabled = FALSE),
+    rois = list()
+  ))
+
+  expect_match(html, "openseadragon.min.js", fixed = TRUE)
+  expect_match(html, "OpenSeadragon", fixed = TRUE)
+  expect_match(html, "tileSources", fixed = TRUE)
+  expect_match(html, "maxImageCacheCount:512", fixed = TRUE)
+  expect_match(html, "blendTime:0.08", fixed = TRUE)
+  expect_match(html, "prefetchNeighborTiles", fixed = TRUE)
+  expect_match(html, "id=\"viewer\" class=\"osdViewer\"", fixed = TRUE)
+  expect_match(html, "id=\"overlay\"", fixed = TRUE)
+  expect_match(html, "imageToViewportCoordinates", fixed = TRUE)
+  expect_match(html, "viewportToImageCoordinates", fixed = TRUE)
+  expect_match(html, "zoomToSlideBounds", fixed = TRUE)
 })
 
 test_that("interactive IHC viewer writes stain deconvolution controls", {

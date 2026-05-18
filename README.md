@@ -192,8 +192,10 @@ viewer <- wsi_viewer(
 )
 ```
 
-This writes browser-readable tiles next to the HTML file. Zooming then requests
-higher-resolution tiles instead of magnifying a thumbnail.
+This writes browser-readable tiles next to the HTML file. Tiled mode uses
+OpenSeadragon for image rendering, tile caching, smooth transitions, and
+coordinate-stable overlays; zooming requests higher-resolution tiles instead of
+magnifying a thumbnail.
 
 ### H&E BTF interactive viewer and conversion
 

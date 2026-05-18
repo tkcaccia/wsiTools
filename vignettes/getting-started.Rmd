@@ -113,7 +113,9 @@ annotation states retained.
 
 For full-resolution zooming, use tiled mode. This asks libvips to create a
 Deep Zoom tile pyramid on disk, then writes an HTML viewer that requests the
-appropriate tile resolution as you zoom.
+appropriate tile resolution as you zoom. The tiled viewer uses OpenSeadragon
+for rendering, tile caching, smooth transitions, and coordinate-stable
+annotation overlays.
 
 ```{r, eval=FALSE, purl=FALSE}
 viewer <- wsi_viewer(
