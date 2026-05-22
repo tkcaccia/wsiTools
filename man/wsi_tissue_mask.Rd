@@ -27,13 +27,16 @@ wsi_tissue_mask(
 
 \item{brightness_threshold}{Maximum HSV value for tissue.}
 
-\item{min_area}{Reserved for future connected-component filtering.}
+\item{min_area}{Minimum connected tissue component size in thumbnail pixels.
+Smaller components are removed before summaries are computed.}
 }
 \value{
-A \code{wsi_tissue_mask} object.
+A \code{wsi_tissue_mask} object containing the logical \code{mask},
+\code{tissue_fraction}, \code{tissue_percentage}, \code{tissue_area},
+\code{tissue_bounding_box}, and per-component \code{component_bboxes}.
 }
 \description{
-Creates a low-resolution thumbnail and classifies tissue with simple color
-thresholds. This first version is intentionally conservative; advanced
-tissue segmentation is a future enhancement.
+Creates a low-resolution thumbnail and classifies tissue/background with
+simple color thresholds. The slide is not loaded into memory; only the
+requested thumbnail is read.
 }

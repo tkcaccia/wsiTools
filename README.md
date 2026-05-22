@@ -879,6 +879,25 @@ manifest <- extract_tiles(
 clean_tiles <- subset(manifest, !artifact_flag & !whitespace_flag)
 ```
 
+The first QC step should usually be tissue/background detection from a
+low-resolution thumbnail. `wsi_tissue_mask()` uses HSV saturation and brightness
+thresholds, never reads the full WSI into memory, and returns the logical mask
+plus tissue percentage, approximate tissue area, a whole-tissue bounding box,
+and connected-component bounding boxes:
+
+```r
+tissue <- wsi_tissue_mask(
+  slide,
+  thumbnail_width = 2048,
+  saturation_threshold = 0.05,
+  brightness_threshold = 0.8
+)
+
+tissue$tissue_percentage
+tissue$tissue_area
+tissue$component_bboxes
+```
+
 The interactive viewer also includes an **Artifacts** menu for quick
 viewport-level screening. It can inspect the currently rendered view for
 obvious blur, pen-like marks, folds, bubbles, or very bright/dark content and
