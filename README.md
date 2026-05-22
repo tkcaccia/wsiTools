@@ -1001,6 +1001,32 @@ bubbles$bubble_fraction_heatmap
 bubbles$tiles[, c("tile_id", "bubble_candidate", "bubble_fraction")]
 ```
 
+Dust and debris screening focuses on small, dark, sharply defined connected
+components. `wsi_detect_dust_candidates()` reports an object mask plus
+per-object summaries, and when a tissue mask is provided it separates objects
+on tissue, background, and tissue edges:
+
+```r
+dust_tile <- wsi_detect_dust_candidates(
+  patch,
+  tissue_mask = patch_tissue,
+  max_area = 200,
+  max_diameter = 40
+)
+
+dust <- wsi_dust_candidate_heatmap(
+  slide,
+  tile_size = 512,
+  tissue_mask = tissue,
+  brightness_threshold = 0.30,
+  min_contrast = 0.08
+)
+
+dust$dust_candidate_tile_fraction
+dust$dust_fraction_heatmap
+dust$tiles[, c("tile_id", "dust_candidate", "dust_object_count")]
+```
+
 The interactive viewer also includes an **Artifacts** menu for quick
 viewport-level screening. It can inspect the currently rendered view for
 obvious blur, pen-like marks, folds, bubbles, or very bright/dark content and

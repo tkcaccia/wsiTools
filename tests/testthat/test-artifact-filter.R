@@ -273,6 +273,73 @@ test_that("bubble candidate heatmap reads tiles and returns bubble matrices", {
   expect_false(any(bubbles$bubble_candidate_tile_mask, na.rm = TRUE))
 })
 
+test_that("dust candidate detector returns small high-contrast object masks", {
+  img <- array(0.82, dim = c(64, 64, 3))
+  img[8:10, 8:10, ] <- 0.04
+  img[30:32, 30:32, ] <- 0.04
+  tissue <- matrix(FALSE, 64, 64)
+  tissue[25:40, 25:40] <- TRUE
+
+  dust <- wsi_detect_dust_candidates(
+    img,
+    tissue_mask = tissue,
+    min_area = 1,
+    max_area = 20,
+    min_edge_fraction = 0.01,
+    min_contrast = 0.1
+  )
+
+  expect_s3_class(dust, "wsi_dust_candidate_mask")
+  expect_equal(dim(dust$mask), c(64, 64))
+  expect_true(dust$dust_candidate)
+  expect_equal(dust$dust_pixel_count, 18)
+  expect_equal(dust$tissue_dust_pixel_count, 9)
+  expect_equal(dust$background_dust_pixel_count, 9)
+  expect_equal(dust$dust_object_count, 2)
+  expect_equal(dust$tissue_dust_object_count, 1)
+  expect_equal(dust$background_dust_object_count, 1)
+  expect_true(all(c("background", "tissue") %in% dust$component_bboxes$location))
+  expect_gt(min(dust$component_bboxes$local_contrast), 0.1)
+  expect_true(all(dust$mask[8:10, 8:10]))
+  expect_true(all(dust$mask[30:32, 30:32]))
+})
+
+test_that("dust candidate detector rejects large dark regions", {
+  img <- array(0.82, dim = c(64, 64, 3))
+  img[1:40, 1:40, ] <- 0.04
+
+  dust <- wsi_detect_dust_candidates(
+    img,
+    estimate_tissue = FALSE,
+    min_area = 1,
+    max_area = 20,
+    min_edge_fraction = 0.01,
+    min_contrast = 0.1
+  )
+
+  expect_s3_class(dust, "wsi_dust_candidate_mask")
+  expect_equal(dust$raw_candidate_pixel_count, 40 * 40)
+  expect_equal(dust$dust_pixel_count, 0)
+  expect_equal(dust$dust_object_count, 0)
+  expect_false(dust$dust_candidate)
+})
+
+test_that("dust candidate heatmap reads tiles and returns dust matrices", {
+  slide <- wsiTools:::wsi_mock_slide(width = 256, height = 256, levels = c(1))
+
+  dust <- wsi_dust_candidate_heatmap(slide, tile_size = 128, min_area = 1)
+
+  expect_s3_class(dust, "wsi_dust_candidate_heatmap")
+  expect_equal(nrow(dust$tiles), 4)
+  expect_equal(dim(dust$dust_fraction_heatmap), c(2, 2))
+  expect_equal(dim(dust$tissue_dust_fraction_heatmap), c(2, 2))
+  expect_equal(dim(dust$background_dust_fraction_heatmap), c(2, 2))
+  expect_equal(dim(dust$dust_candidate_tile_mask), c(2, 2))
+  expect_equal(dust$slide_dust_candidate_fraction, 0)
+  expect_equal(dust$dust_candidate_tile_fraction, 0)
+  expect_false(any(dust$dust_candidate_tile_mask, na.rm = TRUE))
+})
+
 test_that("artifact detection distinguishes textured tiles from blur", {
   checker <- matrix(rep(c(0, 1), 32 * 32 / 2), nrow = 32)
   checker <- array(rep(checker, 3), dim = c(32, 32, 3))

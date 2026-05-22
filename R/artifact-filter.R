@@ -497,6 +497,125 @@ wsi_bubble_filter_components <- function(mask, edge, edge_threshold,
   )
 }
 
+wsi_dust_component_summary <- function(components, dark_mask, edge,
+                                       edge_threshold, brightness,
+                                       saturation, tissue, ring_width) {
+  bboxes <- wsi_tissue_component_bboxes(
+    components,
+    scale = c(x = 1, y = 1),
+    origin = c(x = 0, y = 0)
+  )
+  if (!nrow(bboxes)) {
+    bboxes$max_dimension <- numeric()
+    bboxes$aspect_ratio <- numeric()
+    bboxes$circularity <- numeric()
+    bboxes$perimeter <- numeric()
+    bboxes$edge_fraction <- numeric()
+    bboxes$mean_edge_strength <- numeric()
+    bboxes$mean_brightness <- numeric()
+    bboxes$mean_saturation <- numeric()
+    bboxes$mean_ring_brightness <- numeric()
+    bboxes$local_contrast <- numeric()
+    bboxes$tissue_fraction <- numeric()
+    bboxes$background_fraction <- numeric()
+    bboxes$location <- character()
+    return(bboxes)
+  }
+  nr <- nrow(dark_mask)
+  nc <- ncol(dark_mask)
+  extra <- lapply(components, function(component) {
+    component_mask <- wsi_component_mask(component, nr, nc)
+    dilated <- wsi_binary_dilate(component_mask, radius = ring_width)
+    outer_ring <- dilated & !component_mask
+    boundary <- wsi_component_boundary(component_mask)
+    edge_zone <- boundary | outer_ring
+    idx <- cbind(component[, "row"], component[, "col"])
+    width <- max(component[, "col"]) - min(component[, "col"]) + 1L
+    height <- max(component[, "row"]) - min(component[, "row"]) + 1L
+    area <- nrow(component)
+    perimeter <- wsi_component_exposed_perimeter(component_mask)
+    ring_values <- brightness[outer_ring]
+    ring_mean <- if (length(ring_values)) mean(ring_values, na.rm = TRUE) else NA_real_
+    center_mean <- mean(brightness[idx], na.rm = TRUE)
+    tissue_fraction <- if (is.null(tissue)) NA_real_ else mean(tissue[idx], na.rm = TRUE)
+    location <- if (is.null(tissue)) {
+      NA_character_
+    } else if (tissue_fraction >= 0.75) {
+      "tissue"
+    } else if (tissue_fraction <= 0.25) {
+      "background"
+    } else {
+      "edge"
+    }
+    data.frame(
+      max_dimension = max(width, height),
+      aspect_ratio = max(width, height) / max(1, min(width, height)),
+      circularity = min(1, 4 * pi * area / max(perimeter^2, 1)),
+      perimeter = perimeter,
+      edge_fraction = if (any(edge_zone)) mean(edge[edge_zone] >= edge_threshold, na.rm = TRUE) else NA_real_,
+      mean_edge_strength = if (any(edge_zone)) mean(edge[edge_zone], na.rm = TRUE) else NA_real_,
+      mean_brightness = center_mean,
+      mean_saturation = mean(saturation[idx], na.rm = TRUE),
+      mean_ring_brightness = ring_mean,
+      local_contrast = ring_mean - center_mean,
+      tissue_fraction = tissue_fraction,
+      background_fraction = if (is.na(tissue_fraction)) NA_real_ else 1 - tissue_fraction,
+      location = location,
+      stringsAsFactors = FALSE
+    )
+  })
+  cbind(bboxes, do.call(rbind, extra))
+}
+
+wsi_dust_filter_components <- function(mask, edge, edge_threshold,
+                                       brightness, saturation, tissue,
+                                       min_area, max_area, max_diameter,
+                                       min_edge_fraction, min_contrast,
+                                       ring_width) {
+  components <- wsi_mask_component_list(mask, connectivity = "8", min_area = max(1L, min_area))
+  if (!length(components)) {
+    return(list(
+      mask = matrix(FALSE, nrow = nrow(mask), ncol = ncol(mask)),
+      components = list(),
+      bboxes = wsi_dust_component_summary(
+        list(),
+        dark_mask = mask,
+        edge = edge,
+        edge_threshold = edge_threshold,
+        brightness = brightness,
+        saturation = saturation,
+        tissue = tissue,
+        ring_width = ring_width
+      )
+    ))
+  }
+  summary <- wsi_dust_component_summary(
+    components,
+    dark_mask = mask,
+    edge = edge,
+    edge_threshold = edge_threshold,
+    brightness = brightness,
+    saturation = saturation,
+    tissue = tissue,
+    ring_width = ring_width
+  )
+  keep <- summary$thumbnail_area <= max_area &
+    summary$max_dimension <= max_diameter &
+    summary$edge_fraction >= min_edge_fraction &
+    summary$local_contrast >= min_contrast
+  keep[is.na(keep)] <- FALSE
+  kept <- components[keep]
+  filtered <- matrix(FALSE, nrow = nrow(mask), ncol = ncol(mask))
+  for (component in kept) {
+    filtered[cbind(component[, "row"], component[, "col"])] <- TRUE
+  }
+  list(
+    mask = filtered,
+    components = kept,
+    bboxes = summary[keep, , drop = FALSE]
+  )
+}
+
 wsi_fold_component_summary <- function(components, edge, edge_threshold,
                                        od_sum, saturation, brightness) {
   bboxes <- wsi_tissue_component_bboxes(
@@ -1299,6 +1418,337 @@ wsi_bubble_candidate_heatmap <- function(slide,
       bubble_candidate_tile_fraction = bubble_candidate_tile_fraction
     ),
     class = "wsi_bubble_candidate_heatmap"
+  )
+}
+
+#' Detect dust or debris candidate regions in a small image
+#'
+#' Detects small, dark, sharply defined dust/debris candidates using
+#' connected-component filtering, local contrast, and edge strength. The
+#' function is intended for QC triage on thumbnails, tiles, or small regions;
+#' it does not diagnose the physical cause of an object and can confuse dust
+#' with dark cells, pigments, pen specks, or small tissue fragments.
+#'
+#' @param image RGB/RGBA array, raster, or magick image.
+#' @param tissue_mask Optional logical/numeric matrix or `wsi_tissue_mask` with
+#'   the same height and width as `image`. When supplied, the detector reports
+#'   whether each small object lies on tissue, background, or the tissue edge.
+#' @param estimate_tissue If `TRUE` and `tissue_mask` is `NULL`, estimate a
+#'   simple tissue mask from `image` using [wsi_detect_tissue()].
+#' @param brightness_threshold Maximum HSV brightness/value for dark candidate
+#'   pixels.
+#' @param edge_threshold Local grayscale edge threshold used around candidate
+#'   components.
+#' @param min_edge_fraction Minimum fraction of edge-rich pixels required in
+#'   the component boundary/ring zone.
+#' @param min_contrast Minimum local contrast, computed as surrounding ring
+#'   brightness minus candidate-object brightness.
+#' @param min_area,max_area Minimum and maximum connected component size in
+#'   pixels.
+#' @param max_diameter Maximum component bounding-box width or height in
+#'   pixels.
+#' @param dust_fraction_threshold Candidate fraction threshold used for the
+#'   summary flag.
+#' @param ring_width Pixel radius used to inspect local background around each
+#'   small object.
+#'
+#' @return A `wsi_dust_candidate_mask` object with the filtered `mask`, raw
+#'   dark-object mask, tissue/background fractions, and per-component summaries.
+#' @export
+#' @examples
+#' img <- array(0.82, dim = c(32, 32, 3))
+#' img[10:12, 10:12, ] <- 0.04
+#' wsi_detect_dust_candidates(img, estimate_tissue = FALSE, min_area = 1)
+wsi_detect_dust_candidates <- function(image,
+                                       tissue_mask = NULL,
+                                       estimate_tissue = FALSE,
+                                       brightness_threshold = 0.30,
+                                       edge_threshold = 0.05,
+                                       min_edge_fraction = 0.10,
+                                       min_contrast = 0.08,
+                                       min_area = 2,
+                                       max_area = 200,
+                                       max_diameter = 40,
+                                       dust_fraction_threshold = 0.001,
+                                       ring_width = 2) {
+  arr <- wsi_artifact_array(image)
+  r <- arr[, , 1L]
+  g <- arr[, , 2L]
+  b <- arr[, , 3L]
+  brightness_threshold <- wsi_stain_threshold_01(brightness_threshold, "brightness_threshold")
+  edge_threshold <- wsi_stain_threshold_01(edge_threshold, "edge_threshold")
+  min_edge_fraction <- wsi_stain_threshold_01(min_edge_fraction, "min_edge_fraction")
+  dust_fraction_threshold <- wsi_stain_threshold_01(dust_fraction_threshold, "dust_fraction_threshold")
+  min_contrast <- wsi_check_scalar_number(min_contrast, "min_contrast")
+  min_area <- as.integer(wsi_check_scalar_number(min_area, "min_area", allow_zero = FALSE))
+  max_area <- as.integer(wsi_check_scalar_number(max_area, "max_area", allow_zero = FALSE))
+  max_diameter <- as.integer(wsi_check_scalar_number(max_diameter, "max_diameter", allow_zero = FALSE))
+  ring_width <- as.integer(wsi_check_scalar_number(ring_width, "ring_width", allow_zero = FALSE))
+  if (max_area < min_area) {
+    wsi_abort("`max_area` must be greater than or equal to `min_area`.")
+  }
+
+  hsv <- grDevices::rgb2hsv(r = as.vector(r), g = as.vector(g), b = as.vector(b), maxColorValue = 1)
+  saturation <- matrix(hsv["s", ], nrow = nrow(r), ncol = ncol(r))
+  brightness <- matrix(hsv["v", ], nrow = nrow(r), ncol = ncol(r))
+  gray <- 0.299 * r + 0.587 * g + 0.114 * b
+  edge <- wsi_pen_edge_magnitude(gray)
+  tissue <- wsi_pen_tissue_matrix(tissue_mask, arr, estimate_tissue = estimate_tissue)
+
+  dark_raw <- brightness <= brightness_threshold
+  filtered <- wsi_dust_filter_components(
+    dark_raw,
+    edge = edge,
+    edge_threshold = edge_threshold,
+    brightness = brightness,
+    saturation = saturation,
+    tissue = tissue,
+    min_area = min_area,
+    max_area = max_area,
+    max_diameter = max_diameter,
+    min_edge_fraction = min_edge_fraction,
+    min_contrast = min_contrast,
+    ring_width = ring_width
+  )
+  mask <- filtered$mask
+  dust_pixels <- sum(mask, na.rm = TRUE)
+  total_pixels <- length(mask)
+  tissue_pixels <- if (is.null(tissue)) NA_integer_ else as.integer(sum(tissue, na.rm = TRUE))
+  background_pixels <- if (is.null(tissue)) NA_integer_ else as.integer(sum(!tissue, na.rm = TRUE))
+  tissue_dust_pixels <- if (is.null(tissue)) NA_integer_ else as.integer(sum(mask & tissue, na.rm = TRUE))
+  background_dust_pixels <- if (is.null(tissue)) NA_integer_ else as.integer(sum(mask & !tissue, na.rm = TRUE))
+  dust_fraction <- dust_pixels / total_pixels
+  tissue_dust_fraction <- if (is.null(tissue)) NA_real_ else wsi_stain_fraction(mask, tissue)
+  background_dust_fraction <- if (is.null(tissue) || !background_pixels) {
+    NA_real_
+  } else {
+    background_dust_pixels / background_pixels
+  }
+  object_locations <- filtered$bboxes$location %||% character()
+
+  structure(
+    list(
+      mask = mask,
+      raw_candidate_mask = dark_raw,
+      tissue_mask = tissue,
+      edge_map = edge,
+      dust_pixel_count = as.integer(dust_pixels),
+      raw_candidate_pixel_count = as.integer(sum(dark_raw, na.rm = TRUE)),
+      total_pixel_count = as.integer(total_pixels),
+      tissue_pixel_count = tissue_pixels,
+      background_pixel_count = background_pixels,
+      tissue_dust_pixel_count = tissue_dust_pixels,
+      background_dust_pixel_count = background_dust_pixels,
+      dust_object_count = nrow(filtered$bboxes),
+      tissue_dust_object_count = sum(object_locations == "tissue", na.rm = TRUE),
+      background_dust_object_count = sum(object_locations == "background", na.rm = TRUE),
+      edge_dust_object_count = sum(object_locations == "edge", na.rm = TRUE),
+      dust_fraction = dust_fraction,
+      dust_percentage = dust_fraction * 100,
+      tissue_dust_fraction = tissue_dust_fraction,
+      tissue_dust_percentage = tissue_dust_fraction * 100,
+      background_dust_fraction = background_dust_fraction,
+      background_dust_percentage = background_dust_fraction * 100,
+      dust_candidate = is.finite(dust_fraction) && dust_fraction >= dust_fraction_threshold,
+      component_bboxes = filtered$bboxes,
+      mean_candidate_brightness = if (dust_pixels) mean(brightness[mask], na.rm = TRUE) else NA_real_,
+      mean_candidate_saturation = if (dust_pixels) mean(saturation[mask], na.rm = TRUE) else NA_real_,
+      mean_candidate_edge_strength = if (dust_pixels) mean(edge[mask], na.rm = TRUE) else NA_real_,
+      parameters = list(
+        brightness_threshold = brightness_threshold,
+        edge_threshold = edge_threshold,
+        min_edge_fraction = min_edge_fraction,
+        min_contrast = min_contrast,
+        min_area = min_area,
+        max_area = max_area,
+        max_diameter = max_diameter,
+        dust_fraction_threshold = dust_fraction_threshold,
+        ring_width = ring_width,
+        estimate_tissue = isTRUE(estimate_tissue)
+      )
+    ),
+    class = "wsi_dust_candidate_mask"
+  )
+}
+
+#' Build a tiled dust or debris candidate heatmap for a slide
+#'
+#' Reads a slide tile grid one region at a time and computes
+#' [wsi_detect_dust_candidates()] for each tile. The output is intended for QC
+#' triage and small-object artifact review; it should not be interpreted as a
+#' definitive dust/debris segmentation.
+#'
+#' @param slide A `wsi_slide` object.
+#' @param grid Optional tile grid. If `NULL`, one is created with
+#'   [wsi_tile_grid()].
+#' @param tile_size,overlap,level,region,include_partial Arguments used when
+#'   `grid = NULL`.
+#' @param tissue_mask Optional `wsi_tissue_mask` used to classify candidate
+#'   objects as tissue, background, or edge objects.
+#' @param ... Thresholds passed to [wsi_detect_dust_candidates()].
+#'
+#' @return A `wsi_dust_candidate_heatmap` object with tile metrics, a dust
+#'   fraction heatmap, and a candidate tile mask.
+#' @export
+#' @examples
+#' slide <- wsiTools:::wsi_mock_slide(width = 256, height = 256)
+#' dust <- wsi_dust_candidate_heatmap(slide, tile_size = 128)
+wsi_dust_candidate_heatmap <- function(slide,
+                                       grid = NULL,
+                                       tile_size = 512,
+                                       overlap = 0,
+                                       level = 0,
+                                       region = NULL,
+                                       include_partial = FALSE,
+                                       tissue_mask = NULL,
+                                       ...) {
+  wsi_check_slide(slide)
+  if (is.null(grid)) {
+    grid <- wsi_tile_grid(
+      slide,
+      tile_size = tile_size,
+      overlap = overlap,
+      level = level,
+      region = region,
+      tissue_mask = if (inherits(tissue_mask, "wsi_tissue_mask")) tissue_mask else NULL,
+      include_partial = include_partial
+    )
+  }
+  needed <- c("x", "y", "width", "height")
+  if (!is.data.frame(grid) || !all(needed %in% names(grid))) {
+    wsi_abort("`grid` must be a data frame with `x`, `y`, `width`, and `height` columns.")
+  }
+  if (!"level" %in% names(grid)) {
+    grid$level <- level
+  }
+
+  rows <- vector("list", nrow(grid))
+  read_errors <- character()
+  for (i in seq_len(nrow(grid))) {
+    rows[[i]] <- tryCatch(
+      {
+        tile <- wsi_read_region(
+          slide,
+          x = grid$x[[i]],
+          y = grid$y[[i]],
+          width = grid$width[[i]],
+          height = grid$height[[i]],
+          level = grid$level[[i]],
+          format = "array"
+        )
+        downsample <- if ("downsample" %in% names(grid)) grid$downsample[[i]] else wsi_level_row(slide, grid$level[[i]])$downsample[[1L]]
+        tile_tissue_mask <- if (inherits(tissue_mask, "wsi_tissue_mask")) {
+          wsi_tissue_mask_for_tile(
+            tissue_mask,
+            x = grid$x[[i]],
+            y = grid$y[[i]],
+            width = grid$width[[i]],
+            height = grid$height[[i]],
+            downsample = downsample
+          )
+        } else {
+          tissue_mask
+        }
+        dust <- wsi_detect_dust_candidates(
+          tile,
+          tissue_mask = tile_tissue_mask,
+          estimate_tissue = FALSE,
+          ...
+        )
+        data.frame(
+          dust_fraction = dust$dust_fraction,
+          dust_percentage = dust$dust_percentage,
+          tissue_dust_fraction = dust$tissue_dust_fraction,
+          tissue_dust_percentage = dust$tissue_dust_percentage,
+          background_dust_fraction = dust$background_dust_fraction,
+          background_dust_percentage = dust$background_dust_percentage,
+          dust_candidate = dust$dust_candidate,
+          dust_object_count = dust$dust_object_count,
+          tissue_dust_object_count = dust$tissue_dust_object_count,
+          background_dust_object_count = dust$background_dust_object_count,
+          edge_dust_object_count = dust$edge_dust_object_count,
+          dust_pixel_count = dust$dust_pixel_count,
+          raw_dust_candidate_pixel_count = dust$raw_candidate_pixel_count,
+          dust_mean_brightness = dust$mean_candidate_brightness,
+          dust_mean_saturation = dust$mean_candidate_saturation,
+          dust_mean_edge_strength = dust$mean_candidate_edge_strength,
+          dust_read_error = FALSE,
+          stringsAsFactors = FALSE
+        )
+      },
+      error = function(err) {
+        tile_label <- if ("tile_id" %in% names(grid)) grid$tile_id[[i]] else i
+        read_errors <<- c(read_errors, sprintf("%s: %s", tile_label %||% i, conditionMessage(err)))
+        data.frame(
+          dust_fraction = NA_real_,
+          dust_percentage = NA_real_,
+          tissue_dust_fraction = NA_real_,
+          tissue_dust_percentage = NA_real_,
+          background_dust_fraction = NA_real_,
+          background_dust_percentage = NA_real_,
+          dust_candidate = NA,
+          dust_object_count = NA_integer_,
+          tissue_dust_object_count = NA_integer_,
+          background_dust_object_count = NA_integer_,
+          edge_dust_object_count = NA_integer_,
+          dust_pixel_count = NA_integer_,
+          raw_dust_candidate_pixel_count = NA_integer_,
+          dust_mean_brightness = NA_real_,
+          dust_mean_saturation = NA_real_,
+          dust_mean_edge_strength = NA_real_,
+          dust_read_error = TRUE,
+          stringsAsFactors = FALSE
+        )
+      }
+    )
+  }
+  if (length(read_errors)) {
+    wsi_warn(sprintf(
+      "Dust-candidate heatmap could not read %s tile%s; those rows have `dust_read_error = TRUE`.",
+      length(read_errors),
+      if (length(read_errors) == 1L) "" else "s"
+    ))
+  }
+  metrics <- if (length(rows)) do.call(rbind, rows) else data.frame(
+    dust_fraction = numeric(),
+    dust_percentage = numeric(),
+    tissue_dust_fraction = numeric(),
+    tissue_dust_percentage = numeric(),
+    background_dust_fraction = numeric(),
+    background_dust_percentage = numeric(),
+    dust_candidate = logical(),
+    dust_object_count = integer(),
+    tissue_dust_object_count = integer(),
+    background_dust_object_count = integer(),
+    edge_dust_object_count = integer(),
+    dust_pixel_count = integer(),
+    raw_dust_candidate_pixel_count = integer(),
+    dust_mean_brightness = numeric(),
+    dust_mean_saturation = numeric(),
+    dust_mean_edge_strength = numeric(),
+    dust_read_error = logical(),
+    stringsAsFactors = FALSE
+  )
+  tiles <- cbind(grid, metrics)
+  dust_values <- tiles$dust_candidate
+  dust_candidate_tile_fraction <- if (any(!is.na(dust_values))) mean(dust_values %in% TRUE, na.rm = TRUE) else NA_real_
+  slide_dust_candidate_fraction <- if (any(is.finite(tiles$dust_fraction))) {
+    mean(tiles$dust_fraction, na.rm = TRUE)
+  } else {
+    NA_real_
+  }
+
+  structure(
+    list(
+      tiles = tiles,
+      dust_fraction_heatmap = wsi_matrix_from_tile_values(tiles, "dust_fraction"),
+      tissue_dust_fraction_heatmap = wsi_matrix_from_tile_values(tiles, "tissue_dust_fraction"),
+      background_dust_fraction_heatmap = wsi_matrix_from_tile_values(tiles, "background_dust_fraction"),
+      dust_candidate_tile_mask = wsi_matrix_from_tile_values(tiles, "dust_candidate"),
+      slide_dust_candidate_fraction = slide_dust_candidate_fraction,
+      dust_candidate_tile_fraction = dust_candidate_tile_fraction
+    ),
+    class = "wsi_dust_candidate_heatmap"
   )
 }
 
