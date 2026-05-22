@@ -210,6 +210,69 @@ test_that("fold candidate heatmap reads tiles and returns fold matrices", {
   expect_false(any(folds$fold_candidate_tile_mask, na.rm = TRUE))
 })
 
+test_that("bubble candidate detector returns circular bright edge-ring candidates", {
+  img <- array(0.65, dim = c(64, 64, 3))
+  yy <- row(img[, , 1])
+  xx <- col(img[, , 1])
+  distance <- sqrt((xx - 32)^2 + (yy - 32)^2)
+  center <- distance <= 8
+  ring <- distance > 8 & distance <= 10
+  for (channel in seq_len(3)) {
+    plane <- img[, , channel]
+    plane[center] <- 0.96
+    plane[ring] <- 0.35
+    img[, , channel] <- plane
+  }
+  tissue <- matrix(TRUE, 64, 64)
+
+  bubbles <- wsi_detect_bubble_candidates(
+    img,
+    tissue_mask = tissue,
+    min_area = 20,
+    min_edge_fraction = 0.01
+  )
+
+  expect_s3_class(bubbles, "wsi_bubble_candidate_mask")
+  expect_equal(dim(bubbles$mask), c(64, 64))
+  expect_true(bubbles$bubble_candidate)
+  expect_equal(bubbles$bubble_pixel_count, sum(center))
+  expect_equal(nrow(bubbles$component_bboxes), 1)
+  expect_gt(bubbles$component_bboxes$roundness, 0.9)
+  expect_gt(bubbles$component_bboxes$ring_contrast, 0.1)
+  expect_true(any(bubbles$ring_mask))
+  expect_true(all(bubbles$mask[center]))
+})
+
+test_that("bubble candidate detector rejects flat bright regions without ring edges", {
+  img <- array(1, dim = c(32, 32, 3))
+
+  bubbles <- wsi_detect_bubble_candidates(
+    img,
+    estimate_tissue = FALSE,
+    min_area = 1
+  )
+
+  expect_s3_class(bubbles, "wsi_bubble_candidate_mask")
+  expect_equal(bubbles$raw_candidate_pixel_count, 32 * 32)
+  expect_equal(bubbles$bubble_pixel_count, 0)
+  expect_false(bubbles$bubble_candidate)
+})
+
+test_that("bubble candidate heatmap reads tiles and returns bubble matrices", {
+  slide <- wsiTools:::wsi_mock_slide(width = 256, height = 256, levels = c(1))
+
+  bubbles <- wsi_bubble_candidate_heatmap(slide, tile_size = 128, min_area = 1)
+
+  expect_s3_class(bubbles, "wsi_bubble_candidate_heatmap")
+  expect_equal(nrow(bubbles$tiles), 4)
+  expect_equal(dim(bubbles$bubble_fraction_heatmap), c(2, 2))
+  expect_equal(dim(bubbles$search_bubble_fraction_heatmap), c(2, 2))
+  expect_equal(dim(bubbles$bubble_candidate_tile_mask), c(2, 2))
+  expect_equal(bubbles$slide_bubble_candidate_fraction, 0)
+  expect_equal(bubbles$bubble_candidate_tile_fraction, 0)
+  expect_false(any(bubbles$bubble_candidate_tile_mask, na.rm = TRUE))
+})
+
 test_that("artifact detection distinguishes textured tiles from blur", {
   checker <- matrix(rep(c(0, 1), 32 * 32 / 2), nrow = 32)
   checker <- array(rep(checker, 3), dim = c(32, 32, 3))

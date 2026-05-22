@@ -979,6 +979,28 @@ folds$fold_fraction_heatmap
 folds$tiles[, c("tile_id", "fold_candidate", "fold_fraction")]
 ```
 
+Air bubbles can be screened as a second-stage candidate detector. The rule is
+deliberately conservative: bright low-saturation centres must also have a
+sharp surrounding edge/ring and approximately round connected-component
+geometry. This helps avoid treating ordinary white background as a bubble:
+
+```r
+bubble_tile <- wsi_detect_bubble_candidates(patch, tissue_mask = patch_tissue)
+
+bubbles <- wsi_bubble_candidate_heatmap(
+  slide,
+  tile_size = 512,
+  tissue_mask = tissue,
+  brightness_threshold = 0.85,
+  saturation_threshold = 0.18,
+  min_ring_contrast = 0.05
+)
+
+bubbles$bubble_candidate_tile_fraction
+bubbles$bubble_fraction_heatmap
+bubbles$tiles[, c("tile_id", "bubble_candidate", "bubble_fraction")]
+```
+
 The interactive viewer also includes an **Artifacts** menu for quick
 viewport-level screening. It can inspect the currently rendered view for
 obvious blur, pen-like marks, folds, bubbles, or very bright/dark content and

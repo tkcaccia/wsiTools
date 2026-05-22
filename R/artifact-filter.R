@@ -331,6 +331,172 @@ wsi_stain_fraction <- function(mask, denominator) {
   sum(mask & denominator, na.rm = TRUE) / denom
 }
 
+wsi_binary_dilate <- function(mask, radius = 1L) {
+  radius <- as.integer(radius)
+  mask <- !is.na(mask) & mask
+  if (radius < 1L || !any(mask)) {
+    return(mask)
+  }
+  nr <- nrow(mask)
+  nc <- ncol(mask)
+  out <- matrix(FALSE, nr, nc)
+  for (dr in seq.int(-radius, radius)) {
+    for (dc in seq.int(-radius, radius)) {
+      if (dr^2 + dc^2 > radius^2) {
+        next
+      }
+      r_start <- max(1L, 1L - dr)
+      r_end <- min(nr, nr - dr)
+      c_start <- max(1L, 1L - dc)
+      c_end <- min(nc, nc - dc)
+      if (r_start > r_end || c_start > c_end) {
+        next
+      }
+      src_r <- seq.int(r_start, r_end)
+      src_c <- seq.int(c_start, c_end)
+      out[src_r + dr, src_c + dc] <- out[src_r + dr, src_c + dc] | mask[src_r, src_c]
+    }
+  }
+  out
+}
+
+wsi_component_mask <- function(component, nr, nc) {
+  out <- matrix(FALSE, nr, nc)
+  out[cbind(component[, "row"], component[, "col"])] <- TRUE
+  out
+}
+
+wsi_component_exposed_perimeter <- function(mask) {
+  nr <- nrow(mask)
+  nc <- ncol(mask)
+  perimeter <- 0L
+  perimeter <- perimeter + sum(mask[1L, ], na.rm = TRUE)
+  perimeter <- perimeter + sum(mask[nr, ], na.rm = TRUE)
+  if (nr > 1L) {
+    perimeter <- perimeter + sum(mask[-1L, , drop = FALSE] & !mask[-nr, , drop = FALSE], na.rm = TRUE)
+    perimeter <- perimeter + sum(mask[-nr, , drop = FALSE] & !mask[-1L, , drop = FALSE], na.rm = TRUE)
+  }
+  perimeter <- perimeter + sum(mask[, 1L], na.rm = TRUE)
+  perimeter <- perimeter + sum(mask[, nc], na.rm = TRUE)
+  if (nc > 1L) {
+    perimeter <- perimeter + sum(mask[, -1L, drop = FALSE] & !mask[, -nc, drop = FALSE], na.rm = TRUE)
+    perimeter <- perimeter + sum(mask[, -nc, drop = FALSE] & !mask[, -1L, drop = FALSE], na.rm = TRUE)
+  }
+  as.numeric(perimeter)
+}
+
+wsi_component_boundary <- function(mask) {
+  mask & wsi_binary_dilate(!mask, radius = 1L)
+}
+
+wsi_bubble_component_summary <- function(components, center_mask, edge,
+                                         edge_threshold, brightness,
+                                         saturation, ring_width) {
+  bboxes <- wsi_tissue_component_bboxes(
+    components,
+    scale = c(x = 1, y = 1),
+    origin = c(x = 0, y = 0)
+  )
+  if (!nrow(bboxes)) {
+    bboxes$roundness <- numeric()
+    bboxes$fill_fraction <- numeric()
+    bboxes$circularity <- numeric()
+    bboxes$perimeter <- numeric()
+    bboxes$edge_fraction <- numeric()
+    bboxes$ring_edge_fraction <- numeric()
+    bboxes$mean_edge_strength <- numeric()
+    bboxes$mean_center_brightness <- numeric()
+    bboxes$mean_center_saturation <- numeric()
+    bboxes$mean_ring_brightness <- numeric()
+    bboxes$ring_contrast <- numeric()
+    return(bboxes)
+  }
+  nr <- nrow(center_mask)
+  nc <- ncol(center_mask)
+  extra <- lapply(components, function(component) {
+    component_mask <- wsi_component_mask(component, nr, nc)
+    dilated <- wsi_binary_dilate(component_mask, radius = ring_width)
+    outer_ring <- dilated & !component_mask
+    boundary <- wsi_component_boundary(component_mask)
+    edge_zone <- boundary | outer_ring
+    idx <- cbind(component[, "row"], component[, "col"])
+    width <- max(component[, "col"]) - min(component[, "col"]) + 1L
+    height <- max(component[, "row"]) - min(component[, "row"]) + 1L
+    area <- nrow(component)
+    bbox_area <- width * height
+    perimeter <- wsi_component_exposed_perimeter(component_mask)
+    ring_values <- brightness[outer_ring]
+    ring_mean <- if (length(ring_values)) mean(ring_values, na.rm = TRUE) else NA_real_
+    center_mean <- mean(brightness[idx], na.rm = TRUE)
+    data.frame(
+      roundness = min(width, height) / max(width, height),
+      fill_fraction = area / bbox_area,
+      circularity = min(1, 4 * pi * area / max(perimeter^2, 1)),
+      perimeter = perimeter,
+      edge_fraction = mean(edge[edge_zone] >= edge_threshold, na.rm = TRUE),
+      ring_edge_fraction = if (any(outer_ring)) mean(edge[outer_ring] >= edge_threshold, na.rm = TRUE) else NA_real_,
+      mean_edge_strength = mean(edge[edge_zone], na.rm = TRUE),
+      mean_center_brightness = center_mean,
+      mean_center_saturation = mean(saturation[idx], na.rm = TRUE),
+      mean_ring_brightness = ring_mean,
+      ring_contrast = center_mean - ring_mean,
+      stringsAsFactors = FALSE
+    )
+  })
+  cbind(bboxes, do.call(rbind, extra))
+}
+
+wsi_bubble_filter_components <- function(mask, edge, edge_threshold,
+                                         brightness, saturation,
+                                         min_area, min_edge_fraction,
+                                         min_ring_contrast,
+                                         min_roundness, min_circularity,
+                                         min_fill_fraction,
+                                         max_fill_fraction, ring_width) {
+  components <- wsi_mask_component_list(mask, connectivity = "8", min_area = max(1L, min_area))
+  if (!length(components)) {
+    return(list(
+      mask = matrix(FALSE, nrow = nrow(mask), ncol = ncol(mask)),
+      components = list(),
+      bboxes = wsi_bubble_component_summary(
+        list(),
+        center_mask = mask,
+        edge = edge,
+        edge_threshold = edge_threshold,
+        brightness = brightness,
+        saturation = saturation,
+        ring_width = ring_width
+      )
+    ))
+  }
+  summary <- wsi_bubble_component_summary(
+    components,
+    center_mask = mask,
+    edge = edge,
+    edge_threshold = edge_threshold,
+    brightness = brightness,
+    saturation = saturation,
+    ring_width = ring_width
+  )
+  keep <- summary$edge_fraction >= min_edge_fraction &
+    summary$ring_contrast >= min_ring_contrast &
+    summary$roundness >= min_roundness &
+    summary$circularity >= min_circularity &
+    summary$fill_fraction >= min_fill_fraction &
+    summary$fill_fraction <= max_fill_fraction
+  keep[is.na(keep)] <- FALSE
+  kept <- components[keep]
+  filtered <- matrix(FALSE, nrow = nrow(mask), ncol = ncol(mask))
+  for (component in kept) {
+    filtered[cbind(component[, "row"], component[, "col"])] <- TRUE
+  }
+  list(
+    mask = filtered,
+    components = kept,
+    bboxes = summary[keep, , drop = FALSE]
+  )
+}
+
 wsi_fold_component_summary <- function(components, edge, edge_threshold,
                                        od_sum, saturation, brightness) {
   bboxes <- wsi_tissue_component_bboxes(
@@ -784,6 +950,355 @@ wsi_fold_candidate_heatmap <- function(slide,
       fold_candidate_tile_fraction = fold_candidate_tile_fraction
     ),
     class = "wsi_fold_candidate_heatmap"
+  )
+}
+
+#' Detect air bubble candidate regions in a small image
+#'
+#' Detects air bubble candidates using bright low-saturation centres plus
+#' sharp edge/ring, roundness, circularity, and connected-component filters.
+#' This is a transparent QC heuristic for candidate regions, not a definitive
+#' bubble classifier; whitespace, coverslip glare, tissue tears, or unstained
+#' holes can produce similar appearances.
+#'
+#' @param image RGB/RGBA array, raster, or magick image.
+#' @param tissue_mask Optional logical/numeric matrix or `wsi_tissue_mask` with
+#'   the same height and width as `image`. If supplied, candidates are searched
+#'   inside this mask after optional dilation by `tissue_expansion`.
+#' @param estimate_tissue If `TRUE` and `tissue_mask` is `NULL`, estimate a
+#'   simple tissue mask from `image` using [wsi_detect_tissue()]. Because bubble
+#'   centres can look like background, externally supplied tissue masks are more
+#'   reliable when available.
+#' @param brightness_threshold Minimum HSV brightness/value for bright bubble
+#'   centre pixels.
+#' @param saturation_threshold Maximum HSV saturation for bright bubble centre
+#'   pixels.
+#' @param edge_threshold Local grayscale edge threshold used to score bubble
+#'   rims.
+#' @param min_edge_fraction Minimum fraction of edge-rich pixels required in
+#'   the component boundary/ring zone.
+#' @param min_ring_contrast Minimum brightness difference between the candidate
+#'   centre and its surrounding ring.
+#' @param min_roundness Minimum bounding-box roundness, computed as
+#'   `min(width, height) / max(width, height)`.
+#' @param min_circularity Minimum approximate circularity from component area
+#'   and exposed pixel perimeter.
+#' @param min_fill_fraction,max_fill_fraction Allowed component area fraction
+#'   inside the component bounding box. This helps reject long streaks and
+#'   rectangular bright regions.
+#' @param min_area Minimum connected bright-centre component size in pixels.
+#' @param bubble_fraction_threshold Candidate fraction threshold used for the
+#'   summary flag.
+#' @param ring_width Pixel radius used to inspect the outside rim of each
+#'   candidate component.
+#' @param tissue_expansion Pixel radius used to expand a supplied or estimated
+#'   tissue mask before searching for bright bubble centres.
+#'
+#' @return A `wsi_bubble_candidate_mask` object with the filtered centre `mask`,
+#'   raw candidate mask, ring mask, tissue-aware fractions, and component
+#'   summaries.
+#' @export
+#' @examples
+#' img <- array(0.65, dim = c(48, 48, 3))
+#' yy <- row(img[, , 1])
+#' xx <- col(img[, , 1])
+#' d <- sqrt((xx - 24)^2 + (yy - 24)^2)
+#' for (channel in seq_len(3)) {
+#'   plane <- img[, , channel]
+#'   plane[d <= 7] <- 0.96
+#'   plane[d > 7 & d <= 9] <- 0.35
+#'   img[, , channel] <- plane
+#' }
+#' wsi_detect_bubble_candidates(img, estimate_tissue = FALSE, min_area = 10)
+wsi_detect_bubble_candidates <- function(image,
+                                         tissue_mask = NULL,
+                                         estimate_tissue = FALSE,
+                                         brightness_threshold = 0.85,
+                                         saturation_threshold = 0.18,
+                                         edge_threshold = 0.05,
+                                         min_edge_fraction = 0.03,
+                                         min_ring_contrast = 0.05,
+                                         min_roundness = 0.55,
+                                         min_circularity = 0.25,
+                                         min_fill_fraction = 0.35,
+                                         max_fill_fraction = 0.98,
+                                         min_area = 20,
+                                         bubble_fraction_threshold = 0.01,
+                                         ring_width = 2,
+                                         tissue_expansion = 2) {
+  arr <- wsi_artifact_array(image)
+  r <- arr[, , 1L]
+  g <- arr[, , 2L]
+  b <- arr[, , 3L]
+  brightness_threshold <- wsi_stain_threshold_01(brightness_threshold, "brightness_threshold")
+  saturation_threshold <- wsi_stain_threshold_01(saturation_threshold, "saturation_threshold")
+  edge_threshold <- wsi_stain_threshold_01(edge_threshold, "edge_threshold")
+  min_edge_fraction <- wsi_stain_threshold_01(min_edge_fraction, "min_edge_fraction")
+  min_roundness <- wsi_stain_threshold_01(min_roundness, "min_roundness")
+  min_circularity <- wsi_stain_threshold_01(min_circularity, "min_circularity")
+  min_fill_fraction <- wsi_stain_threshold_01(min_fill_fraction, "min_fill_fraction")
+  max_fill_fraction <- wsi_stain_threshold_01(max_fill_fraction, "max_fill_fraction")
+  bubble_fraction_threshold <- wsi_stain_threshold_01(bubble_fraction_threshold, "bubble_fraction_threshold")
+  min_ring_contrast <- wsi_check_scalar_number(min_ring_contrast, "min_ring_contrast")
+  min_area <- as.integer(wsi_check_scalar_number(min_area, "min_area", allow_zero = FALSE))
+  ring_width <- as.integer(wsi_check_scalar_number(ring_width, "ring_width", allow_zero = FALSE))
+  tissue_expansion <- as.integer(wsi_check_scalar_number(tissue_expansion, "tissue_expansion", allow_zero = TRUE))
+  if (max_fill_fraction < min_fill_fraction) {
+    wsi_abort("`max_fill_fraction` must be greater than or equal to `min_fill_fraction`.")
+  }
+
+  hsv <- grDevices::rgb2hsv(r = as.vector(r), g = as.vector(g), b = as.vector(b), maxColorValue = 1)
+  saturation <- matrix(hsv["s", ], nrow = nrow(r), ncol = ncol(r))
+  brightness <- matrix(hsv["v", ], nrow = nrow(r), ncol = ncol(r))
+  gray <- 0.299 * r + 0.587 * g + 0.114 * b
+  edge <- wsi_pen_edge_magnitude(gray)
+  tissue <- wsi_pen_tissue_matrix(tissue_mask, arr, estimate_tissue = estimate_tissue)
+  search_mask <- if (is.null(tissue)) {
+    matrix(TRUE, nrow(r), ncol(r))
+  } else {
+    wsi_binary_dilate(tissue, radius = tissue_expansion)
+  }
+
+  center_raw <- search_mask &
+    brightness >= brightness_threshold &
+    saturation <= saturation_threshold
+  filtered <- wsi_bubble_filter_components(
+    center_raw,
+    edge = edge,
+    edge_threshold = edge_threshold,
+    brightness = brightness,
+    saturation = saturation,
+    min_area = min_area,
+    min_edge_fraction = min_edge_fraction,
+    min_ring_contrast = min_ring_contrast,
+    min_roundness = min_roundness,
+    min_circularity = min_circularity,
+    min_fill_fraction = min_fill_fraction,
+    max_fill_fraction = max_fill_fraction,
+    ring_width = ring_width
+  )
+  mask <- filtered$mask
+  ring_mask <- matrix(FALSE, nrow = nrow(mask), ncol = ncol(mask))
+  for (component in filtered$components) {
+    component_mask <- wsi_component_mask(component, nrow(mask), ncol(mask))
+    ring_mask <- ring_mask | (wsi_binary_dilate(component_mask, radius = ring_width) & !component_mask)
+  }
+
+  bubble_pixels <- sum(mask, na.rm = TRUE)
+  total_pixels <- length(mask)
+  search_pixels <- sum(search_mask, na.rm = TRUE)
+  tissue_pixels <- if (is.null(tissue)) NA_integer_ else as.integer(sum(tissue, na.rm = TRUE))
+  search_bubble_pixels <- as.integer(sum(mask & search_mask, na.rm = TRUE))
+  bubble_fraction <- bubble_pixels / total_pixels
+  search_bubble_fraction <- if (search_pixels) sum(mask & search_mask, na.rm = TRUE) / search_pixels else NA_real_
+  flag_fraction <- if (is.finite(search_bubble_fraction)) search_bubble_fraction else bubble_fraction
+
+  structure(
+    list(
+      mask = mask,
+      raw_candidate_mask = center_raw,
+      ring_mask = ring_mask,
+      tissue_mask = tissue,
+      search_mask = search_mask,
+      edge_map = edge,
+      bubble_pixel_count = as.integer(bubble_pixels),
+      raw_candidate_pixel_count = as.integer(sum(center_raw, na.rm = TRUE)),
+      total_pixel_count = as.integer(total_pixels),
+      tissue_pixel_count = tissue_pixels,
+      search_pixel_count = as.integer(search_pixels),
+      search_bubble_pixel_count = search_bubble_pixels,
+      bubble_fraction = bubble_fraction,
+      bubble_percentage = bubble_fraction * 100,
+      search_bubble_fraction = search_bubble_fraction,
+      search_bubble_percentage = search_bubble_fraction * 100,
+      bubble_candidate = is.finite(flag_fraction) && flag_fraction >= bubble_fraction_threshold,
+      component_bboxes = filtered$bboxes,
+      mean_candidate_brightness = if (bubble_pixels) mean(brightness[mask], na.rm = TRUE) else NA_real_,
+      mean_candidate_saturation = if (bubble_pixels) mean(saturation[mask], na.rm = TRUE) else NA_real_,
+      mean_candidate_edge_strength = if (any(ring_mask)) mean(edge[ring_mask], na.rm = TRUE) else NA_real_,
+      parameters = list(
+        brightness_threshold = brightness_threshold,
+        saturation_threshold = saturation_threshold,
+        edge_threshold = edge_threshold,
+        min_edge_fraction = min_edge_fraction,
+        min_ring_contrast = min_ring_contrast,
+        min_roundness = min_roundness,
+        min_circularity = min_circularity,
+        min_fill_fraction = min_fill_fraction,
+        max_fill_fraction = max_fill_fraction,
+        min_area = min_area,
+        bubble_fraction_threshold = bubble_fraction_threshold,
+        ring_width = ring_width,
+        tissue_expansion = tissue_expansion,
+        estimate_tissue = isTRUE(estimate_tissue)
+      )
+    ),
+    class = "wsi_bubble_candidate_mask"
+  )
+}
+
+#' Build a tiled air bubble candidate heatmap for a slide
+#'
+#' Reads a slide tile grid one region at a time and computes
+#' [wsi_detect_bubble_candidates()] for each tile. The output is intended for
+#' QC triage and visual review; it should not be interpreted as definitive
+#' bubble segmentation.
+#'
+#' @param slide A `wsi_slide` object.
+#' @param grid Optional tile grid. If `NULL`, one is created with
+#'   [wsi_tile_grid()].
+#' @param tile_size,overlap,level,region,include_partial Arguments used when
+#'   `grid = NULL`.
+#' @param tissue_mask Optional `wsi_tissue_mask` used to restrict the bubble
+#'   search region around tissue pixels.
+#' @param ... Thresholds passed to [wsi_detect_bubble_candidates()].
+#'
+#' @return A `wsi_bubble_candidate_heatmap` object with tile metrics, a bubble
+#'   fraction heatmap, and a candidate tile mask.
+#' @export
+#' @examples
+#' slide <- wsiTools:::wsi_mock_slide(width = 256, height = 256)
+#' bubbles <- wsi_bubble_candidate_heatmap(slide, tile_size = 128)
+wsi_bubble_candidate_heatmap <- function(slide,
+                                         grid = NULL,
+                                         tile_size = 512,
+                                         overlap = 0,
+                                         level = 0,
+                                         region = NULL,
+                                         include_partial = FALSE,
+                                         tissue_mask = NULL,
+                                         ...) {
+  wsi_check_slide(slide)
+  if (is.null(grid)) {
+    grid <- wsi_tile_grid(
+      slide,
+      tile_size = tile_size,
+      overlap = overlap,
+      level = level,
+      region = region,
+      tissue_mask = if (inherits(tissue_mask, "wsi_tissue_mask")) tissue_mask else NULL,
+      include_partial = include_partial
+    )
+  }
+  needed <- c("x", "y", "width", "height")
+  if (!is.data.frame(grid) || !all(needed %in% names(grid))) {
+    wsi_abort("`grid` must be a data frame with `x`, `y`, `width`, and `height` columns.")
+  }
+  if (!"level" %in% names(grid)) {
+    grid$level <- level
+  }
+
+  rows <- vector("list", nrow(grid))
+  read_errors <- character()
+  for (i in seq_len(nrow(grid))) {
+    rows[[i]] <- tryCatch(
+      {
+        tile <- wsi_read_region(
+          slide,
+          x = grid$x[[i]],
+          y = grid$y[[i]],
+          width = grid$width[[i]],
+          height = grid$height[[i]],
+          level = grid$level[[i]],
+          format = "array"
+        )
+        downsample <- if ("downsample" %in% names(grid)) grid$downsample[[i]] else wsi_level_row(slide, grid$level[[i]])$downsample[[1L]]
+        tile_tissue_mask <- if (inherits(tissue_mask, "wsi_tissue_mask")) {
+          wsi_tissue_mask_for_tile(
+            tissue_mask,
+            x = grid$x[[i]],
+            y = grid$y[[i]],
+            width = grid$width[[i]],
+            height = grid$height[[i]],
+            downsample = downsample
+          )
+        } else {
+          tissue_mask
+        }
+        bubbles <- wsi_detect_bubble_candidates(
+          tile,
+          tissue_mask = tile_tissue_mask,
+          estimate_tissue = FALSE,
+          ...
+        )
+        data.frame(
+          bubble_fraction = bubbles$bubble_fraction,
+          bubble_percentage = bubbles$bubble_percentage,
+          search_bubble_fraction = bubbles$search_bubble_fraction,
+          search_bubble_percentage = bubbles$search_bubble_percentage,
+          bubble_candidate = bubbles$bubble_candidate,
+          bubble_component_count = nrow(bubbles$component_bboxes),
+          bubble_pixel_count = bubbles$bubble_pixel_count,
+          raw_bubble_candidate_pixel_count = bubbles$raw_candidate_pixel_count,
+          bubble_mean_brightness = bubbles$mean_candidate_brightness,
+          bubble_mean_saturation = bubbles$mean_candidate_saturation,
+          bubble_mean_edge_strength = bubbles$mean_candidate_edge_strength,
+          bubble_read_error = FALSE,
+          stringsAsFactors = FALSE
+        )
+      },
+      error = function(err) {
+        tile_label <- if ("tile_id" %in% names(grid)) grid$tile_id[[i]] else i
+        read_errors <<- c(read_errors, sprintf("%s: %s", tile_label %||% i, conditionMessage(err)))
+        data.frame(
+          bubble_fraction = NA_real_,
+          bubble_percentage = NA_real_,
+          search_bubble_fraction = NA_real_,
+          search_bubble_percentage = NA_real_,
+          bubble_candidate = NA,
+          bubble_component_count = NA_integer_,
+          bubble_pixel_count = NA_integer_,
+          raw_bubble_candidate_pixel_count = NA_integer_,
+          bubble_mean_brightness = NA_real_,
+          bubble_mean_saturation = NA_real_,
+          bubble_mean_edge_strength = NA_real_,
+          bubble_read_error = TRUE,
+          stringsAsFactors = FALSE
+        )
+      }
+    )
+  }
+  if (length(read_errors)) {
+    wsi_warn(sprintf(
+      "Bubble-candidate heatmap could not read %s tile%s; those rows have `bubble_read_error = TRUE`.",
+      length(read_errors),
+      if (length(read_errors) == 1L) "" else "s"
+    ))
+  }
+  metrics <- if (length(rows)) do.call(rbind, rows) else data.frame(
+    bubble_fraction = numeric(),
+    bubble_percentage = numeric(),
+    search_bubble_fraction = numeric(),
+    search_bubble_percentage = numeric(),
+    bubble_candidate = logical(),
+    bubble_component_count = integer(),
+    bubble_pixel_count = integer(),
+    raw_bubble_candidate_pixel_count = integer(),
+    bubble_mean_brightness = numeric(),
+    bubble_mean_saturation = numeric(),
+    bubble_mean_edge_strength = numeric(),
+    bubble_read_error = logical(),
+    stringsAsFactors = FALSE
+  )
+  tiles <- cbind(grid, metrics)
+  bubble_values <- tiles$bubble_candidate
+  bubble_candidate_tile_fraction <- if (any(!is.na(bubble_values))) mean(bubble_values %in% TRUE, na.rm = TRUE) else NA_real_
+  slide_bubble_candidate_fraction <- if (any(is.finite(tiles$bubble_fraction))) {
+    mean(tiles$bubble_fraction, na.rm = TRUE)
+  } else {
+    NA_real_
+  }
+
+  structure(
+    list(
+      tiles = tiles,
+      bubble_fraction_heatmap = wsi_matrix_from_tile_values(tiles, "bubble_fraction"),
+      search_bubble_fraction_heatmap = wsi_matrix_from_tile_values(tiles, "search_bubble_fraction"),
+      bubble_candidate_tile_mask = wsi_matrix_from_tile_values(tiles, "bubble_candidate"),
+      slide_bubble_candidate_fraction = slide_bubble_candidate_fraction,
+      bubble_candidate_tile_fraction = bubble_candidate_tile_fraction
+    ),
+    class = "wsi_bubble_candidate_heatmap"
   )
 }
 
