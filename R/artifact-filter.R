@@ -205,6 +205,77 @@ wsi_artifact_edge_strength <- function(gray) {
   mean(c(dx, dy), na.rm = TRUE)
 }
 
+wsi_pen_threshold_01 <- function(x, name) {
+  x <- wsi_check_scalar_number(x, name)
+  if (x > 1) {
+    x <- x / 255
+  }
+  if (x > 1) {
+    wsi_abort(sprintf("`%s` must be in 0..1 or 0..255 units.", name))
+  }
+  x
+}
+
+wsi_pen_edge_magnitude <- function(gray) {
+  nr <- nrow(gray)
+  nc <- ncol(gray)
+  edge <- matrix(0, nr, nc)
+  if (nr < 2L && nc < 2L) {
+    return(edge)
+  }
+  if (nc >= 2L) {
+    dx <- abs(gray[, -1L, drop = FALSE] - gray[, -nc, drop = FALSE])
+    edge[, -1L] <- pmax(edge[, -1L], dx)
+    edge[, -nc] <- pmax(edge[, -nc], dx)
+  }
+  if (nr >= 2L) {
+    dy <- abs(gray[-1L, , drop = FALSE] - gray[-nr, , drop = FALSE])
+    edge[-1L, ] <- pmax(edge[-1L, ], dy)
+    edge[-nr, ] <- pmax(edge[-nr, ], dy)
+  }
+  edge
+}
+
+wsi_pen_mask_from_components <- function(mask, min_area = 1L) {
+  components <- wsi_mask_component_list(mask, connectivity = "8", min_area = max(1L, min_area))
+  filtered <- matrix(FALSE, nrow = nrow(mask), ncol = ncol(mask))
+  for (component in components) {
+    filtered[cbind(component[, "row"], component[, "col"])] <- TRUE
+  }
+  list(mask = filtered, components = components)
+}
+
+wsi_pen_tissue_matrix <- function(tissue_mask, image, estimate_tissue = TRUE) {
+  if (is.null(tissue_mask)) {
+    if (!isTRUE(estimate_tissue)) {
+      return(NULL)
+    }
+    return(wsi_detect_tissue(image, min_area = 1L)$mask)
+  }
+  if (inherits(tissue_mask, "wsi_tissue_mask")) {
+    tissue_mask <- tissue_mask$mask
+  } else {
+    tissue_mask <- wsi_mask_channel_matrix(tissue_mask)
+  }
+  tissue_mask <- !is.na(tissue_mask) & tissue_mask != 0
+  dims <- dim(image)
+  if (!identical(dim(tissue_mask), dims[1:2])) {
+    wsi_abort("`tissue_mask` must have the same height and width as `image`.")
+  }
+  tissue_mask
+}
+
+wsi_pen_fraction <- function(mask, denominator = NULL) {
+  if (is.null(denominator)) {
+    return(mean(mask, na.rm = TRUE))
+  }
+  denom <- sum(denominator, na.rm = TRUE)
+  if (!denom) {
+    return(NA_real_)
+  }
+  sum(mask & denominator, na.rm = TRUE) / denom
+}
+
 wsi_artifact_metric_error_row <- function() {
   out <- wsi_empty_artifact_metrics(1L)
   out$artifact_tile_width <- NA_integer_
@@ -214,6 +285,162 @@ wsi_artifact_metric_error_row <- function() {
   out$artifact_read_error <- TRUE
   out$artifact_flag <- TRUE
   out
+}
+
+#' Detect pen marks and ink-like artifacts in a small image
+#'
+#' Detects strongly colour-dominant blue, green, and red pen/marker pixels,
+#' plus black ink-like dark components with visible edge content. The function
+#' operates on the supplied image only, so it is suitable for slide thumbnails,
+#' viewport captures, regions, or tiles without loading a whole-slide image into
+#' memory.
+#'
+#' @param image RGB/RGBA array, raster, or magick image.
+#' @param tissue_mask Optional logical/numeric matrix or `wsi_tissue_mask` with
+#'   the same height and width as `image`. When supplied, tissue affected
+#'   percentages are calculated against tissue pixels only.
+#' @param estimate_tissue If `TRUE` and `tissue_mask` is `NULL`, estimate a
+#'   simple tissue mask from `image` using [wsi_detect_tissue()].
+#' @param channel_threshold Minimum dominant channel intensity for coloured ink.
+#'   Values may be supplied in `0..1` or `0..255` units.
+#' @param blue_red_ratio,blue_green_ratio Dominance ratios for blue pen pixels.
+#' @param green_red_ratio,green_blue_ratio Dominance ratios for green marker
+#'   pixels.
+#' @param red_green_ratio,red_blue_ratio Dominance ratios for red pen pixels.
+#' @param black_brightness_threshold Maximum grayscale brightness for black ink
+#'   candidates, in `0..1` or `0..255` units.
+#' @param black_edge_threshold Minimum local grayscale edge magnitude used to
+#'   decide whether a dark component is ink-like.
+#' @param black_edge_fraction_threshold Minimum fraction of edge-rich pixels
+#'   inside a dark component before the whole dark component is classified as
+#'   black ink.
+#' @param min_area Minimum connected pen/ink component size in pixels.
+#'
+#' @return A `wsi_pen_mark_mask` object containing the combined `mask`, colour
+#'   masks, total and tissue-aware affected percentages, and connected-component
+#'   bounding boxes.
+#' @export
+#' @examples
+#' img <- array(1, dim = c(32, 32, 3))
+#' img[, 12:15, 1] <- 0.05
+#' img[, 12:15, 2] <- 0.10
+#' img[, 12:15, 3] <- 0.90
+#' wsi_detect_pen_marks(img, estimate_tissue = FALSE, min_area = 1)
+wsi_detect_pen_marks <- function(image,
+                                 tissue_mask = NULL,
+                                 estimate_tissue = TRUE,
+                                 channel_threshold = 120,
+                                 blue_red_ratio = 1.4,
+                                 blue_green_ratio = 1.2,
+                                 green_red_ratio = 1.3,
+                                 green_blue_ratio = 1.3,
+                                 red_green_ratio = 1.3,
+                                 red_blue_ratio = 1.3,
+                                 black_brightness_threshold = 45,
+                                 black_edge_threshold = 35,
+                                 black_edge_fraction_threshold = 0.05,
+                                 min_area = 5) {
+  arr <- wsi_artifact_array(image)
+  r <- arr[, , 1L]
+  g <- arr[, , 2L]
+  b <- arr[, , 3L]
+  channel_threshold <- wsi_pen_threshold_01(channel_threshold, "channel_threshold")
+  black_brightness_threshold <- wsi_pen_threshold_01(black_brightness_threshold, "black_brightness_threshold")
+  black_edge_threshold <- wsi_pen_threshold_01(black_edge_threshold, "black_edge_threshold")
+  min_area <- as.integer(wsi_check_scalar_number(min_area, "min_area", allow_zero = FALSE))
+  blue_red_ratio <- wsi_check_scalar_number(blue_red_ratio, "blue_red_ratio", allow_zero = FALSE)
+  blue_green_ratio <- wsi_check_scalar_number(blue_green_ratio, "blue_green_ratio", allow_zero = FALSE)
+  green_red_ratio <- wsi_check_scalar_number(green_red_ratio, "green_red_ratio", allow_zero = FALSE)
+  green_blue_ratio <- wsi_check_scalar_number(green_blue_ratio, "green_blue_ratio", allow_zero = FALSE)
+  red_green_ratio <- wsi_check_scalar_number(red_green_ratio, "red_green_ratio", allow_zero = FALSE)
+  red_blue_ratio <- wsi_check_scalar_number(red_blue_ratio, "red_blue_ratio", allow_zero = FALSE)
+  black_edge_fraction_threshold <- wsi_check_scalar_number(
+    black_edge_fraction_threshold,
+    "black_edge_fraction_threshold"
+  )
+  if (black_edge_fraction_threshold > 1) {
+    wsi_abort("`black_edge_fraction_threshold` must be less than or equal to 1.")
+  }
+
+  blue <- b >= channel_threshold & b >= blue_red_ratio * r & b >= blue_green_ratio * g
+  green <- g >= channel_threshold & g >= green_red_ratio * r & g >= green_blue_ratio * b
+  red <- r >= channel_threshold & r >= red_green_ratio * g & r >= red_blue_ratio * b
+
+  gray <- 0.299 * r + 0.587 * g + 0.114 * b
+  dark <- gray <= black_brightness_threshold
+  edge <- wsi_pen_edge_magnitude(gray)
+  dark_components <- wsi_mask_component_list(dark, connectivity = "8", min_area = min_area)
+  black <- matrix(FALSE, nrow = nrow(gray), ncol = ncol(gray))
+  for (component in dark_components) {
+    idx <- cbind(component[, "row"], component[, "col"])
+    if (mean(edge[idx] >= black_edge_threshold, na.rm = TRUE) >= black_edge_fraction_threshold) {
+      black[idx] <- TRUE
+    }
+  }
+
+  combined_raw <- blue | green | red | black
+  filtered <- wsi_pen_mask_from_components(combined_raw, min_area = min_area)
+  mask <- filtered$mask
+  tissue <- wsi_pen_tissue_matrix(tissue_mask, arr, estimate_tissue = estimate_tissue)
+
+  blue <- blue & mask
+  green <- green & mask
+  red <- red & mask
+  black <- black & mask
+
+  pen_pixels <- sum(mask, na.rm = TRUE)
+  tissue_pixels <- if (is.null(tissue)) NA_integer_ else as.integer(sum(tissue, na.rm = TRUE))
+  tissue_pen_pixels <- if (is.null(tissue)) NA_integer_ else as.integer(sum(mask & tissue, na.rm = TRUE))
+  pen_fraction <- mean(mask, na.rm = TRUE)
+  tissue_affected_fraction <- if (is.null(tissue)) NA_real_ else wsi_pen_fraction(mask, tissue)
+  component_bboxes <- wsi_tissue_component_bboxes(
+    filtered$components,
+    scale = c(x = 1, y = 1),
+    origin = c(x = 0, y = 0)
+  )
+
+  structure(
+    list(
+      mask = mask,
+      blue_mask = blue,
+      green_mask = green,
+      red_mask = red,
+      black_ink_mask = black,
+      tissue_mask = tissue,
+      pen_pixel_count = as.integer(pen_pixels),
+      blue_pixel_count = as.integer(sum(blue, na.rm = TRUE)),
+      green_pixel_count = as.integer(sum(green, na.rm = TRUE)),
+      red_pixel_count = as.integer(sum(red, na.rm = TRUE)),
+      black_ink_pixel_count = as.integer(sum(black, na.rm = TRUE)),
+      total_pixel_count = as.integer(length(mask)),
+      tissue_pixel_count = tissue_pixels,
+      tissue_pen_pixel_count = tissue_pen_pixels,
+      pen_fraction = pen_fraction,
+      pen_percentage = pen_fraction * 100,
+      tissue_affected_fraction = tissue_affected_fraction,
+      tissue_affected_percentage = tissue_affected_fraction * 100,
+      blue_fraction = mean(blue, na.rm = TRUE),
+      green_fraction = mean(green, na.rm = TRUE),
+      red_fraction = mean(red, na.rm = TRUE),
+      black_ink_fraction = mean(black, na.rm = TRUE),
+      component_bboxes = component_bboxes,
+      parameters = list(
+        channel_threshold = channel_threshold,
+        blue_red_ratio = blue_red_ratio,
+        blue_green_ratio = blue_green_ratio,
+        green_red_ratio = green_red_ratio,
+        green_blue_ratio = green_blue_ratio,
+        red_green_ratio = red_green_ratio,
+        red_blue_ratio = red_blue_ratio,
+        black_brightness_threshold = black_brightness_threshold,
+        black_edge_threshold = black_edge_threshold,
+        black_edge_fraction_threshold = black_edge_fraction_threshold,
+        min_area = min_area,
+        estimate_tissue = isTRUE(estimate_tissue)
+      )
+    ),
+    class = "wsi_pen_mark_mask"
+  )
 }
 
 #' Detect common tile artifacts from a small image region

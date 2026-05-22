@@ -898,6 +898,22 @@ tissue$tissue_area
 tissue$component_bboxes
 ```
 
+Pen and ink marks can be screened with a second thumbnail- or tile-level pass.
+`wsi_detect_pen_marks()` uses transparent RGB dominance rules for blue, green,
+and red pen/marker pixels, plus a dark edge-rich component rule for black ink.
+If a tissue mask is supplied, or estimated from the same small image, the result
+reports the percentage of tissue affected:
+
+```r
+thumb <- wsi_thumbnail(slide, width = 2048, format = "array")
+tissue <- wsi_detect_tissue(thumb)
+ink <- wsi_detect_pen_marks(thumb, tissue_mask = tissue)
+
+ink$pen_percentage
+ink$tissue_affected_percentage
+ink$component_bboxes
+```
+
 The interactive viewer also includes an **Artifacts** menu for quick
 viewport-level screening. It can inspect the currently rendered view for
 obvious blur, pen-like marks, folds, bubbles, or very bright/dark content and
