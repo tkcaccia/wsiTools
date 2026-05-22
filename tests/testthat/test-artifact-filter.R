@@ -152,6 +152,64 @@ test_that("stain quality heatmap reads tiles and returns score matrices", {
   expect_true(all(stain$low_stain_tile_mask))
 })
 
+test_that("fold candidate detector returns a filtered candidate mask", {
+  img <- array(0.80, dim = c(32, 32, 3))
+  img[10:24, 14:18, 1] <- 0.18
+  img[10:24, 14:18, 2] <- 0.03
+  img[10:24, 14:18, 3] <- 0.10
+  tissue <- matrix(TRUE, 32, 32)
+
+  folds <- wsi_detect_fold_candidates(
+    img,
+    tissue_mask = tissue,
+    min_area = 1,
+    min_edge_fraction = 0.01
+  )
+
+  expect_s3_class(folds, "wsi_fold_candidate_mask")
+  expect_equal(dim(folds$mask), c(32, 32))
+  expect_true(folds$fold_candidate)
+  expect_equal(folds$fold_pixel_count, 15 * 5)
+  expect_equal(folds$tissue_fold_pixel_count, 15 * 5)
+  expect_equal(nrow(folds$component_bboxes), 1)
+  expect_gt(folds$component_bboxes$edge_fraction, 0)
+  expect_gte(folds$component_bboxes$aspect_ratio, 1)
+  expect_true(all(folds$mask[10:24, 14:18]))
+})
+
+test_that("fold candidate detector rejects dark smooth components without edge content", {
+  img <- array(0.08, dim = c(32, 32, 3))
+  img[, , 1] <- 0.12
+  img[, , 2] <- 0.02
+  img[, , 3] <- 0.07
+
+  folds <- wsi_detect_fold_candidates(
+    img,
+    estimate_tissue = FALSE,
+    min_area = 1
+  )
+
+  expect_s3_class(folds, "wsi_fold_candidate_mask")
+  expect_equal(folds$raw_candidate_pixel_count, 32 * 32)
+  expect_equal(folds$fold_pixel_count, 0)
+  expect_false(folds$fold_candidate)
+})
+
+test_that("fold candidate heatmap reads tiles and returns fold matrices", {
+  slide <- wsiTools:::wsi_mock_slide(width = 256, height = 256, levels = c(1))
+
+  folds <- wsi_fold_candidate_heatmap(slide, tile_size = 128, min_area = 1)
+
+  expect_s3_class(folds, "wsi_fold_candidate_heatmap")
+  expect_equal(nrow(folds$tiles), 4)
+  expect_equal(dim(folds$fold_fraction_heatmap), c(2, 2))
+  expect_equal(dim(folds$tissue_fold_fraction_heatmap), c(2, 2))
+  expect_equal(dim(folds$fold_candidate_tile_mask), c(2, 2))
+  expect_equal(folds$slide_fold_candidate_fraction, 0)
+  expect_equal(folds$fold_candidate_tile_fraction, 0)
+  expect_false(any(folds$fold_candidate_tile_mask, na.rm = TRUE))
+})
+
 test_that("artifact detection distinguishes textured tiles from blur", {
   checker <- matrix(rep(c(0, 1), 32 * 32 / 2), nrow = 32)
   checker <- array(rep(checker, 3), dim = c(32, 32, 3))

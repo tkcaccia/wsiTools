@@ -956,6 +956,29 @@ stain$over_stain_tile_fraction
 stain$stain_score_heatmap
 ```
 
+Tissue fold screening is also available as candidate detection, not a
+definitive classifier. `wsi_detect_fold_candidates()` combines high optical
+density, high saturation, low brightness, local edge content, and connected
+component filtering. `wsi_fold_candidate_heatmap()` applies the same rule
+tile-by-tile for slide QC:
+
+```r
+fold_tile <- wsi_detect_fold_candidates(patch, tissue_mask = patch_tissue)
+
+folds <- wsi_fold_candidate_heatmap(
+  slide,
+  tile_size = 512,
+  tissue_mask = tissue,
+  high_od_threshold = 1.2,
+  saturation_threshold = 0.25,
+  brightness_threshold = 0.45
+)
+
+folds$fold_candidate_tile_fraction
+folds$fold_fraction_heatmap
+folds$tiles[, c("tile_id", "fold_candidate", "fold_fraction")]
+```
+
 The interactive viewer also includes an **Artifacts** menu for quick
 viewport-level screening. It can inspect the currently rendered view for
 obvious blur, pen-like marks, folds, bubbles, or very bright/dark content and

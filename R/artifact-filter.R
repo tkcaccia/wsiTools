@@ -331,6 +331,73 @@ wsi_stain_fraction <- function(mask, denominator) {
   sum(mask & denominator, na.rm = TRUE) / denom
 }
 
+wsi_fold_component_summary <- function(components, edge, edge_threshold,
+                                       od_sum, saturation, brightness) {
+  bboxes <- wsi_tissue_component_bboxes(
+    components,
+    scale = c(x = 1, y = 1),
+    origin = c(x = 0, y = 0)
+  )
+  if (!nrow(bboxes)) {
+    bboxes$aspect_ratio <- numeric()
+    bboxes$edge_fraction <- numeric()
+    bboxes$mean_edge_strength <- numeric()
+    bboxes$mean_optical_density <- numeric()
+    bboxes$mean_saturation <- numeric()
+    bboxes$mean_brightness <- numeric()
+    return(bboxes)
+  }
+  extra <- lapply(components, function(component) {
+    idx <- cbind(component[, "row"], component[, "col"])
+    width <- max(component[, "col"]) - min(component[, "col"]) + 1L
+    height <- max(component[, "row"]) - min(component[, "row"]) + 1L
+    data.frame(
+      aspect_ratio = max(width, height) / max(1, min(width, height)),
+      edge_fraction = mean(edge[idx] >= edge_threshold, na.rm = TRUE),
+      mean_edge_strength = mean(edge[idx], na.rm = TRUE),
+      mean_optical_density = mean(od_sum[idx], na.rm = TRUE),
+      mean_saturation = mean(saturation[idx], na.rm = TRUE),
+      mean_brightness = mean(brightness[idx], na.rm = TRUE),
+      stringsAsFactors = FALSE
+    )
+  })
+  cbind(bboxes, do.call(rbind, extra))
+}
+
+wsi_fold_filter_components <- function(mask, edge, edge_threshold,
+                                       od_sum, saturation, brightness,
+                                       min_area, min_edge_fraction,
+                                       min_aspect_ratio) {
+  components <- wsi_mask_component_list(mask, connectivity = "8", min_area = max(1L, min_area))
+  kept <- list()
+  for (component in components) {
+    idx <- cbind(component[, "row"], component[, "col"])
+    width <- max(component[, "col"]) - min(component[, "col"]) + 1L
+    height <- max(component[, "row"]) - min(component[, "row"]) + 1L
+    aspect_ratio <- max(width, height) / max(1, min(width, height))
+    edge_fraction <- mean(edge[idx] >= edge_threshold, na.rm = TRUE)
+    if (edge_fraction >= min_edge_fraction && aspect_ratio >= min_aspect_ratio) {
+      kept[[length(kept) + 1L]] <- component
+    }
+  }
+  filtered <- matrix(FALSE, nrow = nrow(mask), ncol = ncol(mask))
+  for (component in kept) {
+    filtered[cbind(component[, "row"], component[, "col"])] <- TRUE
+  }
+  list(
+    mask = filtered,
+    components = kept,
+    bboxes = wsi_fold_component_summary(
+      kept,
+      edge = edge,
+      edge_threshold = edge_threshold,
+      od_sum = od_sum,
+      saturation = saturation,
+      brightness = brightness
+    )
+  )
+}
+
 wsi_pen_threshold_01 <- function(x, name) {
   x <- wsi_check_scalar_number(x, name)
   if (x > 1) {
@@ -411,6 +478,313 @@ wsi_artifact_metric_error_row <- function() {
   out$artifact_read_error <- TRUE
   out$artifact_flag <- TRUE
   out
+}
+
+#' Detect tissue fold candidate regions in a small image
+#'
+#' Detects tissue fold candidates using a conservative rule-based combination
+#' of high optical density, high saturation, low brightness, and local edge
+#' content. The result should be treated as a candidate mask for QC review, not
+#' a definitive tissue-fold classifier; dense nuclei, necrosis, blood, or dark
+#' tumour regions can sometimes satisfy similar rules.
+#'
+#' @param image RGB/RGBA array, raster, or magick image.
+#' @param tissue_mask Optional logical/numeric matrix or `wsi_tissue_mask` with
+#'   the same height and width as `image`.
+#' @param estimate_tissue If `TRUE` and `tissue_mask` is `NULL`, estimate a
+#'   simple tissue mask from `image` using [wsi_detect_tissue()].
+#' @param high_od_threshold Minimum RGB optical-density sum for candidate
+#'   pixels.
+#' @param saturation_threshold Minimum HSV saturation for candidate pixels.
+#' @param brightness_threshold Maximum HSV brightness/value for candidate
+#'   pixels.
+#' @param edge_threshold Local grayscale edge threshold used inside connected
+#'   components.
+#' @param min_edge_fraction Minimum fraction of edge-rich pixels required inside
+#'   a connected component.
+#' @param min_area Minimum connected component size in pixels.
+#' @param min_aspect_ratio Minimum component bounding-box aspect ratio. Use
+#'   values greater than 1 to prefer elongated fold-like regions.
+#' @param fold_fraction_threshold Tissue fold-candidate fraction threshold used
+#'   for the summary flag.
+#' @param epsilon Lower RGB bound before optical-density transformation.
+#'
+#' @return A `wsi_fold_candidate_mask` object with the filtered `mask`, raw
+#'   candidate mask, tissue-aware fractions, and component summaries.
+#' @export
+#' @examples
+#' img <- array(0.8, dim = c(32, 32, 3))
+#' img[10:22, 14:18, 1] <- 0.18
+#' img[10:22, 14:18, 2] <- 0.03
+#' img[10:22, 14:18, 3] <- 0.10
+#' wsi_detect_fold_candidates(img, estimate_tissue = FALSE, min_area = 1)
+wsi_detect_fold_candidates <- function(image,
+                                       tissue_mask = NULL,
+                                       estimate_tissue = FALSE,
+                                       high_od_threshold = 1.2,
+                                       saturation_threshold = 0.25,
+                                       brightness_threshold = 0.45,
+                                       edge_threshold = 0.05,
+                                       min_edge_fraction = 0.03,
+                                       min_area = 20,
+                                       min_aspect_ratio = 1,
+                                       fold_fraction_threshold = 0.01,
+                                       epsilon = 1 / 255) {
+  arr <- wsi_artifact_array(image)
+  r <- arr[, , 1L]
+  g <- arr[, , 2L]
+  b <- arr[, , 3L]
+  high_od_threshold <- wsi_check_scalar_number(high_od_threshold, "high_od_threshold")
+  saturation_threshold <- wsi_stain_threshold_01(saturation_threshold, "saturation_threshold")
+  brightness_threshold <- wsi_stain_threshold_01(brightness_threshold, "brightness_threshold")
+  edge_threshold <- wsi_stain_threshold_01(edge_threshold, "edge_threshold")
+  min_edge_fraction <- wsi_stain_threshold_01(min_edge_fraction, "min_edge_fraction")
+  min_aspect_ratio <- wsi_check_scalar_number(min_aspect_ratio, "min_aspect_ratio", allow_zero = FALSE)
+  fold_fraction_threshold <- wsi_stain_threshold_01(fold_fraction_threshold, "fold_fraction_threshold")
+  epsilon <- wsi_check_scalar_number(epsilon, "epsilon", allow_zero = FALSE)
+  if (epsilon >= 1) {
+    wsi_abort("`epsilon` must be less than 1.")
+  }
+  min_area <- as.integer(wsi_check_scalar_number(min_area, "min_area", allow_zero = FALSE))
+
+  hsv <- grDevices::rgb2hsv(r = as.vector(r), g = as.vector(g), b = as.vector(b), maxColorValue = 1)
+  saturation <- matrix(hsv["s", ], nrow = nrow(r), ncol = ncol(r))
+  brightness <- matrix(hsv["v", ], nrow = nrow(r), ncol = ncol(r))
+  gray <- 0.299 * r + 0.587 * g + 0.114 * b
+  edge <- wsi_pen_edge_magnitude(gray)
+  od_sum <- -log(pmax(r, epsilon)) - log(pmax(g, epsilon)) - log(pmax(b, epsilon))
+
+  tissue <- wsi_pen_tissue_matrix(tissue_mask, arr, estimate_tissue = estimate_tissue)
+  eval_mask <- if (is.null(tissue)) matrix(TRUE, nrow(r), ncol(r)) else tissue
+  candidate_raw <- eval_mask &
+    od_sum >= high_od_threshold &
+    saturation >= saturation_threshold &
+    brightness <= brightness_threshold
+  filtered <- wsi_fold_filter_components(
+    candidate_raw,
+    edge = edge,
+    edge_threshold = edge_threshold,
+    od_sum = od_sum,
+    saturation = saturation,
+    brightness = brightness,
+    min_area = min_area,
+    min_edge_fraction = min_edge_fraction,
+    min_aspect_ratio = min_aspect_ratio
+  )
+  mask <- filtered$mask
+  fold_pixels <- sum(mask, na.rm = TRUE)
+  total_pixels <- length(mask)
+  tissue_pixels <- if (is.null(tissue)) NA_integer_ else as.integer(sum(tissue, na.rm = TRUE))
+  tissue_fold_pixels <- if (is.null(tissue)) NA_integer_ else as.integer(sum(mask & tissue, na.rm = TRUE))
+  fold_fraction <- fold_pixels / total_pixels
+  tissue_fold_fraction <- if (is.null(tissue)) NA_real_ else wsi_stain_fraction(mask, tissue)
+  flag_fraction <- if (is.na(tissue_fold_fraction)) fold_fraction else tissue_fold_fraction
+
+  structure(
+    list(
+      mask = mask,
+      raw_candidate_mask = candidate_raw,
+      tissue_mask = tissue,
+      edge_map = edge,
+      optical_density = od_sum,
+      fold_pixel_count = as.integer(fold_pixels),
+      raw_candidate_pixel_count = as.integer(sum(candidate_raw, na.rm = TRUE)),
+      total_pixel_count = as.integer(total_pixels),
+      tissue_pixel_count = tissue_pixels,
+      tissue_fold_pixel_count = tissue_fold_pixels,
+      fold_fraction = fold_fraction,
+      fold_percentage = fold_fraction * 100,
+      tissue_fold_fraction = tissue_fold_fraction,
+      tissue_fold_percentage = tissue_fold_fraction * 100,
+      fold_candidate = is.finite(flag_fraction) && flag_fraction >= fold_fraction_threshold,
+      component_bboxes = filtered$bboxes,
+      mean_candidate_optical_density = if (fold_pixels) mean(od_sum[mask], na.rm = TRUE) else NA_real_,
+      mean_candidate_saturation = if (fold_pixels) mean(saturation[mask], na.rm = TRUE) else NA_real_,
+      mean_candidate_brightness = if (fold_pixels) mean(brightness[mask], na.rm = TRUE) else NA_real_,
+      mean_candidate_edge_strength = if (fold_pixels) mean(edge[mask], na.rm = TRUE) else NA_real_,
+      parameters = list(
+        high_od_threshold = high_od_threshold,
+        saturation_threshold = saturation_threshold,
+        brightness_threshold = brightness_threshold,
+        edge_threshold = edge_threshold,
+        min_edge_fraction = min_edge_fraction,
+        min_area = min_area,
+        min_aspect_ratio = min_aspect_ratio,
+        fold_fraction_threshold = fold_fraction_threshold,
+        epsilon = epsilon,
+        estimate_tissue = isTRUE(estimate_tissue)
+      )
+    ),
+    class = "wsi_fold_candidate_mask"
+  )
+}
+
+#' Build a tiled tissue fold candidate heatmap for a slide
+#'
+#' Reads a slide tile grid one region at a time and computes
+#' [wsi_detect_fold_candidates()] for each tile. The output is intended for
+#' QC triage and visual review; it should not be interpreted as definitive fold
+#' segmentation.
+#'
+#' @param slide A `wsi_slide` object.
+#' @param grid Optional tile grid. If `NULL`, one is created with
+#'   [wsi_tile_grid()].
+#' @param tile_size,overlap,level,region,include_partial Arguments used when
+#'   `grid = NULL`.
+#' @param tissue_mask Optional `wsi_tissue_mask` used to evaluate fold
+#'   candidates inside tissue pixels only.
+#' @param ... Thresholds passed to [wsi_detect_fold_candidates()].
+#'
+#' @return A `wsi_fold_candidate_heatmap` object with tile metrics, a fold
+#'   fraction heatmap, and a candidate tile mask.
+#' @export
+#' @examples
+#' slide <- wsiTools:::wsi_mock_slide(width = 256, height = 256)
+#' folds <- wsi_fold_candidate_heatmap(slide, tile_size = 128)
+wsi_fold_candidate_heatmap <- function(slide,
+                                       grid = NULL,
+                                       tile_size = 512,
+                                       overlap = 0,
+                                       level = 0,
+                                       region = NULL,
+                                       include_partial = FALSE,
+                                       tissue_mask = NULL,
+                                       ...) {
+  wsi_check_slide(slide)
+  if (is.null(grid)) {
+    grid <- wsi_tile_grid(
+      slide,
+      tile_size = tile_size,
+      overlap = overlap,
+      level = level,
+      region = region,
+      tissue_mask = if (inherits(tissue_mask, "wsi_tissue_mask")) tissue_mask else NULL,
+      include_partial = include_partial
+    )
+  }
+  needed <- c("x", "y", "width", "height")
+  if (!is.data.frame(grid) || !all(needed %in% names(grid))) {
+    wsi_abort("`grid` must be a data frame with `x`, `y`, `width`, and `height` columns.")
+  }
+  if (!"level" %in% names(grid)) {
+    grid$level <- level
+  }
+
+  rows <- vector("list", nrow(grid))
+  read_errors <- character()
+  for (i in seq_len(nrow(grid))) {
+    rows[[i]] <- tryCatch(
+      {
+        tile <- wsi_read_region(
+          slide,
+          x = grid$x[[i]],
+          y = grid$y[[i]],
+          width = grid$width[[i]],
+          height = grid$height[[i]],
+          level = grid$level[[i]],
+          format = "array"
+        )
+        downsample <- if ("downsample" %in% names(grid)) grid$downsample[[i]] else wsi_level_row(slide, grid$level[[i]])$downsample[[1L]]
+        tile_tissue_mask <- if (inherits(tissue_mask, "wsi_tissue_mask")) {
+          wsi_tissue_mask_for_tile(
+            tissue_mask,
+            x = grid$x[[i]],
+            y = grid$y[[i]],
+            width = grid$width[[i]],
+            height = grid$height[[i]],
+            downsample = downsample
+          )
+        } else {
+          tissue_mask
+        }
+        folds <- wsi_detect_fold_candidates(
+          tile,
+          tissue_mask = tile_tissue_mask,
+          estimate_tissue = FALSE,
+          ...
+        )
+        data.frame(
+          fold_fraction = folds$fold_fraction,
+          fold_percentage = folds$fold_percentage,
+          tissue_fold_fraction = folds$tissue_fold_fraction,
+          tissue_fold_percentage = folds$tissue_fold_percentage,
+          fold_candidate = folds$fold_candidate,
+          fold_component_count = nrow(folds$component_bboxes),
+          fold_pixel_count = folds$fold_pixel_count,
+          raw_fold_candidate_pixel_count = folds$raw_candidate_pixel_count,
+          fold_mean_optical_density = folds$mean_candidate_optical_density,
+          fold_mean_saturation = folds$mean_candidate_saturation,
+          fold_mean_brightness = folds$mean_candidate_brightness,
+          fold_mean_edge_strength = folds$mean_candidate_edge_strength,
+          fold_read_error = FALSE,
+          stringsAsFactors = FALSE
+        )
+      },
+      error = function(err) {
+        tile_label <- if ("tile_id" %in% names(grid)) grid$tile_id[[i]] else i
+        read_errors <<- c(read_errors, sprintf("%s: %s", tile_label %||% i, conditionMessage(err)))
+        data.frame(
+          fold_fraction = NA_real_,
+          fold_percentage = NA_real_,
+          tissue_fold_fraction = NA_real_,
+          tissue_fold_percentage = NA_real_,
+          fold_candidate = NA,
+          fold_component_count = NA_integer_,
+          fold_pixel_count = NA_integer_,
+          raw_fold_candidate_pixel_count = NA_integer_,
+          fold_mean_optical_density = NA_real_,
+          fold_mean_saturation = NA_real_,
+          fold_mean_brightness = NA_real_,
+          fold_mean_edge_strength = NA_real_,
+          fold_read_error = TRUE,
+          stringsAsFactors = FALSE
+        )
+      }
+    )
+  }
+  if (length(read_errors)) {
+    wsi_warn(sprintf(
+      "Fold-candidate heatmap could not read %s tile%s; those rows have `fold_read_error = TRUE`.",
+      length(read_errors),
+      if (length(read_errors) == 1L) "" else "s"
+    ))
+  }
+  metrics <- if (length(rows)) do.call(rbind, rows) else data.frame(
+    fold_fraction = numeric(),
+    fold_percentage = numeric(),
+    tissue_fold_fraction = numeric(),
+    tissue_fold_percentage = numeric(),
+    fold_candidate = logical(),
+    fold_component_count = integer(),
+    fold_pixel_count = integer(),
+    raw_fold_candidate_pixel_count = integer(),
+    fold_mean_optical_density = numeric(),
+    fold_mean_saturation = numeric(),
+    fold_mean_brightness = numeric(),
+    fold_mean_edge_strength = numeric(),
+    fold_read_error = logical(),
+    stringsAsFactors = FALSE
+  )
+  tiles <- cbind(grid, metrics)
+  fold_values <- tiles$fold_candidate
+  fold_candidate_tile_fraction <- if (any(!is.na(fold_values))) mean(fold_values %in% TRUE, na.rm = TRUE) else NA_real_
+  slide_fold_candidate_fraction <- if (any(is.finite(tiles$fold_fraction))) {
+    mean(tiles$fold_fraction, na.rm = TRUE)
+  } else {
+    NA_real_
+  }
+
+  structure(
+    list(
+      tiles = tiles,
+      fold_fraction_heatmap = wsi_matrix_from_tile_values(tiles, "fold_fraction"),
+      tissue_fold_fraction_heatmap = wsi_matrix_from_tile_values(tiles, "tissue_fold_fraction"),
+      fold_candidate_tile_mask = wsi_matrix_from_tile_values(tiles, "fold_candidate"),
+      slide_fold_candidate_fraction = slide_fold_candidate_fraction,
+      fold_candidate_tile_fraction = fold_candidate_tile_fraction
+    ),
+    class = "wsi_fold_candidate_heatmap"
+  )
 }
 
 #' Detect poor or excessive staining in a small image
