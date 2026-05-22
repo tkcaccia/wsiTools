@@ -2,6 +2,24 @@
   if (is.null(x) || length(x) == 0 || (length(x) == 1 && is.na(x))) y else x
 }
 
+.wsi_native_cache <- new.env(parent = emptyenv())
+
+wsi_native_available <- function(name) {
+  cached <- .wsi_native_cache[[name]]
+  if (!is.null(cached)) {
+    return(isTRUE(cached))
+  }
+  available <- tryCatch(
+    {
+      getNativeSymbolInfo(name, PACKAGE = "wsiTools")
+      TRUE
+    },
+    error = function(err) FALSE
+  )
+  .wsi_native_cache[[name]] <- available
+  available
+}
+
 wsi_abort <- function(message, class = "wsi_error", call = NULL) {
   cli::cli_abort(message, class = class, call = call)
 }

@@ -331,7 +331,7 @@ wsi_stain_fraction <- function(mask, denominator) {
   sum(mask & denominator, na.rm = TRUE) / denom
 }
 
-wsi_binary_dilate <- function(mask, radius = 1L) {
+wsi_binary_dilate_r <- function(mask, radius = 1L) {
   radius <- as.integer(radius)
   mask <- !is.na(mask) & mask
   if (radius < 1L || !any(mask)) {
@@ -358,6 +358,15 @@ wsi_binary_dilate <- function(mask, radius = 1L) {
     }
   }
   out
+}
+
+wsi_binary_dilate <- function(mask, radius = 1L) {
+  radius <- as.integer(radius)
+  mask <- !is.na(mask) & mask
+  if (wsi_native_available("wsi_cpp_binary_dilate")) {
+    return(.Call("wsi_cpp_binary_dilate", mask, radius, PACKAGE = "wsiTools"))
+  }
+  wsi_binary_dilate_r(mask, radius = radius)
 }
 
 wsi_component_mask <- function(component, nr, nc) {
@@ -694,7 +703,7 @@ wsi_pen_threshold_01 <- function(x, name) {
   x
 }
 
-wsi_pen_edge_magnitude <- function(gray) {
+wsi_pen_edge_magnitude_r <- function(gray) {
   nr <- nrow(gray)
   nc <- ncol(gray)
   edge <- matrix(0, nr, nc)
@@ -712,6 +721,13 @@ wsi_pen_edge_magnitude <- function(gray) {
     edge[-nr, ] <- pmax(edge[-nr, ], dy)
   }
   edge
+}
+
+wsi_pen_edge_magnitude <- function(gray) {
+  if (wsi_native_available("wsi_cpp_edge_magnitude")) {
+    return(.Call("wsi_cpp_edge_magnitude", gray, PACKAGE = "wsiTools"))
+  }
+  wsi_pen_edge_magnitude_r(gray)
 }
 
 wsi_pen_mask_from_components <- function(mask, min_area = 1L) {

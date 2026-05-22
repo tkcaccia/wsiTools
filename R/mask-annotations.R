@@ -127,7 +127,7 @@ wsi_mask_colour <- function(color_map, value, index) {
   wsi_stain_palette(index)[[index]]
 }
 
-wsi_mask_component_list <- function(binary, connectivity = c("4", "8"), min_area = 1L) {
+wsi_mask_component_list_r <- function(binary, connectivity = c("4", "8"), min_area = 1L) {
   connectivity <- match.arg(as.character(connectivity), c("4", "8"))
   min_area <- as.integer(wsi_check_scalar_number(min_area, "min_area", allow_zero = FALSE))
   binary <- !is.na(binary) & binary
@@ -179,6 +179,16 @@ wsi_mask_component_list <- function(binary, connectivity = c("4", "8"), min_area
     }
   }
   components
+}
+
+wsi_mask_component_list <- function(binary, connectivity = c("4", "8"), min_area = 1L) {
+  connectivity <- match.arg(as.character(connectivity), c("4", "8"))
+  min_area <- as.integer(wsi_check_scalar_number(min_area, "min_area", allow_zero = FALSE))
+  binary <- !is.na(binary) & binary
+  if (wsi_native_available("wsi_cpp_mask_components")) {
+    return(.Call("wsi_cpp_mask_components", binary, connectivity, min_area, PACKAGE = "wsiTools"))
+  }
+  wsi_mask_component_list_r(binary, connectivity = connectivity, min_area = min_area)
 }
 
 wsi_mask_point_key <- function(x, y) {
