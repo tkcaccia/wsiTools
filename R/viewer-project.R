@@ -6,6 +6,8 @@
 #' as CZI. The function keeps large source files out of R memory and uses only
 #' preview images in the browser. Format-specific high-resolution access remains
 #' delegated to optional runtime backends.
+#' Browser annotations are stored separately for each project image/section, so
+#' ROIs drawn on one tissue section do not appear on another section.
 #'
 #' CZI files require Bio-Formats command-line tools for real image previews and
 #' metadata. Without Bio-Formats, CZI files are still listed in the project

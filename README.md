@@ -180,6 +180,8 @@ sections, or multi-scene microscopy files such as CZI. The function writes a
 single HTML viewer with a left-side **Project** panel for switching between
 samples and scenes. Large source files remain on disk; the viewer embeds
 downsampled previews so the full image is not loaded into R memory.
+Annotations are stored separately for each project image/section, so ROIs drawn
+on one tissue section do not appear on a different section.
 
 ```r
 library(wsiTools)
