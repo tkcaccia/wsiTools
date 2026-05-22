@@ -2,13 +2,17 @@ Package: wsiTools
 Title: Tools for Reading, Tiling, Converting and Exporting Whole-Slide Images
 Version: 0.1.0
 Authors@R: 
-    person("Stefano", role = c("aut", "cre"), email = "tkcaccia@gmail.com")
-Description: An R toolkit for memory-efficient whole-slide image access
-    and preprocessing through region-based reading, tiling, pyramidal image
-    handling, conversion and export. The package provides backend capability
-    checks and abstractions for OpenSlide, libvips, and future microscopy
-    backends without loading complete whole-slide images into R memory by
-    default.
+    person(given = "Stefano", family = "Caccia",
+           role = c("aut", "cre"), email = "tkcaccia@gmail.com")
+Author: Stefano Caccia [aut, cre]
+Maintainer: Stefano Caccia <tkcaccia@gmail.com>
+Description: A lightweight R toolkit for memory-efficient whole-slide image
+    access and preprocessing through region-based reading, tiling, pyramidal
+    image handling, conversion and export. The CRAN-installable core uses R
+    code and light dependencies, while OpenSlide, libvips, StarDist, Cellpose,
+    OME-Zarr pixel access, and web-service integrations are optional runtime
+    capabilities discovered through explicit backend checks. The package avoids
+    loading complete whole-slide images into R memory by default.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
@@ -22,6 +26,7 @@ Imports:
     jsonlite,
     utils
 Suggests:
+    callr,
     knitr,
     httpuv,
     magick,
@@ -30,6 +35,7 @@ Suggests:
     testthat (>= 3.0.0)
 SystemRequirements: None required for installation. Optional runtime tools:
     OpenSlide command-line tools; libvips command-line tools; Bio-Formats
-    command-line tools.
+    command-line tools; external StarDist or Cellpose commands; optional local
+    web services for interactive workflows.
 Config/testthat/edition: 3
 VignetteBuilder: knitr

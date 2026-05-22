@@ -22,9 +22,10 @@ From a local checkout:
 install.packages(".", repos = NULL, type = "source")
 ```
 
-wsiTools is currently installable as a pure R package. OpenSlide and libvips are
-checked at runtime by `wsi_backends()` and related helpers, so Windows users do
-not need Rtools or WSI system libraries just to install the package.
+wsiTools is currently installable as a pure R package. OpenSlide, libvips,
+StarDist, Cellpose, OME-Zarr pixel access, and local web services are treated as
+optional runtime capabilities rather than installation requirements, so Windows
+users do not need Rtools or WSI system libraries just to install the package.
 
 ## System dependencies
 
@@ -36,12 +37,97 @@ functions need the corresponding tools at runtime:
   thumbnails, cropping, and export.
 - Bio-Formats command-line tools are planned for future microscopy format
   support.
+- StarDist, Cellpose, or other segmentation engines remain external commands or
+  services; wsiTools can export ROI crops and import their outputs without
+  depending on Python.
+- `httpuv`, `magick`, and `sf` are optional R packages used only for live viewer
+  bridges, image previews, and polygon-aware ROI operations.
+- `callr` is optional and is used only when non-blocking background jobs are
+  requested.
+- OME-Zarr metadata reading is lightweight; full chunked pixel decoding should
+  remain an optional backend capability.
+
+The CRAN core should stay small: no mandatory native code, no `Rcpp` linking,
+no mandatory Python bridge, and no mandatory OpenSlide/libvips library at
+install time.
 
 Check your local capabilities with:
 
 ```r
 library(wsiTools)
 wsi_backends()
+```
+
+New users can also ask wsiTools for a setup plan:
+
+```r
+plan <- wsi_setup()
+plan
+```
+
+This reports missing optional R packages and system tools, and prints copyable
+commands for Homebrew, apt, dnf, or conda when one is detected. It does not
+install anything unless you explicitly opt in:
+
+```r
+# Review the plan first
+wsi_setup()
+
+# Then optionally install supported optional dependencies
+wsi_install_deps(method = "homebrew")
+```
+
+On Debian/Ubuntu or Fedora, system installs may require `sudo`; wsiTools will
+not run those commands unless you explicitly set `allow_sudo = TRUE`.
+
+StarDist is a Python/TensorFlow tool, so it is not installed silently during
+`install.packages()` or `remotes::install_github()`. To enable the viewer's
+`Run segmentation` button, run the explicit first-time setup helper:
+
+```r
+wsi_install_stardist(method = "conda")
+```
+
+This creates or updates a dedicated `wsitools-stardist` environment, writes a
+small `stardist-predict2d` wrapper in the user wsiTools configuration
+directory, and makes `wsi_has_stardist()` detect it automatically. Use
+`wsi_install_stardist(install = FALSE)` to see the commands without running
+them. The helper checks free disk space first because the conda StarDist package
+can pull in a large TensorFlow stack.
+
+Other Python tools such as Cellpose are best installed in a dedicated conda/pip
+environment and then exposed to wsiTools through environment variables or
+function arguments.
+
+## First-run guided example
+
+After installing from GitHub, create a small mock pathology project that opens
+without OpenSlide, libvips, Python, or real WSI files:
+
+```r
+library(wsiTools)
+
+example <- wsi_first_run_example(open = TRUE)
+example$path
+head(example$tile_grid)
+```
+
+The example directory contains a mock slide project, ROI GeoJSON, a labelled
+mask converted to annotations, synthetic cell segmentation overlays, a tile
+manifest, and a self-contained HTML viewer. You can also run the installed
+script:
+
+```r
+source(system.file("examples/first-run-guided-example.R", package = "wsiTools"))
+```
+
+For a live viewer, inspect the capabilities of that specific session before
+starting optional tools:
+
+```r
+slide <- wsi_open("sample.svs")
+viewer <- wsi_viewer_live(slide, wait = FALSE)
+viewer$capabilities()
 ```
 
 Supported formats depend on the installed backend and the specific file. The
@@ -82,6 +168,57 @@ tiles <- wsi_tile(
   tile_size = 512,
   level = 0,
   tissue_mask = TRUE
+)
+
+wsi_close(slide)
+```
+
+## Multiple samples in one viewer
+
+Use `wsi_viewer_project()` when a case contains several images, serial
+sections, or multi-scene microscopy files such as CZI. The function writes a
+single HTML viewer with a left-side **Project** panel for switching between
+samples and scenes. Large source files remain on disk; the viewer embeds
+downsampled previews so the full image is not loaded into R memory.
+
+```r
+library(wsiTools)
+
+samples <- c(
+  "case_01_section_01.czi",
+  "case_01_section_02.czi",
+  "case_01_section_03.czi"
+)
+
+html <- wsi_viewer_project(
+  samples,
+  output = "case_01_project_viewer.html",
+  width = 4096,
+  overwrite = TRUE
+)
+html
+```
+
+For sharper preview zoom, increase `width`; for smaller HTML files, decrease
+it. CZI previews are optional and require a Python executable with
+`aicspylibczi`, `numpy`, and `Pillow`:
+
+```r
+Sys.setenv(WSITOOLS_CZI_PYTHON = "/path/to/python")
+wsi_has_czi_python()
+```
+
+You can also add related images to a normal slide viewer:
+
+```r
+slide <- wsi_open("case_01_he.svs")
+
+wsi_viewer(
+  slide,
+  mode = "tiles",
+  output = "case_01_viewer.html",
+  tile_dir = "case_01_viewer_tiles",
+  project_images = c("case_01_ihc.czi", "case_01_serial_section.czi")
 )
 
 wsi_close(slide)
@@ -147,14 +284,31 @@ navigation, a side window listing all GeoJSON geometries, crosshair display,
 coordinate copying, polygon drawing, and GeoJSON export. Use `GeoJSON` to open
 the geometry list; each row shows the geometry type, bounds, point count,
 source, and id. Use `Draw ROI`, click polygon vertices, double-click or press
-`Finish`, then use `Save GeoJSON`. In `Brush` mode, painting with no selected
-annotation creates a new ROI; painting with an annotation selected extends it;
-holding `Alt` while brushing removes from the selected annotation. Use `Edit`
+`Finish`, then use `Save GeoJSON`. In `Brush` mode, each normal stroke creates
+a new automatically named annotation. If the painted area touches an existing
+annotation with the same label, the regions merge; holding `Alt` on
+Windows/Linux or `Command` on macOS while brushing removes from the selected
+annotation. The compact ROI report does not open
+automatically; select an ROI and click `ROI summary` when you want to inspect
+area, cell count, and density. Use `Edit`
 to move vertices, double-click an edge to insert a vertex, and Backspace/Delete
-to remove the active vertex. The `Name`, `Class`, and `Custom class` controls
-update the selected annotation label and category before GeoJSON export.
-`Ctrl+Z` undoes annotation edits in the viewer, with the last 10 committed
-annotation states retained. In a static browser viewer this opens the
+to remove the active vertex. Drawn, painted, and edited annotation regions are
+kept class-exclusive: annotations with the same class label merge into one
+multi-part annotation, while areas already occupied by a different class label
+are clipped from the new or refined annotation. The brush refinement controls can smooth a
+boundary, simplify it with a pixel tolerance, fill holes, merge checked
+annotations from the left panel, and split a multi-part annotation into
+separate ROIs. The Class Presets and History sections in the annotation panel
+can be maximized with their `Maximize` buttons and restored with `Esc` or
+`Restore`. The toolbar `Class`, `Custom class`, and `Set next class` controls
+set the class for the next drawn or painted annotation; selecting an ROI does
+not overwrite these controls, and changing them does not relabel the selected
+annotation. Use the annotation manager controls to change an existing
+annotation before GeoJSON export. Annotation colors
+are category-driven: all ROIs with the same class label share the same class
+color, including imported GeoJSON and newly painted annotations. `Ctrl+Z` undoes
+annotation edits and `Ctrl+Shift+Z`/`Ctrl+Y` redoes them, with the last 10
+committed states retained in each direction. In a static browser viewer this opens the
 browser's normal save/download flow rather than silently writing to a server
 path.
 
@@ -166,18 +320,55 @@ current R session automatically:
 session <- wsi_viewer_live(
   slide,
   mode = "tiles",
-  name = "viewer_state"
+  name = "viewer_state",
+  wait = FALSE
 )
 
 # After drawing ROIs, measuring distances, importing GeoJSON, or adding
 # segmentation overlays in the browser:
-viewer_state_rois
-viewer_state_measurements
-viewer_state_segmentation
-wsi_viewer_state(session)$rois
+session$capabilities()
+session$get_rois()
+session$get_selected_roi()
+session$get_selected_rois()
+session$get_measurements()
+session$get_roi_summary()
+session$get_cell_summary()
+session$get_class_summary()
+session$get_ihc_summary()
+session$get_ihc_class_summary()
+session$get_segmentation()
+session$get_layers()
+
+# After deconvolving a selected ROI or crop in R:
+session$measure_ihc_intensity(patch_channels, dab_threshold = 0.1)
+
+# Register R callbacks before interacting with the viewer:
+session$on("roi_created", function(roi) {
+  print(roi)
+})
+
+session$on("roi_selected", function(roi) {
+  crop <- export_roi_crop(slide, roi, file = tempfile(fileext = ".png"))
+})
+
+session$on("segmentation_finished", function(cells) {
+  print(summarise_rois(session$get_rois(), cells = cells))
+})
+
+# R can also push overlays back into the open viewer:
+session$add_rois(read_geojson("qupath_annotations.geojson"))
+session$add_segmentation(data.frame(cell_id = "cell_1", x = 1200, y = 900))
+session$add_layer("tumour ROIs", session$get_rois())
+session$add_layer("StarDist cells", session$get_segmentation())
+session$add_layer("DAB intensity", matrix(runif(100), nrow = 10), opacity = 0.4)
+session$set_layer_visible("StarDist cells", TRUE)
+
+# Save a reproducible project snapshot:
+session$save_project("case_001.wsiproject")
 ```
 
-In plain R sessions the live loop is serviced until you press Esc or Ctrl+C.
+In plain R sessions, call `session$service()` periodically, or start with
+`wait = TRUE` for a blocking live loop that runs until you press Esc or Ctrl+C.
 The synced objects remain available in the chosen R environment.
 
 For full-resolution zooming, build a Deep Zoom tile pyramid with libvips:
@@ -252,6 +443,44 @@ visibility controls, color pickers, and gain sliders. In tiled mode the browser
 recolors only the visible Deep Zoom tiles, so the full WSI is not loaded into R
 memory.
 
+For H&E patches, `wsiTools` can separate hematoxylin/eosin channels and
+perform lightweight stain normalisation. Macenko-style estimation and an
+experimental Vahadane-style NMF estimator are implemented in pure R for
+already-small regions, tiles, or thumbnails:
+
+```r
+patch <- wsi_read_region(
+  slide,
+  x = 10000,
+  y = 20000,
+  width = 1024,
+  height = 1024
+)
+
+he_channels <- wsi_deconvolve_he(patch)
+stain_matrix <- wsi_estimate_stain_matrix(patch, method = "macenko")
+
+normalized <- wsi_normalize_stains(
+  patch,
+  method = "macenko",
+  target_matrix = wsi_he_stain_matrix()
+)
+```
+
+For WSI workflows, normalise only the requested region or apply the function
+inside a tile loop:
+
+```r
+normalized_region <- wsi_stain_normalize_region(
+  slide,
+  x = 10000,
+  y = 20000,
+  width = 1024,
+  height = 1024,
+  method = "macenko"
+)
+```
+
 For brightfield multiplex IHC, define up to three optical-density stain
 channels and open the selectable multi-channel viewer:
 
@@ -287,9 +516,24 @@ wsi_convert(
   output = "sample.ome.tiff",
   format = "ome-tiff",
   pyramid = TRUE,
-  compression = "lzw"
+  compression = "lzw",
+  tile_size = 512,
+  depth = "onepixel",
+  region_shrink = "mean",
+  predictor = "horizontal"
+)
+
+wsi_export_ome_tiff(
+  input = "sample.svs",
+  output = "sample.ome.tiff",
+  compression = "lzw",
+  overwrite = TRUE
 )
 ```
+
+OME-TIFF export uses libvips when available and writes tiled pyramids with
+SubIFD pyramid layers and TIFF metadata properties for OME-oriented workflows.
+The exact codec support depends on the installed libvips/libtiff build.
 
 ## ROI example
 
@@ -327,6 +571,24 @@ viewer <- wsi_viewer_roi(
 ROI polygons are drawn in level-0 slide coordinates, which matches common
 QuPath GeoJSON exports.
 
+Annotation masks can be imported as ROI polygons too. This is intended for
+already-small annotation or segmentation masks, not for loading a full WSI into
+R memory:
+
+```r
+mask_rois <- read_mask_annotations(
+  "tumour_mask.png",
+  threshold = 0.5,
+  class_map = c("1" = "tumour"),
+  origin = c(x = 0, y = 0),
+  scale = c(x = 1, y = 1)
+)
+
+wsi_viewer_roi(slide, mask_rois, output = "tumour_mask_viewer.html", open = FALSE)
+# In a live session, use: session$add_rois(mask_rois)
+write_geojson(mask_rois, "tumour_mask_annotations.geojson", overwrite = TRUE)
+```
+
 The same viewer can create new polygon annotations interactively and export
 them as a GeoJSON `FeatureCollection`.
 
@@ -347,12 +609,14 @@ viewer_compare(
 ```
 
 OME-Zarr inputs are opened as lightweight metadata-backed slide handles. The
-first implementation reads dimensions, levels, and NGFF metadata without
-decoding full image chunks:
+first implementation reads dimensions, axes, chunks, dtype, transforms, levels,
+and NGFF metadata without decoding full image chunks:
 
 ```r
 zarr <- open_omezarr("sample.ome.zarr")
-omezarr_metadata("sample.ome.zarr")
+meta <- omezarr_metadata("sample.ome.zarr")
+meta$axis_table
+meta$levels
 ```
 
 ROI annotations can be imported from QuPath-compatible GeoJSON, labelled,
@@ -364,6 +628,22 @@ rois <- wsi_set_roi_class(rois, "tumour", roi_id = rois$roi_id[1])
 write_geojson(rois, "annotations_relabelled.geojson", overwrite = TRUE)
 
 viewer_add_rois(slide, rois, output = "slide_rois.html")
+```
+
+The GeoJSON reader/writer preserves QuPath polygon and multipolygon
+annotations, including object ids, object type, classification names and
+colors, measurements, lock state, raw properties, and top-level GeoJSON
+metadata where possible.
+
+For a live viewer round trip, keep the annotations as `wsi_roi` objects:
+
+```r
+rois <- read_geojson("qupath_annotations.geojson")
+viewer$add_rois(rois)
+
+# After visual edits in the viewer:
+edited <- viewer$get_rois()
+write_geojson(edited, "edited_for_qupath.geojson", overwrite = TRUE)
 ```
 
 Optional external segmentation tools remain outside the dependency tree. Export
@@ -378,12 +658,23 @@ viewer_add_segmentation(slide, segmentation, output = "segmentation.html")
 
 cells <- import_segmentation("stardist_centroids.csv")
 viewer_add_segmentation(slide, cells, output = "stardist_cells.html", cell_radius = 8)
+
+# Convert a model mask image into editable ROI annotations:
+mask_rois <- import_segmentation("model_mask.png", mask_as_rois = TRUE, threshold = 0.5)
+viewer$add_rois(mask_rois)
 ```
 
-For StarDist, `wsiTools` keeps Python optional. In the interactive viewer,
-select or brush an ROI, open the Segmentation menu, export the selected ROI,
-run StarDist on the ROI crop, then load the result GeoJSON or CSV/TSV centroids
-back into the viewer.
+For StarDist, `wsiTools` keeps Python optional but provides a first-run setup
+helper:
+
+```r
+wsi_install_stardist(method = "conda")
+```
+
+After that, `wsi_viewer_live(..., stardist = TRUE)` can wire the viewer's
+`Run segmentation` button automatically. In the interactive viewer, select or
+brush an ROI, open the Segmentation menu, run StarDist on the ROI crop, then
+load or receive the result GeoJSON or CSV/TSV centroids back into the viewer.
 From R, the same workflow can be scripted with a user-supplied StarDist command:
 
 ```r
@@ -401,8 +692,9 @@ viewer_add_segmentation(slide, result$segmentation, output = "stardist_overlay.h
 ```
 
 The live viewer can also start segmentation directly on the selected ROI. Start
-the viewer with `stardist = TRUE`; wsiTools starts the local R endpoint and
-wires the `Start StarDist` button automatically:
+the viewer with `stardist = TRUE`; when a StarDist command is available,
+wsiTools starts the local R endpoint and wires the `Run segmentation` button
+automatically:
 
 ```r
 slide <- wsi_open("sample.svs")
@@ -417,10 +709,65 @@ session <- wsi_viewer_live(
 ```
 
 In the viewer, select or brush an ROI, open `Segmentation`, and press
-`Start StarDist`. The selected ROI is sent to the local endpoint, StarDist runs
-on the ROI crop, and returned cell polygons are added as overlays. If
-`stardist-predict2d` is already on `PATH`, you can omit `stardist_command` and
-`stardist_args`.
+`Run segmentation`. The selected ROI is sent to the local endpoint, StarDist
+runs on only that ROI crop, and returned cell polygons or centroids are added
+as overlays. The selected ROI and imported cells are also written directly into
+the live R session, so the normal R-side result is:
+
+```r
+cells <- session$get_segmentation()
+selected_roi <- session$get_selected_roi()
+selected_rois <- session$get_selected_rois()
+roi_summary <- session$get_roi_summary()
+cell_summary <- session$get_cell_summary()
+```
+
+The last run metadata, including crop/output paths, is available in
+`wsi_viewer_state(session)$last_segmentation` and the companion object
+`wsi_viewer_live_state_last_segmentation`. If `stardist-predict2d` is already
+on `PATH`, you can omit `stardist_command` and `stardist_args`. If no StarDist
+command is available, the viewer still opens and the Segmentation menu remains
+usable for selected-ROI export and result import.
+
+Long-running work can also run as a non-blocking background job when the
+optional `callr` package is installed:
+
+```r
+# Preview candidate tiles in the open viewer without reading pixel data.
+# Inspect the locked grid overlay, then export exactly that preview.
+preview <- session$preview_tiles(
+  tile_size = 512,
+  stride = 512
+)
+
+tiles <- session$extract_tile_preview(
+  output_dir = "confirmed_tiles",
+  format = "png"
+)
+
+job <- session$run_segmentation_async(
+  command = "python",
+  args = c("run_stardist.py", "{input}", "{output}", "{model}")
+)
+
+job$status()
+cells <- job$result()
+
+tile_job <- session$run_tiles_async(
+  tile_size = 512,
+  stride = 512,
+  save_images = FALSE
+)
+tiles <- tile_job$result()
+
+convert_job <- session$run_conversion_async(
+  output = "sample.ome.tiff",
+  format = "ome-tiff",
+  compression = "lzw",
+  overwrite = TRUE
+)
+convert_job$status()
+```
 
 The same StarDist bridge is available from the command line. From a source
 checkout use `./exec/wsitools`; from an installed package you can resolve the
@@ -469,6 +816,83 @@ grid <- extract_tiles(slide, roi = rois, tile_size = 512, stride = 256, save_ima
 manifest <- extract_tiles(slide, roi = rois, tile_size = 512, stride = 512, output_dir = "roi_tiles")
 ```
 
+Live viewer selections can be used directly for reproducible ROI tile
+extraction:
+
+```r
+rois <- session$get_selected_rois()
+
+tiles <- extract_tiles(
+  slide,
+  roi = rois,
+  tile_size = 512,
+  stride = 512,
+  skip_background = TRUE,
+  split = c(train = 0.7, valid = 0.3),
+  seed = 1,
+  save_images = FALSE
+)
+```
+
+For ML pipelines, ROI-aware sampling can keep tile provenance, balance classes,
+skip background, write a CSV manifest, and create a reproducible
+train/validation split:
+
+```r
+manifest <- extract_tiles(
+  slide,
+  roi = rois,
+  output_dir = "ml_tiles",
+  tile_size = 512,
+  stride = 512,
+  sampling = "balanced",
+  tiles_per_class = 500,
+  skip_background = TRUE,
+  tissue_threshold = 0.2,
+  split = "train_validation",
+  train_fraction = 0.8,
+  seed = 2026,
+  manifest_file = "ml_tiles/manifest.csv"
+)
+```
+
+Artifact filtering is optional and tile-based. It reads candidate regions one at
+a time, computes lightweight quality-control metrics, and can either flag or
+drop tiles with blur, out-of-focus appearance, pen-like marks, fold-like dark
+saturated regions, bubble-like bright regions, or very bright/dark content:
+
+```r
+manifest <- extract_tiles(
+  slide,
+  roi = rois,
+  tile_size = 512,
+  stride = 512,
+  skip_background = TRUE,
+  whitespace_filter = TRUE,
+  artifact_filter = TRUE,
+  artifact_action = "flag",
+  save_images = FALSE
+)
+
+clean_tiles <- subset(manifest, !artifact_flag & !whitespace_flag)
+```
+
+Whitespace/background labelling is separate from artifact detection. It adds
+manifest columns such as `whitespace_fraction`, `whitespace_flag`,
+`background_fraction`, and `background_flag` using a simple bright,
+low-saturation detector:
+
+```r
+manifest <- extract_tiles(
+  slide,
+  tile_size = 512,
+  stride = 512,
+  whitespace_filter = TRUE,
+  whitespace_action = "flag",
+  save_images = FALSE
+)
+```
+
 Basic measurement and registration helpers cover manual pathology analysis
 workflows:
 
@@ -477,9 +901,95 @@ cells <- data.frame(x = c(1000, 1200, 3000), y = c(800, 900, 1800))
 measure_cell_density(cells, rois, pixel_size = wsi_mpp(slide))
 summarise_rois(rois, cells = cells, pixel_size = wsi_mpp(slide), file = "roi_summary.csv")
 
+patch_channels <- wsi_deconvolve_region(
+  slide,
+  x = 10000,
+  y = 20000,
+  width = 2048,
+  height = 2048
+)
+
+ihc_roi <- measure_ihc_intensity(
+  patch_channels,
+  rois = rois,
+  image_origin = c(x = 10000, y = 20000),
+  dab_threshold = 0.1,
+  pixel_size = wsi_mpp(slide)
+)
+ihc_class <- summarise_ihc_intensity(ihc_roi)
+
+cell_counts <- wsi_cell_counts(
+  slide,
+  segmentation = cells,
+  channels = patch_channels,
+  rois = rois,
+  image_origin = c(x = 10000, y = 20000),
+  positive_threshold = c(hrp_dab = 0.1),
+  pixel_size = wsi_mpp(slide),
+  output_dir = "cell_counts",
+  overwrite = TRUE
+)
+
+report <- measurement_report(
+  rois,
+  cells = cells,
+  stains = patch_channels,
+  image_origin = c(x = 10000, y = 20000),
+  pixel_size = wsi_mpp(slide),
+  output_dir = "measurement_report",
+  prefix = "case_001"
+)
+
 transform <- estimate_transform(landmarks1, landmarks2)
 transformed_rois <- transform_rois(rois, transform)
 ```
+
+The report writes separate CSV tables for ROI area/density, class summaries,
+nearest-neighbour distances, cell-to-boundary distances, and hematoxylin/HRP-DAB
+intensity summaries when stain channels are supplied. `measure_ihc_intensity()`
+adds practical IHC columns such as `ihc_dab_mean`,
+`ihc_dab_positive_area_px2`, `ihc_hematoxylin_density`, and
+`ihc_dab_h_ratio`. `wsi_cell_counts()` creates a per-cell table, a cell-by-
+channel counts matrix, ROI counts, class counts, and optional CSV exports from
+segmentation coordinates plus already-read stain/channel matrices.
+
+Save the analysis as a reopenable wsiTools project:
+
+```r
+project <- wsi_project(slide)
+project$viewer_state <- session$get_state()
+project$rois <- session$get_rois()
+project$measurements <- session$get_measurements()
+project$segmentation <- session$get_segmentation()
+project$stain_settings <- list(method = "H-DAB", channels = c("hematoxylin", "DAB"))
+project$tile_manifest <- manifest
+project$metadata <- list(case_id = "case_001")
+project$processing_provenance <- list(
+  steps = list(
+    list(name = "manual annotation", tool = "wsiTools viewer"),
+    list(name = "tile extraction", tile_size = 512, stride = 512)
+  )
+)
+
+wsi_save_project(project, "case_001.wsiproject")
+reopened <- wsi_read_project("case_001.wsiproject")
+reopened$rois
+reopened$tile_manifest
+
+case_report <- wsi_case_report(
+  reopened,
+  output_dir = "case_001_report",
+  overwrite = TRUE
+)
+case_report$html
+case_report$files
+```
+
+The project directory contains a `project.json` index plus sidecar GeoJSON and
+CSV files, so analyses can be versioned, inspected, and reopened without
+embedding image pixels. `wsi_case_report()` adds a lightweight HTML report and
+CSV tables for ROI areas, class percentages, cell densities, stain intensity
+summaries, tile counts, and processing provenance.
 
 ## First milestone status
 
@@ -509,7 +1019,7 @@ Implemented:
 
 Planned:
 
-- native OpenSlide C/Rcpp bindings with external-pointer finalizers
+- optional OpenSlide native bindings outside the CRAN-light core, if needed
 - OME-Zarr chunk decoding for true tiled pixel display
 - associated image reads
 - richer ROI geometry filtering and polygon masking

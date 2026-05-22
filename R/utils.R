@@ -11,6 +11,12 @@ wsi_warn <- function(message, class = "wsi_warning", call = NULL) {
 }
 
 wsi_command_exists <- function(command) {
+  if (!is.character(command) || length(command) != 1L || is.na(command) || !nzchar(command)) {
+    return(FALSE)
+  }
+  if (file.exists(command)) {
+    return(file.access(command, mode = 1L) == 0L)
+  }
   nzchar(Sys.which(command))
 }
 
@@ -218,10 +224,10 @@ wsi_magick_to_array <- function(image) {
   if (length(dims) != 3L) {
     wsi_abort("Could not convert magick image data to an RGB/RGBA array.")
   }
-  if (dims[[1L]] <= 4L && dims[[3L]] > 4L) {
+  if (dims[[1L]] %in% 3:4) {
     # magick commonly returns channel x width x height.
     arr <- aperm(arr, c(3L, 2L, 1L))
-  } else if (dims[[3L]] <= 4L && dims[[1L]] > 4L) {
+  } else if (dims[[3L]] %in% 3:4) {
     # Some magick/ImageMagick builds return width x height x channel.
     arr <- aperm(arr, c(2L, 1L, 3L))
   } else {

@@ -1,0 +1,42 @@
+test_that("wsi_viewer adds a left-side project section", {
+  slide <- wsiTools:::wsi_mock_slide(width = 1200, height = 800, levels = c(1, 4))
+  output <- tempfile(fileext = ".html")
+
+  result <- wsi_viewer(
+    slide,
+    width = 256,
+    output = output,
+    open = FALSE,
+    project_images = list(wsiTools:::wsi_mock_slide(width = 600, height = 400, levels = c(1, 2)))
+  )
+
+  expect_identical(result, output)
+  html <- paste(readLines(output, warn = FALSE), collapse = "\n")
+  expect_match(html, "Project", fixed = TRUE)
+  expect_match(html, "projectPanel", fixed = TRUE)
+  expect_match(html, "projectImageList", fixed = TRUE)
+  expect_match(html, "projectSectionList", fixed = TRUE)
+  expect_match(html, "bindProjectPanel", fixed = TRUE)
+  expect_match(html, "switchProjectItem", fixed = TRUE)
+  expect_match(html, "projectStatePayload", fixed = TRUE)
+  expect_match(html, '"project"', fixed = TRUE)
+})
+
+test_that("wsi_viewer_project lists CZI paths without loading them into R", {
+  czi1 <- tempfile("section_1_", fileext = ".czi")
+  czi2 <- tempfile("section_2_", fileext = ".czi")
+  writeBin(as.raw(1:8), czi1)
+  writeBin(as.raw(9:16), czi2)
+  output <- tempfile(fileext = ".html")
+
+  result <- wsi_viewer_project(c(czi1, czi2), output = output, open = FALSE)
+
+  expect_identical(result, output)
+  html <- paste(readLines(output, warn = FALSE), collapse = "\n")
+  expect_match(html, basename(czi1), fixed = TRUE)
+  expect_match(html, basename(czi2), fixed = TRUE)
+  expect_match(html, "CZI detected", fixed = TRUE)
+  expect_match(html, "Bio-Formats", fixed = TRUE)
+  expect_match(html, "Project image selected", fixed = TRUE)
+  expect_match(html, '"viewer_mode":"project"', fixed = TRUE)
+})

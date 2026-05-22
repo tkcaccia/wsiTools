@@ -15,6 +15,23 @@ extract_tiles(
   level = 0,
   tissue_mask = FALSE,
   tissue_threshold = 0.1,
+  whitespace_filter = FALSE,
+  whitespace_action = c("flag", "drop"),
+  whitespace_options = wsi_whitespace_options(),
+  artifact_filter = FALSE,
+  artifact_action = c("flag", "drop"),
+  artifact_options = wsi_artifact_options(),
+  sampling = c("auto", "all", "roi", "balanced"),
+  roi_only = TRUE,
+  skip_background = FALSE,
+  max_tiles = NULL,
+  tiles_per_class = NULL,
+  split = c("none", "train_validation"),
+  train_fraction = 0.8,
+  stratify_split = TRUE,
+  seed = NULL,
+  slide_id = NULL,
+  manifest_file = NULL,
   format = c("png", "jpeg", "tiff"),
   prefix = NULL,
   overwrite = FALSE,
@@ -32,6 +49,23 @@ wsi_extract_tiles(
   level = 0,
   tissue_mask = FALSE,
   tissue_threshold = 0.1,
+  whitespace_filter = FALSE,
+  whitespace_action = c("flag", "drop"),
+  whitespace_options = wsi_whitespace_options(),
+  artifact_filter = FALSE,
+  artifact_action = c("flag", "drop"),
+  artifact_options = wsi_artifact_options(),
+  sampling = c("auto", "all", "roi", "balanced"),
+  roi_only = TRUE,
+  skip_background = FALSE,
+  max_tiles = NULL,
+  tiles_per_class = NULL,
+  split = c("none", "train_validation"),
+  train_fraction = 0.8,
+  stratify_split = TRUE,
+  seed = NULL,
+  slide_id = NULL,
+  manifest_file = NULL,
   format = c("png", "jpeg", "tiff"),
   prefix = NULL,
   overwrite = FALSE,
@@ -42,7 +76,8 @@ wsi_extract_tiles(
 \arguments{
 \item{image}{A \code{wsi_slide} object.}
 
-\item{roi}{Optional ROI object. The first milestone uses the ROI bounding box.}
+\item{roi}{Optional ROI object. When supplied, tiles are generated per ROI
+and, by default, tile centers must fall inside polygon ROIs.}
 
 \item{tile_size}{Tile width and height in pixels at \code{level}.}
 
@@ -55,10 +90,57 @@ wsi_extract_tiles(
 
 \item{level}{Pyramid level.}
 
-\item{tissue_mask}{Whether to estimate and filter by tissue mask when saving
-images.}
+\item{tissue_mask}{Whether to estimate and filter by tissue mask, or a
+precomputed \code{wsi_tissue_mask} object.}
 
 \item{tissue_threshold}{Minimum tissue fraction when \code{tissue_mask = TRUE}.}
+
+\item{whitespace_filter}{Whether to compute simple whitespace/background
+metrics for candidate tiles. This is optional because it reads each
+candidate tile region.}
+
+\item{whitespace_action}{\code{"flag"} keeps all tiles and appends whitespace
+columns; \code{"drop"} removes rows where \code{whitespace_flag} is \code{TRUE}.}
+
+\item{whitespace_options}{Thresholds from \code{\link[=wsi_whitespace_options]{wsi_whitespace_options()}}.}
+
+\item{artifact_filter}{Whether to compute artifact metrics for candidate
+tiles. This is optional because it reads each candidate tile region.}
+
+\item{artifact_action}{\code{"flag"} keeps all tiles and appends artifact columns;
+\code{"drop"} removes rows where \code{artifact_flag} is \code{TRUE}.}
+
+\item{artifact_options}{Thresholds from \code{\link[=wsi_artifact_options]{wsi_artifact_options()}}.}
+
+\item{sampling}{Sampling mode: \code{"all"} for the whole slide or ROI grid,
+\code{"roi"} for ROI-only tiles, \code{"balanced"} for equal tiles per ROI class, or
+\code{"auto"} to use ROI mode when \code{roi} is supplied.}
+
+\item{roi_only}{Whether ROI tiles should require the tile center to fall
+inside the ROI polygon. When \code{FALSE}, ROI bounding boxes are tiled.}
+
+\item{skip_background}{Alias for enabling tissue-mask filtering.}
+
+\item{max_tiles}{Optional maximum number of tiles after filtering.}
+
+\item{tiles_per_class}{Optional number of tiles per class for balanced
+sampling. When omitted, the smallest class count is used.}
+
+\item{split}{Split mode. Use \code{"train_validation"} to add train/validation
+labels, or pass a named numeric vector such as
+\code{c(train = 0.7, valid = 0.3)} for reproducible custom splits.}
+
+\item{train_fraction}{Fraction assigned to the training split when
+\code{split = "train_validation"}.}
+
+\item{stratify_split}{Whether train/validation split should be stratified by
+class when class labels are available.}
+
+\item{seed}{Optional random seed for reproducible sampling and splitting.}
+
+\item{slide_id}{Optional slide identifier stored in the manifest.}
+
+\item{manifest_file}{Optional CSV file for saving the returned manifest/grid.}
 
 \item{format}{Tile image format.}
 
@@ -77,5 +159,12 @@ A tile grid or tile manifest data frame.
 Convenience wrapper around \code{\link[=wsi_tile_grid]{wsi_tile_grid()}} and \code{\link[=wsi_tile]{wsi_tile()}}. When
 \code{save_images = FALSE}, only tile coordinates are returned and no pixels are
 read. When \code{save_images = TRUE}, tiles are exported through the existing
-region-based tile pipeline.
+region-based tile pipeline. ML-oriented options can restrict extraction to
+ROIs, balance tiles by annotation class, skip background using a tissue mask,
+assign train/validation splits, and record provenance.
+Optional whitespace/background labelling reads candidate tiles one at a time
+and appends \verb{whitespace_*} manifest columns.
+Optional artifact filtering reads candidate tiles one at a time and appends
+artifact quality columns for blur, pen marks, folds, bubbles,
+out-of-focus appearance, and very bright or dark tiles.
 }

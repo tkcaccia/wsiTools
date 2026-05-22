@@ -5,9 +5,21 @@
 \alias{wsi_write_geojson}
 \title{Write ROI annotations as GeoJSON}
 \usage{
-write_geojson(rois, file, overwrite = FALSE)
+write_geojson(
+  rois,
+  file,
+  overwrite = FALSE,
+  class_presets = NULL,
+  respect_export_rules = FALSE
+)
 
-wsi_write_geojson(rois, file, overwrite = FALSE)
+wsi_write_geojson(
+  rois,
+  file,
+  overwrite = FALSE,
+  class_presets = NULL,
+  respect_export_rules = FALSE
+)
 }
 \arguments{
 \item{rois}{A \code{wsi_roi} object.}
@@ -15,10 +27,19 @@ wsi_write_geojson(rois, file, overwrite = FALSE)
 \item{file}{Output GeoJSON path.}
 
 \item{overwrite}{Whether to overwrite an existing file.}
+
+\item{class_presets}{Optional class preset table from
+\code{\link[=wsi_roi_class_presets]{wsi_roi_class_presets()}}. When supplied, preset colours are written into
+QuPath-compatible classifications.}
+
+\item{respect_export_rules}{Whether to drop ROIs whose class preset has
+\code{export = FALSE} or \code{export_rule = "exclude"}.}
 }
 \value{
 The output path, invisibly.
 }
 \description{
 Writes \code{wsi_roi} objects as QuPath-compatible GeoJSON FeatureCollections.
+Polygon and multipolygon coordinates are written without flattening, and
+QuPath metadata read by \code{\link[=read_geojson]{read_geojson()}} is preserved where possible.
 }

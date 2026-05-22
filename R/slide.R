@@ -16,7 +16,7 @@
 #' wsi_info(slide)
 #' wsi_close(slide)
 #' }
-wsi_open <- function(path, backend = c("auto", "openslide", "vips", "omezarr")) {
+wsi_open <- function(path, backend = c("auto", "openslide", "vips", "omezarr", "imagemagick")) {
   backend <- match.arg(backend)
   path <- wsi_validate_input_path(path)
 
@@ -26,11 +26,12 @@ wsi_open <- function(path, backend = c("auto", "openslide", "vips", "omezarr")) 
     }
     candidates <- c(
       if (wsi_has_openslide()) "openslide",
-      if (wsi_has_vips()) "vips"
+      if (wsi_has_vips()) "vips",
+      if (wsi_has_imagemagick()) "imagemagick"
     )
     if (!length(candidates)) {
       wsi_abort(
-        "No WSI backend is available. Install OpenSlide command-line tools or libvips, then retry.",
+        "No WSI/image backend is available. Install OpenSlide, libvips, or ImageMagick, then retry.",
         class = "wsi_backend_unavailable"
       )
     }
@@ -38,7 +39,12 @@ wsi_open <- function(path, backend = c("auto", "openslide", "vips", "omezarr")) 
     errors <- character()
     for (candidate in candidates) {
       slide <- tryCatch(
-        switch(candidate, openslide = wsi_openslide_open(path), vips = wsi_vips_open(path)),
+        switch(
+          candidate,
+          openslide = wsi_openslide_open(path),
+          vips = wsi_vips_open(path),
+          imagemagick = wsi_imagemagick_open(path)
+        ),
         error = function(err) {
           errors[[candidate]] <<- conditionMessage(err)
           NULL
@@ -61,7 +67,8 @@ wsi_open <- function(path, backend = c("auto", "openslide", "vips", "omezarr")) 
     backend,
     openslide = wsi_openslide_open(path),
     vips = wsi_vips_open(path),
-    omezarr = open_omezarr(path)
+    omezarr = open_omezarr(path),
+    imagemagick = wsi_imagemagick_open(path)
   )
 }
 

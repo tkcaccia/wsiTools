@@ -33,6 +33,13 @@ wsi_thumbnail <- function(slide, width = 1024, height = NULL,
     return(magick::image_blank(width, thumb_height, color = "grey98"))
   }
 
+  if (identical(slide$backend, "imagemagick") && !wsi_has_vips()) {
+    tmp <- tempfile(fileext = ".png")
+    on.exit(unlink(tmp), add = TRUE)
+    wsi_imagemagick_thumbnail_file(slide, tmp, width = width, height = height)
+    return(wsi_read_image_file(tmp, format))
+  }
+
   if (!wsi_has_vips()) {
     wsi_abort(
       "Thumbnail generation requires libvips for this milestone. Install `vips` and `vipsheader`, then retry.",
@@ -67,7 +74,7 @@ wsi_thumbnail <- function(slide, width = 1024, height = NULL,
 #' @export
 wsi_crop <- function(slide, x, y, width, height, level = 0, output = NULL,
                      format = c("tiff", "png", "jpeg", "ome-tiff"),
-                     backend = c("auto", "vips", "openslide"),
+                     backend = c("auto", "vips", "openslide", "imagemagick"),
                      overwrite = FALSE) {
   format <- match.arg(format)
   backend <- match.arg(backend)

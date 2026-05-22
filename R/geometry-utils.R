@@ -29,22 +29,25 @@ wsi_geojson_ring_matrix <- function(ring) {
   mat
 }
 
-wsi_roi_rings <- function(roi, index = 1L) {
+wsi_roi_polygons <- function(roi, index = 1L) {
   if (!inherits(roi, "wsi_roi")) {
     wsi_abort("`roi` must be a `wsi_roi` object.")
   }
   geometry_type <- roi$geometry_type[[index]]
   coords <- roi$coordinates[[index]]
   if (identical(geometry_type, "Polygon")) {
-    return(lapply(coords, wsi_geojson_ring_matrix))
+    return(list(lapply(coords, wsi_geojson_ring_matrix)))
   }
   if (identical(geometry_type, "MultiPolygon")) {
-    rings <- unlist(lapply(coords, function(polygon) {
+    return(lapply(coords, function(polygon) {
       lapply(polygon, wsi_geojson_ring_matrix)
-    }), recursive = FALSE)
-    return(rings)
+    }))
   }
   wsi_abort(sprintf("Geometry type `%s` is not polygonal.", geometry_type %||% NA_character_))
+}
+
+wsi_roi_rings <- function(roi, index = 1L) {
+  unlist(wsi_roi_polygons(roi, index), recursive = FALSE)
 }
 
 wsi_ring_area <- function(ring) {
@@ -58,13 +61,19 @@ wsi_ring_area <- function(ring) {
 }
 
 wsi_roi_area_px <- function(roi, index = 1L) {
-  rings <- wsi_roi_rings(roi, index)
-  if (!length(rings)) {
+  polygons <- wsi_roi_polygons(roi, index)
+  if (!length(polygons)) {
     return(0)
   }
-  outer <- wsi_ring_area(rings[[1L]])
-  holes <- if (length(rings) > 1L) sum(vapply(rings[-1L], wsi_ring_area, numeric(1))) else 0
-  max(0, outer - holes)
+  areas <- vapply(polygons, function(rings) {
+    if (!length(rings)) {
+      return(0)
+    }
+    outer <- wsi_ring_area(rings[[1L]])
+    holes <- if (length(rings) > 1L) sum(vapply(rings[-1L], wsi_ring_area, numeric(1))) else 0
+    max(0, outer - holes)
+  }, numeric(1))
+  sum(areas)
 }
 
 wsi_point_in_ring <- function(point, ring) {
@@ -88,14 +97,19 @@ wsi_point_in_ring <- function(point, ring) {
 }
 
 wsi_point_in_roi <- function(point, roi, index = 1L) {
-  rings <- wsi_roi_rings(roi, index)
-  if (!length(rings) || !wsi_point_in_ring(point, rings[[1L]])) {
+  polygons <- wsi_roi_polygons(roi, index)
+  if (!length(polygons)) {
     return(FALSE)
   }
-  if (length(rings) == 1L) {
-    return(TRUE)
-  }
-  !any(vapply(rings[-1L], function(ring) wsi_point_in_ring(point, ring), logical(1)))
+  any(vapply(polygons, function(rings) {
+    if (!length(rings) || !wsi_point_in_ring(point, rings[[1L]])) {
+      return(FALSE)
+    }
+    if (length(rings) == 1L) {
+      return(TRUE)
+    }
+    !any(vapply(rings[-1L], function(ring) wsi_point_in_ring(point, ring), logical(1)))
+  }, logical(1)))
 }
 
 wsi_point_segment_distance <- function(point, a, b) {

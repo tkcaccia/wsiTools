@@ -98,10 +98,61 @@ wsi_default_stardist_command <- function(command = NULL) {
   if (nzchar(env_command)) {
     return(env_command)
   }
+  wrapper <- tryCatch(wsi_stardist_wrapper_path(), error = function(err) "")
+  if (nzchar(wrapper) && wsi_command_exists(wrapper)) {
+    return(wrapper)
+  }
   if (wsi_command_exists("stardist-predict2d")) {
     return("stardist-predict2d")
   }
   ""
+}
+
+wsi_stardist_setup_command <- function(command = "stardist-predict2d") {
+  command <- command %||% "stardist-predict2d"
+  if (!nzchar(command)) {
+    command <- "stardist-predict2d"
+  }
+  sprintf(
+    "Sys.setenv(WSITOOLS_STARDIST_COMMAND = %s)",
+    encodeString(command, quote = "\"")
+  )
+}
+
+wsi_stardist_not_configured_message <- function(command = NULL,
+                                                context = c("generic", "viewer", "image")) {
+  context <- match.arg(context)
+  command <- command %||% ""
+  requested <- if (nzchar(command)) {
+    sprintf("\nRequested command: `%s`.", command)
+  } else {
+    ""
+  }
+  example <- switch(
+    context,
+    viewer = paste0(
+      "\nCopyable R command suggestion:\n",
+      "  wsi_install_stardist(method = \"conda\")\n",
+      "  viewer <- wsi_viewer_live(slide, stardist = TRUE, wait = FALSE)"
+    ),
+    image = paste0(
+      "\nCopyable R command suggestion:\n",
+      "  wsi_install_stardist(method = \"conda\")\n",
+      "  stardist_segment_image(input, output)"
+    ),
+    generic = paste0(
+      "\nCopyable R command suggestion:\n",
+      "  wsi_install_stardist(method = \"conda\")\n",
+      "  # or configure an existing command:\n",
+      "  ", wsi_stardist_setup_command()
+    )
+  )
+  paste0(
+    "No StarDist command was found. Install/configure it, ",
+    "or load a segmentation GeoJSON/CSV instead.",
+    requested,
+    example
+  )
 }
 
 wsi_stardist_default_args <- function(prob_thresh = NULL, nms_thresh = NULL) {
@@ -362,10 +413,7 @@ stardist_segment_image <- function(input, output,
 
   if (!nzchar(command) || !wsi_command_exists(command)) {
     wsi_abort(
-      paste0(
-        "StarDist is not available. Install StarDist in a Python environment ",
-        "and pass `command`/`args`, or set `WSITOOLS_STARDIST_COMMAND`."
-      ),
+      wsi_stardist_not_configured_message(command, context = "image"),
       class = "wsi_backend_unavailable"
     )
   }
@@ -594,10 +642,16 @@ wsi_stardist_segment_roi <- stardist_segment_roi
 #'
 #' @param file Segmentation output file.
 #' @param type Input type. `"auto"` infers from file extension.
+#' @param mask_as_rois For image masks, convert connected non-background mask
+#'   components to `wsi_roi` polygon annotations with [wsi_mask_to_rois()]
+#'   instead of returning a mask-overlay object.
+#' @param ... Additional arguments passed to [wsi_mask_to_rois()] when
+#'   `mask_as_rois = TRUE`.
 #'
 #' @return A segmentation object.
 #' @export
-import_segmentation <- function(file, type = c("auto", "geojson", "csv", "mask")) {
+import_segmentation <- function(file, type = c("auto", "geojson", "csv", "mask"),
+                                mask_as_rois = FALSE, ...) {
   file <- wsi_validate_input_path(file)
   type <- wsi_segmentation_type(file, type)
 
@@ -633,6 +687,13 @@ import_segmentation <- function(file, type = c("auto", "geojson", "csv", "mask")
     return(data)
   }
 
+  if (isTRUE(mask_as_rois)) {
+    roi <- wsi_read_mask_annotations(file, ...)
+    class(roi) <- c("wsi_segmentation_rois", "wsi_segmentation", class(roi))
+    attr(roi, "source_file") <- file
+    return(roi)
+  }
+
   structure(
     list(type = "mask", path = file),
     class = c("wsi_segmentation_mask", "wsi_segmentation")
@@ -649,6 +710,53 @@ wsi_segmentation_geojson_text <- function(segmentation, cell_radius = 8) {
   on.exit(unlink(tmp), add = TRUE)
   write_geojson(rois, tmp, overwrite = TRUE)
   paste(readLines(tmp, warn = FALSE), collapse = "\n")
+}
+
+wsi_segmentation_geojson_object <- function(segmentation, cell_radius = 8) {
+  text <- wsi_segmentation_geojson_text(segmentation, cell_radius = cell_radius)
+  jsonlite::fromJSON(text, simplifyVector = FALSE)
+}
+
+wsi_named_numeric_list <- function(x) {
+  if (is.null(x)) {
+    return(NULL)
+  }
+  values <- as.numeric(x)
+  names(values) <- names(x)
+  as.list(values)
+}
+
+wsi_stardist_response_body <- function(result, cell_radius = 8) {
+  metadata <- list(
+    message = sprintf(
+      "StarDist completed for ROI %s.",
+      result$roi_id %||% "selected ROI"
+    ),
+    crop = result$crop %||% result$input %||% NULL,
+    output = result$output %||% NULL,
+    slide_output = result$slide_output %||% NULL,
+    roi_id = result$roi_id %||% NULL,
+    bbox = wsi_named_numeric_list(result$bbox),
+    status = result$status %||% "complete",
+    segmentation_type = class(result$segmentation)[[1L]] %||% NULL
+  )
+
+  overlay <- tryCatch(
+    wsi_segmentation_geojson_object(result$segmentation, cell_radius = cell_radius),
+    error = function(err) {
+      metadata$message <<- paste0(
+        metadata$message,
+        " The output was imported, but live viewer overlay currently requires ",
+        "polygon GeoJSON or centroid CSV/TSV output. ",
+        conditionMessage(err)
+      )
+      NULL
+    }
+  )
+  if (!is.null(overlay)) {
+    metadata$geojson <- overlay
+  }
+  metadata
 }
 
 wsi_http_json_response <- function(status = 200L, body = list(), content_type = "application/json") {
@@ -684,10 +792,10 @@ wsi_http_request_body <- function(req) {
 #' Start a local StarDist ROI segmentation endpoint
 #'
 #' Starts an optional local HTTP endpoint for the interactive viewer's
-#' `Start StarDist` button. The viewer posts the selected ROI GeoJSON to the
+#' `Run segmentation` button. The viewer posts the selected ROI GeoJSON to the
 #' endpoint. The endpoint crops that ROI, runs [stardist_segment_roi()], converts
 #' polygon or centroid segmentation output to GeoJSON cell overlays, and returns
-#' the result to the browser.
+#' the result and run metadata to the browser.
 #'
 #' This function requires the optional `httpuv` package and an external StarDist
 #' command or script. It is not required for installing or loading wsiTools.
@@ -703,6 +811,9 @@ wsi_http_request_body <- function(req) {
 #' @param backend Region export backend passed to [stardist_segment_roi()].
 #' @param cell_radius Radius used when returning centroid outputs as cell
 #'   GeoJSON overlays.
+#' @param state Optional live viewer state. When supplied, the endpoint records
+#'   the selected ROI and imported segmentation directly in the R session before
+#'   returning the overlay to the browser.
 #' @param wait If `TRUE`, run the httpuv event loop until interrupted.
 #'
 #' @return A `wsi_stardist_server` object with the service URL.
@@ -741,6 +852,7 @@ wsi_stardist_server <- function(image,
                                 crop_format = c("png", "tiff", "jpeg"),
                                 backend = c("auto", "vips", "openslide"),
                                 cell_radius = 8,
+                                state = NULL,
                                 wait = FALSE) {
   if (!requireNamespace("httpuv", quietly = TRUE)) {
     wsi_abort(
@@ -762,6 +874,9 @@ wsi_stardist_server <- function(image,
   }
   if (!startsWith(path, "/")) {
     path <- paste0("/", path)
+  }
+  if (!is.null(state) && !inherits(state, "wsi_viewer_state")) {
+    wsi_abort("`state` must be `NULL` or a live `wsi_viewer_state` object.")
   }
 
   app <- list(
@@ -787,6 +902,14 @@ wsi_stardist_server <- function(image,
         on.exit(unlink(roi_file), add = TRUE)
         writeLines(body, roi_file, useBytes = TRUE)
         roi <- read_geojson(roi_file)
+        if (!is.null(state)) {
+          wsi_viewer_state_set_selected_roi(
+            state,
+            roi,
+            event = "segmentation_requested",
+            detail = list(engine = "stardist", output_dir = output_dir)
+          )
+        }
         result <- stardist_segment_roi(
           image = image,
           roi = roi,
@@ -804,10 +927,15 @@ wsi_stardist_server <- function(image,
           run = TRUE,
           backend = backend
         )
-        geojson <- wsi_segmentation_geojson_text(result$segmentation, cell_radius = cell_radius)
+        if (!is.null(state)) {
+          wsi_viewer_state_add_segmentation_result(
+            state,
+            result,
+            cell_radius = cell_radius
+          )
+        }
         wsi_http_json_response(
-          body = geojson,
-          content_type = "application/geo+json"
+          body = wsi_stardist_response_body(result, cell_radius = cell_radius)
         )
       }, error = function(err) {
         wsi_http_json_response(
@@ -839,7 +967,7 @@ wsi_stardist_server <- function(image,
   }
   url <- sprintf("http://%s:%d%s", host, used_port, path)
   out <- structure(
-    list(server = server, url = url, host = host, port = used_port, path = path),
+    list(server = server, url = url, host = host, port = used_port, path = path, state = state),
     class = "wsi_stardist_server"
   )
   message("wsiTools StarDist endpoint listening at ", url)

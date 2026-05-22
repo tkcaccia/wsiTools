@@ -1,4 +1,4 @@
-wsi_region_to_file <- function(slide, region, output, backend = c("auto", "vips", "openslide")) {
+wsi_region_to_file <- function(slide, region, output, backend = c("auto", "vips", "openslide", "imagemagick")) {
   backend <- wsi_choose_region_backend(slide, backend)
 
   if (identical(slide$backend, "mock")) {
@@ -10,6 +10,9 @@ wsi_region_to_file <- function(slide, region, output, backend = c("auto", "vips"
   }
   if (backend == "openslide") {
     return(wsi_openslide_read_region_file(slide, region, output))
+  }
+  if (backend == "imagemagick") {
+    return(wsi_imagemagick_read_region_file(slide, region, output))
   }
 
   wsi_abort(sprintf("Backend `%s` does not yet support region reading.", backend))
@@ -136,6 +139,10 @@ wsi_read_region_grid <- function(slide, grid, level = 0, output_dir = NULL,
     roi_id = grid$roi_id %||% NA_character_,
     stringsAsFactors = FALSE
   )
+  extra_columns <- setdiff(names(grid), c(names(manifest), "output_file"))
+  for (column in extra_columns) {
+    manifest[[column]] <- grid[[column]]
+  }
   class(manifest) <- c("wsi_tile_manifest", class(manifest))
   manifest
 }

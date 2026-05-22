@@ -4,7 +4,10 @@
 \alias{wsi_open}
 \title{Open a whole-slide image}
 \usage{
-wsi_open(path, backend = c("auto", "openslide", "vips", "omezarr"))
+wsi_open(
+  path,
+  backend = c("auto", "openslide", "vips", "omezarr", "imagemagick")
+)
 }
 \arguments{
 \item{path}{Path to a WSI or large image file.}

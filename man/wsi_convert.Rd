@@ -10,9 +10,16 @@ wsi_convert(
   format = c("ome-tiff", "tiff", "pyramidal-tiff", "png", "jpeg"),
   backend = c("auto", "vips"),
   tile_size = 512,
-  compression = c("lzw", "jpeg", "deflate", "none"),
+  compression = c("lzw", "jpeg", "deflate", "zstd", "webp", "packbits", "none"),
   pyramid = TRUE,
   bigtiff = TRUE,
+  subifd = NULL,
+  properties = NULL,
+  depth = c("onepixel", "onetile", "one"),
+  region_shrink = c("mean", "median", "mode", "max", "min", "nearest"),
+  predictor = c("horizontal", "none", "float"),
+  quality = NULL,
+  compression_level = NULL,
   overwrite = FALSE
 )
 }
@@ -32,6 +39,22 @@ wsi_convert(
 \item{pyramid}{Write a pyramidal TIFF when supported.}
 
 \item{bigtiff}{Use BigTIFF for TIFF outputs.}
+
+\item{subifd}{Store pyramid layers as SubIFDs for TIFF outputs. This is
+enabled automatically for OME-TIFF outputs.}
+
+\item{properties}{Ask libvips to write image metadata into the TIFF
+ImageDescription tag.}
+
+\item{depth}{Pyramid depth passed to libvips.}
+
+\item{region_shrink}{Shrink strategy for lower pyramid levels.}
+
+\item{predictor}{TIFF predictor for lossless compression.}
+
+\item{quality}{JPEG/WebP quality factor when applicable.}
+
+\item{compression_level}{Deflate or Zstd compression level when applicable.}
 
 \item{overwrite}{Whether to overwrite \code{output}.}
 }

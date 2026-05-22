@@ -5,14 +5,31 @@
 \alias{wsi_import_segmentation}
 \title{Import external segmentation outputs}
 \usage{
-import_segmentation(file, type = c("auto", "geojson", "csv", "mask"))
+import_segmentation(
+  file,
+  type = c("auto", "geojson", "csv", "mask"),
+  mask_as_rois = FALSE,
+  ...
+)
 
-wsi_import_segmentation(file, type = c("auto", "geojson", "csv", "mask"))
+wsi_import_segmentation(
+  file,
+  type = c("auto", "geojson", "csv", "mask"),
+  mask_as_rois = FALSE,
+  ...
+)
 }
 \arguments{
 \item{file}{Segmentation output file.}
 
 \item{type}{Input type. \code{"auto"} infers from file extension.}
+
+\item{mask_as_rois}{For image masks, convert connected non-background mask
+components to \code{wsi_roi} polygon annotations with \code{\link[=wsi_mask_to_rois]{wsi_mask_to_rois()}}
+instead of returning a mask-overlay object.}
+
+\item{...}{Additional arguments passed to \code{\link[=wsi_mask_to_rois]{wsi_mask_to_rois()}} when
+\code{mask_as_rois = TRUE}.}
 }
 \value{
 A segmentation object.

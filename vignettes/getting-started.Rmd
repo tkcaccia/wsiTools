@@ -46,6 +46,16 @@ slide
 
 `wsi_open()` returns a lightweight `wsi_slide` object. It validates the file,
 chooses a backend, and reads metadata. It does not load the full slide.
+OpenSlide, libvips, StarDist, Cellpose, `httpuv`, and `callr` are optional
+runtime capabilities; the package should still install and load without them.
+
+Use `wsi_setup()` after installation to see a CRAN-safe setup report with
+copyable commands for optional tools. It does not install system libraries
+unless you explicitly opt in.
+
+```{r, eval=FALSE}
+wsi_setup()
+```
 
 ## Reading metadata
 
@@ -102,13 +112,27 @@ navigation, a side window listing all GeoJSON geometries, crosshair display,
 coordinate copying, polygon drawing, and GeoJSON export. Use `GeoJSON` to open
 the geometry list; each row shows the geometry type, bounds, point count,
 source, and id. Use `Draw ROI`, click polygon vertices, double-click or press
-`Finish`, then use `Save GeoJSON`. In `Brush` mode, painting with no selected
-annotation creates a new ROI; painting with an annotation selected extends it;
-holding `Alt` while brushing removes from the selected annotation. Use `Edit`
+`Finish`, then use `Save GeoJSON`. In `Brush` mode, each normal stroke creates
+a new automatically named annotation. If the painted area touches an existing
+annotation with the same label, the regions merge; holding `Alt` on
+Windows/Linux or `Command` on macOS while brushing removes from the selected
+annotation. The compact ROI report does not open
+automatically; select an ROI and click `ROI summary` when you want to inspect
+area, cell count, and density. Use `Edit`
 to move vertices, double-click an edge to insert a vertex, and Backspace/Delete
-to remove the active vertex. The `Name`, `Class`, and `Custom class` controls
-update the selected annotation label and category before GeoJSON export.
-`Ctrl+Z` undoes annotation edits in the viewer, with the last 10 committed
+to remove the active vertex. Drawn, painted, and edited annotation regions are
+kept class-exclusive: annotations with the same class label merge into one
+multi-part annotation, while areas already occupied by a different class label
+are clipped from the new or refined annotation. The Class Presets and History sections in the
+annotation panel can be maximized with their `Maximize` buttons and restored
+with `Esc` or `Restore`. The toolbar `Class`, `Custom class`, and `Set next
+class` controls set the class for the next drawn or painted annotation;
+selecting an ROI does not overwrite these controls, and changing them does not
+relabel the selected annotation. Use the annotation manager controls to change
+an existing annotation before GeoJSON export.
+Annotation colors are category-driven, so imported, drawn, and painted ROIs
+with the same class label share the same class color. `Ctrl+Z` undoes
+annotation edits in the viewer, with the last 10 committed
 annotation states retained.
 
 For full-resolution zooming, use tiled mode. This asks libvips to create a
@@ -141,11 +165,14 @@ viewer_compare(
 ```
 
 OME-Zarr directories can be opened as metadata-backed slide handles. This
-extracts dimensions and pyramid levels without decoding all chunks.
+extracts dimensions, axes, chunks, dtype, coordinate transforms, and pyramid
+levels without decoding all chunks.
 
 ```{r, eval=FALSE, purl=FALSE}
 zarr <- open_omezarr("sample.ome.zarr")
-omezarr_metadata("sample.ome.zarr")
+meta <- omezarr_metadata("sample.ome.zarr")
+meta$axis_table
+meta$levels
 ```
 
 ## Deconvolving IHC stains
@@ -181,6 +208,45 @@ ihc_viewer <- wsi_viewer_ihc(
 
 The `Stains` menu provides an `IHC` toggle, separate hematoxylin and HRP/DAB
 channel visibility controls, color pickers, and gain sliders.
+
+For H&E images, use the H&E stain helpers on a patch, tile, or thumbnail. The
+functions work in optical-density space and avoid full-slide reads:
+
+```{r, eval=FALSE, purl=FALSE}
+patch <- wsi_read_region(
+  slide,
+  x = 10000,
+  y = 20000,
+  width = 1024,
+  height = 1024
+)
+
+he_channels <- wsi_deconvolve_he(patch)
+stain_matrix <- wsi_estimate_stain_matrix(patch, method = "macenko")
+
+normalized <- wsi_normalize_stains(
+  patch,
+  method = "macenko",
+  target_matrix = wsi_he_stain_matrix()
+)
+```
+
+There is also a region wrapper for WSI preprocessing pipelines:
+
+```{r, eval=FALSE, purl=FALSE}
+normalized_region <- wsi_stain_normalize_region(
+  slide,
+  x = 10000,
+  y = 20000,
+  width = 1024,
+  height = 1024,
+  method = "macenko"
+)
+```
+
+`method = "vahadane"` provides a small dependency-free NMF approximation for
+Vahadane-style separation. For production studies, validate stain vectors and
+normalisation settings on reference material from the same laboratory workflow.
 
 For brightfield multiplex IHC, create selectable stain channels and pass them
 to the multi-channel viewer:
@@ -280,6 +346,50 @@ grid <- extract_tiles(slide, tile_size = 512, stride = 256, save_images = FALSE)
 manifest <- extract_tiles(slide, tile_size = 512, stride = 512, output_dir = "tiles")
 ```
 
+For machine-learning patch extraction, `extract_tiles()` can work directly from
+ROI annotations, balance classes, skip background, save a CSV manifest, and add
+a reproducible train/validation split:
+
+```{r, eval=FALSE, purl=FALSE}
+manifest <- extract_tiles(
+  slide,
+  roi = roi,
+  output_dir = "ml_tiles",
+  tile_size = 512,
+  stride = 512,
+  sampling = "balanced",
+  tiles_per_class = 500,
+  skip_background = TRUE,
+  split = "train_validation",
+  train_fraction = 0.8,
+  seed = 2026,
+  manifest_file = "ml_tiles/manifest.csv"
+)
+```
+
+Artifact filtering can be added as an optional quality-control pass. The
+package reads candidate tiles one region at a time and appends flags for blur,
+out-of-focus appearance, pen-like marks, fold-like dark saturated regions,
+bubble-like bright regions, and very bright or dark tiles. Whitespace/background
+labelling can be enabled at the same time and adds `whitespace_*` and
+`background_*` manifest columns:
+
+```{r, eval=FALSE, purl=FALSE}
+manifest <- extract_tiles(
+  slide,
+  roi = roi,
+  tile_size = 512,
+  stride = 512,
+  whitespace_filter = TRUE,
+  whitespace_action = "flag",
+  artifact_filter = TRUE,
+  artifact_action = "flag",
+  save_images = FALSE
+)
+
+clean_manifest <- subset(manifest, !artifact_flag & !whitespace_flag)
+```
+
 ## Cropping ROIs
 
 ```{r, eval=FALSE, purl=FALSE}
@@ -309,12 +419,43 @@ ROI overlay coordinates are interpreted as level-0 slide pixels, matching
 QuPath-style GeoJSON exports.
 
 ROIs can be relabelled and written back to GeoJSON for use in QuPath or other
-pathology pipelines.
+pathology pipelines. Polygon and multipolygon annotations retain QuPath object
+ids, object type, classification labels and colors, measurements, lock state,
+raw properties, and top-level GeoJSON metadata where possible.
 
 ```{r, eval=FALSE, purl=FALSE}
 roi <- read_geojson("annotations.geojson")
 roi <- wsi_set_roi_class(roi, "tumour", roi_id = roi$roi_id[1])
 write_geojson(roi, "annotations_relabelled.geojson", overwrite = TRUE)
+```
+
+The same objects can round-trip through a live viewer session:
+
+```{r, eval=FALSE, purl=FALSE}
+viewer <- wsi_viewer_live(slide, wait = FALSE)
+viewer$capabilities()
+
+rois <- read_geojson("qupath_annotations.geojson")
+viewer$add_rois(rois)
+
+edited <- viewer$get_rois()
+write_geojson(edited, "edited_for_qupath.geojson", overwrite = TRUE)
+```
+
+Annotation or segmentation masks can also be converted to ROI polygons. This
+works best for already-small mask images or matrices; it should not be used to
+load an entire WSI into memory.
+
+```{r, eval=FALSE, purl=FALSE}
+mask_rois <- read_mask_annotations(
+  "tumour_mask.png",
+  threshold = 0.5,
+  class_map = c("1" = "tumour"),
+  origin = c(x = 0, y = 0),
+  scale = c(x = 1, y = 1)
+)
+viewer$add_rois(mask_rois)
+write_geojson(mask_rois, "tumour_mask_annotations.geojson", overwrite = TRUE)
 ```
 
 Optional external segmentation tools remain outside wsiTools dependencies. A
@@ -327,13 +468,101 @@ segmentation <- import_segmentation("model_output.geojson")
 viewer_add_segmentation(slide, segmentation, output = "segmentation_overlay.html")
 ```
 
+For live sessions, long-running operations can run in a background R process
+when the optional `callr` package is installed. The viewer remains responsive,
+and results are collected later through a small job object.
+
+```{r, eval=FALSE, purl=FALSE}
+# Preview tiles first as a locked viewer layer, then export the confirmed grid.
+preview <- viewer$preview_tiles(tile_size = 512, stride = 512)
+tiles <- viewer$extract_tile_preview("confirmed_tiles", format = "png")
+
+job <- viewer$run_segmentation_async()
+job$status()
+cells <- job$result()
+
+tile_job <- viewer$run_tiles_async(tile_size = 512, stride = 512, save_images = FALSE)
+tiles <- tile_job$result()
+```
+
 Basic measurements and class summaries use ROI coordinates and optional pixel
-size metadata.
+size metadata. The report helper bundles ROI areas, class summaries,
+cell-density tables, nearest-neighbour distances, boundary distances, and
+optional hematoxylin/HRP-DAB intensity summaries into CSV-ready tables.
 
 ```{r, eval=FALSE, purl=FALSE}
 cells <- data.frame(x = c(1000, 1200, 3000), y = c(800, 900, 1800))
 measure_cell_density(cells, roi, pixel_size = wsi_mpp(slide))
 summarise_rois(roi, cells = cells, pixel_size = wsi_mpp(slide), file = "roi_summary.csv")
+
+patch_channels <- wsi_deconvolve_region(
+  slide,
+  x = 10000,
+  y = 20000,
+  width = 2048,
+  height = 2048
+)
+
+ihc_roi <- measure_ihc_intensity(
+  patch_channels,
+  rois = roi,
+  image_origin = c(x = 10000, y = 20000),
+  dab_threshold = 0.1,
+  pixel_size = wsi_mpp(slide)
+)
+ihc_class <- summarise_ihc_intensity(ihc_roi)
+
+cell_counts <- wsi_cell_counts(
+  slide,
+  segmentation = cells,
+  channels = patch_channels,
+  rois = roi,
+  image_origin = c(x = 10000, y = 20000),
+  positive_threshold = c(hrp_dab = 0.1),
+  pixel_size = wsi_mpp(slide),
+  output_dir = "cell_counts",
+  overwrite = TRUE
+)
+
+report <- measurement_report(
+  roi,
+  cells = cells,
+  stains = patch_channels,
+  image_origin = c(x = 10000, y = 20000),
+  pixel_size = wsi_mpp(slide),
+  output_dir = "measurement_report",
+  prefix = "case_001"
+)
+```
+
+Use `wsi_project()` to save a reopenable analysis session. The project stores a
+small JSON index plus GeoJSON/CSV sidecar files for annotations, viewer state,
+measurements, segmentation overlays, stain settings, and tile manifests.
+
+```{r, eval=FALSE, purl=FALSE}
+project <- wsi_project(
+  "case_001.wsiproject",
+  slide = slide,
+  viewer_state = session,
+  rois = roi,
+  measurements = report,
+  segmentation = segmentation,
+  stains = patch_channels,
+  tile_manifest = manifest,
+  metadata = list(case_id = "case_001")
+)
+
+reopened <- wsi_read_project("case_001.wsiproject")
+reopened$rois
+reopened$tile_manifest
+
+case_report <- wsi_case_report(
+  reopened,
+  output_dir = "case_001_report",
+  overwrite = TRUE
+)
+case_report$html
+case_report$files
 ```
 
 For serial sections, estimate a simple affine transform from manual landmarks
@@ -352,23 +581,47 @@ wsi_convert(
   output = "sample.ome.tiff",
   format = "ome-tiff",
   pyramid = TRUE,
-  compression = "lzw"
+  compression = "lzw",
+  tile_size = 512,
+  depth = "onepixel",
+  region_shrink = "mean",
+  predictor = "horizontal"
+)
+
+wsi_export_ome_tiff(
+  input = "sample.svs",
+  output = "sample.ome.tiff",
+  compression = "lzw",
+  overwrite = TRUE
 )
 ```
 
 Conversion is handled by libvips when available. wsiTools constructs command
 arguments safely and never overwrites existing files unless
-`overwrite = TRUE`.
+`overwrite = TRUE`. OME-TIFF export enables tiled pyramids, SubIFDs, BigTIFF,
+and TIFF metadata properties by default; exact codec support depends on the
+installed libvips/libtiff build.
 
 ## Practical notes on OpenSlide and libvips
+
+The CRAN-facing core of wsiTools is intentionally lightweight. Installation
+does not require OpenSlide, libvips, Python, StarDist, Cellpose, or a running web
+service. Those are optional runtime capabilities that are checked when a user
+asks for a backend-dependent operation.
 
 OpenSlide is the preferred first backend for many pathology WSI formats such as
 Aperio SVS, Hamamatsu NDPI, Leica SCN, MIRAX MRXS, and related pyramidal files,
 subject to local backend support.
 
 libvips is used for efficient thumbnails, cropping, conversion, and pyramidal
-TIFF export. OME-TIFF behavior depends on the installed libvips version and its
-TIFF writer capabilities.
+TIFF/OME-TIFF export. OME-TIFF behavior depends on the installed libvips
+version and its TIFF writer capabilities.
+
+StarDist and Cellpose integrations should remain external-command or local
+service workflows: export an ROI crop, run the model in the user's chosen
+environment, and import masks, centroids, polygons, or GeoJSON back into
+wsiTools. OME-Zarr metadata reads are lightweight; full chunked pixel access is
+best treated as an optional backend rather than a mandatory dependency.
 
 Always check:
 

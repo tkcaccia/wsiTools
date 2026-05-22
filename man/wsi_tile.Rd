@@ -15,6 +15,12 @@ wsi_tile(
   tissue_mask = FALSE,
   tissue_threshold = 0.1,
   format = c("png", "jpeg", "tiff"),
+  whitespace_filter = FALSE,
+  whitespace_action = c("flag", "drop"),
+  whitespace_options = wsi_whitespace_options(),
+  artifact_filter = FALSE,
+  artifact_action = c("flag", "drop"),
+  artifact_options = wsi_artifact_options(),
   prefix = NULL,
   overwrite = FALSE,
   workers = 1
@@ -34,6 +40,22 @@ wsi_tile(
 \item{tissue_threshold}{Minimum tissue fraction when \code{tissue_mask = TRUE}.}
 
 \item{format}{Tile image format.}
+
+\item{whitespace_filter}{Whether to compute optional whitespace/background
+metrics before export.}
+
+\item{whitespace_action}{\code{"flag"} keeps all tiles and appends whitespace
+columns; \code{"drop"} removes rows where \code{whitespace_flag} is \code{TRUE}.}
+
+\item{whitespace_options}{Thresholds from \code{\link[=wsi_whitespace_options]{wsi_whitespace_options()}}.}
+
+\item{artifact_filter}{Whether to compute optional tile artifact metrics
+before export.}
+
+\item{artifact_action}{\code{"flag"} keeps all tiles and appends artifact columns;
+\code{"drop"} removes rows where \code{artifact_flag} is \code{TRUE}.}
+
+\item{artifact_options}{Thresholds from \code{\link[=wsi_artifact_options]{wsi_artifact_options()}}.}
 
 \item{prefix}{Optional filename prefix.}
 

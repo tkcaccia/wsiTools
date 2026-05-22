@@ -91,7 +91,11 @@ wsi_vips_read_region_file <- function(slide, region, output) {
 }
 
 wsi_vips_tiff_target <- function(output, tile_size = 512, compression = "lzw",
-                                 pyramid = TRUE, bigtiff = TRUE, ome = FALSE) {
+                                 pyramid = TRUE, bigtiff = TRUE, ome = FALSE,
+                                 subifd = ome, properties = ome,
+                                 depth = "onepixel", region_shrink = "mean",
+                                 predictor = NULL, quality = NULL,
+                                 compression_level = NULL) {
   options <- c(
     "tile",
     sprintf("tile-width=%d", as.integer(tile_size)),
@@ -105,11 +109,31 @@ wsi_vips_tiff_target <- function(output, tile_size = 512, compression = "lzw",
   }
   if (isTRUE(ome)) {
     options <- c(options, "subifd")
+  } else if (isTRUE(subifd)) {
+    options <- c(options, "subifd")
+  }
+  if (isTRUE(properties)) {
+    options <- c(options, "properties")
   }
   if (!identical(compression, "none")) {
     options <- c(options, sprintf("compression=%s", compression))
   } else {
     options <- c(options, "compression=none")
+  }
+  if (isTRUE(pyramid) && !is.null(depth)) {
+    options <- c(options, sprintf("depth=%s", depth))
+  }
+  if (isTRUE(pyramid) && !is.null(region_shrink)) {
+    options <- c(options, sprintf("region-shrink=%s", region_shrink))
+  }
+  if (!is.null(predictor)) {
+    options <- c(options, sprintf("predictor=%s", predictor))
+  }
+  if (!is.null(quality)) {
+    options <- c(options, sprintf("Q=%d", as.integer(quality)))
+  }
+  if (!is.null(compression_level)) {
+    options <- c(options, sprintf("level=%d", as.integer(compression_level)))
   }
   sprintf("%s[%s]", output, paste(options, collapse = ","))
 }

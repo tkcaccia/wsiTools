@@ -5,9 +5,21 @@
 \alias{wsi_summarise_rois}
 \title{Summarise annotated tissue classes}
 \usage{
-summarise_rois(rois, cells = NULL, pixel_size = NULL, file = NULL)
+summarise_rois(
+  rois,
+  cells = NULL,
+  pixel_size = NULL,
+  file = NULL,
+  overwrite = FALSE
+)
 
-wsi_summarise_rois(rois, cells = NULL, pixel_size = NULL, file = NULL)
+wsi_summarise_rois(
+  rois,
+  cells = NULL,
+  pixel_size = NULL,
+  file = NULL,
+  overwrite = FALSE
+)
 }
 \arguments{
 \item{rois}{A \code{wsi_roi} object.}
@@ -17,6 +29,8 @@ wsi_summarise_rois(rois, cells = NULL, pixel_size = NULL, file = NULL)
 \item{pixel_size}{Optional microns per pixel.}
 
 \item{file}{Optional CSV output path.}
+
+\item{overwrite}{Whether to overwrite \code{file}.}
 }
 \value{
 A data frame with area and optional cell-density summaries per class.

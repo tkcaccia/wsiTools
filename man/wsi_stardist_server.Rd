@@ -22,6 +22,7 @@ wsi_stardist_server(
   crop_format = c("png", "tiff", "jpeg"),
   backend = c("auto", "vips", "openslide"),
   cell_radius = 8,
+  state = NULL,
   wait = FALSE
 )
 }
@@ -45,6 +46,10 @@ wsi_stardist_server(
 \item{cell_radius}{Radius used when returning centroid outputs as cell
 GeoJSON overlays.}
 
+\item{state}{Optional live viewer state. When supplied, the endpoint records
+the selected ROI and imported segmentation directly in the R session before
+returning the overlay to the browser.}
+
 \item{wait}{If \code{TRUE}, run the httpuv event loop until interrupted.}
 }
 \value{
@@ -52,10 +57,10 @@ A \code{wsi_stardist_server} object with the service URL.
 }
 \description{
 Starts an optional local HTTP endpoint for the interactive viewer's
-\verb{Start StarDist} button. The viewer posts the selected ROI GeoJSON to the
+\verb{Run segmentation} button. The viewer posts the selected ROI GeoJSON to the
 endpoint. The endpoint crops that ROI, runs \code{\link[=stardist_segment_roi]{stardist_segment_roi()}}, converts
 polygon or centroid segmentation output to GeoJSON cell overlays, and returns
-the result to the browser.
+the result and run metadata to the browser.
 }
 \details{
 This function requires the optional \code{httpuv} package and an external StarDist

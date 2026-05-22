@@ -5,12 +5,14 @@
 \alias{wsi_open_omezarr}
 \title{Open an OME-Zarr image as a lightweight slide handle}
 \usage{
-open_omezarr(path)
+open_omezarr(path, multiscale = 1L)
 
-wsi_open_omezarr(path)
+wsi_open_omezarr(path, multiscale = 1L)
 }
 \arguments{
 \item{path}{Path to an OME-Zarr directory.}
+
+\item{multiscale}{Multiscale image index to open.}
 }
 \value{
 A \code{wsi_slide} object with backend \code{"omezarr"}.

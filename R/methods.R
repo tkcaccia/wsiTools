@@ -50,6 +50,14 @@ summary.wsi_tile_manifest <- function(object, ...) {
   if ("tissue_fraction" %in% names(object) && any(!is.na(object$tissue_fraction))) {
     cat("  Mean tissue fraction: ", round(mean(object$tissue_fraction, na.rm = TRUE), 3), "\n", sep = "")
   }
+  if ("class" %in% names(object) && any(!is.na(object$class) & nzchar(object$class))) {
+    cat("  Classes:\n")
+    print(table(object$class, useNA = "ifany"))
+  }
+  if ("split" %in% names(object) && any(!is.na(object$split) & nzchar(object$split))) {
+    cat("  Splits:\n")
+    print(table(object$split, useNA = "ifany"))
+  }
   invisible(object)
 }
 

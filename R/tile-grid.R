@@ -336,6 +336,16 @@ wsi_tile_grid <- function(slide, tile_size = 512, overlap = 0, level = 0,
 #' @param roi Optional ROI object; use [wsi_tile_roi()] for ROI-specific tiling.
 #' @param tissue_mask Whether to estimate and filter by tissue mask.
 #' @param tissue_threshold Minimum tissue fraction when `tissue_mask = TRUE`.
+#' @param whitespace_filter Whether to compute optional whitespace/background
+#'   metrics before export.
+#' @param whitespace_action `"flag"` keeps all tiles and appends whitespace
+#'   columns; `"drop"` removes rows where `whitespace_flag` is `TRUE`.
+#' @param whitespace_options Thresholds from [wsi_whitespace_options()].
+#' @param artifact_filter Whether to compute optional tile artifact metrics
+#'   before export.
+#' @param artifact_action `"flag"` keeps all tiles and appends artifact columns;
+#'   `"drop"` removes rows where `artifact_flag` is `TRUE`.
+#' @param artifact_options Thresholds from [wsi_artifact_options()].
 #' @param format Tile image format.
 #' @param prefix Optional filename prefix.
 #' @param overwrite Whether to overwrite existing tiles.
@@ -346,9 +356,17 @@ wsi_tile_grid <- function(slide, tile_size = 512, overlap = 0, level = 0,
 wsi_tile <- function(slide, output_dir, tile_size = 512, overlap = 0, level = 0,
                      region = NULL, roi = NULL, tissue_mask = FALSE,
                      tissue_threshold = 0.1, format = c("png", "jpeg", "tiff"),
+                     whitespace_filter = FALSE,
+                     whitespace_action = c("flag", "drop"),
+                     whitespace_options = wsi_whitespace_options(),
+                     artifact_filter = FALSE,
+                     artifact_action = c("flag", "drop"),
+                     artifact_options = wsi_artifact_options(),
                      prefix = NULL, overwrite = FALSE, workers = 1) {
   wsi_check_slide(slide)
   format <- match.arg(format)
+  whitespace_action <- match.arg(whitespace_action)
+  artifact_action <- match.arg(artifact_action)
   if (!identical(as.integer(workers), 1L)) {
     wsi_warn("Parallel tile extraction is planned but not implemented yet; using `workers = 1`.")
   }
@@ -377,6 +395,22 @@ wsi_tile <- function(slide, output_dir, tile_size = 512, overlap = 0, level = 0,
     grid <- grid[is.na(grid$tissue_fraction) | grid$tissue_fraction >= tissue_threshold, , drop = FALSE]
   }
 
+  grid <- wsi_apply_whitespace_filter(
+    slide,
+    grid,
+    whitespace_filter = whitespace_filter,
+    whitespace_action = whitespace_action,
+    whitespace_options = whitespace_options
+  )
+
+  grid <- wsi_apply_artifact_filter(
+    slide,
+    grid,
+    artifact_filter = artifact_filter,
+    artifact_action = artifact_action,
+    artifact_options = artifact_options
+  )
+
   if (!is.null(prefix) && nrow(grid)) {
     grid$output_file <- sprintf("%s_%s.%s", prefix, tools::file_path_sans_ext(grid$tile_id), wsi_format_extension(format))
   }
@@ -396,6 +430,16 @@ wsi_tile <- function(slide, output_dir, tile_size = 512, overlap = 0, level = 0,
 #' @inheritParams wsi_tile_grid_from_coords
 #' @param output_dir Output directory.
 #' @param format Tile image format.
+#' @param whitespace_filter Whether to compute optional whitespace/background
+#'   metrics before export.
+#' @param whitespace_action `"flag"` keeps all tiles and appends whitespace
+#'   columns; `"drop"` removes rows where `whitespace_flag` is `TRUE`.
+#' @param whitespace_options Thresholds from [wsi_whitespace_options()].
+#' @param artifact_filter Whether to compute optional tile artifact metrics
+#'   before export.
+#' @param artifact_action `"flag"` keeps all tiles and appends artifact columns;
+#'   `"drop"` removes rows where `artifact_flag` is `TRUE`.
+#' @param artifact_options Thresholds from [wsi_artifact_options()].
 #' @param prefix Optional filename prefix.
 #' @param overwrite Whether to overwrite existing tiles.
 #'
@@ -412,9 +456,17 @@ wsi_tile_from_coords <- function(slide, coords, output_dir, tile_size = 512,
                                  level = 0, anchor = c("top_left", "center"),
                                  bounds = c("error", "trim", "drop"),
                                  format = c("png", "jpeg", "tiff"),
+                                 whitespace_filter = FALSE,
+                                 whitespace_action = c("flag", "drop"),
+                                 whitespace_options = wsi_whitespace_options(),
+                                 artifact_filter = FALSE,
+                                 artifact_action = c("flag", "drop"),
+                                 artifact_options = wsi_artifact_options(),
                                  prefix = NULL, overwrite = FALSE) {
   wsi_check_slide(slide)
   format <- match.arg(format)
+  whitespace_action <- match.arg(whitespace_action)
+  artifact_action <- match.arg(artifact_action)
   anchor <- match.arg(anchor)
   bounds <- match.arg(bounds)
 
@@ -425,6 +477,22 @@ wsi_tile_from_coords <- function(slide, coords, output_dir, tile_size = 512,
     level = level,
     anchor = anchor,
     bounds = bounds
+  )
+
+  grid <- wsi_apply_whitespace_filter(
+    slide,
+    grid,
+    whitespace_filter = whitespace_filter,
+    whitespace_action = whitespace_action,
+    whitespace_options = whitespace_options
+  )
+
+  grid <- wsi_apply_artifact_filter(
+    slide,
+    grid,
+    artifact_filter = artifact_filter,
+    artifact_action = artifact_action,
+    artifact_options = artifact_options
   )
 
   if (!is.null(prefix) && nrow(grid)) {

@@ -20,6 +20,7 @@ wsi_viewer(
   rebuild = FALSE,
   roi = NULL,
   roi_fill_alpha = 0.15,
+  roi_class_presets = wsi_roi_class_presets(),
   stain = c("none", "ihc"),
   channels = NULL,
   hematoxylin = c(0.65, 0.704, 0.286),
@@ -29,7 +30,11 @@ wsi_viewer(
   hematoxylin_strength = 1,
   hrp_strength = 1,
   segmentation_run_url = NULL,
-  viewer_state_url = NULL
+  viewer_state_url = NULL,
+  autosave_enabled = FALSE,
+  autosave_interval = 5,
+  autosave_path = NULL,
+  project_images = NULL
 )
 }
 \arguments{
@@ -66,6 +71,10 @@ pixel coordinates, matching QuPath-style GeoJSON exports.}
 
 \item{roi_fill_alpha}{Fill transparency for ROI polygons.}
 
+\item{roi_class_presets}{Editable ROI class presets from
+\code{\link[=wsi_roi_class_presets]{wsi_roi_class_presets()}}. These define dropdown classes, default class
+colours, and optional export rules.}
+
 \item{stain}{Optional stain display mode. Use \code{"ihc"} for interactive
 stain-channel color deconvolution in the browser.}
 
@@ -83,13 +92,27 @@ hematoxylin and HRP/DAB channels.}
 hematoxylin and HRP/DAB channels.}
 
 \item{segmentation_run_url}{Optional HTTP endpoint used by the viewer's
-\verb{Start StarDist} button. The browser posts the selected ROI GeoJSON to this
-URL and expects StarDist cell GeoJSON in response. Use
+\verb{Run segmentation} button. The browser posts the selected ROI GeoJSON to
+this URL and expects either GeoJSON or JSON with a \code{geojson} field in
+response. Use
 \code{\link[=wsi_stardist_server]{wsi_stardist_server()}} to create a local endpoint.}
 
 \item{viewer_state_url}{Optional HTTP endpoint used to sync annotations,
 measurements, segmentation overlays, and display state back to R. Use
 \code{\link[=wsi_viewer_live]{wsi_viewer_live()}} or \code{\link[=wsi_viewer_session]{wsi_viewer_session()}} to create this endpoint.}
+
+\item{autosave_enabled}{Whether the viewer should periodically sync state to
+the live R bridge for project autosave. This is normally set by
+\code{\link[=wsi_viewer_live]{wsi_viewer_live()}}.}
+
+\item{autosave_interval}{Seconds between autosave syncs.}
+
+\item{autosave_path}{Optional project directory shown in autosave status
+messages.}
+
+\item{project_images}{Optional paths, slide objects, or project records to
+list in the left Project section. CZI paths are listed without loading the
+full file into R; real CZI previews require optional Bio-Formats tools.}
 }
 \value{
 The HTML viewer path, invisibly.
@@ -105,17 +128,28 @@ The viewer includes lightweight pathology-viewer controls inspired by tools
 such as QuPath and napari. Controls are grouped into menus for navigation,
 annotations, GeoJSON overlays, view aids, and optional stains. These cover
 pan/select modes, fit and 1:1 zoom, ROI visibility and label toggles, ROI
-opacity, ROI previous/next navigation, an annotation side window listing
-GeoJSON geometries, browser-side GeoJSON import, crosshair display,
-coordinate copying, polygon drawing, brush-style annotation painting
-including selected-ROI extension and \code{Alt} brush removal,
-selected-ROI vertex editing, name/class reassignment including custom
-annotation categories, 10-step \code{Ctrl+Z} annotation undo, deletion,
-StarDist-oriented selected-ROI export and
-segmentation GeoJSON import, distance measurement in pixels and micrometres when MPP metadata is
-available, and browser-based GeoJSON export. Optional \code{stain = "ihc"} adds an RGB
-optical-density deconvolution display with selectable stain channels,
-colours, and gains. Use \code{channels} to provide multi-IHC channel definitions.
+opacity, ROI previous/next navigation, a left-side annotation manager with
+GeoJSON geometry listing, visibility toggles, lock/unlock, colour editing,
+name/class editing, duplicate/delete, zoom-to-ROI, selected-ROI export,
+browser-side GeoJSON import, crosshair display, coordinate copying, polygon
+drawing, brush-style annotation painting with a brush-size slider,
+selected-ROI extension, platform-aware brush removal (\code{Alt} on Windows/Linux
+and \code{Command} on macOS), smoothing, simplification, hole
+filling, checked-ROI merge, multi-part split, selected-ROI vertex editing,
+name/class reassignment including custom annotation categories, 10-step
+\code{Ctrl+Z} undo and \code{Ctrl+Shift+Z}/\code{Ctrl+Y} redo, selected-ROI StarDist export,
+optional selected-ROI segmentation runs, segmentation GeoJSON/CSV import,
+distance measurement in pixels and micrometres when MPP metadata is
+available, browser-based GeoJSON export, and a \code{Ctrl+K} command palette for
+common actions such as importing GeoJSON, exporting selected ROIs, running
+StarDist, showing a coordinate-only tile grid, and requesting a project save
+from a live R session. A \verb{?} shortcut and Help menu show the keyboard map for
+pan, draw, brush, edit, measure, undo, redo, save, import, and export.
+Optional \code{stain = "ihc"} adds an RGB optical-density deconvolution display
+with selectable stain channels, colours, and gains. Use \code{channels} to provide
+multi-IHC channel definitions. \code{project_images} adds a left-side Project
+section for related images or multi-scene microscopy files, including CZI
+entries that can be activated through optional Bio-Formats tooling.
 }
 \examples{
 \dontrun{

@@ -19,6 +19,8 @@ A \code{wsi_roi} data frame.
 }
 \description{
 Reads GeoJSON annotations and returns lightweight ROI metadata with list
-columns for geometry coordinates. Polygon and multipolygon coordinates are
-supported in the first milestone.
+columns for geometry coordinates. Polygon and multipolygon annotations are
+supported, and QuPath metadata such as object ids, object type,
+classification labels/colors, measurements, and raw properties are preserved
+for round-trip export.
 }

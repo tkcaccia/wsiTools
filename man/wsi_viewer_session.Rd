@@ -17,6 +17,10 @@ wsi_viewer_session(
   max_tries = 20L,
   wait = interactive(),
   open = interactive(),
+  autosave = !is.null(autosave_path),
+  autosave_path = NULL,
+  autosave_interval = 5,
+  autosave_overwrite = TRUE,
   stardist = FALSE,
   stardist_output_dir = "wsi_stardist_viewer",
   stardist_host = host,
@@ -47,6 +51,10 @@ wsi_viewer_live(
   max_tries = 20L,
   wait = interactive(),
   open = interactive(),
+  autosave = !is.null(autosave_path),
+  autosave_path = NULL,
+  autosave_interval = 5,
+  autosave_overwrite = TRUE,
   stardist = FALSE,
   stardist_output_dir = "wsi_stardist_viewer",
   stardist_host = host,
@@ -75,8 +83,12 @@ wsi_viewer_stardist(slide, ..., stardist = TRUE)
 
 \item{name}{Name assigned in \code{envir} for the live state object. Companion
 objects named \verb{<name>_rois}, \verb{<name>_measurements},
-\verb{<name>_segmentation}, \verb{<name>_selected_roi}, and \verb{<name>_last_event} are
-refreshed after every browser sync.}
+\verb{<name>_roi_summary}, \verb{<name>_cell_summary}, \verb{<name>_class_summary},
+\verb{<name>_ihc_summary}, \verb{<name>_ihc_class_summary},
+\verb{<name>_segmentation}, \verb{<name>_layers}, \verb{<name>_selected_roi},
+\verb{<name>_selected_rois}, \verb{<name>_history}, \verb{<name>_tile_preview},
+\verb{<name>_last_segmentation}, and \verb{<name>_last_event} are refreshed after
+every browser sync or R-side measurement update.}
 
 \item{envir}{Environment where live state objects are assigned.}
 
@@ -90,9 +102,21 @@ to the console; synced objects remain in \code{envir}.}
 
 \item{open}{Whether to open the viewer with \code{\link[utils:browseURL]{utils::browseURL()}}.}
 
-\item{stardist}{If \code{TRUE}, start a local StarDist ROI endpoint for the
-viewer's \verb{Start StarDist} button. This requires \code{httpuv} and an external
-StarDist command or script.}
+\item{autosave}{Whether to periodically save the live viewer state to a
+\code{.wsiproject} folder. May also be a single path, equivalent to setting
+\code{autosave = TRUE} and \code{autosave_path} to that value.}
+
+\item{autosave_path}{Project directory used for autosave. If \code{autosave = TRUE} and this is \code{NULL}, a directory named
+\verb{<name>_autosave.wsiproject} is used in the working directory.}
+
+\item{autosave_interval}{Seconds between browser-to-R autosave syncs.}
+
+\item{autosave_overwrite}{Whether autosave may update an existing
+\code{.wsiproject} index and sidecar files.}
+
+\item{stardist}{If \code{TRUE}, try to start a local StarDist ROI endpoint for the
+viewer's \verb{Run segmentation} button. If no StarDist command is available,
+the viewer still opens and selected ROIs can be exported/imported manually.}
 
 \item{stardist_output_dir}{Directory for ROI crops and StarDist outputs.}
 
@@ -103,15 +127,42 @@ address used by the StarDist ROI endpoint.}
 \code{\link[=stardist_segment_roi]{stardist_segment_roi()}}.}
 }
 \value{
-A \code{wsi_viewer_session} object, invisibly.
+A \code{wsi_viewer_session} object, invisibly. The object keeps the
+bridge fields (\code{url}, \code{html}, \code{state}) and provides live-session helper
+methods:
+\code{on()}, \code{off()}, \code{list_callbacks()}, \code{get_state()}, \code{get_rois()}, \code{get_selected_roi()}, \code{get_selected_rois()},
+\code{get_measurements()}, \code{get_roi_summary()}, \code{get_cell_summary()},
+\code{get_class_summary()}, \code{get_ihc_summary()}, \code{get_ihc_class_summary()},
+\code{get_segmentation()}, \code{get_layers()}, \code{get_history()}, \code{get_tile_preview()},
+\code{list_layers()}, \code{get_events()}, \code{add_rois()}, \code{add_segmentation()},
+\code{add_layer()}, \code{set_layer_visible()}, \code{remove_layer()},
+\code{measure_ihc_intensity()},
+\code{preview_tiles()}, \code{clear_tile_preview()}, \code{extract_tile_preview()},
+\code{save_project()},
+\code{service()}, and \code{stop()}.
 }
 \description{
 Opens an interactive viewer with a local HTTP bridge. Browser-side
 annotations, imported GeoJSON, edited ROI labels/classes, distance
 measurements, and segmentation overlays are posted back to the current R
-session. The state object is an environment, so it is updated in place as new
-events arrive. Set \code{stardist = TRUE} to also start a local selected-ROI
-StarDist endpoint and wire the viewer's \verb{Start StarDist} button to it.
+session. ROI area, cell-density, cell, stain-measurement, and class-summary
+tables are refreshed as ordinary R data frames whenever ROI or segmentation
+state changes. The returned object is a live session with convenience methods
+such as \code{capabilities()}, \code{get_rois()}, \code{get_selected_roi()}, \code{get_selected_rois()},
+\code{get_measurements()}, \code{get_roi_summary()}, \code{get_cell_summary()}, \code{get_class_summary()},
+\code{get_ihc_summary()}, \code{get_ihc_class_summary()}, \code{get_segmentation()},
+\code{get_layers()}, \code{get_history()}, \code{get_tile_preview()},
+\code{add_rois()}, \code{add_segmentation()}, \code{measure_ihc_intensity()},
+\code{add_layer()}, \code{set_layer_visible()}, \code{preview_tiles()},
+\code{extract_tile_preview()}, \code{list_jobs()},
+\code{run_segmentation_async()}, \code{run_tiles_async()},
+\code{run_conversion_async()}, \code{run_pyramid_async()}, and \code{save_project()}.
+Async methods require the suggested \code{callr} package and return \code{wsi_job}
+objects with \code{status()} and \code{result()} methods. The state object
+is an environment, so it is updated in place as new events arrive. Set
+\code{stardist = TRUE} to also start a local selected-ROI StarDist endpoint, when
+a runnable command is available, and wire the viewer's \verb{Run segmentation}
+button to it.
 }
 \details{
 This live bridge is optional and requires the suggested \code{httpuv} package.
@@ -120,14 +171,48 @@ The ordinary \code{\link[=wsi_viewer]{wsi_viewer()}} remains a static HTML viewe
 \examples{
 \dontrun{
 slide <- wsi_open("sample.svs")
-session <- wsi_viewer_live(slide, mode = "tiles")
+session <- wsi_viewer_live(slide, mode = "tiles", wait = FALSE)
 
 # With StarDist available on PATH:
-session <- wsi_viewer_live(slide, mode = "tiles", stardist = TRUE)
+session <- wsi_viewer_live(slide, mode = "tiles", stardist = TRUE, wait = FALSE)
 
 # After drawing in the browser and stopping the live loop:
-wsi_viewer_live_state_rois
-wsi_viewer_live_state_measurements
-wsi_viewer_state(session)$rois
+session$get_rois()
+session$get_selected_rois()
+session$get_measurements()
+session$get_roi_summary()
+session$get_cell_summary()
+session$get_class_summary()
+session$get_ihc_summary()
+session$get_layers()
+session$get_history()
+session$save_project("case_001.wsiproject")
+
+# Autosave the viewer state every 5 seconds:
+session <- wsi_viewer_live(
+  slide,
+  mode = "tiles",
+  autosave_path = "case_001_autosave.wsiproject",
+  autosave_interval = 5,
+  wait = FALSE
+)
+
+# Push R-controlled overlays into the open viewer:
+session$add_layer("tumour ROIs", session$get_rois())
+session$add_layer("DAB intensity", matrix(runif(100), nrow = 10), opacity = 0.4)
+session$set_layer_visible("DAB intensity", TRUE)
+
+# Preview candidate tiles in the viewer before writing image files:
+preview <- session$preview_tiles(tile_size = 512, stride = 512)
+manifest <- session$extract_tile_preview("confirmed_tiles")
+
+# Register callbacks before interacting with the browser:
+session$on("roi_created", function(roi) print(roi))
+session$on("roi_selected", function(roi) {
+  crop <- export_roi_crop(slide, roi)
+})
+session$on("segmentation_finished", function(cells) {
+  print(summarise_rois(session$get_rois(), cells))
+})
 }
 }

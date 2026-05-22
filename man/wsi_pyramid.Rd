@@ -8,9 +8,14 @@ wsi_pyramid(
   input,
   output,
   tile_size = 512,
-  compression = c("lzw", "jpeg", "deflate", "none"),
+  compression = c("lzw", "jpeg", "deflate", "zstd", "webp", "packbits", "none"),
   bigtiff = TRUE,
   ome = TRUE,
+  depth = c("onepixel", "onetile", "one"),
+  region_shrink = c("mean", "median", "mode", "max", "min", "nearest"),
+  predictor = c("horizontal", "none", "float"),
+  quality = NULL,
+  compression_level = NULL,
   overwrite = FALSE
 )
 }
@@ -26,6 +31,16 @@ wsi_pyramid(
 \item{bigtiff}{Use BigTIFF.}
 
 \item{ome}{Use OME-oriented TIFF options where libvips supports them.}
+
+\item{depth}{Pyramid depth passed to libvips.}
+
+\item{region_shrink}{Shrink strategy for lower pyramid levels.}
+
+\item{predictor}{TIFF predictor for lossless compression.}
+
+\item{quality}{JPEG/WebP quality factor when applicable.}
+
+\item{compression_level}{Deflate or Zstd compression level when applicable.}
 
 \item{overwrite}{Whether to overwrite \code{output}.}
 }

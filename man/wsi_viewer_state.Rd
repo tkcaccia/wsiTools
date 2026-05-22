@@ -13,8 +13,10 @@ viewer_state(x)
 \item{x}{A \code{wsi_viewer_session} or \code{wsi_viewer_state} object.}
 }
 \value{
-A list containing ROIs, measurements, segmentation overlays, selected
-ROI, view/stain settings, and event history.
+A list containing ROIs, distance measurements, ROI/cell/class summary
+tables, trajectories, segmentation overlays, selected ROI(s), R-controlled
+viewer layers, previewed tile coordinates, last segmentation run metadata,
+annotation history, view/stain settings, autosave status, and event history.
 }
 \description{
 Read live viewer state

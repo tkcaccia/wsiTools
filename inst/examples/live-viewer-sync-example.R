@@ -102,7 +102,7 @@ message("Starting live viewer.")
 message("In the browser:")
 message("  1. Draw, brush, edit, or import GeoJSON ROIs.")
 message("  2. Use Measure -> Distance to measure between two points.")
-message("  3. If StarDist is enabled, select an ROI and use Segmentation -> Start StarDist.")
+message("  3. If StarDist is enabled, select an ROI and use Segmentation -> Run segmentation.")
 message("  4. Return to R with Esc or Ctrl+C. Synced objects will be saved below.")
 message("")
 
@@ -112,7 +112,7 @@ session <- wsi_viewer_live(
   output = output_html,
   tile_dir = if (identical(mode, "tiles")) tile_dir else NULL,
   open = TRUE,
-  wait = TRUE,
+  wait = FALSE,
   name = "viewer_state",
   stardist = use_stardist,
   stardist_output_dir = file.path(script_dir, "stardist_selected_roi"),
@@ -121,7 +121,37 @@ session <- wsi_viewer_live(
   stardist_model = stardist_model
 )
 
-state <- wsi_viewer_state(session)
+session$on("roi_created", function(roi) {
+  message("Callback roi_created: ", nrow(roi), " ROI available.")
+})
+session$on("roi_selected", function(roi) {
+  if (inherits(roi, "wsi_roi") && nrow(roi)) {
+    message("Callback roi_selected: ", roi$name[[1]])
+  }
+})
+session$on("segmentation_finished", function(cells) {
+  message("Callback segmentation_finished: ", nrow(cells), " cell/segmentation overlay(s).")
+})
+
+preview_grid <- head(wsi_tile_grid(slide, tile_size = 2048, level = 0, include_partial = FALSE), 200)
+if (nrow(preview_grid)) {
+  session$add_layer(
+    "Example tile grid",
+    preview_grid,
+    opacity = 0.45,
+    colour = "#facc15",
+    service = FALSE
+  )
+  message("Queued an R-controlled example tile-grid layer.")
+}
+
+message("Live callbacks are registered. Press Ctrl+C or Esc in R to stop servicing the viewer.")
+tryCatch(
+  repeat session$service(100),
+  interrupt = function(e) NULL
+)
+
+state <- session$get_state(service = FALSE)
 
 message("")
 message("Live viewer returned to R.")
@@ -154,3 +184,12 @@ message("  viewer_state")
 message("  viewer_state_rois")
 message("  viewer_state_measurements")
 message("  viewer_state_segmentation")
+message("")
+message("The returned session object also exposes:")
+message("  session$get_rois()")
+message("  session$get_selected_roi()")
+message("  session$get_measurements()")
+message("  session$get_segmentation()")
+message("  session$add_rois(rois)")
+message("  session$add_segmentation(cells)")
+message("  session$save_project('case_001.wsiproject')")

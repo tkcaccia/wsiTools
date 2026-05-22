@@ -281,6 +281,267 @@ wsi_ihc_stain_matrix <- function(hematoxylin = c(0.650, 0.704, 0.286),
   cbind(hematoxylin = hematoxylin, hrp = hrp, residual = residual)
 }
 
+wsi_format_stain_image <- function(image, format = c("array", "raster", "magick")) {
+  format <- match.arg(format)
+  if (identical(format, "array")) {
+    return(image)
+  }
+  raster <- wsi_array_to_raster(image)
+  if (identical(format, "raster")) {
+    return(raster)
+  }
+  wsi_require_magick("return a stain-normalized image as a magick object")
+  magick::image_read(raster)
+}
+
+wsi_validate_stain_matrix <- function(matrix, name = "stain_matrix",
+                                      min_channels = 2L) {
+  if (!is.matrix(matrix) && !is.data.frame(matrix)) {
+    wsi_abort(sprintf("`%s` must be a numeric matrix with three RGB rows.", name))
+  }
+  matrix <- as.matrix(matrix)
+  storage.mode(matrix) <- "double"
+  if (nrow(matrix) != 3L || ncol(matrix) < min_channels ||
+      anyNA(matrix) || any(!is.finite(matrix))) {
+    wsi_abort(sprintf(
+      "`%s` must be a finite numeric matrix with 3 rows and at least %s columns.",
+      name,
+      min_channels
+    ))
+  }
+  for (i in seq_len(ncol(matrix))) {
+    matrix[, i] <- wsi_normalize_stain_vector(matrix[, i], sprintf("%s[, %s]", name, i))
+  }
+  matrix
+}
+
+#' Define standard H&E stain channels
+#'
+#' Creates hematoxylin and eosin stain-channel definitions for H&E
+#' deconvolution, Macenko-style normalisation, and reconstruction. The default
+#' optical-density vectors are common H&E starting values; use slide- or
+#' laboratory-specific vectors when quantitative reproducibility matters.
+#'
+#' @param hematoxylin,eosin RGB optical-density vectors.
+#' @param hematoxylin_colour,eosin_colour Display colours for recoloured
+#'   channel visualisation.
+#'
+#' @return A `wsi_stain_channels` object with hematoxylin and eosin channels.
+#' @export
+wsi_he_stain_channels <- function(hematoxylin = c(0.644, 0.717, 0.267),
+                                  eosin = c(0.093, 0.954, 0.283),
+                                  hematoxylin_colour = "#4b3f99",
+                                  eosin_colour = "#e85b90") {
+  wsi_stain_channels(
+    name = c("Hematoxylin", "Eosin"),
+    vector = list(hematoxylin, eosin),
+    colour = c(hematoxylin_colour, eosin_colour),
+    strength = c(1, 1),
+    visible = c(TRUE, TRUE)
+  )
+}
+
+#' @rdname wsi_he_stain_channels
+#' @return `wsi_he_stain_matrix()` returns a 3 x 3 matrix with hematoxylin,
+#'   eosin, and residual optical-density vectors.
+#' @export
+wsi_he_stain_matrix <- function(hematoxylin = c(0.644, 0.717, 0.267),
+                                eosin = c(0.093, 0.954, 0.283)) {
+  channels <- wsi_he_stain_channels(hematoxylin = hematoxylin, eosin = eosin)
+  matrix <- wsi_complete_stain_basis(channels)$matrix
+  colnames(matrix) <- c("hematoxylin", "eosin", "residual")
+  matrix
+}
+
+wsi_channels_from_matrix <- function(matrix,
+                                     names = c("Hematoxylin", "Eosin"),
+                                     colours = c("#4b3f99", "#e85b90")) {
+  matrix <- wsi_validate_stain_matrix(matrix, "matrix", min_channels = length(names))
+  wsi_stain_channels(
+    name = names,
+    vector = lapply(seq_along(names), function(i) matrix[, i]),
+    colour = colours[seq_along(names)]
+  )
+}
+
+wsi_stain_od_pixels <- function(image, epsilon = 1 / 255,
+                                luminosity_threshold = 0.8,
+                                od_threshold = 0.15,
+                                max_pixels = 10000) {
+  arr <- wsi_image_to_array(image)
+  rgb <- arr[, , seq_len(3L), drop = FALSE]
+  rgb_mat <- cbind(as.vector(rgb[, , 1L]), as.vector(rgb[, , 2L]), as.vector(rgb[, , 3L]))
+  od <- -log(pmax(rgb_mat, epsilon))
+  brightness <- rowMeans(rgb_mat)
+  keep <- brightness < luminosity_threshold & rowSums(od) > od_threshold
+  od <- od[keep, , drop = FALSE]
+  if (!nrow(od)) {
+    return(od)
+  }
+  max_pixels <- as.integer(wsi_check_scalar_number(max_pixels, "max_pixels", allow_zero = FALSE))
+  if (nrow(od) > max_pixels) {
+    index <- unique(as.integer(round(seq(1, nrow(od), length.out = max_pixels))))
+    od <- od[index, , drop = FALSE]
+  }
+  od
+}
+
+wsi_order_he_vectors <- function(vectors, hematoxylin_reference = c(0.644, 0.717, 0.267),
+                                 eosin_reference = c(0.093, 0.954, 0.283)) {
+  vectors <- wsi_validate_stain_matrix(vectors, "vectors", min_channels = 2L)[, seq_len(2L), drop = FALSE]
+  hematoxylin_reference <- wsi_normalize_stain_vector(hematoxylin_reference, "hematoxylin_reference")
+  eosin_reference <- wsi_normalize_stain_vector(eosin_reference, "eosin_reference")
+  score_direct <- sum(vectors[, 1L] * hematoxylin_reference) + sum(vectors[, 2L] * eosin_reference)
+  score_swap <- sum(vectors[, 2L] * hematoxylin_reference) + sum(vectors[, 1L] * eosin_reference)
+  if (score_swap > score_direct) {
+    vectors <- vectors[, c(2L, 1L), drop = FALSE]
+  }
+  colnames(vectors) <- c("hematoxylin", "eosin")
+  vectors
+}
+
+wsi_estimate_macenko_matrix <- function(image, luminosity_threshold = 0.8,
+                                        od_threshold = 0.15,
+                                        angular_percentile = 1,
+                                        max_pixels = 10000,
+                                        epsilon = 1 / 255) {
+  od <- wsi_stain_od_pixels(
+    image,
+    epsilon = epsilon,
+    luminosity_threshold = luminosity_threshold,
+    od_threshold = od_threshold,
+    max_pixels = max_pixels
+  )
+  if (nrow(od) < 3L) {
+    wsi_warn("Too few tissue-like pixels for Macenko stain estimation; using standard H&E vectors.")
+    return(wsi_he_stain_matrix())
+  }
+
+  angular_percentile <- wsi_check_scalar_number(angular_percentile, "angular_percentile")
+  if (angular_percentile <= 0 || angular_percentile >= 50) {
+    wsi_abort("`angular_percentile` must be greater than 0 and less than 50.")
+  }
+
+  sv <- svd(od)
+  plane <- sv$v[, seq_len(2L), drop = FALSE]
+  projected <- od %*% plane
+  angles <- atan2(projected[, 2L], projected[, 1L])
+  angle_min <- unname(stats::quantile(angles, probs = angular_percentile / 100, na.rm = TRUE, names = FALSE))
+  angle_max <- unname(stats::quantile(angles, probs = 1 - angular_percentile / 100, na.rm = TRUE, names = FALSE))
+  vectors <- cbind(
+    plane[, 1L] * cos(angle_min) + plane[, 2L] * sin(angle_min),
+    plane[, 1L] * cos(angle_max) + plane[, 2L] * sin(angle_max)
+  )
+  vectors <- abs(vectors)
+  vectors <- wsi_order_he_vectors(vectors)
+  wsi_he_stain_matrix(hematoxylin = vectors[, 1L], eosin = vectors[, 2L])
+}
+
+wsi_estimate_vahadane_matrix <- function(image, luminosity_threshold = 0.8,
+                                         od_threshold = 0.15,
+                                         max_pixels = 5000,
+                                         nmf_iterations = 80,
+                                         sparsity = 0.05,
+                                         epsilon = 1 / 255) {
+  od <- wsi_stain_od_pixels(
+    image,
+    epsilon = epsilon,
+    luminosity_threshold = luminosity_threshold,
+    od_threshold = od_threshold,
+    max_pixels = max_pixels
+  )
+  if (nrow(od) < 3L) {
+    wsi_warn("Too few tissue-like pixels for Vahadane-style stain estimation; using standard H&E vectors.")
+    return(wsi_he_stain_matrix())
+  }
+
+  nmf_iterations <- as.integer(wsi_check_scalar_number(nmf_iterations, "nmf_iterations", allow_zero = FALSE))
+  sparsity <- wsi_check_scalar_number(sparsity, "sparsity")
+  init <- tryCatch(
+    t(wsi_estimate_macenko_matrix(
+      image,
+      luminosity_threshold = luminosity_threshold,
+      od_threshold = od_threshold,
+      max_pixels = max_pixels,
+      epsilon = epsilon
+    )[, seq_len(2L), drop = FALSE]),
+    error = function(err) t(wsi_he_stain_matrix()[, seq_len(2L), drop = FALSE])
+  )
+  h <- pmax(init, epsilon)
+  w <- pmax(od %*% t(h), epsilon)
+  for (i in seq_len(nmf_iterations)) {
+    w <- w * ((od %*% t(h)) / pmax(w %*% h %*% t(h) + sparsity, epsilon))
+    h <- h * ((t(w) %*% od) / pmax(t(w) %*% w %*% h, epsilon))
+    row_norm <- sqrt(rowSums(h^2))
+    row_norm[row_norm <= 0 | !is.finite(row_norm)] <- 1
+    h <- h / row_norm
+    w <- sweep(w, 2L, row_norm, `*`)
+  }
+  vectors <- wsi_order_he_vectors(t(h))
+  wsi_he_stain_matrix(hematoxylin = vectors[, 1L], eosin = vectors[, 2L])
+}
+
+#' Estimate H&E stain vectors from an image patch
+#'
+#' Estimates a 3 x 3 optical-density stain matrix for an already-small H&E image
+#' patch, thumbnail, or tile. `method = "macenko"` implements a lightweight
+#' Macenko-style PCA estimate. `method = "vahadane"` uses a small non-negative
+#' matrix-factorisation approximation inspired by Vahadane-style stain
+#' separation. Both methods are dependency-free and intended for preprocessing
+#' support, not as a replacement for carefully validated laboratory-specific
+#' calibration.
+#'
+#' @param image RGB/RGBA array, raster object, or magick image.
+#' @param method `"macenko"`, `"vahadane"`, or `"fixed"` standard H&E vectors.
+#' @param luminosity_threshold Pixels brighter than this RGB mean are treated as
+#'   background during estimation.
+#' @param od_threshold Minimum optical-density sum for tissue-like pixels.
+#' @param angular_percentile Macenko angular percentile.
+#' @param max_pixels Maximum number of tissue-like pixels used for estimation.
+#' @param nmf_iterations,sparsity Controls for the experimental
+#'   Vahadane-style NMF estimator.
+#' @param epsilon Lower bound used before taking optical-density logarithms.
+#'
+#' @return A 3 x 3 stain matrix with hematoxylin, eosin, and residual columns.
+#' @export
+wsi_estimate_stain_matrix <- function(image,
+                                      method = c("macenko", "vahadane", "fixed"),
+                                      luminosity_threshold = 0.8,
+                                      od_threshold = 0.15,
+                                      angular_percentile = 1,
+                                      max_pixels = 10000,
+                                      nmf_iterations = 80,
+                                      sparsity = 0.05,
+                                      epsilon = 1 / 255) {
+  method <- match.arg(method)
+  epsilon <- wsi_check_scalar_number(epsilon, "epsilon", allow_zero = FALSE)
+  if (epsilon >= 1) {
+    wsi_abort("`epsilon` must be less than 1.")
+  }
+  if (identical(method, "fixed")) {
+    return(wsi_he_stain_matrix())
+  }
+  if (identical(method, "macenko")) {
+    return(wsi_estimate_macenko_matrix(
+      image,
+      luminosity_threshold = luminosity_threshold,
+      od_threshold = od_threshold,
+      angular_percentile = angular_percentile,
+      max_pixels = max_pixels,
+      epsilon = epsilon
+    ))
+  }
+  wsi_estimate_vahadane_matrix(
+    image,
+    luminosity_threshold = luminosity_threshold,
+    od_threshold = od_threshold,
+    max_pixels = max_pixels,
+    nmf_iterations = nmf_iterations,
+    sparsity = sparsity,
+    epsilon = epsilon
+  )
+}
+
 wsi_channel_ids_from_output <- function(channels) {
   metadata <- channels$channel_metadata
   if (!is.null(metadata)) {
@@ -478,6 +739,341 @@ wsi_deconvolve_ihc <- function(image,
     strengths = c(hematoxylin_strength, hrp_strength)
   )
 }
+
+#' Deconvolve hematoxylin and eosin from an H&E image
+#'
+#' Separates an already-small H&E image patch, tile, or thumbnail into
+#' hematoxylin and eosin optical-density concentration channels. This is the
+#' H&E counterpart to [wsi_deconvolve_ihc()] and can use fixed stain vectors or
+#' vectors estimated separately with [wsi_estimate_stain_matrix()].
+#'
+#' @param image RGB/RGBA array, raster object, or magick image.
+#' @param format Output format. `"channels"` returns numeric concentration
+#'   matrices for `hematoxylin` and `eosin`; image formats return a recoloured
+#'   two-channel visualisation.
+#' @param stain_matrix Optional 3 x 3 stain matrix. When supplied, the first two
+#'   columns are used as hematoxylin and eosin.
+#' @param hematoxylin,eosin RGB optical-density vectors used when
+#'   `stain_matrix` is not supplied.
+#' @param hematoxylin_colour,eosin_colour Display colours for recoloured output.
+#' @param epsilon Lower bound used before taking optical-density logarithms.
+#'
+#' @return A `wsi_ihc_channels` object, array, raster, or magick image.
+#' @export
+#' @examples
+#' patch <- array(0.8, dim = c(32, 32, 3))
+#' channels <- wsi_deconvolve_he(patch)
+wsi_deconvolve_he <- function(image,
+                              format = c("channels", "array", "raster", "magick"),
+                              stain_matrix = NULL,
+                              hematoxylin = c(0.644, 0.717, 0.267),
+                              eosin = c(0.093, 0.954, 0.283),
+                              hematoxylin_colour = "#4b3f99",
+                              eosin_colour = "#e85b90",
+                              epsilon = 1 / 255) {
+  format <- match.arg(format)
+  epsilon <- wsi_check_scalar_number(epsilon, "epsilon", allow_zero = FALSE)
+  if (epsilon >= 1) {
+    wsi_abort("`epsilon` must be less than 1.")
+  }
+  if (is.null(stain_matrix)) {
+    channel_definitions <- wsi_he_stain_channels(
+      hematoxylin = hematoxylin,
+      eosin = eosin,
+      hematoxylin_colour = hematoxylin_colour,
+      eosin_colour = eosin_colour
+    )
+  } else {
+    channel_definitions <- wsi_channels_from_matrix(
+      stain_matrix,
+      names = c("Hematoxylin", "Eosin"),
+      colours = c(hematoxylin_colour, eosin_colour)
+    )
+  }
+  channels <- wsi_deconvolve_array(image, channel_definitions, epsilon = epsilon)
+  wsi_format_ihc_output(
+    channels,
+    format = format,
+    colours = c(hematoxylin_colour, eosin_colour),
+    strengths = c(1, 1)
+  )
+}
+
+#' Reconstruct an RGB image from stain concentration channels
+#'
+#' Reconstructs a brightfield RGB image from optical-density concentration
+#' channels and a stain matrix. This is useful after H&E separation or stain
+#' normalisation, where concentrations are recombined with a target stain basis.
+#'
+#' @param channels A `wsi_ihc_channels` object returned by
+#'   [wsi_deconvolve_he()], [wsi_deconvolve_ihc()], or
+#'   [wsi_deconvolve_multi_ihc()].
+#' @param stain_matrix Optional 3-row stain matrix. When omitted, the matrix
+#'   stored in `channels` is used.
+#' @param format Output format.
+#'
+#' @return An RGB/RGBA array, raster, or magick image.
+#' @export
+wsi_reconstruct_stains <- function(channels, stain_matrix = NULL,
+                                   format = c("array", "raster", "magick")) {
+  format <- match.arg(format)
+  if (!inherits(channels, "wsi_ihc_channels")) {
+    wsi_abort("`channels` must be a `wsi_ihc_channels` object.")
+  }
+  ids <- wsi_channel_ids_from_output(channels)
+  if (!length(ids)) {
+    wsi_abort("No stain concentration channels are available.")
+  }
+  first <- channels[[ids[[1L]]]]
+  height <- nrow(first)
+  width <- ncol(first)
+  concentration <- do.call(cbind, lapply(ids, function(id) {
+    value <- channels[[id]]
+    if (is.null(value) || !identical(dim(value), dim(first))) {
+      wsi_abort("All stain concentration channels must have identical dimensions.")
+    }
+    as.vector(pmax(0, value))
+  }))
+  if (is.null(stain_matrix)) {
+    stain_matrix <- channels$stain_matrix
+  }
+  stain_matrix <- wsi_validate_stain_matrix(stain_matrix, "stain_matrix", min_channels = length(ids))
+  stain_matrix <- stain_matrix[, seq_along(ids), drop = FALSE]
+  od <- concentration %*% t(stain_matrix)
+  rgb <- exp(-od)
+  image <- array(rgb, dim = c(height, width, 3L))
+  image <- pmin(pmax(image, 0), 1)
+  if (!is.null(channels$alpha)) {
+    image <- array(c(image, channels$alpha), dim = c(height, width, 4L))
+  }
+  wsi_format_stain_image(image, format = format)
+}
+
+wsi_stain_channel_quantiles <- function(channels, ids = c("hematoxylin", "eosin"),
+                                        concentration_percentile = 99) {
+  concentration_percentile <- wsi_check_scalar_number(concentration_percentile, "concentration_percentile")
+  if (concentration_percentile <= 0 || concentration_percentile > 100) {
+    wsi_abort("`concentration_percentile` must be greater than 0 and less than or equal to 100.")
+  }
+  out <- vapply(ids, function(id) {
+    values <- channels[[id]]
+    if (is.null(values)) {
+      wsi_abort(sprintf("Stain channel `%s` is not available.", id))
+    }
+    values <- as.vector(values)
+    values <- values[is.finite(values)]
+    if (!length(values)) {
+      return(1)
+    }
+    q <- unname(stats::quantile(values, probs = concentration_percentile / 100, na.rm = TRUE, names = FALSE))
+    if (!is.finite(q) || q <= 0) 1 else q
+  }, numeric(1))
+  unname(out)
+}
+
+wsi_scale_he_channels <- function(channels, source_concentrations,
+                                  target_concentrations) {
+  ids <- c("hematoxylin", "eosin")
+  source_concentrations <- as.numeric(source_concentrations)
+  target_concentrations <- as.numeric(target_concentrations)
+  if (length(source_concentrations) != 2L || length(target_concentrations) != 2L ||
+      anyNA(source_concentrations) || anyNA(target_concentrations) ||
+      any(!is.finite(source_concentrations)) || any(!is.finite(target_concentrations))) {
+    wsi_abort("Source and target concentration summaries must be numeric vectors of length 2.")
+  }
+  out <- channels
+  ratio <- target_concentrations / pmax(source_concentrations, .Machine$double.eps)
+  for (i in seq_along(ids)) {
+    value <- pmax(0, out[[ids[[i]]]] * ratio[[i]])
+    dim(value) <- dim(out[[ids[[i]]]])
+    out[[ids[[i]]]] <- value
+  }
+  out
+}
+
+wsi_stain_normalization_result <- function(image, channels, source_matrix,
+                                           target_matrix, source_concentrations,
+                                           target_concentrations, method) {
+  structure(
+    list(
+      image = image,
+      channels = channels,
+      source_matrix = source_matrix,
+      target_matrix = target_matrix,
+      source_concentrations = source_concentrations,
+      target_concentrations = target_concentrations,
+      method = method
+    ),
+    class = "wsi_stain_normalization"
+  )
+}
+
+#' Normalize H&E stain appearance for a patch or tile
+#'
+#' Performs dependency-free H&E stain normalisation on an already-small image
+#' patch, tile, or thumbnail. The default `method = "macenko"` estimates source
+#' H&E stain vectors from the supplied image and reconstructs the patch with
+#' target H&E vectors. `method = "vahadane"` provides a lightweight
+#' Vahadane-style non-negative matrix-factorisation estimate. `method = "fixed"`
+#' uses the standard H&E vectors without estimation.
+#'
+#' This function is deliberately patch-oriented. For whole-slide images, call
+#' [wsi_stain_normalize_region()] or apply it inside a tiled workflow; do not
+#' load an entire WSI into R memory.
+#'
+#' @param image RGB/RGBA array, raster object, or magick image.
+#' @param method Stain-estimation method: `"macenko"`, `"vahadane"`, or
+#'   `"fixed"`.
+#' @param target Optional reference image used to estimate target vectors and
+#'   target concentration percentiles.
+#' @param source_matrix Optional source H&E stain matrix. If omitted, it is
+#'   estimated from `image` unless `method = "fixed"`.
+#' @param target_matrix Optional target H&E stain matrix. If omitted and
+#'   `target` is not supplied, standard H&E vectors are used.
+#' @param source_concentrations,target_concentrations Optional hematoxylin/eosin
+#'   concentration percentile values. When omitted, source values are measured
+#'   from `image`; target values come from `target` when supplied, otherwise
+#'   source values are reused so only stain-vector normalisation is applied.
+#' @param concentration_percentile Percentile used for concentration scaling.
+#' @param format `"array"`, `"raster"`, `"magick"`, or `"result"` for a detailed
+#'   object containing the normalized image, matrices, and concentration
+#'   summaries.
+#' @inheritParams wsi_estimate_stain_matrix
+#'
+#' @return A normalized image or a `wsi_stain_normalization` object.
+#' @export
+#' @examples
+#' patch <- array(0.8, dim = c(32, 32, 3))
+#' normalized <- wsi_normalize_stains(patch, method = "fixed")
+wsi_normalize_stains <- function(image,
+                                 method = c("macenko", "vahadane", "fixed"),
+                                 target = NULL,
+                                 source_matrix = NULL,
+                                 target_matrix = NULL,
+                                 source_concentrations = NULL,
+                                 target_concentrations = NULL,
+                                 concentration_percentile = 99,
+                                 luminosity_threshold = 0.8,
+                                 od_threshold = 0.15,
+                                 angular_percentile = 1,
+                                 max_pixels = 10000,
+                                 nmf_iterations = 80,
+                                 sparsity = 0.05,
+                                 epsilon = 1 / 255,
+                                 format = c("array", "raster", "magick", "result")) {
+  method <- match.arg(method)
+  format <- match.arg(format)
+  arr <- wsi_image_to_array(image)
+  if (is.null(source_matrix)) {
+    source_matrix <- wsi_estimate_stain_matrix(
+      arr,
+      method = method,
+      luminosity_threshold = luminosity_threshold,
+      od_threshold = od_threshold,
+      angular_percentile = angular_percentile,
+      max_pixels = max_pixels,
+      nmf_iterations = nmf_iterations,
+      sparsity = sparsity,
+      epsilon = epsilon
+    )
+  } else {
+    source_matrix <- wsi_validate_stain_matrix(source_matrix, "source_matrix", min_channels = 2L)
+  }
+
+  target_arr <- NULL
+  if (!is.null(target)) {
+    target_arr <- wsi_image_to_array(target)
+  }
+  if (is.null(target_matrix)) {
+    target_matrix <- if (is.null(target_arr)) {
+      wsi_he_stain_matrix()
+    } else {
+      wsi_estimate_stain_matrix(
+        target_arr,
+        method = method,
+        luminosity_threshold = luminosity_threshold,
+        od_threshold = od_threshold,
+        angular_percentile = angular_percentile,
+        max_pixels = max_pixels,
+        nmf_iterations = nmf_iterations,
+        sparsity = sparsity,
+        epsilon = epsilon
+      )
+    }
+  } else {
+    target_matrix <- wsi_validate_stain_matrix(target_matrix, "target_matrix", min_channels = 2L)
+  }
+
+  channels <- wsi_deconvolve_he(arr, stain_matrix = source_matrix, format = "channels", epsilon = epsilon)
+  if (is.null(source_concentrations)) {
+    source_concentrations <- wsi_stain_channel_quantiles(channels, concentration_percentile = concentration_percentile)
+  }
+  if (is.null(target_concentrations)) {
+    target_concentrations <- if (is.null(target_arr)) {
+      source_concentrations
+    } else {
+      target_channels <- wsi_deconvolve_he(target_arr, stain_matrix = target_matrix, format = "channels", epsilon = epsilon)
+      wsi_stain_channel_quantiles(target_channels, concentration_percentile = concentration_percentile)
+    }
+  }
+  channels <- wsi_scale_he_channels(channels, source_concentrations, target_concentrations)
+  normalized <- wsi_reconstruct_stains(channels, stain_matrix = target_matrix, format = "array")
+  result <- wsi_stain_normalization_result(
+    image = normalized,
+    channels = channels,
+    source_matrix = source_matrix,
+    target_matrix = target_matrix,
+    source_concentrations = source_concentrations,
+    target_concentrations = target_concentrations,
+    method = method
+  )
+  if (identical(format, "result")) {
+    return(result)
+  }
+  wsi_format_stain_image(normalized, format = format)
+}
+
+#' @rdname wsi_normalize_stains
+#' @export
+wsi_normalise_stains <- wsi_normalize_stains
+
+#' Normalize stains in a slide region
+#'
+#' Reads only the requested region from a slide and applies
+#' [wsi_normalize_stains()]. This keeps stain normalisation compatible with WSI
+#' workflows by avoiding full-slide reads.
+#'
+#' @param slide A `wsi_slide` object or path readable by [wsi_open()].
+#' @param x,y,width,height,level Region coordinates; see [wsi_read_region()].
+#' @param ... Arguments passed to [wsi_normalize_stains()].
+#'
+#' @return See [wsi_normalize_stains()].
+#' @export
+wsi_stain_normalize_region <- function(slide, x, y, width, height, level = 0, ...) {
+  opened <- NULL
+  on.exit(if (!is.null(opened)) wsi_close(opened), add = TRUE)
+  if (is.character(slide) && length(slide) == 1L) {
+    opened <- wsi_open(slide, backend = "auto")
+    slide <- opened
+  } else {
+    wsi_check_slide(slide)
+  }
+
+  patch <- wsi_read_region(
+    slide,
+    x = x,
+    y = y,
+    width = width,
+    height = height,
+    level = level,
+    format = "array"
+  )
+  wsi_normalize_stains(patch, ...)
+}
+
+#' @rdname wsi_stain_normalize_region
+#' @export
+wsi_stain_normalise_region <- wsi_stain_normalize_region
 
 #' Deconvolve multiple brightfield IHC stain channels from an image
 #'
@@ -708,5 +1304,15 @@ print.wsi_ihc_channels <- function(x, ...) {
   cat("<wsi_ihc_channels>\n")
   cat("  size: ", dims[[2L]], " x ", dims[[1L]], " px\n", sep = "")
   cat("  channels: ", paste(ids, collapse = ", "), "\n", sep = "")
+  invisible(x)
+}
+
+#' @export
+print.wsi_stain_normalization <- function(x, ...) {
+  dims <- dim(x$image)
+  cat("<wsi_stain_normalization>\n")
+  cat("  method: ", x$method %||% "unknown", "\n", sep = "")
+  cat("  size: ", dims[[2L]], " x ", dims[[1L]], " px\n", sep = "")
+  cat("  channels: hematoxylin, eosin\n", sep = "")
   invisible(x)
 }

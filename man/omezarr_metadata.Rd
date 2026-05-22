@@ -5,18 +5,22 @@
 \alias{wsi_omezarr_metadata}
 \title{Read OME-Zarr metadata}
 \usage{
-omezarr_metadata(path)
+omezarr_metadata(path, multiscale = 1L)
 
-wsi_omezarr_metadata(path)
+wsi_omezarr_metadata(path, multiscale = 1L)
 }
 \arguments{
 \item{path}{Path to an OME-Zarr directory.}
+
+\item{multiscale}{Multiscale image index to inspect when a Zarr group stores
+more than one image.}
 }
 \value{
 A list with attributes, multiscale metadata, and a levels data frame.
 }
 \description{
 Reads OME-NGFF/Zarr metadata without loading image chunks into memory. The
-first implementation extracts multiscale dataset paths, dimensions, pyramid
-levels, and basic attributes from local OME-Zarr directories.
+parser extracts multiscale dataset paths, axes, dimensions, chunks, dtype,
+scale/translation transforms, and pyramid levels from local OME-Zarr
+directories.
 }

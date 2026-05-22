@@ -1,13 +1,70 @@
+wsi_empty_tile_preview <- function() {
+  out <- data.frame(
+    tile_id = character(),
+    x = numeric(),
+    y = numeric(),
+    width = numeric(),
+    height = numeric(),
+    level = integer(),
+    row = integer(),
+    col = integer(),
+    downsample = numeric(),
+    stringsAsFactors = FALSE
+  )
+  class(out) <- c("wsi_tile_preview", "wsi_tile_manifest", class(out))
+  out
+}
+
+wsi_tile_preview <- function(grid) {
+  if (is.null(grid)) {
+    return(wsi_empty_tile_preview())
+  }
+  if (!is.data.frame(grid)) {
+    wsi_abort("Tile preview must be a data frame.")
+  }
+  needed <- c("x", "y", "width", "height")
+  if (!all(needed %in% names(grid))) {
+    wsi_abort("Tile preview data must contain `x`, `y`, `width`, and `height` columns.")
+  }
+  class(grid) <- c(
+    "wsi_tile_preview",
+    "wsi_tile_manifest",
+    setdiff(class(grid), c("wsi_tile_preview", "wsi_tile_manifest"))
+  )
+  grid
+}
+
 wsi_new_viewer_state <- function(name = "wsi_viewer_live_state", envir = parent.frame(),
                                  max_events = 1000L) {
   state <- new.env(parent = emptyenv())
   state$rois <- wsi_empty_roi()
   state$measurements <- wsi_empty_measurements()
+  state$trajectories <- wsi_empty_trajectories()
   state$segmentation <- wsi_empty_roi()
+  state$roi_summary <- wsi_empty_roi_summary()
+  state$cell_summary <- wsi_empty_cell_summary()
+  state$class_summary <- wsi_empty_class_summary()
+  state$ihc_summary <- wsi_empty_ihc_intensity_summary("roi")
+  state$ihc_class_summary <- wsi_empty_ihc_intensity_summary("class")
+  state$layers <- list()
+  state$tile_preview <- wsi_empty_tile_preview()
   state$selected_roi <- NULL
+  state$selected_rois <- wsi_empty_roi()
+  state$last_segmentation <- NULL
+  state$pixel_size <- NULL
   state$view <- list()
   state$stain <- NULL
+  state$annotations <- list(dirty = FALSE, dirty_reason = "")
+  state$history <- wsi_empty_annotation_history()
+  state$jobs <- list()
+  state$autosave <- list(enabled = FALSE)
   state$events <- list()
+  state$commands <- list()
+  state$command_sequence <- 0L
+  state$callbacks <- list()
+  state$callback_sequence <- 0L
+  state$callback_errors <- list()
+  state$dispatching_callback <- FALSE
   state$last_event <- NULL
   state$last_payload <- NULL
   state$last_sync <- NULL
@@ -17,6 +74,255 @@ wsi_new_viewer_state <- function(name = "wsi_viewer_live_state", envir = parent.
   class(state) <- c("wsi_viewer_state", "environment")
   wsi_assign_viewer_state(state)
   state
+}
+
+wsi_viewer_autosave_config <- function(autosave = FALSE, path = NULL,
+                                       interval = 5, overwrite = TRUE,
+                                       name = "wsi_viewer_live_state") {
+  if (is.character(autosave) && length(autosave) == 1L && !is.na(autosave) && nzchar(autosave)) {
+    path <- autosave
+    autosave <- TRUE
+  }
+  if (!is.logical(autosave) || length(autosave) != 1L || is.na(autosave)) {
+    wsi_abort("`autosave` must be `TRUE`, `FALSE`, or a single project directory path.")
+  }
+  interval <- as.numeric(wsi_check_scalar_number(interval, "autosave_interval", allow_zero = FALSE))
+  if (!is.logical(overwrite) || length(overwrite) != 1L || is.na(overwrite)) {
+    wsi_abort("`autosave_overwrite` must be `TRUE` or `FALSE`.")
+  }
+  if (!isTRUE(autosave)) {
+    return(list(enabled = FALSE, interval = interval, overwrite = overwrite))
+  }
+  if (is.null(path)) {
+    path <- paste0(wsi_safe_id(name, "wsi_viewer_live_state"), "_autosave.wsiproject")
+  }
+  if (!is.character(path) || length(path) != 1L || is.na(path) || !nzchar(path)) {
+    wsi_abort("`autosave_path` must be `NULL` or a single non-empty project directory path.")
+  }
+  list(
+    enabled = TRUE,
+    path = path,
+    interval = interval,
+    interval_ms = as.integer(max(1000, round(interval * 1000))),
+    overwrite = overwrite,
+    last_save = NULL,
+    last_error = NULL,
+    last_error_time = NULL,
+    last_event = NULL,
+    last_project = NULL,
+    count = 0L
+  )
+}
+
+wsi_viewer_autosave_status <- function(state) {
+  autosave <- state$autosave %||% list(enabled = FALSE)
+  autosave$last_save <- as.character(autosave$last_save %||% NA_character_)
+  autosave
+}
+
+wsi_viewer_autosave_due <- function(state, force = FALSE) {
+  autosave <- state$autosave %||% list(enabled = FALSE)
+  if (!isTRUE(autosave$enabled)) {
+    return(FALSE)
+  }
+  if (isTRUE(force) || is.null(autosave$last_save)) {
+    return(TRUE)
+  }
+  interval <- as.numeric(autosave$interval %||% 5)
+  last <- autosave$last_save
+  if (is.character(last)) {
+    last <- suppressWarnings(as.POSIXct(last))
+  }
+  is.na(last) || as.numeric(difftime(Sys.time(), last, units = "secs")) >= interval
+}
+
+wsi_viewer_autosave_save <- function(state, slide = NULL, force = FALSE,
+                                     reason = "autosave") {
+  if (!inherits(state, "wsi_viewer_state")) {
+    return(invisible(NULL))
+  }
+  autosave <- state$autosave %||% list(enabled = FALSE)
+  if (!isTRUE(autosave$enabled) || !wsi_viewer_autosave_due(state, force = force)) {
+    return(invisible(NULL))
+  }
+  now <- Sys.time()
+  project <- tryCatch(
+    wsi_project(
+      autosave$path,
+      slide = slide,
+      viewer_state = state,
+      metadata = list(
+        autosave = list(
+          enabled = TRUE,
+          reason = reason,
+          last_event = state$last_event %||% NA_character_,
+          selected_roi_id = if (inherits(state$selected_roi, "wsi_roi") && nrow(state$selected_roi)) {
+            state$selected_roi$roi_id[[1L]]
+          } else {
+            NA_character_
+          }
+        )
+      ),
+      processing_provenance = list(
+        autosave = TRUE,
+        autosave_reason = reason,
+        autosave_interval_seconds = autosave$interval %||% NA_real_
+      ),
+      overwrite = autosave$overwrite %||% TRUE
+    ),
+    error = function(err) err
+  )
+  if (inherits(project, "error")) {
+    autosave$last_error <- conditionMessage(project)
+    autosave$last_error_time <- format(now, "%Y-%m-%dT%H:%M:%OS%z")
+    state$autosave <- autosave
+    wsi_assign_viewer_state(state)
+    return(invisible(NULL))
+  }
+  autosave$last_save <- now
+  autosave$last_error <- NULL
+  autosave$last_error_time <- NULL
+  autosave$last_event <- state$last_event %||% reason
+  autosave$last_project <- project$path %||% autosave$path
+  autosave$count <- as.integer(autosave$count %||% 0L) + 1L
+  state$autosave <- autosave
+  wsi_assign_viewer_state(state)
+  invisible(project)
+}
+
+wsi_viewer_queue_command <- function(state, type, payload = list()) {
+  if (!inherits(state, "wsi_viewer_state")) {
+    wsi_abort("`state` must be a `wsi_viewer_state` object.")
+  }
+  if (!is.character(type) || length(type) != 1L || is.na(type) || !nzchar(type)) {
+    wsi_abort("Viewer command `type` must be a single non-empty string.")
+  }
+  state$command_sequence <- as.integer(state$command_sequence %||% 0L) + 1L
+  command <- list(
+    id = sprintf("cmd_%d", state$command_sequence),
+    type = type,
+    time = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS%z"),
+    payload = payload %||% list()
+  )
+  state$commands[[length(state$commands) + 1L]] <- command
+  invisible(command)
+}
+
+wsi_viewer_take_commands <- function(state) {
+  commands <- state$commands %||% list()
+  state$commands <- list()
+  commands
+}
+
+wsi_viewer_event_aliases <- function(event) {
+  switch(
+    event,
+    roi_added = "roi_created",
+    segmentation_added = "segmentation_finished",
+    segmentation_completed = "segmentation_finished",
+    character()
+  )
+}
+
+wsi_viewer_event_names <- function(event) {
+  unique(c(event, wsi_viewer_event_aliases(event)))
+}
+
+wsi_viewer_callback_object <- function(callback_event, state, payload) {
+  if (callback_event %in% c("roi_created", "roi_added", "roi_selected")) {
+    return(state$selected_roi)
+  }
+  if (callback_event %in% c("segmentation_finished", "segmentation_added", "segmentation_completed")) {
+    return(state$segmentation)
+  }
+  if (callback_event %in% c("layer_added", "layer_removed", "layer_visibility_updated", "r_add_layer")) {
+    detail <- payload$detail %||% list()
+    key <- detail$id %||% detail$name %||% payload$id %||% payload$name
+    layer <- wsi_viewer_get_layer(state$layers, key)
+    if (!is.null(layer)) {
+      return(layer)
+    }
+    return(state$layers)
+  }
+  if (callback_event %in% c("measurement_added")) {
+    if (nrow(state$measurements)) {
+      return(utils::tail(state$measurements, 1L))
+    }
+    return(state$measurements)
+  }
+  if (callback_event %in% c("trajectory_added")) {
+    if (nrow(state$trajectories %||% wsi_empty_trajectories())) {
+      return(utils::tail(state$trajectories, 1L))
+    }
+    return(state$trajectories %||% wsi_empty_trajectories())
+  }
+  wsi_viewer_state(state)
+}
+
+wsi_viewer_callback_args <- function(callback, object, event, state, payload) {
+  formals <- tryCatch(formals(callback), error = function(err) NULL)
+  args <- list(object, event, state, payload)
+  if (is.null(formals)) {
+    return(list(object))
+  }
+  if (!length(formals)) {
+    return(list())
+  }
+  if ("..." %in% names(formals)) {
+    return(list(object, event = event, state = state, payload = payload))
+  }
+  unname(args[seq_len(min(length(formals), length(args)))])
+}
+
+wsi_dispatch_viewer_callbacks <- function(state, payload) {
+  callbacks <- state$callbacks %||% list()
+  if (!length(callbacks)) {
+    return(invisible(state))
+  }
+  state$dispatching_callback <- TRUE
+  on.exit({
+    state$dispatching_callback <- FALSE
+  }, add = TRUE)
+  event <- as.character(state$last_event %||% payload$event %||% "viewer_state")
+  event_names <- wsi_viewer_event_names(event)
+  keep <- rep(TRUE, length(callbacks))
+
+  for (i in seq_along(callbacks)) {
+    callback <- callbacks[[i]]
+    if (!callback$event %in% event_names) {
+      next
+    }
+    object <- wsi_viewer_callback_object(callback$event, state, payload)
+    err <- tryCatch(
+      {
+        do.call(
+          callback$callback,
+          wsi_viewer_callback_args(callback$callback, object, event, state, payload)
+        )
+        NULL
+      },
+      error = function(err) err
+    )
+    if (!is.null(err)) {
+      state$callback_errors[[length(state$callback_errors) + 1L]] <- list(
+        id = callback$id,
+        event = callback$event,
+        message = conditionMessage(err),
+        time = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS%z")
+      )
+      wsi_warn(sprintf(
+        "Viewer callback `%s` for event `%s` failed: %s",
+        callback$id,
+        callback$event,
+        conditionMessage(err)
+      ))
+    }
+    if (isTRUE(callback$once)) {
+      keep[[i]] <- FALSE
+    }
+  }
+  state$callbacks <- callbacks[keep]
+  invisible(state)
 }
 
 wsi_empty_measurements <- function() {
@@ -30,6 +336,436 @@ wsi_empty_measurements <- function() {
     distance_um = numeric(),
     stringsAsFactors = FALSE
   )
+}
+
+wsi_empty_trajectories <- function() {
+  out <- data.frame(
+    id = character(),
+    name = character(),
+    n = integer(),
+    control_count = integer(),
+    point_count = integer(),
+    length_px = numeric(),
+    created = character(),
+    stringsAsFactors = FALSE
+  )
+  out$control_points <- I(list())
+  out$points <- I(list())
+  class(out) <- c("wsi_trajectories", class(out))
+  out
+}
+
+wsi_viewer_points_from_payload <- function(points) {
+  if (is.null(points) || !length(points)) {
+    return(data.frame(x = numeric(), y = numeric()))
+  }
+  if (is.data.frame(points)) {
+    if (!all(c("x", "y") %in% names(points))) {
+      return(data.frame(x = numeric(), y = numeric()))
+    }
+    return(data.frame(
+      x = suppressWarnings(as.numeric(points$x)),
+      y = suppressWarnings(as.numeric(points$y)),
+      stringsAsFactors = FALSE
+    ))
+  }
+  rows <- lapply(points, function(point) {
+    if (!is.list(point)) {
+      return(NULL)
+    }
+    data.frame(
+      x = suppressWarnings(as.numeric(point$x %||% NA_real_)),
+      y = suppressWarnings(as.numeric(point$y %||% NA_real_)),
+      stringsAsFactors = FALSE
+    )
+  })
+  rows <- Filter(Negate(is.null), rows)
+  if (!length(rows)) {
+    return(data.frame(x = numeric(), y = numeric()))
+  }
+  out <- do.call(rbind, rows)
+  out[is.finite(out$x) & is.finite(out$y), , drop = FALSE]
+}
+
+wsi_trajectories_from_payload <- function(trajectories) {
+  if (is.null(trajectories) || !length(trajectories)) {
+    return(wsi_empty_trajectories())
+  }
+  if (is.data.frame(trajectories) && all(c("id", "name") %in% names(trajectories))) {
+    out <- as.data.frame(trajectories, stringsAsFactors = FALSE)
+    for (column in c("n", "control_count", "point_count")) {
+      if (!column %in% names(out)) {
+        out[[column]] <- NA_integer_
+      }
+      out[[column]] <- suppressWarnings(as.integer(out[[column]]))
+    }
+    if (!"length_px" %in% names(out)) {
+      out$length_px <- NA_real_
+    }
+    out$length_px <- suppressWarnings(as.numeric(out$length_px))
+    if (!"created" %in% names(out)) {
+      out$created <- NA_character_
+    }
+    if (!"control_points" %in% names(out)) {
+      out$control_points <- I(rep(list(data.frame(x = numeric(), y = numeric())), nrow(out)))
+    } else if (!inherits(out$control_points, "AsIs")) {
+      out$control_points <- I(as.list(out$control_points))
+    }
+    if (!"points" %in% names(out)) {
+      out$points <- I(rep(list(data.frame(x = numeric(), y = numeric())), nrow(out)))
+    } else if (!inherits(out$points, "AsIs")) {
+      out$points <- I(as.list(out$points))
+    }
+    out <- out[, c("id", "name", "n", "control_count", "point_count", "length_px", "created", "control_points", "points"), drop = FALSE]
+    class(out) <- c("wsi_trajectories", setdiff(class(out), "wsi_trajectories"))
+    return(out)
+  }
+  entries <- if (is.list(trajectories)) trajectories else as.list(trajectories)
+  rows <- vector("list", length(entries))
+  control_points <- vector("list", length(entries))
+  points <- vector("list", length(entries))
+  keep <- logical(length(entries))
+  for (i in seq_along(entries)) {
+    entry <- entries[[i]]
+    if (!is.list(entry)) {
+      next
+    }
+    control <- wsi_viewer_points_from_payload(entry$control_points %||% entry$controls)
+    sampled <- wsi_viewer_points_from_payload(entry$points %||% entry$xy)
+    rows[[i]] <- data.frame(
+      id = as.character(entry$id %||% sprintf("trajectory_%d", i)),
+      name = as.character(entry$name %||% sprintf("Trajectory %d", i)),
+      n = suppressWarnings(as.integer(entry$n %||% nrow(sampled))),
+      control_count = nrow(control),
+      point_count = nrow(sampled),
+      length_px = suppressWarnings(as.numeric(entry$length_px %||% NA_real_)),
+      created = as.character(entry$created %||% NA_character_),
+      stringsAsFactors = FALSE
+    )
+    control_points[[i]] <- control
+    points[[i]] <- sampled
+    keep[[i]] <- TRUE
+  }
+  if (!any(keep)) {
+    return(wsi_empty_trajectories())
+  }
+  out <- do.call(rbind, rows[keep])
+  out$control_points <- I(control_points[keep])
+  out$points <- I(points[keep])
+  class(out) <- c("wsi_trajectories", class(out))
+  out
+}
+
+wsi_empty_roi_summary <- function() {
+  data.frame(
+    roi_id = character(),
+    roi_name = character(),
+    roi_class = character(),
+    object_type = character(),
+    xmin = numeric(),
+    ymin = numeric(),
+    xmax = numeric(),
+    ymax = numeric(),
+    area_px2 = numeric(),
+    area_um2 = numeric(),
+    area_mm2 = numeric(),
+    percent_total_area = numeric(),
+    cell_count = integer(),
+    cells_per_px2 = numeric(),
+    cells_per_mm2 = numeric(),
+    stringsAsFactors = FALSE
+  )
+}
+
+wsi_empty_cell_summary <- function() {
+  data.frame(
+    cell_id = character(),
+    cell_name = character(),
+    cell_class = character(),
+    source = character(),
+    x = numeric(),
+    y = numeric(),
+    area_px2 = numeric(),
+    roi_id = character(),
+    roi_name = character(),
+    roi_class = character(),
+    inside_roi = logical(),
+    distance_to_roi_boundary_px = numeric(),
+    distance_to_roi_boundary_um = numeric(),
+    stringsAsFactors = FALSE
+  )
+}
+
+wsi_empty_class_summary <- function() {
+  data.frame(
+    class = character(),
+    area_px2 = numeric(),
+    roi_count = integer(),
+    percent_area = numeric(),
+    area_um2 = numeric(),
+    area_mm2 = numeric(),
+    cell_count = integer(),
+    cells_per_mm2 = numeric(),
+    cells_per_px2 = numeric(),
+    stringsAsFactors = FALSE
+  )
+}
+
+wsi_viewer_merge_ihc_roi_summary <- function(summary, ihc_summary) {
+  if (!is.data.frame(summary) || !nrow(summary) ||
+      !is.data.frame(ihc_summary) || !nrow(ihc_summary) ||
+      !"roi_id" %in% names(ihc_summary)) {
+    return(summary)
+  }
+  cols <- setdiff(names(ihc_summary), c("roi_name", "roi_class"))
+  merge(summary, ihc_summary[, cols, drop = FALSE], by = "roi_id", all.x = TRUE, sort = FALSE)
+}
+
+wsi_viewer_merge_ihc_class_summary <- function(summary, ihc_class_summary) {
+  if (!is.data.frame(summary) || !nrow(summary) ||
+      !is.data.frame(ihc_class_summary) || !nrow(ihc_class_summary) ||
+      !"class" %in% names(ihc_class_summary)) {
+    return(summary)
+  }
+  merge(summary, ihc_class_summary, by = "class", all.x = TRUE, sort = FALSE)
+}
+
+wsi_viewer_measurement_column <- function(name) {
+  name <- trimws(as.character(name %||% "measurement"))
+  if (!nzchar(name)) {
+    name <- "measurement"
+  }
+  name <- gsub("[^A-Za-z0-9]+", "_", name)
+  name <- gsub("^_+|_+$", "", name)
+  paste0("measurement_", name)
+}
+
+wsi_viewer_measurement_values <- function(measurements) {
+  if (is.null(measurements) || !length(measurements)) {
+    return(list())
+  }
+  out <- list()
+  if (!is.null(names(measurements)) && any(nzchar(names(measurements)))) {
+    for (name in names(measurements)) {
+      value <- measurements[[name]]
+      if (is.list(value) && !is.null(value$value)) {
+        value <- value$value
+      }
+      if (length(value) == 1L && !is.list(value)) {
+        out[[wsi_viewer_measurement_column(name)]] <- value
+      }
+    }
+    return(out)
+  }
+  for (entry in measurements) {
+    if (!is.list(entry)) {
+      next
+    }
+    name <- entry$name %||% entry$key %||% entry$id %||% NULL
+    value <- entry$value %||% entry$measurement %||% NULL
+    if (!is.null(name) && length(value) == 1L && !is.list(value)) {
+      out[[wsi_viewer_measurement_column(name)]] <- value
+    }
+  }
+  out
+}
+
+wsi_viewer_measurement_table <- function(measurements) {
+  n <- length(measurements %||% list())
+  if (!n) {
+    return(data.frame())
+  }
+  rows <- lapply(measurements, wsi_viewer_measurement_values)
+  cols <- unique(unlist(lapply(rows, names), use.names = FALSE))
+  if (!length(cols)) {
+    return(data.frame(row.names = seq_len(n)))
+  }
+  out <- as.data.frame(matrix(NA_real_, nrow = n, ncol = length(cols)))
+  names(out) <- cols
+  for (i in seq_along(rows)) {
+    row <- rows[[i]]
+    for (col in names(row)) {
+      value <- row[[col]]
+      out[[col]][[i]] <- suppressWarnings(as.numeric(value))
+      if (is.na(out[[col]][[i]]) && !is.na(value)) {
+        out[[col]] <- as.character(out[[col]])
+        out[[col]][[i]] <- as.character(value)
+      }
+    }
+  }
+  out
+}
+
+wsi_viewer_roi_centroid <- function(rois, index) {
+  properties <- if ("properties" %in% names(rois)) rois$properties[[index]] else list()
+  centroid <- properties$centroid %||% properties$center %||% NULL
+  if (is.list(centroid) && all(c("x", "y") %in% names(centroid))) {
+    xy <- c(as.numeric(centroid$x), as.numeric(centroid$y))
+    if (all(is.finite(xy))) {
+      return(xy)
+    }
+  }
+  c(
+    mean(c(rois$xmin[[index]], rois$xmax[[index]])),
+    mean(c(rois$ymin[[index]], rois$ymax[[index]]))
+  )
+}
+
+wsi_viewer_cell_points <- function(segmentation) {
+  if (!inherits(segmentation, "wsi_roi") || !nrow(segmentation)) {
+    return(NULL)
+  }
+  points <- t(vapply(seq_len(nrow(segmentation)), function(i) {
+    wsi_viewer_roi_centroid(segmentation, i)
+  }, numeric(2)))
+  colnames(points) <- c("x", "y")
+  points
+}
+
+wsi_viewer_source_column <- function(rois, index) {
+  props <- if ("properties" %in% names(rois)) rois$properties[[index]] else list()
+  source <- props$source %||% props$source_file %||% NA_character_
+  as.character(source %||% NA_character_)
+}
+
+wsi_viewer_is_segmentation_roi <- function(rois, index) {
+  source <- tolower(wsi_viewer_source_column(rois, index))
+  class <- tolower(as.character(if ("class" %in% names(rois)) rois$class[[index]] else ""))
+  object_type <- tolower(as.character(if ("object_type" %in% names(rois)) rois$object_type[[index]] else ""))
+  grepl("stardist|segmentation|cellpose", source) ||
+    class %in% c("cell", "cells", "nucleus", "nuclei") ||
+    object_type %in% c("detection", "cell", "nucleus")
+}
+
+wsi_viewer_annotation_rois <- function(rois) {
+  if (!inherits(rois, "wsi_roi") || !nrow(rois)) {
+    return(wsi_empty_roi())
+  }
+  keep <- !vapply(seq_len(nrow(rois)), function(i) wsi_viewer_is_segmentation_roi(rois, i), logical(1))
+  out <- rois[keep, , drop = FALSE]
+  class(out) <- unique(c("wsi_roi", class(out)))
+  out
+}
+
+wsi_viewer_cell_summary <- function(segmentation, rois = NULL, pixel_size = NULL) {
+  if (!inherits(segmentation, "wsi_roi") || !nrow(segmentation)) {
+    return(wsi_empty_cell_summary())
+  }
+  points <- wsi_viewer_cell_points(segmentation)
+  px <- wsi_pixel_size_xy(pixel_size)
+  rows <- lapply(seq_len(nrow(segmentation)), function(i) {
+    point <- points[i, ]
+    area_px2 <- tryCatch(wsi_roi_area_px(segmentation, i), error = function(err) NA_real_)
+    roi_index <- NA_integer_
+    inside <- FALSE
+    distance_px <- NA_real_
+    if (inherits(rois, "wsi_roi") && nrow(rois)) {
+      inside_hits <- which(vapply(seq_len(nrow(rois)), function(j) {
+        tryCatch(wsi_point_in_roi(point, rois, j), error = function(err) FALSE)
+      }, logical(1)))
+      if (length(inside_hits)) {
+        roi_index <- inside_hits[[1L]]
+        inside <- TRUE
+        distance_px <- tryCatch(wsi_point_roi_boundary_distance(point, rois, roi_index), error = function(err) NA_real_)
+      } else {
+        distances <- vapply(seq_len(nrow(rois)), function(j) {
+          tryCatch(wsi_point_roi_boundary_distance(point, rois, j), error = function(err) Inf)
+        }, numeric(1))
+        if (length(distances) && any(is.finite(distances))) {
+          roi_index <- which.min(distances)
+          distance_px <- distances[[roi_index]]
+        }
+      }
+    }
+    data.frame(
+      cell_id = segmentation$roi_id[[i]] %||% sprintf("cell_%d", i),
+      cell_name = segmentation$name[[i]] %||% sprintf("cell_%d", i),
+      cell_class = wsi_roi_class(segmentation$class[[i]] %||% "cell"),
+      source = wsi_viewer_source_column(segmentation, i),
+      x = point[["x"]],
+      y = point[["y"]],
+      area_px2 = area_px2,
+      roi_id = if (is.na(roi_index)) NA_character_ else rois$roi_id[[roi_index]],
+      roi_name = if (is.na(roi_index)) NA_character_ else rois$name[[roi_index]],
+      roi_class = if (is.na(roi_index)) NA_character_ else wsi_roi_class(rois$class[[roi_index]]),
+      inside_roi = inside,
+      distance_to_roi_boundary_px = distance_px,
+      distance_to_roi_boundary_um = if (is.null(px) || is.na(distance_px)) NA_real_ else distance_px * mean(px),
+      stringsAsFactors = FALSE
+    )
+  })
+  out <- do.call(rbind, rows)
+  measurement_cols <- wsi_viewer_measurement_table(segmentation$measurements %||% list())
+  if (ncol(measurement_cols)) {
+    out <- cbind(out, measurement_cols)
+  }
+  out
+}
+
+wsi_viewer_roi_summary <- function(rois, segmentation = NULL, pixel_size = NULL) {
+  if (!inherits(rois, "wsi_roi") || !nrow(rois)) {
+    return(wsi_empty_roi_summary())
+  }
+  summary <- wsi_roi_measurement_table(rois, pixel_size = pixel_size)
+  cells <- wsi_viewer_cell_points(segmentation)
+  if (!is.null(cells) && nrow(cells)) {
+    density <- measure_cell_density(as.data.frame(cells), rois, pixel_size = pixel_size)
+    summary <- merge(
+      summary,
+      density[, c("roi_id", "cell_count", "cells_per_px2", "cells_per_mm2"), drop = FALSE],
+      by = "roi_id",
+      all.x = TRUE,
+      sort = FALSE
+    )
+    summary$cell_count[is.na(summary$cell_count)] <- 0L
+  } else {
+    summary$cell_count <- 0L
+    summary$cells_per_px2 <- ifelse(summary$area_px2 > 0, 0, NA_real_)
+    summary$cells_per_mm2 <- NA_real_
+  }
+  measurement_cols <- wsi_viewer_measurement_table(rois$measurements %||% list())
+  if (ncol(measurement_cols)) {
+    summary <- cbind(summary, measurement_cols)
+  }
+  summary
+}
+
+wsi_viewer_class_summary <- function(rois, segmentation = NULL, pixel_size = NULL) {
+  if (!inherits(rois, "wsi_roi") || !nrow(rois)) {
+    return(wsi_empty_class_summary())
+  }
+  cells <- wsi_viewer_cell_points(segmentation)
+  summary <- summarise_rois(
+    rois,
+    cells = if (!is.null(cells) && nrow(cells)) as.data.frame(cells) else NULL,
+    pixel_size = pixel_size
+  )
+  if (!"cell_count" %in% names(summary)) {
+    summary$cell_count <- 0L
+    summary$cells_per_mm2 <- NA_real_
+    summary$cells_per_px2 <- ifelse(summary$area_px2 > 0, 0, NA_real_)
+  }
+  summary
+}
+
+wsi_viewer_update_measurement_tables <- function(state) {
+  if (!inherits(state, "wsi_viewer_state")) {
+    return(invisible(NULL))
+  }
+  pixel_size <- state$pixel_size %||% NULL
+  if (!is.null(pixel_size)) {
+    numeric_pixel_size <- suppressWarnings(as.numeric(unlist(pixel_size, use.names = FALSE)))
+    if (!length(numeric_pixel_size) || anyNA(numeric_pixel_size) || any(!is.finite(numeric_pixel_size))) {
+      pixel_size <- NULL
+    }
+  }
+  annotation_rois <- wsi_viewer_annotation_rois(state$rois)
+  state$cell_summary <- wsi_viewer_cell_summary(state$segmentation, annotation_rois, pixel_size = pixel_size)
+  state$roi_summary <- wsi_viewer_roi_summary(annotation_rois, state$segmentation, pixel_size = pixel_size)
+  state$class_summary <- wsi_viewer_class_summary(annotation_rois, state$segmentation, pixel_size = pixel_size)
+  state$roi_summary <- wsi_viewer_merge_ihc_roi_summary(state$roi_summary, state$ihc_summary)
+  state$class_summary <- wsi_viewer_merge_ihc_class_summary(state$class_summary, state$ihc_class_summary)
+  invisible(state)
 }
 
 wsi_measurements_from_payload <- function(measures) {
@@ -54,6 +790,62 @@ wsi_measurements_from_payload <- function(measures) {
   do.call(rbind, rows)
 }
 
+wsi_empty_annotation_history <- function() {
+  out <- data.frame(
+    id = character(),
+    time = character(),
+    action = character(),
+    label = character(),
+    stringsAsFactors = FALSE
+  )
+  out$detail <- I(list())
+  class(out) <- c("wsi_annotation_history", class(out))
+  out
+}
+
+wsi_annotation_history_from_payload <- function(history) {
+  if (is.null(history) || !length(history)) {
+    return(wsi_empty_annotation_history())
+  }
+  if (is.data.frame(history)) {
+    out <- as.data.frame(history, stringsAsFactors = FALSE)
+    for (column in c("id", "time", "action", "label")) {
+      if (!column %in% names(out)) {
+        out[[column]] <- NA_character_
+      }
+      out[[column]] <- as.character(out[[column]])
+    }
+    if (!"detail" %in% names(out)) {
+      out$detail <- I(rep(list(list()), nrow(out)))
+    } else if (!inherits(out$detail, "AsIs")) {
+      out$detail <- I(as.list(out$detail))
+    }
+    out <- out[, c("id", "time", "action", "label", "detail"), drop = FALSE]
+    class(out) <- c("wsi_annotation_history", setdiff(class(out), "wsi_annotation_history"))
+    return(out)
+  }
+  entries <- if (is.list(history)) history else as.list(history)
+  rows <- lapply(seq_along(entries), function(i) {
+    entry <- entries[[i]]
+    if (!is.list(entry)) {
+      entry <- list(label = as.character(entry))
+    }
+    data.frame(
+      id = as.character(entry$id %||% sprintf("history_%d", i)),
+      time = as.character(entry$time %||% NA_character_),
+      action = as.character(entry$action %||% "annotation_changed"),
+      label = as.character(entry$label %||% entry$action %||% "Annotation changed"),
+      stringsAsFactors = FALSE
+    )
+  })
+  out <- do.call(rbind, rows)
+  out$detail <- I(lapply(entries, function(entry) {
+    if (is.list(entry)) entry$detail %||% list() else list()
+  }))
+  class(out) <- c("wsi_annotation_history", class(out))
+  out
+}
+
 wsi_rois_from_payload <- function(geojson) {
   if (is.null(geojson)) {
     return(wsi_empty_roi())
@@ -68,6 +860,113 @@ wsi_selected_roi_from_payload <- function(feature) {
   wsi_roi_from_geojson(list(type = "FeatureCollection", features = list(feature)))
 }
 
+wsi_selected_rois_from_payload <- function(selected_rois = NULL, selected_roi = NULL) {
+  if (!is.null(selected_rois)) {
+    rois <- wsi_rois_from_payload(selected_rois)
+    if (inherits(rois, "wsi_roi") && nrow(rois)) {
+      return(rois)
+    }
+  }
+  selected <- wsi_selected_roi_from_payload(selected_roi)
+  if (inherits(selected, "wsi_roi") && nrow(selected)) {
+    return(selected)
+  }
+  wsi_empty_roi()
+}
+
+wsi_viewer_job_record <- function(job, status = NULL, message = NULL,
+                                  progress = NULL, log = NULL) {
+  meta <- tryCatch(job$metadata(), error = function(err) {
+    list(
+      id = job$id %||% NA_character_,
+      name = job$name %||% "wsiTools job",
+      pid = tryCatch(job$pid(), error = function(e) NA_integer_),
+      status = tryCatch(job$status(), error = function(e) "failed"),
+      display_status = "failed",
+      progress = NA_real_,
+      progress_available = FALSE,
+      message = conditionMessage(err),
+      started = job$started %||% NA,
+      finished = NA,
+      log = conditionMessage(err)
+    )
+  })
+  raw_status <- as.character(status %||% meta$status %||% "running")[[1L]]
+  display_status <- wsi_job_display_status(raw_status)
+  progress <- progress %||% meta$progress %||% NA_real_
+  progress <- suppressWarnings(as.numeric(progress))
+  if (identical(display_status, "completed")) {
+    progress <- 100
+  } else if (identical(display_status, "queued") && !is.finite(progress)) {
+    progress <- 0
+  }
+  log <- as.character(log %||% meta$log %||% character())
+  message <- as.character(message %||% meta$message %||% utils::tail(log[nzchar(log)], 1L) %||% "")
+  list(
+    id = as.character(meta$id %||% job$id %||% ""),
+    name = as.character(meta$name %||% job$name %||% "wsiTools job"),
+    pid = suppressWarnings(as.integer(meta$pid %||% NA_integer_)),
+    status = display_status,
+    raw_status = raw_status,
+    progress = if (is.finite(progress)) max(0, min(100, progress)) else NA_real_,
+    progress_available = isTRUE(meta$progress_available) || is.finite(progress),
+    message = message[[1L]] %||% "",
+    log = utils::tail(log, 40L),
+    started = as.character(meta$started %||% NA),
+    updated = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS%z"),
+    finished = as.character(meta$finished %||% NA)
+  )
+}
+
+wsi_viewer_jobs_table <- function(jobs) {
+  jobs <- jobs %||% list()
+  if (!length(jobs)) {
+    return(data.frame(
+      id = character(),
+      name = character(),
+      status = character(),
+      progress = numeric(),
+      message = character(),
+      updated = character(),
+      stringsAsFactors = FALSE
+    ))
+  }
+  data.frame(
+    id = vapply(jobs, function(job) as.character(job$id %||% ""), character(1)),
+    name = vapply(jobs, function(job) as.character(job$name %||% ""), character(1)),
+    status = vapply(jobs, function(job) as.character(job$status %||% ""), character(1)),
+    progress = vapply(jobs, function(job) as.numeric(job$progress %||% NA_real_), numeric(1)),
+    message = vapply(jobs, function(job) as.character(job$message %||% ""), character(1)),
+    updated = vapply(jobs, function(job) as.character(job$updated %||% ""), character(1)),
+    stringsAsFactors = FALSE
+  )
+}
+
+wsi_viewer_state_set_job <- function(state, job, status = NULL, message = NULL,
+                                     progress = NULL, log = NULL,
+                                     queue_command = TRUE) {
+  if (!inherits(state, "wsi_viewer_state") || is.null(job)) {
+    return(invisible(NULL))
+  }
+  record <- wsi_viewer_job_record(
+    job = job,
+    status = status,
+    message = message,
+    progress = progress,
+    log = log
+  )
+  if (!nzchar(record$id)) {
+    return(invisible(NULL))
+  }
+  state$jobs <- state$jobs %||% list()
+  state$jobs[[record$id]] <- record
+  if (isTRUE(queue_command)) {
+    wsi_viewer_queue_command(state, "job_update", list(job = record))
+  }
+  wsi_assign_viewer_state(state)
+  invisible(record)
+}
+
 wsi_assign_viewer_state <- function(state) {
   envir <- state$export_envir
   name <- state$export_name
@@ -77,8 +976,22 @@ wsi_assign_viewer_state <- function(state) {
   assign(name, state, envir = envir)
   assign(paste0(name, "_rois"), state$rois, envir = envir)
   assign(paste0(name, "_measurements"), state$measurements, envir = envir)
+  assign(paste0(name, "_trajectories"), state$trajectories %||% wsi_empty_trajectories(), envir = envir)
+  assign(paste0(name, "_roi_summary"), state$roi_summary, envir = envir)
+  assign(paste0(name, "_cell_summary"), state$cell_summary, envir = envir)
+  assign(paste0(name, "_class_summary"), state$class_summary, envir = envir)
+  assign(paste0(name, "_ihc_summary"), state$ihc_summary %||% wsi_empty_ihc_intensity_summary("roi"), envir = envir)
+  assign(paste0(name, "_ihc_class_summary"), state$ihc_class_summary %||% wsi_empty_ihc_intensity_summary("class"), envir = envir)
   assign(paste0(name, "_segmentation"), state$segmentation, envir = envir)
+  assign(paste0(name, "_layers"), state$layers, envir = envir)
+  assign(paste0(name, "_tile_preview"), state$tile_preview %||% wsi_empty_tile_preview(), envir = envir)
+  assign(paste0(name, "_annotations"), state$annotations, envir = envir)
+  assign(paste0(name, "_history"), state$history, envir = envir)
+  assign(paste0(name, "_autosave"), wsi_viewer_autosave_status(state), envir = envir)
+  assign(paste0(name, "_jobs"), wsi_viewer_jobs_table(state$jobs), envir = envir)
   assign(paste0(name, "_selected_roi"), state$selected_roi, envir = envir)
+  assign(paste0(name, "_selected_rois"), state$selected_rois, envir = envir)
+  assign(paste0(name, "_last_segmentation"), state$last_segmentation, envir = envir)
   assign(paste0(name, "_last_event"), state$last_payload, envir = envir)
   invisible(state)
 }
@@ -93,11 +1006,20 @@ wsi_viewer_state_apply <- function(state, payload) {
 
   state$rois <- wsi_rois_from_payload(payload$rois)
   state$measurements <- wsi_measurements_from_payload(payload$measurements)
+  state$trajectories <- wsi_trajectories_from_payload(payload$trajectories)
   state$segmentation <- wsi_rois_from_payload(payload$segmentation)
+  state$layers <- wsi_viewer_update_layers_from_payload(state$layers, payload$layers)
   state$selected_roi <- wsi_selected_roi_from_payload(payload$selected_roi)
+  state$selected_rois <- wsi_selected_rois_from_payload(payload$selected_rois, payload$selected_roi)
   state$view <- payload$view %||% list()
   state$stain <- payload$stain %||% NULL
+  state$annotations <- payload$annotations %||% list(dirty = FALSE, dirty_reason = "")
+  state$history <- wsi_annotation_history_from_payload(payload$history)
+  wsi_viewer_update_measurement_tables(state)
   state$last_event <- as.character(payload$event %||% "viewer_state")
+  if (startsWith(state$last_event, "segmentation")) {
+    state$last_segmentation <- payload$detail %||% list()
+  }
   state$last_payload <- payload
   state$last_sync <- Sys.time()
 
@@ -106,7 +1028,14 @@ wsi_viewer_state_apply <- function(state, payload) {
     time = as.character(payload$time %||% format(state$last_sync, "%Y-%m-%dT%H:%M:%OS%z")),
     roi_count = nrow(state$rois),
     measurement_count = nrow(state$measurements),
-    segmentation_count = nrow(state$segmentation)
+    trajectory_count = nrow(state$trajectories %||% wsi_empty_trajectories()),
+    segmentation_count = nrow(state$segmentation),
+    selected_roi_count = nrow(state$selected_rois),
+    roi_summary_count = nrow(state$roi_summary),
+    cell_summary_count = nrow(state$cell_summary),
+    history_count = nrow(state$history),
+    tile_preview_count = nrow(state$tile_preview %||% wsi_empty_tile_preview()),
+    layer_count = length(state$layers %||% list())
   )
   state$events[[length(state$events) + 1L]] <- event
   max_events <- state$max_events %||% 1000L
@@ -115,21 +1044,1610 @@ wsi_viewer_state_apply <- function(state, payload) {
   }
 
   wsi_assign_viewer_state(state)
+  wsi_dispatch_viewer_callbacks(state, payload)
   invisible(state)
 }
 
-wsi_viewer_state_response <- function(state) {
+wsi_viewer_state_record_event <- function(state, event, detail = list()) {
+  if (!inherits(state, "wsi_viewer_state")) {
+    return(invisible(NULL))
+  }
+  event <- as.character(event %||% "viewer_state")
+  now <- Sys.time()
+  payload <- list(
+    event = event,
+    time = format(now, "%Y-%m-%dT%H:%M:%OS%z"),
+    selected_roi = if (inherits(state$selected_roi, "wsi_roi") && nrow(state$selected_roi)) {
+      wsi_viewer_rois_to_geojson(state$selected_roi)$features[[1L]]
+    } else {
+      NULL
+    },
+    selected_rois = if (inherits(state$selected_rois, "wsi_roi") && nrow(state$selected_rois)) {
+      wsi_viewer_rois_to_geojson(state$selected_rois)
+    } else {
+      NULL
+    },
+    detail = detail %||% list()
+  )
+  state$last_event <- event
+  state$last_payload <- payload
+  state$last_sync <- now
+  wsi_viewer_update_measurement_tables(state)
+  entry <- list(
+    event = event,
+    time = payload$time,
+    roi_count = if (inherits(state$rois, "wsi_roi")) nrow(state$rois) else 0L,
+    measurement_count = if (is.data.frame(state$measurements)) nrow(state$measurements) else 0L,
+    segmentation_count = if (inherits(state$segmentation, "wsi_roi")) nrow(state$segmentation) else 0L,
+    selected_roi_count = if (inherits(state$selected_rois, "wsi_roi")) nrow(state$selected_rois) else 0L,
+    roi_summary_count = if (is.data.frame(state$roi_summary)) nrow(state$roi_summary) else 0L,
+    cell_summary_count = if (is.data.frame(state$cell_summary)) nrow(state$cell_summary) else 0L,
+    history_count = if (is.data.frame(state$history)) nrow(state$history) else 0L,
+    tile_preview_count = if (is.data.frame(state$tile_preview)) nrow(state$tile_preview) else 0L,
+    layer_count = length(state$layers %||% list())
+  )
+  if (length(detail %||% list())) {
+    entry$detail <- detail
+  }
+  state$events[[length(state$events) + 1L]] <- entry
+  max_events <- state$max_events %||% 1000L
+  if (length(state$events) > max_events) {
+    state$events <- utils::tail(state$events, max_events)
+  }
+  wsi_assign_viewer_state(state)
+  invisible(state)
+}
+
+wsi_viewer_state_set_selected_roi <- function(state, roi, event = "segmentation_requested",
+                                              detail = list()) {
+  if (!inherits(state, "wsi_viewer_state") || !inherits(roi, "wsi_roi") || !nrow(roi)) {
+    return(invisible(NULL))
+  }
+  selected <- roi[1L, , drop = FALSE]
+  class(selected) <- unique(c("wsi_roi", class(selected)))
+  state$selected_roi <- selected
+  state$selected_rois <- selected
+  wsi_viewer_state_record_event(
+    state,
+    event,
+    utils::modifyList(
+      list(roi_id = selected$roi_id[[1L]] %||% NA_character_),
+      detail %||% list(),
+      keep.null = TRUE
+    )
+  )
+}
+
+wsi_viewer_state_add_segmentation_result <- function(state, result, cell_radius = 8) {
+  if (!inherits(state, "wsi_viewer_state") || is.null(result$segmentation)) {
+    return(invisible(NULL))
+  }
+  segmentation <- tryCatch(
+    wsi_viewer_coerce_segmentation(result$segmentation, radius = cell_radius),
+    error = function(err) NULL
+  )
+  added <- 0L
+  if (inherits(segmentation, "wsi_roi") && nrow(segmentation)) {
+    state$segmentation <- wsi_viewer_bind_rois(state$segmentation, segmentation)
+    added <- nrow(segmentation)
+  }
+  wsi_viewer_update_measurement_tables(state)
+  detail <- list(
+    added = added,
+    crop = result$crop %||% result$input %||% NULL,
+    output = result$output %||% NULL,
+    slide_output = result$slide_output %||% NULL,
+    roi_id = result$roi_id %||% NULL,
+    bbox = wsi_named_numeric_list(result$bbox),
+    status = result$status %||% "complete",
+    segmentation_type = if (!is.null(result$segmentation)) class(result$segmentation)[[1L]] else NULL
+  )
+  state$last_segmentation <- detail
+  wsi_viewer_state_record_event(state, "segmentation_finished", detail)
+}
+
+wsi_viewer_state_response <- function(state, dequeue_commands = TRUE) {
+  commands <- if (isTRUE(dequeue_commands)) {
+    wsi_viewer_take_commands(state)
+  } else {
+    state$commands %||% list()
+  }
   list(
     ok = TRUE,
     event = state$last_event,
     roi_count = nrow(state$rois),
     measurement_count = nrow(state$measurements),
+    roi_summary_count = nrow(state$roi_summary),
+    cell_summary_count = nrow(state$cell_summary),
     segmentation_count = nrow(state$segmentation),
-    last_sync = as.character(state$last_sync)
+    selected_roi_count = nrow(state$selected_rois),
+    layer_count = length(state$layers %||% list()),
+    history_count = nrow(state$history),
+    tile_preview_count = nrow(state$tile_preview %||% wsi_empty_tile_preview()),
+    annotations_dirty = isTRUE((state$annotations %||% list())$dirty),
+    last_sync = as.character(state$last_sync),
+    autosave = wsi_viewer_autosave_status(state),
+    jobs = unname(state$jobs %||% list()),
+    commands = commands
   )
 }
 
-wsi_start_viewer_state_server <- function(state, host = "127.0.0.1", port = 8788,
+wsi_viewer_rois_to_geojson <- function(rois) {
+  if (!inherits(rois, "wsi_roi")) {
+    wsi_abort("`rois` must be a `wsi_roi` object.")
+  }
+  features <- lapply(seq_len(nrow(rois)), function(i) {
+    feature <- wsi_roi_feature_for_write(rois, i)
+    feature$type <- "Feature"
+    feature$id <- wsi_geojson_scalar(wsi_roi_column_value(rois, "roi_id", i), default = as.character(i))
+    feature$properties <- wsi_roi_properties_for_write(rois, i)
+    feature$geometry <- wsi_roi_geometry_for_write(rois, i)
+    feature
+  })
+  wsi_geojson_for_rois(rois, features)
+}
+
+wsi_viewer_coerce_rois <- function(rois, arg = "rois") {
+  if (inherits(rois, "wsi_roi")) {
+    return(rois)
+  }
+  if (is.character(rois) && length(rois) == 1L && !is.na(rois) && nzchar(rois)) {
+    return(read_geojson(rois))
+  }
+  if (is.list(rois) && !is.data.frame(rois)) {
+    return(wsi_roi_from_geojson(rois))
+  }
+  wsi_abort(sprintf("`%s` must be a `wsi_roi` object, GeoJSON list, or GeoJSON file path.", arg))
+}
+
+wsi_viewer_empty_like <- function(example, n) {
+  if (is.list(example) && !is.data.frame(example)) {
+    return(I(rep(list(NULL), n)))
+  }
+  if (is.logical(example)) {
+    return(rep(NA, n))
+  }
+  if (is.numeric(example) || is.integer(example)) {
+    return(rep(NA_real_, n))
+  }
+  rep(NA_character_, n)
+}
+
+wsi_viewer_bind_rois <- function(x, y) {
+  if (is.null(x) || !inherits(x, "wsi_roi") || !nrow(x)) {
+    return(y)
+  }
+  if (is.null(y) || !inherits(y, "wsi_roi") || !nrow(y)) {
+    return(x)
+  }
+  cols <- union(names(x), names(y))
+  add_missing <- function(data, template) {
+    for (col in setdiff(cols, names(data))) {
+      source <- if (col %in% names(template)) template[[col]] else character()
+      data[[col]] <- wsi_viewer_empty_like(source, nrow(data))
+    }
+    data[cols]
+  }
+  out <- rbind(
+    add_missing(as.data.frame(x), y),
+    add_missing(as.data.frame(y), x)
+  )
+  class(out) <- unique(c("wsi_roi", setdiff(class(y), "data.frame"), setdiff(class(x), "data.frame"), "data.frame"))
+  out
+}
+
+wsi_viewer_selected_tail <- function(rois) {
+  if (!inherits(rois, "wsi_roi") || !nrow(rois)) {
+    return(NULL)
+  }
+  out <- rois[nrow(rois), , drop = FALSE]
+  class(out) <- unique(c("wsi_roi", class(out)))
+  out
+}
+
+wsi_viewer_coerce_segmentation <- function(segmentation, radius = 8) {
+  if (inherits(segmentation, "wsi_roi")) {
+    return(segmentation)
+  }
+  if (is.character(segmentation) && length(segmentation) == 1L &&
+      !is.na(segmentation) && nzchar(segmentation)) {
+    return(wsi_segmentation_to_rois(import_segmentation(segmentation), radius = radius))
+  }
+  if (is.list(segmentation) && !is.data.frame(segmentation)) {
+    return(wsi_roi_from_geojson(segmentation))
+  }
+  if (is.data.frame(segmentation)) {
+    data <- segmentation
+    cols <- wsi_centroid_columns(data)
+    if (is.null(cols)) {
+      wsi_abort("Segmentation data frames must contain `x`/`y` or `centroid_x`/`centroid_y` columns.")
+    }
+    data$x <- as.numeric(data[[cols[["x"]]]])
+    data$y <- as.numeric(data[[cols[["y"]]]])
+    class(data) <- unique(c("wsi_segmentation_centroids", class(data)))
+    return(wsi_segmentation_to_rois(data, radius = radius))
+  }
+  wsi_abort("`segmentation` must be GeoJSON-like ROI data, a centroid table, or an imported segmentation object.")
+}
+
+wsi_viewer_layer_name <- function(name) {
+  if (!is.character(name) || length(name) != 1L || is.na(name) || !nzchar(trimws(name))) {
+    wsi_abort("Layer `name` must be a single non-empty string.")
+  }
+  trimws(name)
+}
+
+wsi_viewer_layer_id <- function(name) {
+  id <- tolower(gsub("[^A-Za-z0-9]+", "_", wsi_viewer_layer_name(name)))
+  id <- gsub("^_+|_+$", "", id)
+  if (!nzchar(id)) {
+    id <- sprintf("layer_%s", as.integer(Sys.time()))
+  }
+  id
+}
+
+wsi_viewer_layer_colour <- function(colour = NULL, fallback = "#38bdf8") {
+  value <- colour %||% fallback
+  if (!is.character(value) || length(value) != 1L || is.na(value) || !nzchar(value)) {
+    value <- fallback
+  }
+  ok <- tryCatch(
+    {
+      grDevices::col2rgb(value)
+      TRUE
+    },
+    error = function(err) FALSE
+  )
+  if (isTRUE(ok)) {
+    return(value)
+  }
+  fallback
+}
+
+wsi_viewer_layer_extent <- function(extent = NULL, slide = NULL, ncol = NULL, nrow = NULL) {
+  if (is.null(extent)) {
+    if (!is.null(slide) && inherits(slide, "wsi_slide")) {
+      return(list(
+        xmin = 0,
+        ymin = 0,
+        xmax = unname(as.numeric(slide$dimensions[["width"]])),
+        ymax = unname(as.numeric(slide$dimensions[["height"]]))
+      ))
+    }
+    return(list(
+      xmin = 0,
+      ymin = 0,
+      xmax = as.numeric(ncol %||% 1),
+      ymax = as.numeric(nrow %||% 1)
+    ))
+  }
+  if (!is.numeric(extent) || anyNA(extent) || !all(is.finite(extent))) {
+    wsi_abort("Layer `extent` must be numeric and finite.")
+  }
+  nm <- names(extent) %||% character()
+  if (all(c("xmin", "ymin", "xmax", "ymax") %in% nm)) {
+    value <- as.numeric(extent[c("xmin", "ymin", "xmax", "ymax")])
+    return(list(xmin = value[[1L]], ymin = value[[2L]], xmax = value[[3L]], ymax = value[[4L]]))
+  }
+  if (all(c("x", "y", "width", "height") %in% nm)) {
+    x <- as.numeric(extent[["x"]])
+    y <- as.numeric(extent[["y"]])
+    return(list(xmin = x, ymin = y, xmax = x + as.numeric(extent[["width"]]), ymax = y + as.numeric(extent[["height"]])))
+  }
+  if (length(extent) == 4L) {
+    value <- as.numeric(extent)
+    return(list(xmin = value[[1L]], ymin = value[[2L]], xmax = value[[3L]], ymax = value[[4L]]))
+  }
+  wsi_abort("Layer `extent` must contain `xmin`, `ymin`, `xmax`, `ymax` or `x`, `y`, `width`, `height`.")
+}
+
+wsi_viewer_bbox_ring <- function(xmin, ymin, xmax, ymax) {
+  list(
+    list(x = xmin, y = ymin),
+    list(x = xmax, y = ymin),
+    list(x = xmax, y = ymax),
+    list(x = xmin, y = ymax),
+    list(x = xmin, y = ymin)
+  )
+}
+
+wsi_viewer_recolour_items <- function(items, colour, fill_alpha = 0.18) {
+  override <- !is.null(colour)
+  colour <- wsi_viewer_layer_colour(colour, fallback = "#38bdf8")
+  lapply(items, function(item) {
+    if (isTRUE(override) || is.null(item$colour) || is.na(item$colour) || !nzchar(item$colour)) {
+      item$colour <- colour
+    }
+    if (isTRUE(override) || is.null(item$fill) || is.na(item$fill) || !nzchar(item$fill)) {
+      item$fill <- wsi_viewer_hex_to_rgba(item$colour, alpha = fill_alpha)
+    }
+    item
+  })
+}
+
+wsi_viewer_layer_grid_items <- function(grid, colour = NULL, fill_alpha = 0.03) {
+  needed <- c("x", "y", "width", "height")
+  if (!is.data.frame(grid) || !all(needed %in% names(grid))) {
+    wsi_abort("Tile-grid layers must be a data frame with `x`, `y`, `width`, and `height` columns.")
+  }
+  colour <- wsi_viewer_layer_colour(colour, fallback = "#facc15")
+  downsample <- if ("downsample" %in% names(grid)) as.numeric(grid$downsample) else rep(1, nrow(grid))
+  ids <- if ("tile_id" %in% names(grid)) as.character(grid$tile_id) else sprintf("tile_%05d", seq_len(nrow(grid)))
+  classes <- if ("class" %in% names(grid)) as.character(grid$class) else rep("tile", nrow(grid))
+  lapply(seq_len(nrow(grid)), function(i) {
+    x <- as.numeric(grid$x[[i]])
+    y <- as.numeric(grid$y[[i]])
+    w <- as.numeric(grid$width[[i]]) * downsample[[i]]
+    h <- as.numeric(grid$height[[i]]) * downsample[[i]]
+    ring <- wsi_viewer_bbox_ring(x, y, x + w, y + h)
+    list(
+      id = ids[[i]],
+      name = ids[[i]],
+      label = ids[[i]],
+      class = classes[[i]],
+      visible = TRUE,
+      locked = TRUE,
+      geometry_type = "Polygon",
+      source = "tile grid",
+      drawable = TRUE,
+      point_count = 4L,
+      area = w * h,
+      bbox = list(xmin = x, ymin = y, xmax = x + w, ymax = y + h),
+      colour = colour,
+      fill = wsi_viewer_hex_to_rgba(colour, alpha = fill_alpha),
+      rings = list(ring)
+    )
+  })
+}
+
+wsi_viewer_layer_points_items <- function(points, colour = NULL, radius = 6) {
+  if (!is.data.frame(points) || !all(c("x", "y") %in% names(points))) {
+    wsi_abort("Point layers must be a data frame with `x` and `y` columns.")
+  }
+  radius <- wsi_check_scalar_number(radius, "radius", allow_zero = FALSE)
+  colour <- wsi_viewer_layer_colour(colour, fallback = "#38bdf8")
+  ids <- if ("id" %in% names(points)) as.character(points$id) else sprintf("point_%05d", seq_len(nrow(points)))
+  classes <- if ("class" %in% names(points)) as.character(points$class) else rep("point", nrow(points))
+  lapply(seq_len(nrow(points)), function(i) {
+    x <- as.numeric(points$x[[i]])
+    y <- as.numeric(points$y[[i]])
+    list(
+      id = ids[[i]],
+      name = ids[[i]],
+      label = ids[[i]],
+      class = classes[[i]],
+      type = "point",
+      x = x,
+      y = y,
+      radius = radius,
+      source = "points",
+      colour = colour,
+      fill = wsi_viewer_hex_to_rgba(colour, alpha = 0.35)
+    )
+  })
+}
+
+wsi_viewer_matrix_values <- function(x, max_cells = 250000L) {
+  mat <- as.matrix(x)
+  if (!(is.numeric(mat) || is.logical(mat))) {
+    wsi_abort("Heatmap and mask layers must be numeric or logical matrices.")
+  }
+  if (length(mat) > max_cells) {
+    wsi_abort(sprintf(
+      "Layer matrix has %s cells; downsample it before adding it to the viewer, or increase `max_cells`.",
+      format(length(mat), big.mark = ",", scientific = FALSE)
+    ))
+  }
+  storage.mode(mat) <- "double"
+  list(
+    values = unname(lapply(seq_len(nrow(mat)), function(i) unname(as.numeric(mat[i, ])))),
+    nrow = nrow(mat),
+    ncol = ncol(mat),
+    min = suppressWarnings(min(mat, na.rm = TRUE)),
+    max = suppressWarnings(max(mat, na.rm = TRUE))
+  )
+}
+
+wsi_viewer_layer_payload <- function(name, data, type = c("auto", "rois", "segmentation",
+                                                         "points", "tile_grid", "heatmap",
+                                                         "mask", "image"),
+                                     slide = NULL, visible = TRUE, opacity = 1,
+                                     colour = NULL, radius = 8, extent = NULL,
+                                     replace = TRUE, max_cells = 250000L) {
+  name <- wsi_viewer_layer_name(name)
+  type <- match.arg(type)
+  if (!is.logical(visible) || length(visible) != 1L || is.na(visible)) {
+    wsi_abort("Layer `visible` must be `TRUE` or `FALSE`.")
+  }
+  opacity <- wsi_check_scalar_number(opacity, "opacity")
+  opacity <- max(0, min(1, opacity))
+  layer_colour <- wsi_viewer_layer_colour(colour, fallback = "#38bdf8")
+  id <- wsi_viewer_layer_id(name)
+
+  if (identical(type, "auto")) {
+    if (inherits(data, "wsi_tissue_mask")) {
+      type <- "mask"
+    } else if (inherits(data, "wsi_roi")) {
+      type <- "rois"
+    } else if (is.data.frame(data) && all(c("x", "y", "width", "height") %in% names(data))) {
+      type <- "tile_grid"
+    } else if (is.data.frame(data) && !is.null(wsi_centroid_columns(data))) {
+      type <- "segmentation"
+    } else if (is.matrix(data) && (is.numeric(data) || is.logical(data))) {
+      type <- "heatmap"
+    } else if (inherits(data, "raster") || (is.array(data) && length(dim(data)) >= 3L)) {
+      type <- "image"
+    } else if (is.character(data) && length(data) == 1L && nzchar(data)) {
+      ext <- tolower(tools::file_ext(data))
+      type <- if (ext %in% c("geojson", "json")) "rois" else "image"
+    } else {
+      type <- "points"
+    }
+  }
+
+  layer <- list(
+    id = id,
+    name = name,
+    type = type,
+    visible = visible,
+    opacity = opacity,
+    colour = layer_colour,
+    replace = isTRUE(replace),
+    count = 0L
+  )
+
+  if (identical(type, "rois")) {
+    rois <- wsi_viewer_coerce_rois(data, arg = "data")
+    items <- wsi_viewer_recolour_items(wsi_viewer_roi_features(rois), colour = colour, fill_alpha = 0.16)
+    layer$items <- items
+    layer$count <- length(items)
+  } else if (identical(type, "segmentation")) {
+    rois <- wsi_viewer_coerce_segmentation(data, radius = radius)
+    items <- wsi_viewer_recolour_items(wsi_viewer_roi_features(rois), colour = colour %||% "#38bdf8", fill_alpha = 0.12)
+    layer$type <- "vector"
+    layer$source_type <- "segmentation"
+    layer$items <- items
+    layer$count <- length(items)
+  } else if (identical(type, "tile_grid")) {
+    items <- wsi_viewer_layer_grid_items(data, colour = colour %||% "#facc15")
+    layer$type <- "vector"
+    layer$source_type <- "tile_grid"
+    layer$items <- items
+    layer$count <- length(items)
+  } else if (identical(type, "points")) {
+    items <- wsi_viewer_layer_points_items(data, colour = colour, radius = radius)
+    layer$type <- "vector"
+    layer$source_type <- "points"
+    layer$items <- items
+    layer$count <- length(items)
+  } else if (identical(type, "mask")) {
+    mat <- if (inherits(data, "wsi_tissue_mask")) data$mask else data
+    values <- wsi_viewer_matrix_values(mat, max_cells = max_cells)
+    if (inherits(data, "wsi_tissue_mask")) {
+      extent <- extent %||% c(
+        xmin = 0,
+        ymin = 0,
+        xmax = ncol(data$mask) * as.numeric(data$scale_x %||% 1),
+        ymax = nrow(data$mask) * as.numeric(data$scale_y %||% 1)
+      )
+    }
+    layer$type <- "heatmap"
+    layer$source_type <- "mask"
+    layer$values <- values$values
+    layer$nrow <- values$nrow
+    layer$ncol <- values$ncol
+    layer$min <- 0
+    layer$max <- 1
+    layer$extent <- wsi_viewer_layer_extent(extent, slide = slide, ncol = values$ncol, nrow = values$nrow)
+    layer$count <- values$nrow * values$ncol
+    layer$opacity <- opacity %||% 0.35
+  } else if (identical(type, "heatmap")) {
+    values <- wsi_viewer_matrix_values(data, max_cells = max_cells)
+    layer$values <- values$values
+    layer$nrow <- values$nrow
+    layer$ncol <- values$ncol
+    layer$min <- if (is.finite(values$min)) values$min else 0
+    layer$max <- if (is.finite(values$max)) values$max else 1
+    layer$extent <- wsi_viewer_layer_extent(extent, slide = slide, ncol = values$ncol, nrow = values$nrow)
+    layer$count <- values$nrow * values$ncol
+  } else if (identical(type, "image")) {
+    if (is.character(data) && length(data) == 1L) {
+      path <- wsi_validate_input_path(data)
+      ext <- tolower(tools::file_ext(path))
+      mime <- switch(ext, jpg = "image/jpeg", jpeg = "image/jpeg", gif = "image/gif",
+                     webp = "image/webp", tif = "image/tiff", tiff = "image/tiff",
+                     "image/png")
+      layer$data_uri <- wsi_image_data_uri(path, mime = mime)
+    } else if (inherits(data, "raster") || is.array(data)) {
+      layer$data_uri <- wsi_array_data_uri(data)
+    } else {
+      wsi_abort("Image layers must be image paths, rasters, or arrays.")
+    }
+    layer$extent <- wsi_viewer_layer_extent(extent, slide = slide)
+    layer$count <- 1L
+  }
+
+  structure(layer, class = c("wsi_viewer_layer", "list"))
+}
+
+wsi_viewer_layer_key <- function(layer) {
+  layer$id %||% wsi_viewer_layer_id(layer$name %||% "layer")
+}
+
+wsi_viewer_get_layer <- function(layers, key) {
+  if (is.null(key) || !length(key)) {
+    return(NULL)
+  }
+  key <- as.character(key[[1L]])
+  for (layer in layers %||% list()) {
+    if (identical(as.character(layer$id %||% ""), key) ||
+        identical(as.character(layer$name %||% ""), key)) {
+      return(layer)
+    }
+  }
+  NULL
+}
+
+wsi_viewer_set_layer <- function(layers, layer) {
+  key <- wsi_viewer_layer_key(layer)
+  layers <- layers %||% list()
+  idx <- match(key, vapply(layers, wsi_viewer_layer_key, character(1)))
+  if (is.na(idx)) {
+    layers[[length(layers) + 1L]] <- layer
+  } else {
+    layers[[idx]] <- layer
+  }
+  names(layers) <- vapply(layers, wsi_viewer_layer_key, character(1))
+  layers
+}
+
+wsi_viewer_layer_summary <- function(layers) {
+  layers <- layers %||% list()
+  if (!length(layers)) {
+    return(data.frame(id = character(), name = character(), type = character(),
+                      visible = logical(), opacity = numeric(), count = integer(),
+                      stringsAsFactors = FALSE))
+  }
+  data.frame(
+    id = vapply(layers, function(layer) as.character(layer$id %||% ""), character(1)),
+    name = vapply(layers, function(layer) as.character(layer$name %||% ""), character(1)),
+    type = vapply(layers, function(layer) as.character(layer$source_type %||% layer$type %||% ""), character(1)),
+    visible = vapply(layers, function(layer) isTRUE(layer$visible), logical(1)),
+    opacity = vapply(layers, function(layer) as.numeric(layer$opacity %||% NA_real_), numeric(1)),
+    count = vapply(layers, function(layer) as.integer(layer$count %||% 0L), integer(1)),
+    stringsAsFactors = FALSE
+  )
+}
+
+wsi_viewer_update_layers_from_payload <- function(layers, payload_layers) {
+  if (is.null(payload_layers) || !length(payload_layers)) {
+    return(layers %||% list())
+  }
+  out <- layers %||% list()
+  for (summary in payload_layers) {
+    if (!is.list(summary)) {
+      next
+    }
+    key <- summary$id %||% summary$name
+    layer <- wsi_viewer_get_layer(out, key)
+    if (is.null(layer)) {
+      next
+    }
+    if (!is.null(summary$visible)) {
+      layer$visible <- isTRUE(summary$visible)
+    }
+    if (!is.null(summary$opacity)) {
+      layer$opacity <- max(0, min(1, as.numeric(summary$opacity)))
+    }
+    out <- wsi_viewer_set_layer(out, layer)
+  }
+  out
+}
+
+wsi_viewer_session_pump <- function(session, timeout = 0L) {
+  if (inherits(session, "wsi_viewer_session") && requireNamespace("httpuv", quietly = TRUE)) {
+    try(httpuv::service(as.integer(timeout)), silent = TRUE)
+  }
+  invisible(session)
+}
+
+wsi_viewer_session_slide_input <- function(slide, require_path = FALSE) {
+  path <- slide$path %||% NULL
+  if (is.character(path) && length(path) == 1L && !is.na(path) && nzchar(path) && file.exists(path)) {
+    return(path)
+  }
+  if (isTRUE(require_path)) {
+    wsi_abort("This async operation needs a file-backed slide path.")
+  }
+  slide
+}
+
+wsi_viewer_session_selected_roi <- function(session, roi = NULL, service = TRUE) {
+  if (is.null(roi)) {
+    selected <- session$get_selected_roi(service = service)
+    if (inherits(selected, "wsi_roi") && nrow(selected)) {
+      return(selected[1L, , drop = FALSE])
+    }
+    selected <- session$get_selected_rois(service = service)
+    if (inherits(selected, "wsi_roi") && nrow(selected)) {
+      return(selected[1L, , drop = FALSE])
+    }
+    wsi_abort("Select or draw an ROI in the viewer before starting selected-ROI analysis.")
+  }
+  roi <- wsi_viewer_coerce_rois(roi)
+  if (!nrow(roi)) {
+    wsi_abort("`roi` does not contain any regions.")
+  }
+  if (nrow(roi) > 1L) {
+    wsi_warn("Multiple ROIs were supplied; using the first ROI for this operation.")
+  }
+  roi[1L, , drop = FALSE]
+}
+
+wsi_viewer_session_selected_rois <- function(session, roi = NULL, service = TRUE) {
+  if (is.null(roi)) {
+    selected <- session$get_selected_rois(service = service)
+    if (inherits(selected, "wsi_roi") && nrow(selected)) {
+      return(selected)
+    }
+    return(NULL)
+  }
+  roi <- wsi_viewer_coerce_rois(roi)
+  if (!nrow(roi)) {
+    return(NULL)
+  }
+  roi
+}
+
+wsi_viewer_session_register_job <- function(session, job) {
+  session$jobs <- session$jobs %||% list()
+  session$jobs[[job$id]] <- job
+  wsi_viewer_state_set_job(
+    session$state,
+    job,
+    status = "queued",
+    message = sprintf("%s queued.", job$name),
+    progress = 0
+  )
+  wsi_viewer_state_set_job(
+    session$state,
+    job,
+    status = "running",
+    message = sprintf("%s running.", job$name)
+  )
+  invisible(job)
+}
+
+wsi_viewer_session_jobs_table <- function(jobs) {
+  jobs <- jobs %||% list()
+  if (!length(jobs)) {
+    return(data.frame(
+      id = character(),
+      name = character(),
+      pid = integer(),
+      status = character(),
+      progress = numeric(),
+      message = character(),
+      started = as.POSIXct(character()),
+      updated = character(),
+      stringsAsFactors = FALSE
+    ))
+  }
+  meta <- lapply(jobs, function(job) {
+    tryCatch(job$metadata(), error = function(err) list(
+      id = job$id %||% "",
+      name = job$name %||% "wsiTools job",
+      pid = NA_integer_,
+      display_status = "failed",
+      progress = NA_real_,
+      message = conditionMessage(err),
+      started = job$started %||% NA,
+      updated = as.character(Sys.time())
+    ))
+  })
+  data.frame(
+    id = vapply(meta, function(x) as.character(x$id %||% ""), character(1)),
+    name = vapply(meta, function(x) as.character(x$name %||% ""), character(1)),
+    pid = vapply(meta, function(x) as.integer(x$pid %||% NA_integer_), integer(1)),
+    status = vapply(meta, function(x) as.character(x$display_status %||% wsi_job_display_status(x$status)), character(1)),
+    progress = vapply(meta, function(x) as.numeric(x$progress %||% NA_real_), numeric(1)),
+    message = vapply(meta, function(x) as.character(x$message %||% ""), character(1)),
+    started = as.POSIXct(vapply(meta, function(x) as.character(x$started %||% NA), character(1))),
+    updated = vapply(meta, function(x) as.character(x$updated %||% ""), character(1)),
+    stringsAsFactors = FALSE
+  )
+}
+
+wsi_viewer_session_record_job_failure <- function(session, job, error, event = "job_failed",
+                                                  service = TRUE) {
+  wsi_viewer_state_set_job(
+    session$state,
+    job,
+    status = "failed",
+    message = conditionMessage(error),
+    log = c(job$log(n = 40L), conditionMessage(error))
+  )
+  detail <- list(
+    job_id = job$id,
+    job_name = job$name,
+    status = "failed",
+    message = conditionMessage(error)
+  )
+  wsi_viewer_state_record_event(session$state, event, detail)
+  if (isTRUE(service)) {
+    wsi_viewer_session_pump(session, 0L)
+  }
+  invisible(detail)
+}
+
+wsi_viewer_session_add_segmentation_job_result <- function(session, result,
+                                                           cell_radius = 8,
+                                                           name = "Async StarDist",
+                                                           job = NULL,
+                                                           service = TRUE) {
+  segmentation <- NULL
+  added <- 0L
+  if (!is.null(result$segmentation)) {
+    segmentation <- tryCatch(
+      wsi_viewer_coerce_segmentation(result$segmentation, radius = cell_radius),
+      error = function(err) {
+        wsi_warn(sprintf("Could not convert async segmentation result for viewer overlay: %s", conditionMessage(err)))
+        NULL
+      }
+    )
+    if (inherits(segmentation, "wsi_roi") && nrow(segmentation)) {
+      session$state$segmentation <- wsi_viewer_bind_rois(session$state$segmentation, segmentation)
+      added <- nrow(segmentation)
+      wsi_viewer_queue_command(
+        session$state,
+        "add_segmentation",
+        list(geojson = wsi_viewer_rois_to_geojson(segmentation), name = name)
+      )
+    }
+  }
+
+  detail <- list(
+    added = added,
+    crop = result$crop %||% result$input %||% NULL,
+    output = result$output %||% NULL,
+    slide_output = result$slide_output %||% NULL,
+    roi_id = result$roi_id %||% NULL,
+    bbox = wsi_named_numeric_list(result$bbox),
+    status = result$status %||% "complete",
+    segmentation_type = if (!is.null(result$segmentation)) class(result$segmentation)[[1L]] else NULL,
+    async = TRUE
+  )
+  if (!is.null(job)) {
+    detail$job_id <- job$id
+    detail$job_name <- job$name
+  }
+  session$state$last_segmentation <- detail
+  wsi_viewer_update_measurement_tables(session$state)
+  if (!is.null(job)) {
+    wsi_viewer_state_set_job(
+      session$state,
+      job,
+      status = "finished",
+      progress = 100,
+      message = sprintf("StarDist completed; imported %s cell%s.", added, if (added == 1L) "" else "s")
+    )
+  }
+  wsi_viewer_state_record_event(session$state, "segmentation_finished", detail)
+  if (isTRUE(service)) {
+    wsi_viewer_session_pump(session, 0L)
+  }
+  invisible(detail)
+}
+
+wsi_viewer_session_record_async_result <- function(session, event, job, result,
+                                                   detail = list(), service = TRUE) {
+  wsi_viewer_state_set_job(
+    session$state,
+    job,
+    status = "finished",
+    progress = 100,
+    message = sprintf("%s completed.", job$name)
+  )
+  detail <- utils::modifyList(
+    list(
+      job_id = job$id,
+      job_name = job$name,
+      status = "complete"
+    ),
+    detail %||% list(),
+    keep.null = TRUE
+  )
+  wsi_viewer_state_record_event(session$state, event, detail)
+  if (isTRUE(service)) {
+    wsi_viewer_session_pump(session, 0L)
+  }
+  invisible(result)
+}
+
+wsi_viewer_session_collect_jobs <- function(session) {
+  jobs <- session$jobs %||% list()
+  if (!length(jobs)) {
+    return(invisible(session))
+  }
+  for (job in jobs) {
+    status <- tryCatch(job$status(), error = function(err) {
+      wsi_viewer_session_record_job_failure(session, job, err, service = FALSE)
+      "failed"
+    })
+    if (!identical(status, "failed")) {
+      wsi_viewer_state_set_job(
+        session$state,
+        job,
+        status = status,
+        queue_command = !identical(wsi_job_display_status(status), (session$state$jobs[[job$id]] %||% list())$status)
+      )
+    }
+  }
+  invisible(session)
+}
+
+wsi_viewer_session_capabilities <- function(session) {
+  slide <- session$slide
+  slide_path <- slide$path %||% NA_character_
+  file_backed <- is.character(slide_path) && length(slide_path) == 1L &&
+    !is.na(slide_path) && nzchar(slide_path) && file.exists(slide_path)
+  backend <- slide$backend %||% NA_character_
+  region_read <- file_backed && (
+    wsi_has_vips() ||
+      (identical(backend, "openslide") && wsi_command_exists("openslide-write-png"))
+  )
+  tiled_viewer <- file_backed && wsi_has_vips()
+  stardist_endpoint <- !is.null(session$stardist_server)
+  stardist_ready <- wsi_has_stardist()
+  live_bridge <- inherits(session$state, "wsi_viewer_state") && !is.null(session$url)
+  httpuv_ready <- requireNamespace("httpuv", quietly = TRUE)
+  async_ready <- wsi_has_callr()
+
+  out <- data.frame(
+    capability = c(
+      "session_api",
+      "static_viewer",
+      "live_r_sync",
+      "autosave_project",
+      "http_service",
+      "thumbnail_viewer",
+      "tiled_viewer",
+      "region_export",
+      "tile_grid",
+      "tile_preview_layer",
+      "tile_export",
+      "conversion",
+      "pyramid_export",
+      "geojson_roundtrip",
+      "annotation_editing",
+      "r_controlled_layers",
+      "measurements",
+      "async_jobs",
+      "stardist_endpoint",
+      "stardist_async"
+    ),
+    available = c(
+      TRUE,
+      TRUE,
+      live_bridge,
+      live_bridge && isTRUE((session$state$autosave %||% list())$enabled),
+      httpuv_ready,
+      TRUE,
+      tiled_viewer,
+      region_read,
+      TRUE,
+      TRUE,
+      region_read,
+      wsi_has_vips(),
+      wsi_has_vips(),
+      TRUE,
+      TRUE,
+      TRUE,
+      TRUE,
+      async_ready,
+      stardist_endpoint,
+      async_ready && region_read && stardist_ready
+    ),
+    backend = c(
+      "wsi_viewer_session",
+      "base R/html",
+      "httpuv",
+      "wsi_project",
+      "httpuv",
+      "base R/html",
+      "libvips",
+      if (wsi_has_vips()) "libvips" else "openslide-write-png",
+      "base R",
+      "base R + viewer layer",
+      if (wsi_has_vips()) "libvips" else "openslide-write-png",
+      "libvips",
+      "libvips",
+      "jsonlite",
+      "viewer JavaScript",
+      "viewer state bridge",
+      "base R",
+      "callr",
+      "httpuv + StarDist",
+      "callr + StarDist"
+    ),
+    notes = c(
+      "R methods expose get/add/list/callback/project operations.",
+      "A static HTML viewer can be written without OpenSlide, libvips, or StarDist.",
+      "Browser edits can sync back into this R session when the live bridge is running.",
+      "Live viewer state can be autosaved into a .wsiproject folder.",
+      "Local HTTP servicing for live viewer state and segmentation endpoints.",
+      "Thumbnail mode is available for mock slides and file-backed slides.",
+      "Deep Zoom tiled viewing requires a file-backed slide and libvips.",
+      "Exporting ROI crops or regions requires libvips or openslide-write-png.",
+      "Coordinate-only tile grids do not read image pixels.",
+      "Tile previews are pushed into the viewer as locked coordinate overlays before export.",
+      "Saving tile images requires region export capability.",
+      "Format conversion requires libvips.",
+      "Pyramidal TIFF/OME-TIFF export requires libvips.",
+      "QuPath-compatible GeoJSON import/export is handled in R.",
+      "Polygon drawing, brush editing, labels, colors, and manager controls are viewer-side features.",
+      "R can push ROI, segmentation, tile-grid, point, heatmap, mask, and image layers.",
+      "Distance, ROI/cell/class summaries, and density tables are kept in R data frames.",
+      "Non-blocking jobs require the suggested callr package.",
+      "The viewer's Run segmentation button is wired when a StarDist endpoint is running.",
+      "Async selected-ROI StarDist requires callr, region export, and a StarDist command."
+    ),
+    stringsAsFactors = FALSE
+  )
+  class(out) <- c("wsi_viewer_capabilities", class(out))
+  out
+}
+
+wsi_attach_viewer_session_methods <- function(session) {
+  self <- NULL
+  session$jobs <- session$jobs %||% list()
+
+  session$on <- function(event, callback, once = FALSE) {
+    if (!is.character(event) || length(event) != 1L || is.na(event) || !nzchar(event)) {
+      wsi_abort("`event` must be a single non-empty event name.")
+    }
+    if (!is.function(callback)) {
+      wsi_abort("`callback` must be a function.")
+    }
+    if (!is.logical(once) || length(once) != 1L || is.na(once)) {
+      wsi_abort("`once` must be `TRUE` or `FALSE`.")
+    }
+    self$state$callback_sequence <- as.integer(self$state$callback_sequence %||% 0L) + 1L
+    id <- sprintf("callback_%d", self$state$callback_sequence)
+    self$state$callbacks[[length(self$state$callbacks) + 1L]] <- list(
+      id = id,
+      event = event,
+      callback = callback,
+      once = once
+    )
+    invisible(id)
+  }
+  session$off <- function(event = NULL, id = NULL) {
+    callbacks <- self$state$callbacks %||% list()
+    if (!length(callbacks)) {
+      return(invisible(self))
+    }
+    keep <- rep(TRUE, length(callbacks))
+    if (!is.null(event)) {
+      if (!is.character(event) || anyNA(event) || !length(event)) {
+        wsi_abort("`event` must be `NULL` or character event name(s).")
+      }
+      keep <- keep & !vapply(callbacks, function(x) x$event %in% event, logical(1))
+    }
+    if (!is.null(id)) {
+      if (!is.character(id) || anyNA(id) || !length(id)) {
+        wsi_abort("`id` must be `NULL` or character callback id(s).")
+      }
+      keep <- keep & !vapply(callbacks, function(x) x$id %in% id, logical(1))
+    }
+    if (is.null(event) && is.null(id)) {
+      keep[] <- FALSE
+    }
+    self$state$callbacks <- callbacks[keep]
+    invisible(self)
+  }
+  session$list_callbacks <- function() {
+    callbacks <- self$state$callbacks %||% list()
+    if (!length(callbacks)) {
+      return(data.frame(id = character(), event = character(), once = logical()))
+    }
+    data.frame(
+      id = vapply(callbacks, `[[`, character(1), "id"),
+      event = vapply(callbacks, `[[`, character(1), "event"),
+      once = vapply(callbacks, function(x) isTRUE(x$once), logical(1)),
+      stringsAsFactors = FALSE
+    )
+  }
+  session$get_callback_errors <- function() {
+    self$state$callback_errors %||% list()
+  }
+  session$capabilities <- function() {
+    wsi_viewer_session_capabilities(self)
+  }
+  session$get_state <- function(service = TRUE) {
+    if (isTRUE(service) && !isTRUE(self$state$dispatching_callback)) {
+      wsi_viewer_session_pump(self, 0L)
+    }
+    wsi_viewer_state(self)
+  }
+  session$get_rois <- function(service = TRUE) {
+    session$get_state(service = service)$rois
+  }
+  session$get_selected_roi <- function(service = TRUE) {
+    session$get_state(service = service)$selected_roi
+  }
+  session$get_selected_rois <- function(service = TRUE) {
+    session$get_state(service = service)$selected_rois
+  }
+  session$get_measurements <- function(service = TRUE) {
+    session$get_state(service = service)$measurements
+  }
+  session$get_trajectories <- function(service = TRUE) {
+    session$get_state(service = service)$trajectories
+  }
+  session$get_roi_summary <- function(service = TRUE) {
+    session$get_state(service = service)$roi_summary
+  }
+  session$get_cell_summary <- function(service = TRUE) {
+    session$get_state(service = service)$cell_summary
+  }
+  session$get_class_summary <- function(service = TRUE) {
+    session$get_state(service = service)$class_summary
+  }
+  session$get_ihc_summary <- function(service = TRUE) {
+    session$get_state(service = service)$ihc_summary
+  }
+  session$get_ihc_class_summary <- function(service = TRUE) {
+    session$get_state(service = service)$ihc_class_summary
+  }
+  session$get_segmentation <- function(service = TRUE) {
+    session$get_state(service = service)$segmentation
+  }
+  session$get_layers <- function(service = TRUE) {
+    session$get_state(service = service)$layers
+  }
+  session$list_layers <- function(service = TRUE) {
+    wsi_viewer_layer_summary(session$get_layers(service = service))
+  }
+  session$get_events <- function(service = TRUE) {
+    session$get_state(service = service)$events
+  }
+  session$get_history <- function(service = TRUE) {
+    session$get_state(service = service)$history
+  }
+  session$get_tile_preview <- function(service = TRUE) {
+    session$get_state(service = service)$tile_preview
+  }
+  session$add_rois <- function(rois, name = "R session", service = TRUE) {
+    rois <- wsi_viewer_coerce_rois(rois)
+    if (!nrow(rois)) {
+      return(invisible(self))
+    }
+    self$state$rois <- wsi_viewer_bind_rois(self$state$rois, rois)
+    self$state$selected_roi <- wsi_viewer_selected_tail(self$state$rois)
+    self$state$selected_rois <- self$state$selected_roi %||% wsi_empty_roi()
+    self$state$last_event <- "r_add_rois"
+    self$state$last_sync <- Sys.time()
+    wsi_viewer_update_measurement_tables(self$state)
+    wsi_viewer_queue_command(
+      self$state,
+      "add_rois",
+      list(geojson = wsi_viewer_rois_to_geojson(rois), name = name)
+    )
+    wsi_assign_viewer_state(self$state)
+    if (isTRUE(service)) {
+      wsi_viewer_session_pump(self, 0L)
+    }
+    invisible(self)
+  }
+  session$add_segmentation <- function(cells, radius = 8, name = "R segmentation", service = TRUE) {
+    segmentation <- wsi_viewer_coerce_segmentation(cells, radius = radius)
+    if (!nrow(segmentation)) {
+      return(invisible(self))
+    }
+    self$state$segmentation <- wsi_viewer_bind_rois(self$state$segmentation, segmentation)
+    self$state$last_event <- "r_add_segmentation"
+    self$state$last_segmentation <- list(added = nrow(segmentation), source = name, status = "queued")
+    self$state$last_sync <- Sys.time()
+    wsi_viewer_update_measurement_tables(self$state)
+    wsi_viewer_queue_command(
+      self$state,
+      "add_segmentation",
+      list(geojson = wsi_viewer_rois_to_geojson(segmentation), name = name)
+    )
+    wsi_assign_viewer_state(self$state)
+    if (isTRUE(service)) {
+      wsi_viewer_session_pump(self, 0L)
+    }
+    invisible(self)
+  }
+  session$add_layer <- function(name, data, type = c("auto", "rois", "segmentation",
+                                                    "points", "tile_grid", "heatmap",
+                                                    "mask", "image"),
+                                visible = TRUE, opacity = 1, colour = NULL,
+                                radius = 8, extent = NULL, replace = TRUE,
+                                max_cells = 250000L, service = TRUE) {
+    layer <- wsi_viewer_layer_payload(
+      name = name,
+      data = data,
+      type = type,
+      slide = self$slide,
+      visible = visible,
+      opacity = opacity,
+      colour = colour,
+      radius = radius,
+      extent = extent,
+      replace = replace,
+      max_cells = max_cells
+    )
+    self$state$layers <- wsi_viewer_set_layer(self$state$layers, layer)
+    self$state$last_event <- "r_add_layer"
+    self$state$last_sync <- Sys.time()
+    wsi_viewer_queue_command(
+      self$state,
+      "add_layer",
+      list(layer = layer)
+    )
+    wsi_assign_viewer_state(self$state)
+    if (isTRUE(service)) {
+      wsi_viewer_session_pump(self, 0L)
+    }
+    invisible(self)
+  }
+  session$set_layer_visible <- function(name, visible = TRUE, service = TRUE) {
+    name <- wsi_viewer_layer_name(name)
+    if (!is.logical(visible) || length(visible) != 1L || is.na(visible)) {
+      wsi_abort("`visible` must be `TRUE` or `FALSE`.")
+    }
+    layer <- wsi_viewer_get_layer(self$state$layers, name)
+    if (is.null(layer)) {
+      wsi_abort(sprintf("Layer `%s` was not found.", name))
+    }
+    layer$visible <- visible
+    self$state$layers <- wsi_viewer_set_layer(self$state$layers, layer)
+    self$state$last_event <- "r_set_layer_visible"
+    self$state$last_sync <- Sys.time()
+    wsi_viewer_queue_command(
+      self$state,
+      "set_layer_visible",
+      list(id = layer$id, name = layer$name, visible = visible)
+    )
+    wsi_assign_viewer_state(self$state)
+    if (isTRUE(service)) {
+      wsi_viewer_session_pump(self, 0L)
+    }
+    invisible(self)
+  }
+  session$remove_layer <- function(name, service = TRUE) {
+    name <- wsi_viewer_layer_name(name)
+    layer <- wsi_viewer_get_layer(self$state$layers, name)
+    if (is.null(layer)) {
+      wsi_abort(sprintf("Layer `%s` was not found.", name))
+    }
+    keep <- !vapply(self$state$layers, function(x) {
+      identical(as.character(x$id %||% ""), as.character(layer$id %||% "")) ||
+        identical(as.character(x$name %||% ""), as.character(layer$name %||% ""))
+    }, logical(1))
+    self$state$layers <- self$state$layers[keep]
+    self$state$last_event <- "r_remove_layer"
+    self$state$last_sync <- Sys.time()
+    wsi_viewer_queue_command(
+      self$state,
+      "remove_layer",
+      list(id = layer$id, name = layer$name)
+    )
+    wsi_assign_viewer_state(self$state)
+    if (isTRUE(service)) {
+      wsi_viewer_session_pump(self, 0L)
+    }
+    invisible(self)
+  }
+  session$preview_tiles <- function(roi = NULL,
+                                    layer = TRUE,
+                                    layer_name = "Tile preview",
+                                    visible = TRUE,
+                                    colour = "#facc15",
+                                    opacity = 0.85,
+                                    service = TRUE,
+                                    ...) {
+    selected <- wsi_viewer_session_selected_rois(self, roi = roi, service = service)
+    args <- list(...)
+    args$save_images <- FALSE
+    args$output_dir <- NULL
+    if (!is.null(selected)) {
+      args$roi <- selected
+    }
+    preview <- do.call(extract_tiles, c(list(image = self$slide), args))
+    preview <- wsi_tile_preview(preview)
+    self$state$tile_preview <- preview
+    if (isTRUE(layer)) {
+      self$add_layer(
+        layer_name,
+        preview,
+        type = "tile_grid",
+        visible = visible,
+        opacity = opacity,
+        colour = colour,
+        service = FALSE
+      )
+    }
+    wsi_viewer_state_record_event(
+      self$state,
+      "tile_preview_created",
+      list(
+        tile_count = nrow(preview),
+        roi_count = if (is.null(selected)) 0L else nrow(selected),
+        layer_name = if (isTRUE(layer)) layer_name else NULL
+      )
+    )
+    if (isTRUE(service)) {
+      wsi_viewer_session_pump(self, 0L)
+    }
+    preview
+  }
+  session$clear_tile_preview <- function(layer_name = "Tile preview",
+                                         remove_layer = TRUE,
+                                         service = TRUE) {
+    self$state$tile_preview <- wsi_empty_tile_preview()
+    if (isTRUE(remove_layer)) {
+      layer <- wsi_viewer_get_layer(self$state$layers, wsi_viewer_layer_name(layer_name))
+      if (!is.null(layer)) {
+        self$remove_layer(layer$name, service = FALSE)
+      }
+    }
+    wsi_viewer_state_record_event(
+      self$state,
+      "tile_preview_cleared",
+      list(layer_name = layer_name)
+    )
+    if (isTRUE(service)) {
+      wsi_viewer_session_pump(self, 0L)
+    }
+    invisible(self)
+  }
+  session$extract_tile_preview <- function(output_dir,
+                                           format = c("png", "jpeg", "tiff"),
+                                           overwrite = FALSE,
+                                           manifest_file = NULL,
+                                           service = TRUE) {
+    format <- match.arg(format)
+    preview <- self$get_tile_preview(service = service)
+    if (!is.data.frame(preview) || !nrow(preview)) {
+      wsi_abort("No tile preview is available. Run `viewer$preview_tiles()` before exporting previewed tiles.")
+    }
+    manifest <- wsi_export_tiles(
+      self$slide,
+      preview,
+      output_dir = output_dir,
+      format = format,
+      overwrite = overwrite
+    )
+    class(manifest) <- c("wsi_tile_manifest", setdiff(class(manifest), "wsi_tile_manifest"))
+    wsi_write_tile_manifest_file(manifest, manifest_file, overwrite = overwrite)
+    wsi_viewer_state_record_event(
+      self$state,
+      "tile_preview_exported",
+      list(
+        tile_count = nrow(manifest),
+        output_dir = output_dir,
+        manifest_file = manifest_file %||% NA_character_,
+        format = format
+      )
+    )
+    if (isTRUE(service)) {
+      wsi_viewer_session_pump(self, 0L)
+    }
+    manifest
+  }
+  session$extract_preview_tiles <- session$extract_tile_preview
+  session$run_preview_tiles <- session$extract_tile_preview
+  session$measure_ihc_intensity <- function(stains,
+                                            roi = NULL,
+                                            image_origin = c(x = 0, y = 0),
+                                            dab_channel = NULL,
+                                            hematoxylin_channel = NULL,
+                                            dab_threshold = 0.1,
+                                            pixel_size = NULL,
+                                            max_pixels = 5e6,
+                                            service = TRUE) {
+    selected <- wsi_viewer_session_selected_rois(self, roi = roi, service = service)
+    if (is.null(selected)) {
+      selected <- wsi_viewer_annotation_rois(self$state$rois)
+    }
+    if (!inherits(selected, "wsi_roi") || !nrow(selected)) {
+      wsi_abort("No ROI is available for IHC measurement. Draw/select an ROI or pass `roi`.")
+    }
+    if (is.null(pixel_size)) {
+      pixel_size <- self$state$pixel_size %||% NULL
+    }
+    report <- measure_ihc_intensity(
+      stains,
+      rois = selected,
+      image_origin = image_origin,
+      dab_channel = dab_channel,
+      hematoxylin_channel = hematoxylin_channel,
+      dab_threshold = dab_threshold,
+      pixel_size = pixel_size,
+      by = "both",
+      max_pixels = max_pixels
+    )
+    self$state$ihc_summary <- report$roi_summary
+    self$state$ihc_class_summary <- report$class_summary
+    wsi_viewer_update_measurement_tables(self$state)
+    wsi_viewer_state_record_event(
+      self$state,
+      "ihc_intensity_measured",
+      list(
+        roi_count = nrow(report$roi_summary),
+        class_count = nrow(report$class_summary),
+        dab_threshold = dab_threshold
+      )
+    )
+    if (isTRUE(service)) {
+      wsi_viewer_session_pump(self, 0L)
+    }
+    report
+  }
+  session$get_jobs <- function() {
+    self$jobs %||% list()
+  }
+  session$list_jobs <- function() {
+    wsi_viewer_session_collect_jobs(self)
+    wsi_viewer_session_jobs_table(self$jobs)
+  }
+  session$get_job <- function(id) {
+    if (!is.character(id) || length(id) != 1L || is.na(id) || !nzchar(id)) {
+      wsi_abort("`id` must be a single non-empty job id.")
+    }
+    job <- (self$jobs %||% list())[[id]]
+    if (is.null(job)) {
+      wsi_abort(sprintf("Viewer job `%s` was not found.", id))
+    }
+    job
+  }
+  session$get_job_progress <- function(id = NULL, service = TRUE) {
+    if (isTRUE(service)) {
+      wsi_viewer_session_collect_jobs(self)
+    }
+    if (is.null(id)) {
+      return(wsi_viewer_jobs_table(self$state$jobs))
+    }
+    if (!is.character(id) || length(id) != 1L || is.na(id) || !nzchar(id)) {
+      wsi_abort("`id` must be `NULL` or a single non-empty job id.")
+    }
+    record <- (self$state$jobs %||% list())[[id]]
+    if (is.null(record)) {
+      wsi_abort(sprintf("Viewer job `%s` was not found.", id))
+    }
+    record
+  }
+  session$get_job_log <- function(id, n = 40L, service = TRUE) {
+    if (isTRUE(service)) {
+      wsi_viewer_session_collect_jobs(self)
+    }
+    job <- (self$jobs %||% list())[[id]]
+    if (!is.null(job)) {
+      return(job$log(n = n))
+    }
+    record <- session$get_job_progress(id = id, service = FALSE)
+    utils::tail(as.character(record$log %||% character()), as.integer(n))
+  }
+  session$run_segmentation_async <- function(roi = NULL,
+                                             output_dir = "wsi_stardist_viewer_async",
+                                             cell_radius = 8,
+                                             service = TRUE,
+                                             update_viewer = TRUE,
+                                             ...) {
+    selected <- wsi_viewer_session_selected_roi(self, roi = roi, service = service)
+    wsi_viewer_state_set_selected_roi(
+      self$state,
+      selected,
+      event = "segmentation_requested",
+      detail = list(engine = "stardist", async = TRUE)
+    )
+    job <- wsi_stardist_segment_roi_async(
+      image = wsi_viewer_session_slide_input(self$slide),
+      roi = selected,
+      output_dir = output_dir,
+      ...
+    )
+    wsi_viewer_session_register_job(self, job)
+    wsi_viewer_state_record_event(
+      self$state,
+      "segmentation_started",
+      list(job_id = job$id, job_name = job$name, roi_id = selected$roi_id[[1L]] %||% NA_character_, async = TRUE)
+    )
+    if (isTRUE(update_viewer)) {
+      job$then(function(result, job) {
+        wsi_viewer_session_add_segmentation_job_result(
+          self,
+          result,
+          cell_radius = cell_radius,
+          name = "Async StarDist",
+          job = job,
+          service = service
+        )
+      })
+    }
+    job$catch(function(error, job) {
+      wsi_viewer_session_record_job_failure(self, job, error, event = "segmentation_failed", service = service)
+    })
+    if (isTRUE(service)) {
+      wsi_viewer_session_pump(self, 0L)
+    }
+    job
+  }
+  session$run_tiles_async <- function(roi = NULL,
+                                      layer = TRUE,
+                                      layer_name = "Async tile grid",
+                                      service = TRUE,
+                                      ...) {
+    selected <- wsi_viewer_session_selected_rois(self, roi = roi, service = service)
+    args <- wsi_async_job_args(...)
+    if (!is.null(selected)) {
+      args$roi <- selected
+    }
+    job <- do.call(
+      wsi_extract_tiles_async,
+      c(list(image = wsi_viewer_session_slide_input(self$slide)), args)
+    )
+    wsi_viewer_session_register_job(self, job)
+    wsi_viewer_state_record_event(
+      self$state,
+      "tiles_started",
+      list(job_id = job$id, job_name = job$name, roi_count = if (is.null(selected)) 0L else nrow(selected), async = TRUE)
+    )
+    job$then(function(result, job) {
+      if (isTRUE(layer) && is.data.frame(result)) {
+        self$add_layer(layer_name, result, type = "tile_grid", service = FALSE)
+      }
+      wsi_viewer_session_record_async_result(
+        self,
+        "tiles_finished",
+        job,
+        result,
+        detail = list(tile_count = if (is.data.frame(result)) nrow(result) else NA_integer_, async = TRUE),
+        service = service
+      )
+    })
+    job$catch(function(error, job) {
+      wsi_viewer_session_record_job_failure(self, job, error, event = "tiles_failed", service = service)
+    })
+    if (isTRUE(service)) {
+      wsi_viewer_session_pump(self, 0L)
+    }
+    job
+  }
+  session$run_conversion_async <- function(output, input = NULL, service = TRUE, ...) {
+    input <- input %||% wsi_viewer_session_slide_input(self$slide, require_path = TRUE)
+    job <- wsi_convert_async(input = input, output = output, ...)
+    wsi_viewer_session_register_job(self, job)
+    wsi_viewer_state_record_event(
+      self$state,
+      "conversion_started",
+      list(job_id = job$id, job_name = job$name, input = input, output = output, async = TRUE)
+    )
+    job$then(function(result, job) {
+      wsi_viewer_session_record_async_result(
+        self,
+        "conversion_finished",
+        job,
+        result,
+        detail = list(input = input, output = output, async = TRUE),
+        service = service
+      )
+    })
+    job$catch(function(error, job) {
+      wsi_viewer_session_record_job_failure(self, job, error, event = "conversion_failed", service = service)
+    })
+    if (isTRUE(service)) {
+      wsi_viewer_session_pump(self, 0L)
+    }
+    job
+  }
+  session$run_pyramid_async <- function(output, input = NULL, service = TRUE, ...) {
+    input <- input %||% wsi_viewer_session_slide_input(self$slide, require_path = TRUE)
+    job <- wsi_pyramid_async(input = input, output = output, ...)
+    wsi_viewer_session_register_job(self, job)
+    wsi_viewer_state_record_event(
+      self$state,
+      "pyramid_started",
+      list(job_id = job$id, job_name = job$name, input = input, output = output, async = TRUE)
+    )
+    job$then(function(result, job) {
+      wsi_viewer_session_record_async_result(
+        self,
+        "pyramid_finished",
+        job,
+        result,
+        detail = list(input = input, output = output, async = TRUE),
+        service = service
+      )
+    })
+    job$catch(function(error, job) {
+      wsi_viewer_session_record_job_failure(self, job, error, event = "pyramid_failed", service = service)
+    })
+    if (isTRUE(service)) {
+      wsi_viewer_session_pump(self, 0L)
+    }
+    job
+  }
+  session$save_project <- function(path, ..., overwrite = FALSE, service = TRUE) {
+    project <- wsi_project(path, slide = self$slide, viewer_state = self, ..., overwrite = overwrite)
+    self$state$annotations <- list(dirty = FALSE, dirty_reason = "project_saved")
+    self$state$last_event <- "project_saved"
+    self$state$last_sync <- Sys.time()
+    wsi_viewer_queue_command(
+      self$state,
+      "annotations_saved",
+      list(reason = "project_saved", path = path)
+    )
+    wsi_assign_viewer_state(self$state)
+    if (isTRUE(service)) {
+      wsi_viewer_session_pump(self, 0L)
+    }
+    project
+  }
+  session$autosave_start <- function(path = NULL, interval = 5,
+                                     overwrite = TRUE, service = TRUE) {
+    self$state$autosave <- wsi_viewer_autosave_config(
+      autosave = TRUE,
+      path = path,
+      interval = interval,
+      overwrite = overwrite,
+      name = self$name
+    )
+    project <- wsi_viewer_autosave_save(
+      self$state,
+      slide = self$slide,
+      force = TRUE,
+      reason = "autosave_started"
+    )
+    if (isTRUE(service)) {
+      wsi_viewer_session_pump(self, 0L)
+    }
+    invisible(project %||% self)
+  }
+  session$autosave_stop <- function(service = TRUE) {
+    self$state$autosave$enabled <- FALSE
+    self$state$autosave$stopped_at <- format(Sys.time(), "%Y-%m-%dT%H:%M:%OS%z")
+    wsi_assign_viewer_state(self$state)
+    if (isTRUE(service)) {
+      wsi_viewer_session_pump(self, 0L)
+    }
+    invisible(self)
+  }
+  session$autosave_now <- function(reason = "manual_autosave", service = TRUE) {
+    project <- wsi_viewer_autosave_save(
+      self$state,
+      slide = self$slide,
+      force = TRUE,
+      reason = reason
+    )
+    if (isTRUE(service)) {
+      wsi_viewer_session_pump(self, 0L)
+    }
+    invisible(project %||% self)
+  }
+  session$autosave_status <- function() {
+    wsi_viewer_autosave_status(self$state)
+  }
+  session$service <- function(timeout = 100L) {
+    wsi_viewer_service(self, timeout = timeout)
+    wsi_viewer_session_collect_jobs(self)
+    invisible(self)
+  }
+  session$stop <- function() {
+    wsi_viewer_stop(self)
+    invisible(self)
+  }
+
+  self <- session
+  session
+}
+
+wsi_start_viewer_state_server <- function(state, slide = NULL,
+                                          host = "127.0.0.1", port = 8788,
                                           path = "/viewer-state", max_tries = 20L) {
   if (!requireNamespace("httpuv", quietly = TRUE)) {
     wsi_abort(
@@ -167,6 +2685,7 @@ wsi_start_viewer_state_server <- function(state, host = "127.0.0.1", port = 8788
         }
         payload <- jsonlite::fromJSON(body, simplifyVector = FALSE)
         wsi_viewer_state_apply(state, payload)
+        wsi_viewer_autosave_save(state, slide = slide, reason = state$last_event %||% "viewer_state")
         wsi_http_json_response(body = wsi_viewer_state_response(state))
       }, error = function(err) {
         wsi_http_json_response(status = 500L, body = list(error = conditionMessage(err)))
@@ -191,9 +2710,24 @@ wsi_start_viewer_state_server <- function(state, host = "127.0.0.1", port = 8788
 #' Opens an interactive viewer with a local HTTP bridge. Browser-side
 #' annotations, imported GeoJSON, edited ROI labels/classes, distance
 #' measurements, and segmentation overlays are posted back to the current R
-#' session. The state object is an environment, so it is updated in place as new
-#' events arrive. Set `stardist = TRUE` to also start a local selected-ROI
-#' StarDist endpoint and wire the viewer's `Start StarDist` button to it.
+#' session. ROI area, cell-density, cell, stain-measurement, and class-summary
+#' tables are refreshed as ordinary R data frames whenever ROI or segmentation
+#' state changes. The returned object is a live session with convenience methods
+#' such as `capabilities()`, `get_rois()`, `get_selected_roi()`, `get_selected_rois()`,
+#' `get_measurements()`, `get_roi_summary()`, `get_cell_summary()`, `get_class_summary()`,
+#' `get_ihc_summary()`, `get_ihc_class_summary()`, `get_segmentation()`,
+#' `get_layers()`, `get_history()`, `get_tile_preview()`,
+#' `add_rois()`, `add_segmentation()`, `measure_ihc_intensity()`,
+#' `add_layer()`, `set_layer_visible()`, `preview_tiles()`,
+#' `extract_tile_preview()`, `list_jobs()`,
+#' `run_segmentation_async()`, `run_tiles_async()`,
+#' `run_conversion_async()`, `run_pyramid_async()`, and `save_project()`.
+#' Async methods require the suggested `callr` package and return `wsi_job`
+#' objects with `status()` and `result()` methods. The state object
+#' is an environment, so it is updated in place as new events arrive. Set
+#' `stardist = TRUE` to also start a local selected-ROI StarDist endpoint, when
+#' a runnable command is available, and wire the viewer's `Run segmentation`
+#' button to it.
 #'
 #' This live bridge is optional and requires the suggested `httpuv` package.
 #' The ordinary [wsi_viewer()] remains a static HTML viewer for file-only use.
@@ -202,8 +2736,12 @@ wsi_start_viewer_state_server <- function(state, host = "127.0.0.1", port = 8788
 #' @param ... Additional arguments passed to [wsi_viewer()].
 #' @param name Name assigned in `envir` for the live state object. Companion
 #'   objects named `<name>_rois`, `<name>_measurements`,
-#'   `<name>_segmentation`, `<name>_selected_roi`, and `<name>_last_event` are
-#'   refreshed after every browser sync.
+#'   `<name>_roi_summary`, `<name>_cell_summary`, `<name>_class_summary`,
+#'   `<name>_ihc_summary`, `<name>_ihc_class_summary`,
+#'   `<name>_segmentation`, `<name>_layers`, `<name>_selected_roi`,
+#'   `<name>_selected_rois`, `<name>_history`, `<name>_tile_preview`,
+#'   `<name>_last_segmentation`, and `<name>_last_event` are refreshed after
+#'   every browser sync or R-side measurement update.
 #' @param envir Environment where live state objects are assigned.
 #' @param host,port,path Local HTTP address used for browser-to-R sync.
 #' @param max_tries Number of subsequent ports to try if `port` is busy.
@@ -211,9 +2749,18 @@ wsi_start_viewer_state_server <- function(state, host = "127.0.0.1", port = 8788
 #'   the most reliable mode for plain R sessions. Press Esc or Ctrl+C to return
 #'   to the console; synced objects remain in `envir`.
 #' @param open Whether to open the viewer with [utils::browseURL()].
-#' @param stardist If `TRUE`, start a local StarDist ROI endpoint for the
-#'   viewer's `Start StarDist` button. This requires `httpuv` and an external
-#'   StarDist command or script.
+#' @param autosave Whether to periodically save the live viewer state to a
+#'   `.wsiproject` folder. May also be a single path, equivalent to setting
+#'   `autosave = TRUE` and `autosave_path` to that value.
+#' @param autosave_path Project directory used for autosave. If `autosave =
+#'   TRUE` and this is `NULL`, a directory named
+#'   `<name>_autosave.wsiproject` is used in the working directory.
+#' @param autosave_interval Seconds between browser-to-R autosave syncs.
+#' @param autosave_overwrite Whether autosave may update an existing
+#'   `.wsiproject` index and sidecar files.
+#' @param stardist If `TRUE`, try to start a local StarDist ROI endpoint for the
+#'   viewer's `Run segmentation` button. If no StarDist command is available,
+#'   the viewer still opens and selected ROIs can be exported/imported manually.
 #' @param stardist_output_dir Directory for ROI crops and StarDist outputs.
 #' @param stardist_host,stardist_port,stardist_path,stardist_max_tries Local
 #'   address used by the StarDist ROI endpoint.
@@ -221,27 +2768,77 @@ wsi_start_viewer_state_server <- function(state, host = "127.0.0.1", port = 8788
 #'   Arguments passed through to [wsi_stardist_server()] and
 #'   [stardist_segment_roi()].
 #'
-#' @return A `wsi_viewer_session` object, invisibly.
+#' @return A `wsi_viewer_session` object, invisibly. The object keeps the
+#'   bridge fields (`url`, `html`, `state`) and provides live-session helper
+#'   methods:
+#'   `on()`, `off()`, `list_callbacks()`, `get_state()`, `get_rois()`, `get_selected_roi()`, `get_selected_rois()`,
+#'   `get_measurements()`, `get_roi_summary()`, `get_cell_summary()`,
+#'   `get_class_summary()`, `get_ihc_summary()`, `get_ihc_class_summary()`,
+#'   `get_segmentation()`, `get_layers()`, `get_history()`, `get_tile_preview()`,
+#'   `list_layers()`, `get_events()`, `add_rois()`, `add_segmentation()`,
+#'   `add_layer()`, `set_layer_visible()`, `remove_layer()`,
+#'   `measure_ihc_intensity()`,
+#'   `preview_tiles()`, `clear_tile_preview()`, `extract_tile_preview()`,
+#'   `save_project()`,
+#'   `service()`, and `stop()`.
 #' @export
 #'
 #' @examples
 #' \dontrun{
 #' slide <- wsi_open("sample.svs")
-#' session <- wsi_viewer_live(slide, mode = "tiles")
+#' session <- wsi_viewer_live(slide, mode = "tiles", wait = FALSE)
 #'
 #' # With StarDist available on PATH:
-#' session <- wsi_viewer_live(slide, mode = "tiles", stardist = TRUE)
+#' session <- wsi_viewer_live(slide, mode = "tiles", stardist = TRUE, wait = FALSE)
 #'
 #' # After drawing in the browser and stopping the live loop:
-#' wsi_viewer_live_state_rois
-#' wsi_viewer_live_state_measurements
-#' wsi_viewer_state(session)$rois
+#' session$get_rois()
+#' session$get_selected_rois()
+#' session$get_measurements()
+#' session$get_roi_summary()
+#' session$get_cell_summary()
+#' session$get_class_summary()
+#' session$get_ihc_summary()
+#' session$get_layers()
+#' session$get_history()
+#' session$save_project("case_001.wsiproject")
+#'
+#' # Autosave the viewer state every 5 seconds:
+#' session <- wsi_viewer_live(
+#'   slide,
+#'   mode = "tiles",
+#'   autosave_path = "case_001_autosave.wsiproject",
+#'   autosave_interval = 5,
+#'   wait = FALSE
+#' )
+#'
+#' # Push R-controlled overlays into the open viewer:
+#' session$add_layer("tumour ROIs", session$get_rois())
+#' session$add_layer("DAB intensity", matrix(runif(100), nrow = 10), opacity = 0.4)
+#' session$set_layer_visible("DAB intensity", TRUE)
+#'
+#' # Preview candidate tiles in the viewer before writing image files:
+#' preview <- session$preview_tiles(tile_size = 512, stride = 512)
+#' manifest <- session$extract_tile_preview("confirmed_tiles")
+#'
+#' # Register callbacks before interacting with the browser:
+#' session$on("roi_created", function(roi) print(roi))
+#' session$on("roi_selected", function(roi) {
+#'   crop <- export_roi_crop(slide, roi)
+#' })
+#' session$on("segmentation_finished", function(cells) {
+#'   print(summarise_rois(session$get_rois(), cells))
+#' })
 #' }
 wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
                                envir = parent.frame(), host = "127.0.0.1",
                                port = 8788, path = "/viewer-state",
                                max_tries = 20L, wait = interactive(),
                                open = interactive(),
+                               autosave = !is.null(autosave_path),
+                               autosave_path = NULL,
+                               autosave_interval = 5,
+                               autosave_overwrite = TRUE,
                                stardist = FALSE,
                                stardist_output_dir = "wsi_stardist_viewer",
                                stardist_host = host,
@@ -265,10 +2862,22 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   stardist_output_type <- match.arg(stardist_output_type)
   stardist_crop_format <- match.arg(stardist_crop_format)
   stardist_backend <- match.arg(stardist_backend)
+  autosave_config <- wsi_viewer_autosave_config(
+    autosave = autosave,
+    path = autosave_path,
+    interval = autosave_interval,
+    overwrite = autosave_overwrite,
+    name = name
+  )
 
   state <- wsi_new_viewer_state(name = name, envir = envir)
+  state$autosave <- autosave_config
+  state$pixel_size <- tryCatch(wsi_mpp(slide), error = function(err) NULL)
+  wsi_viewer_update_measurement_tables(state)
+  wsi_assign_viewer_state(state)
   bridge <- wsi_start_viewer_state_server(
     state = state,
+    slide = slide,
     host = host,
     port = port,
     path = path,
@@ -290,39 +2899,51 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   if (isTRUE(stardist) && is.null(dots$segmentation_run_url)) {
     command <- wsi_default_stardist_command(stardist_command)
     if (!nzchar(command) || !wsi_command_exists(command)) {
-      wsi_abort(
-        paste0(
-          "`stardist = TRUE` needs a StarDist command that R can run. ",
-          "Install StarDist, put `stardist-predict2d` on PATH, set ",
-          "`WSITOOLS_STARDIST_COMMAND`, or pass `stardist_command` and ",
-          "`stardist_args` for your Python/script setup."
-        ),
+      wsi_warn(
+        wsi_stardist_not_configured_message(command, context = "viewer"),
         class = "wsi_backend_unavailable"
       )
+    } else {
+      stardist_bridge <- tryCatch(
+        wsi_stardist_server(
+          image = slide,
+          output_dir = stardist_output_dir,
+          host = stardist_host,
+          port = stardist_port,
+          path = stardist_path,
+          max_tries = stardist_max_tries,
+          model = stardist_model,
+          command = stardist_command,
+          args = stardist_args,
+          output_type = stardist_output_type,
+          prob_thresh = stardist_prob_thresh,
+          nms_thresh = stardist_nms_thresh,
+          overwrite = stardist_overwrite,
+          level = stardist_level,
+          crop_format = stardist_crop_format,
+          backend = stardist_backend,
+          cell_radius = stardist_cell_radius,
+          state = state,
+          wait = FALSE
+        ),
+        error = function(err) {
+          wsi_warn(paste0(
+            "Could not start the StarDist segmentation endpoint: ",
+            conditionMessage(err),
+            ". The viewer will still open for ROI export/import."
+          ))
+          NULL
+        }
+      )
+      if (!is.null(stardist_bridge)) {
+        dots$segmentation_run_url <- stardist_bridge$url
+      }
     }
-    stardist_bridge <- wsi_stardist_server(
-      image = slide,
-      output_dir = stardist_output_dir,
-      host = stardist_host,
-      port = stardist_port,
-      path = stardist_path,
-      max_tries = stardist_max_tries,
-      model = stardist_model,
-      command = stardist_command,
-      args = stardist_args,
-      output_type = stardist_output_type,
-      prob_thresh = stardist_prob_thresh,
-      nms_thresh = stardist_nms_thresh,
-      overwrite = stardist_overwrite,
-      level = stardist_level,
-      crop_format = stardist_crop_format,
-      backend = stardist_backend,
-      cell_radius = stardist_cell_radius,
-      wait = FALSE
-    )
-    dots$segmentation_run_url <- stardist_bridge$url
   }
   dots$viewer_state_url <- bridge$url
+  dots$autosave_enabled <- isTRUE(state$autosave$enabled)
+  dots$autosave_interval <- state$autosave$interval %||% autosave_interval
+  dots$autosave_path <- state$autosave$path %||% NULL
   dots$open <- open
   dots$slide <- slide
   html <- do.call(wsi_viewer, dots)
@@ -332,6 +2953,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
       bridge,
       list(
         state = state,
+        slide = slide,
         html = html,
         name = name,
         envir = envir,
@@ -340,12 +2962,16 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
     ),
     class = "wsi_viewer_session"
   )
+  session <- wsi_attach_viewer_session_methods(session)
+  if (isTRUE(state$autosave$enabled)) {
+    wsi_viewer_autosave_save(state, slide = slide, force = TRUE, reason = "session_started")
+  }
   session_ready <- TRUE
 
   message("wsiTools live viewer sync listening at ", bridge$url)
   message("Browser edits update `", name, "` and companion objects in the chosen R environment.")
   if (!is.null(stardist_bridge)) {
-    message("Start StarDist is enabled for selected ROIs at ", stardist_bridge$url)
+    message("Run segmentation is enabled for selected ROIs at ", stardist_bridge$url)
   }
 
   if (isTRUE(wait)) {
@@ -357,7 +2983,10 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
       try(httpuv::stopServer(bridge$server), silent = TRUE)
     }, add = TRUE)
     tryCatch(
-      repeat httpuv::service(100),
+      repeat {
+        httpuv::service(100)
+        wsi_viewer_session_collect_jobs(session)
+      },
       interrupt = function(e) NULL
     )
   }
@@ -379,8 +3008,10 @@ wsi_viewer_stardist <- function(slide, ..., stardist = TRUE) {
 #'
 #' @param x A `wsi_viewer_session` or `wsi_viewer_state` object.
 #'
-#' @return A list containing ROIs, measurements, segmentation overlays, selected
-#'   ROI, view/stain settings, and event history.
+#' @return A list containing ROIs, distance measurements, ROI/cell/class summary
+#'   tables, trajectories, segmentation overlays, selected ROI(s), R-controlled
+#'   viewer layers, previewed tile coordinates, last segmentation run metadata,
+#'   annotation history, view/stain settings, autosave status, and event history.
 #' @export
 wsi_viewer_state <- function(x) {
   state <- if (inherits(x, "wsi_viewer_session")) {
@@ -394,11 +3025,27 @@ wsi_viewer_state <- function(x) {
   list(
     rois = state$rois,
     measurements = state$measurements,
+    trajectories = state$trajectories %||% wsi_empty_trajectories(),
+    roi_summary = state$roi_summary,
+    cell_summary = state$cell_summary,
+    class_summary = state$class_summary,
+    ihc_summary = state$ihc_summary %||% wsi_empty_ihc_intensity_summary("roi"),
+    ihc_class_summary = state$ihc_class_summary %||% wsi_empty_ihc_intensity_summary("class"),
     segmentation = state$segmentation,
+    layers = state$layers %||% list(),
+    tile_preview = state$tile_preview %||% wsi_empty_tile_preview(),
     selected_roi = state$selected_roi,
+    selected_rois = state$selected_rois,
+    last_segmentation = state$last_segmentation,
     view = state$view,
     stain = state$stain,
+    annotations = state$annotations %||% list(dirty = FALSE, dirty_reason = ""),
+    history = state$history %||% wsi_empty_annotation_history(),
+    autosave = wsi_viewer_autosave_status(state),
+    jobs = wsi_viewer_jobs_table(state$jobs),
+    job_details = state$jobs %||% list(),
     events = state$events,
+    pending_commands = state$commands %||% list(),
     last_event = state$last_event,
     last_payload = state$last_payload,
     last_sync = state$last_sync
@@ -442,9 +3089,25 @@ wsi_viewer_stop <- function(session) {
 print.wsi_viewer_state <- function(x, ...) {
   cat("<wsi_viewer_state>\n")
   cat(sprintf("  ROIs: %d\n", nrow(x$rois)))
+  cat(sprintf("  selected ROIs: %d\n", nrow(x$selected_rois)))
   cat(sprintf("  measurements: %d\n", nrow(x$measurements)))
+  cat(sprintf("  trajectories: %d\n", nrow(x$trajectories %||% wsi_empty_trajectories())))
+  cat(sprintf("  ROI summary rows: %d\n", nrow(x$roi_summary)))
+  cat(sprintf("  cell summary rows: %d\n", nrow(x$cell_summary)))
   cat(sprintf("  segmentation overlays: %d\n", nrow(x$segmentation)))
+  cat(sprintf("  layers: %d\n", length(x$layers %||% list())))
+  cat(sprintf("  tile preview: %d\n", nrow(x$tile_preview %||% wsi_empty_tile_preview())))
+  cat(sprintf("  history entries: %d\n", nrow(x$history %||% wsi_empty_annotation_history())))
   cat(sprintf("  last event: %s\n", x$last_event %||% "none"))
+  invisible(x)
+}
+
+#' @export
+print.wsi_viewer_capabilities <- function(x, ...) {
+  cat("<wsi_viewer_capabilities>\n")
+  available <- sum(as.logical(x$available), na.rm = TRUE)
+  cat(sprintf("  available: %d/%d\n", available, nrow(x)))
+  print.data.frame(x, row.names = FALSE)
   invisible(x)
 }
 
@@ -457,6 +3120,7 @@ print.wsi_viewer_session <- function(x, ...) {
   if (!is.null(x$stardist_server)) {
     cat(sprintf("  stardist: %s\n", x$stardist_server$url))
   }
+  cat("  methods: capabilities(), on(), get_rois(), get_selected_roi(), get_selected_rois(), get_measurements(), get_trajectories(), get_roi_summary(), get_cell_summary(), get_ihc_summary(), get_segmentation(), get_layers(), get_history(), get_tile_preview(), add_rois(), add_layer(), measure_ihc_intensity(), preview_tiles(), extract_tile_preview(), list_jobs(), run_segmentation_async(), run_tiles_async(), save_project(), autosave_start()\n")
   cat("  stop with: wsi_viewer_stop(x)\n")
   invisible(x)
 }
