@@ -914,6 +914,26 @@ ink$tissue_affected_percentage
 ink$component_bboxes
 ```
 
+Blur and out-of-focus regions can be scored with the variance of the
+Laplacian. `wsi_detect_blur()` works on one tile, thumbnail, or small region,
+while `wsi_focus_heatmap()` reads a tile grid one region at a time and returns
+both a numeric focus heatmap and a blurry-tile mask:
+
+```r
+focus_tile <- wsi_detect_blur(patch, threshold = 0.001)
+
+focus <- wsi_focus_heatmap(
+  slide,
+  tile_size = 512,
+  threshold = 0.001,
+  tissue_mask = tissue
+)
+
+focus$slide_focus_score
+focus$blurry_tile_fraction
+focus$heatmap
+```
+
 The interactive viewer also includes an **Artifacts** menu for quick
 viewport-level screening. It can inspect the currently rendered view for
 obvious blur, pen-like marks, folds, bubbles, or very bright/dark content and

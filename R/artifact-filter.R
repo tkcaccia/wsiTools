@@ -205,6 +205,85 @@ wsi_artifact_edge_strength <- function(gray) {
   mean(c(dx, dy), na.rm = TRUE)
 }
 
+wsi_artifact_gray <- function(tile) {
+  arr <- wsi_artifact_array(tile)
+  0.299 * arr[, , 1L] + 0.587 * arr[, , 2L] + 0.114 * arr[, , 3L]
+}
+
+wsi_focus_laplacian <- function(gray) {
+  nr <- nrow(gray)
+  nc <- ncol(gray)
+  lap <- matrix(0, nr, nc)
+  if (nr < 3L || nc < 3L) {
+    return(lap)
+  }
+  center <- gray[2:(nr - 1L), 2:(nc - 1L), drop = FALSE]
+  lap[2:(nr - 1L), 2:(nc - 1L)] <-
+    -4 * center +
+    gray[1:(nr - 2L), 2:(nc - 1L), drop = FALSE] +
+    gray[3:nr, 2:(nc - 1L), drop = FALSE] +
+    gray[2:(nr - 1L), 1:(nc - 2L), drop = FALSE] +
+    gray[2:(nr - 1L), 3:nc, drop = FALSE]
+  lap
+}
+
+wsi_focus_sobel <- function(gray) {
+  nr <- nrow(gray)
+  nc <- ncol(gray)
+  out <- matrix(0, nr, nc)
+  if (nr < 3L || nc < 3L) {
+    return(out)
+  }
+  r1 <- 1:(nr - 2L)
+  r2 <- 2:(nr - 1L)
+  r3 <- 3:nr
+  c1 <- 1:(nc - 2L)
+  c2 <- 2:(nc - 1L)
+  c3 <- 3:nc
+  gx <-
+    -gray[r1, c1, drop = FALSE] - 2 * gray[r2, c1, drop = FALSE] - gray[r3, c1, drop = FALSE] +
+    gray[r1, c3, drop = FALSE] + 2 * gray[r2, c3, drop = FALSE] + gray[r3, c3, drop = FALSE]
+  gy <-
+    -gray[r1, c1, drop = FALSE] - 2 * gray[r1, c2, drop = FALSE] - gray[r1, c3, drop = FALSE] +
+    gray[r3, c1, drop = FALSE] + 2 * gray[r3, c2, drop = FALSE] + gray[r3, c3, drop = FALSE]
+  out[r2, c2] <- sqrt(gx^2 + gy^2)
+  out
+}
+
+wsi_blur_threshold <- function(threshold, name = "threshold") {
+  threshold <- wsi_check_scalar_number(threshold, name)
+  threshold
+}
+
+wsi_focus_matrix_from_tiles <- function(tiles, value_col = "focus_score", flag_col = "focus_blurry") {
+  if (!nrow(tiles) || !all(c("row", "col", value_col, flag_col) %in% names(tiles))) {
+    return(list(heatmap = matrix(numeric(), 0, 0), blurry_tile_mask = matrix(logical(), 0, 0)))
+  }
+  rows <- suppressWarnings(as.integer(tiles$row))
+  cols <- suppressWarnings(as.integer(tiles$col))
+  if (anyNA(rows) || anyNA(cols) || any(rows < 1L) || any(cols < 1L)) {
+    return(list(heatmap = matrix(numeric(), 0, 0), blurry_tile_mask = matrix(logical(), 0, 0)))
+  }
+  heatmap <- matrix(NA_real_, nrow = max(rows), ncol = max(cols))
+  blurry <- matrix(NA, nrow = max(rows), ncol = max(cols))
+  idx <- cbind(rows, cols)
+  heatmap[idx] <- tiles[[value_col]]
+  blurry[idx] <- tiles[[flag_col]]
+  list(heatmap = heatmap, blurry_tile_mask = blurry)
+}
+
+wsi_tissue_mask_for_tile <- function(mask, x, y, width, height, downsample) {
+  if (!inherits(mask, "wsi_tissue_mask")) {
+    return(NULL)
+  }
+  mat <- mask$mask
+  x_centers <- x + (seq_len(width) - 0.5) * downsample
+  y_centers <- y + (seq_len(height) - 0.5) * downsample
+  mask_cols <- pmin(pmax(floor(x_centers / mask$scale_x) + 1L, 1L), ncol(mat))
+  mask_rows <- pmin(pmax(floor(y_centers / mask$scale_y) + 1L, 1L), nrow(mat))
+  mat[mask_rows, mask_cols, drop = FALSE]
+}
+
 wsi_pen_threshold_01 <- function(x, name) {
   x <- wsi_check_scalar_number(x, name)
   if (x > 1) {
@@ -285,6 +364,257 @@ wsi_artifact_metric_error_row <- function() {
   out$artifact_read_error <- TRUE
   out$artifact_flag <- TRUE
   out
+}
+
+#' Detect blur or out-of-focus content in a small image
+#'
+#' Computes a dependency-free focus score from a tile, thumbnail, or small
+#' region. The primary score is the variance of the Laplacian on grayscale
+#' intensities; blurry or out-of-focus images have low high-frequency content
+#' and therefore low Laplacian variance. Additional Sobel/Tenengrad and local
+#' contrast scores are returned for inspection.
+#'
+#' @param image RGB/RGBA array, raster, or magick image.
+#' @param threshold Laplacian-variance threshold below which the image is
+#'   flagged as blurry.
+#' @param tissue_mask Optional logical/numeric matrix or `wsi_tissue_mask` with
+#'   the same height and width as `image`. When supplied, focus metrics are
+#'   calculated on tissue pixels only.
+#' @param estimate_tissue If `TRUE` and `tissue_mask` is `NULL`, estimate a
+#'   simple tissue mask from `image` using [wsi_detect_tissue()].
+#' @param min_tissue_fraction Minimum fraction of tissue pixels required before
+#'   the tile is considered evaluable.
+#'
+#' @return A one-row data frame with focus scores and blur flags.
+#' @export
+#' @examples
+#' sharp <- array(rep(matrix(rep(c(0, 1), 32 * 32 / 2), nrow = 32), 3),
+#'   dim = c(32, 32, 3)
+#' )
+#' wsi_detect_blur(sharp)
+wsi_detect_blur <- function(image,
+                            threshold = 0.001,
+                            tissue_mask = NULL,
+                            estimate_tissue = FALSE,
+                            min_tissue_fraction = 0.05) {
+  arr <- wsi_artifact_array(image)
+  gray <- 0.299 * arr[, , 1L] + 0.587 * arr[, , 2L] + 0.114 * arr[, , 3L]
+  threshold <- wsi_blur_threshold(threshold)
+  min_tissue_fraction <- wsi_check_scalar_number(min_tissue_fraction, "min_tissue_fraction")
+  if (min_tissue_fraction > 1) {
+    wsi_abort("`min_tissue_fraction` must be less than or equal to 1.")
+  }
+  tissue <- wsi_pen_tissue_matrix(tissue_mask, arr, estimate_tissue)
+  eval_mask <- if (is.null(tissue)) matrix(TRUE, nrow(gray), ncol(gray)) else tissue
+  tissue_fraction <- if (is.null(tissue)) NA_real_ else mean(tissue, na.rm = TRUE)
+  evaluable <- sum(eval_mask, na.rm = TRUE) > 0L &&
+    (is.na(tissue_fraction) || tissue_fraction >= min_tissue_fraction)
+
+  laplacian <- wsi_focus_laplacian(gray)
+  sobel <- wsi_focus_sobel(gray)
+  values <- laplacian[eval_mask]
+  sobel_values <- sobel[eval_mask]
+  gray_values <- gray[eval_mask]
+  laplacian_variance <- if (isTRUE(evaluable) && length(values) > 1L) stats::var(as.vector(values), na.rm = TRUE) else NA_real_
+  sobel_mean <- if (isTRUE(evaluable) && length(sobel_values)) mean(sobel_values, na.rm = TRUE) else NA_real_
+  tenengrad_score <- if (isTRUE(evaluable) && length(sobel_values)) mean(sobel_values^2, na.rm = TRUE) else NA_real_
+  local_contrast <- if (isTRUE(evaluable) && length(gray_values) > 1L) stats::sd(as.vector(gray_values), na.rm = TRUE) else NA_real_
+  if (!is.finite(laplacian_variance)) {
+    laplacian_variance <- NA_real_
+  }
+  if (!is.finite(sobel_mean)) {
+    sobel_mean <- NA_real_
+  }
+  if (!is.finite(tenengrad_score)) {
+    tenengrad_score <- NA_real_
+  }
+  if (!is.finite(local_contrast)) {
+    local_contrast <- NA_real_
+  }
+  blurry <- if (isTRUE(evaluable) && is.finite(laplacian_variance)) laplacian_variance <= threshold else NA
+
+  data.frame(
+    focus_width = as.integer(ncol(gray)),
+    focus_height = as.integer(nrow(gray)),
+    focus_score = laplacian_variance,
+    laplacian_variance = laplacian_variance,
+    sobel_mean = sobel_mean,
+    tenengrad_score = tenengrad_score,
+    local_contrast = local_contrast,
+    focus_threshold = threshold,
+    focus_tissue_fraction = tissue_fraction,
+    focus_evaluable = isTRUE(evaluable),
+    focus_blurry = blurry,
+    stringsAsFactors = FALSE
+  )
+}
+
+#' Build a tiled focus heatmap for a slide
+#'
+#' Reads the requested grid one tile at a time, computes [wsi_detect_blur()] for
+#' each tile, and returns tile-level focus metrics plus matrix views of the
+#' focus score and blurry-tile mask. This never loads the whole slide into R
+#' memory.
+#'
+#' @param slide A `wsi_slide` object.
+#' @param grid Optional tile grid. If `NULL`, one is created with
+#'   [wsi_tile_grid()].
+#' @param tile_size,overlap,level,region,include_partial Arguments used when
+#'   `grid = NULL`.
+#' @param threshold Laplacian-variance threshold below which a tile is flagged
+#'   as blurry.
+#' @param tissue_mask Optional `wsi_tissue_mask` or tile-sized mask input used
+#'   by [wsi_detect_blur()]. For slide-level heatmaps, pass a `wsi_tissue_mask`;
+#'   tile-sized tissue masks are sampled from it before scoring each tile.
+#' @param min_tissue_fraction Minimum tile tissue fraction required before a
+#'   tile is considered evaluable.
+#'
+#' @return A `wsi_focus_heatmap` object with `tiles`, `heatmap`,
+#'   `blurry_tile_mask`, `slide_focus_score`, and `blurry_tile_fraction`.
+#' @export
+#' @examples
+#' slide <- wsiTools:::wsi_mock_slide(width = 256, height = 256)
+#' focus <- wsi_focus_heatmap(slide, tile_size = 128, threshold = 0.001)
+wsi_focus_heatmap <- function(slide,
+                              grid = NULL,
+                              tile_size = 512,
+                              overlap = 0,
+                              level = 0,
+                              region = NULL,
+                              include_partial = FALSE,
+                              threshold = 0.001,
+                              tissue_mask = NULL,
+                              min_tissue_fraction = 0.05) {
+  wsi_check_slide(slide)
+  threshold <- wsi_blur_threshold(threshold)
+  min_tissue_fraction <- wsi_check_scalar_number(min_tissue_fraction, "min_tissue_fraction")
+  if (min_tissue_fraction > 1) {
+    wsi_abort("`min_tissue_fraction` must be less than or equal to 1.")
+  }
+  if (is.null(grid)) {
+    grid <- wsi_tile_grid(
+      slide,
+      tile_size = tile_size,
+      overlap = overlap,
+      level = level,
+      region = region,
+      tissue_mask = if (inherits(tissue_mask, "wsi_tissue_mask")) tissue_mask else NULL,
+      include_partial = include_partial
+    )
+  }
+  needed <- c("x", "y", "width", "height")
+  if (!is.data.frame(grid) || !all(needed %in% names(grid))) {
+    wsi_abort("`grid` must be a data frame with `x`, `y`, `width`, and `height` columns.")
+  }
+  if (!"level" %in% names(grid)) {
+    grid$level <- level
+  }
+
+  rows <- vector("list", nrow(grid))
+  read_errors <- character()
+  for (i in seq_len(nrow(grid))) {
+    rows[[i]] <- tryCatch(
+      {
+        tile <- wsi_read_region(
+          slide,
+          x = grid$x[[i]],
+          y = grid$y[[i]],
+          width = grid$width[[i]],
+          height = grid$height[[i]],
+          level = grid$level[[i]],
+          format = "array"
+        )
+        downsample <- if ("downsample" %in% names(grid)) grid$downsample[[i]] else wsi_level_row(slide, grid$level[[i]])$downsample[[1L]]
+        tile_tissue_mask <- NULL
+        estimate_tissue <- FALSE
+        tile_tissue_fraction <- if ("tissue_fraction" %in% names(grid)) grid$tissue_fraction[[i]] else NA_real_
+        if (inherits(tissue_mask, "wsi_tissue_mask")) {
+          tile_tissue_mask <- wsi_tissue_mask_for_tile(
+            tissue_mask,
+            x = grid$x[[i]],
+            y = grid$y[[i]],
+            width = grid$width[[i]],
+            height = grid$height[[i]],
+            downsample = downsample
+          )
+          tile_tissue_fraction <- mean(tile_tissue_mask, na.rm = TRUE)
+          estimate_tissue <- FALSE
+        } else if (!is.null(tissue_mask)) {
+          tile_tissue_mask <- tissue_mask
+        }
+        metrics <- wsi_detect_blur(
+          tile,
+          threshold = threshold,
+          tissue_mask = tile_tissue_mask,
+          estimate_tissue = estimate_tissue,
+          min_tissue_fraction = min_tissue_fraction
+        )
+        metrics$focus_tissue_fraction <- tile_tissue_fraction %||% metrics$focus_tissue_fraction
+        metrics$focus_read_error <- FALSE
+        metrics
+      },
+      error = function(err) {
+        tile_label <- if ("tile_id" %in% names(grid)) grid$tile_id[[i]] else i
+        read_errors <<- c(read_errors, sprintf("%s: %s", tile_label %||% i, conditionMessage(err)))
+        data.frame(
+          focus_width = NA_integer_,
+          focus_height = NA_integer_,
+          focus_score = NA_real_,
+          laplacian_variance = NA_real_,
+          sobel_mean = NA_real_,
+          tenengrad_score = NA_real_,
+          local_contrast = NA_real_,
+          focus_threshold = threshold,
+          focus_tissue_fraction = if ("tissue_fraction" %in% names(grid)) grid$tissue_fraction[[i]] else NA_real_,
+          focus_evaluable = FALSE,
+          focus_blurry = NA,
+          focus_read_error = TRUE,
+          stringsAsFactors = FALSE
+        )
+      }
+    )
+  }
+  if (length(read_errors)) {
+    wsi_warn(sprintf(
+      "Focus heatmap could not read %s tile%s; those rows have `focus_read_error = TRUE`.",
+      length(read_errors),
+      if (length(read_errors) == 1L) "" else "s"
+    ))
+  }
+  metrics <- if (length(rows)) do.call(rbind, rows) else data.frame(
+    focus_width = integer(),
+    focus_height = integer(),
+    focus_score = numeric(),
+    laplacian_variance = numeric(),
+    sobel_mean = numeric(),
+    tenengrad_score = numeric(),
+    local_contrast = numeric(),
+    focus_threshold = numeric(),
+    focus_tissue_fraction = numeric(),
+    focus_evaluable = logical(),
+    focus_blurry = logical(),
+    focus_read_error = logical(),
+    stringsAsFactors = FALSE
+  )
+  out_tiles <- cbind(grid, metrics)
+  matrices <- wsi_focus_matrix_from_tiles(out_tiles)
+  evaluable <- out_tiles$focus_evaluable %in% TRUE & is.finite(out_tiles$focus_score)
+  slide_focus_score <- if (any(evaluable)) stats::median(out_tiles$focus_score[evaluable], na.rm = TRUE) else NA_real_
+  blurry_values <- out_tiles$focus_blurry
+  blurry_tile_fraction <- if (any(!is.na(blurry_values))) mean(blurry_values %in% TRUE, na.rm = TRUE) else NA_real_
+
+  structure(
+    list(
+      tiles = out_tiles,
+      heatmap = matrices$heatmap,
+      blurry_tile_mask = matrices$blurry_tile_mask,
+      slide_focus_score = slide_focus_score,
+      blurry_tile_fraction = blurry_tile_fraction,
+      threshold = threshold,
+      min_tissue_fraction = min_tissue_fraction
+    ),
+    class = "wsi_focus_heatmap"
+  )
 }
 
 #' Detect pen marks and ink-like artifacts in a small image

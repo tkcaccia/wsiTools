@@ -66,6 +66,48 @@ test_that("pen mark detector separates red, green, and black ink-like regions", 
   expect_true(all(marks$mask[5:60, 50:53]))
 })
 
+test_that("blur detector separates sharp from flat images", {
+  edge <- matrix(0, nrow = 64, ncol = 64)
+  edge[, 33:64] <- 1
+  sharp <- array(rep(edge, 3), dim = c(64, 64, 3))
+  flat <- array(0.5, dim = c(64, 64, 3))
+
+  sharp_focus <- wsi_detect_blur(sharp, threshold = 0.001)
+  flat_focus <- wsi_detect_blur(flat, threshold = 0.001)
+
+  expect_false(sharp_focus$focus_blurry)
+  expect_true(flat_focus$focus_blurry)
+  expect_gt(sharp_focus$focus_score, flat_focus$focus_score)
+  expect_gt(sharp_focus$tenengrad_score, flat_focus$tenengrad_score)
+})
+
+test_that("blur detector can skip tiles with too little tissue", {
+  checker <- matrix(rep(c(0, 1), 32 * 32 / 2), nrow = 32)
+  sharp <- array(rep(checker, 3), dim = c(32, 32, 3))
+  tissue <- matrix(FALSE, 32, 32)
+  tissue[1, 1] <- TRUE
+
+  focus <- wsi_detect_blur(sharp, tissue_mask = tissue, min_tissue_fraction = 0.1)
+
+  expect_false(focus$focus_evaluable)
+  expect_equal(focus$focus_tissue_fraction, 1 / (32 * 32))
+  expect_true(is.na(focus$focus_blurry))
+})
+
+test_that("focus heatmap reads tiles and returns heatmap matrices", {
+  slide <- wsiTools:::wsi_mock_slide(width = 256, height = 256, levels = c(1))
+
+  focus <- wsi_focus_heatmap(slide, tile_size = 128, threshold = 0.001)
+
+  expect_s3_class(focus, "wsi_focus_heatmap")
+  expect_equal(nrow(focus$tiles), 4)
+  expect_equal(dim(focus$heatmap), c(2, 2))
+  expect_equal(dim(focus$blurry_tile_mask), c(2, 2))
+  expect_equal(focus$slide_focus_score, 0)
+  expect_equal(focus$blurry_tile_fraction, 1)
+  expect_true(all(focus$blurry_tile_mask))
+})
+
 test_that("artifact detection distinguishes textured tiles from blur", {
   checker <- matrix(rep(c(0, 1), 32 * 32 / 2), nrow = 32)
   checker <- array(rep(checker, 3), dim = c(32, 32, 3))
