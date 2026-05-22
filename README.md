@@ -879,6 +879,13 @@ manifest <- extract_tiles(
 clean_tiles <- subset(manifest, !artifact_flag & !whitespace_flag)
 ```
 
+The interactive viewer also includes an **Artifacts** menu for quick
+viewport-level screening. It can inspect the currently rendered view for
+obvious blur, pen-like marks, folds, bubbles, or very bright/dark content and
+optionally create an `artefact` ROI. This is intended for manual QC while
+viewing; reproducible ML tile export should still use `artifact_filter = TRUE`
+in the tile manifest workflow.
+
 Whitespace/background labelling is separate from artifact detection. It adds
 manifest columns such as `whitespace_fraction`, `whitespace_flag`,
 `background_fraction`, and `background_flag` using a simple bright,
