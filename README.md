@@ -934,6 +934,28 @@ focus$blurry_tile_fraction
 focus$heatmap
 ```
 
+Basic stain-quality screening uses tissue-region colour statistics:
+saturation, brightness, mean RGB, and RGB optical density. `wsi_detect_stain_quality()`
+returns a staining score plus low-stain and over-stain masks. The slide-level
+helper reads one tile at a time and returns heatmaps suitable for QC review:
+
+```r
+stain_tile <- wsi_detect_stain_quality(patch, tissue_mask = patch_tissue)
+
+stain <- wsi_stain_quality_heatmap(
+  slide,
+  tile_size = 512,
+  tissue_mask = tissue,
+  low_saturation_threshold = 0.08,
+  high_brightness_threshold = 0.88
+)
+
+stain$slide_staining_score
+stain$low_stain_tile_fraction
+stain$over_stain_tile_fraction
+stain$stain_score_heatmap
+```
+
 The interactive viewer also includes an **Artifacts** menu for quick
 viewport-level screening. It can inspect the currently rendered view for
 obvious blur, pen-like marks, folds, bubbles, or very bright/dark content and

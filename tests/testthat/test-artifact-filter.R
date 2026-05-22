@@ -108,6 +108,50 @@ test_that("focus heatmap reads tiles and returns heatmap matrices", {
   expect_true(all(focus$blurry_tile_mask))
 })
 
+test_that("stain quality detector flags low and excessive staining", {
+  tissue <- matrix(TRUE, 32, 32)
+  low <- array(0.95, dim = c(32, 32, 3))
+  over <- array(0.04, dim = c(32, 32, 3))
+  good <- array(1, dim = c(32, 32, 3))
+  good[, , 1] <- 0.78
+  good[, , 2] <- 0.55
+  good[, , 3] <- 0.74
+
+  low_qc <- wsi_detect_stain_quality(low, tissue_mask = tissue, min_area = 1)
+  over_qc <- wsi_detect_stain_quality(over, tissue_mask = tissue, min_area = 1)
+  good_qc <- wsi_detect_stain_quality(good, tissue_mask = tissue, min_area = 1)
+
+  expect_s3_class(low_qc, "wsi_stain_quality")
+  expect_true(low_qc$low_stain)
+  expect_false(low_qc$over_stained)
+  expect_equal(low_qc$low_stain_percentage, 100)
+  expect_gt(nrow(low_qc$low_stain_regions), 0)
+  expect_true(over_qc$over_stained)
+  expect_false(over_qc$low_stain)
+  expect_equal(over_qc$over_stain_percentage, 100)
+  expect_gt(nrow(over_qc$over_stain_regions), 0)
+  expect_false(good_qc$low_stain)
+  expect_false(good_qc$over_stained)
+  expect_gt(good_qc$staining_score, low_qc$staining_score)
+  expect_gt(good_qc$staining_score, over_qc$staining_score)
+})
+
+test_that("stain quality heatmap reads tiles and returns score matrices", {
+  slide <- wsiTools:::wsi_mock_slide(width = 256, height = 256, levels = c(1))
+
+  stain <- wsi_stain_quality_heatmap(slide, tile_size = 128, min_area = 1)
+
+  expect_s3_class(stain, "wsi_stain_quality_heatmap")
+  expect_equal(nrow(stain$tiles), 4)
+  expect_equal(dim(stain$stain_score_heatmap), c(2, 2))
+  expect_equal(dim(stain$low_stain_tile_mask), c(2, 2))
+  expect_equal(dim(stain$over_stain_tile_mask), c(2, 2))
+  expect_equal(stain$slide_staining_score, 0)
+  expect_equal(stain$low_stain_tile_fraction, 1)
+  expect_equal(stain$over_stain_tile_fraction, 0)
+  expect_true(all(stain$low_stain_tile_mask))
+})
+
 test_that("artifact detection distinguishes textured tiles from blur", {
   checker <- matrix(rep(c(0, 1), 32 * 32 / 2), nrow = 32)
   checker <- array(rep(checker, 3), dim = c(32, 32, 3))

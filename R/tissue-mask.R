@@ -24,7 +24,8 @@ wsi_tissue_rgb_metrics <- function(image) {
   hsv <- grDevices::rgb2hsv(
     r = as.vector(rgb[, , 1L]),
     g = as.vector(rgb[, , 2L]),
-    b = as.vector(rgb[, , 3L])
+    b = as.vector(rgb[, , 3L]),
+    maxColorValue = 1
   )
   list(
     saturation = matrix(hsv["s", ], nrow = dims[[1L]], ncol = dims[[2L]]),

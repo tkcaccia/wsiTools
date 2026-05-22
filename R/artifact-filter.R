@@ -272,6 +272,25 @@ wsi_focus_matrix_from_tiles <- function(tiles, value_col = "focus_score", flag_c
   list(heatmap = heatmap, blurry_tile_mask = blurry)
 }
 
+wsi_matrix_from_tile_values <- function(tiles, value_col) {
+  if (!nrow(tiles) || !all(c("row", "col", value_col) %in% names(tiles))) {
+    return(matrix(numeric(), 0, 0))
+  }
+  rows <- suppressWarnings(as.integer(tiles$row))
+  cols <- suppressWarnings(as.integer(tiles$col))
+  if (anyNA(rows) || anyNA(cols) || any(rows < 1L) || any(cols < 1L)) {
+    return(matrix(numeric(), 0, 0))
+  }
+  values <- tiles[[value_col]]
+  out <- if (is.logical(values)) {
+    matrix(NA, nrow = max(rows), ncol = max(cols))
+  } else {
+    matrix(NA_real_, nrow = max(rows), ncol = max(cols))
+  }
+  out[cbind(rows, cols)] <- tiles[[value_col]]
+  out
+}
+
 wsi_tissue_mask_for_tile <- function(mask, x, y, width, height, downsample) {
   if (!inherits(mask, "wsi_tissue_mask")) {
     return(NULL)
@@ -282,6 +301,34 @@ wsi_tissue_mask_for_tile <- function(mask, x, y, width, height, downsample) {
   mask_cols <- pmin(pmax(floor(x_centers / mask$scale_x) + 1L, 1L), ncol(mat))
   mask_rows <- pmin(pmax(floor(y_centers / mask$scale_y) + 1L, 1L), nrow(mat))
   mat[mask_rows, mask_cols, drop = FALSE]
+}
+
+wsi_stain_threshold_01 <- function(x, name) {
+  x <- wsi_check_scalar_number(x, name)
+  if (x > 1) {
+    wsi_abort(sprintf("`%s` must be less than or equal to 1.", name))
+  }
+  x
+}
+
+wsi_stain_component_bboxes <- function(mask, min_area) {
+  filtered <- wsi_pen_mask_from_components(mask, min_area = min_area)
+  list(
+    mask = filtered$mask,
+    bboxes = wsi_tissue_component_bboxes(
+      filtered$components,
+      scale = c(x = 1, y = 1),
+      origin = c(x = 0, y = 0)
+    )
+  )
+}
+
+wsi_stain_fraction <- function(mask, denominator) {
+  denom <- sum(denominator, na.rm = TRUE)
+  if (!denom) {
+    return(NA_real_)
+  }
+  sum(mask & denominator, na.rm = TRUE) / denom
 }
 
 wsi_pen_threshold_01 <- function(x, name) {
@@ -364,6 +411,349 @@ wsi_artifact_metric_error_row <- function() {
   out$artifact_read_error <- TRUE
   out$artifact_flag <- TRUE
   out
+}
+
+#' Detect poor or excessive staining in a small image
+#'
+#' Computes basic stain-quality metrics from a thumbnail, tile, or small region.
+#' The detector uses transparent colour statistics: HSV saturation and
+#' brightness, RGB optical density, and rule-based low-stain / over-stain masks.
+#' It is intended for QC screening and tile manifests; robust diagnostic stain
+#' assessment still requires assay- and laboratory-specific validation.
+#'
+#' @param image RGB/RGBA array, raster, or magick image.
+#' @param tissue_mask Optional logical/numeric matrix or `wsi_tissue_mask` with
+#'   the same height and width as `image`. When supplied, all metrics and masks
+#'   are calculated inside tissue pixels only.
+#' @param estimate_tissue If `TRUE` and `tissue_mask` is `NULL`, estimate a
+#'   simple tissue mask from `image` using [wsi_detect_tissue()]. For very pale
+#'   poorly stained images, pass an external tissue mask when possible.
+#' @param low_saturation_threshold Minimum acceptable HSV saturation.
+#' @param high_brightness_threshold Brightness above which pixels are considered
+#'   weakly stained or washed out.
+#' @param low_od_threshold Optical-density sum below which pixels are considered
+#'   weakly stained.
+#' @param high_od_threshold Optical-density sum above which pixels are
+#'   considered over-stained.
+#' @param low_brightness_threshold Brightness below which pixels contribute to
+#'   the over-stain mask.
+#' @param low_fraction_threshold,over_fraction_threshold Fraction thresholds
+#'   used to flag a region as low-stain or over-stained.
+#' @param min_tissue_fraction Minimum tissue/evaluable fraction required before
+#'   flags are assigned.
+#' @param min_area Minimum connected component size in pixels for low-stain and
+#'   over-stain regions.
+#' @param epsilon Lower RGB bound before optical-density transformation.
+#'
+#' @return A `wsi_stain_quality` object containing summary metrics, low-stain
+#'   and over-stain masks, region bounding boxes, and flags.
+#' @export
+#' @examples
+#' img <- array(0.75, dim = c(32, 32, 3))
+#' wsi_detect_stain_quality(img, estimate_tissue = FALSE, min_area = 1)
+wsi_detect_stain_quality <- function(image,
+                                     tissue_mask = NULL,
+                                     estimate_tissue = FALSE,
+                                     low_saturation_threshold = 0.08,
+                                     high_brightness_threshold = 0.88,
+                                     low_od_threshold = 0.15,
+                                     high_od_threshold = 2.2,
+                                     low_brightness_threshold = 0.18,
+                                     low_fraction_threshold = 0.20,
+                                     over_fraction_threshold = 0.20,
+                                     min_tissue_fraction = 0.05,
+                                     min_area = 5,
+                                     epsilon = 1 / 255) {
+  arr <- wsi_artifact_array(image)
+  r <- arr[, , 1L]
+  g <- arr[, , 2L]
+  b <- arr[, , 3L]
+  low_saturation_threshold <- wsi_stain_threshold_01(low_saturation_threshold, "low_saturation_threshold")
+  high_brightness_threshold <- wsi_stain_threshold_01(high_brightness_threshold, "high_brightness_threshold")
+  low_brightness_threshold <- wsi_stain_threshold_01(low_brightness_threshold, "low_brightness_threshold")
+  low_fraction_threshold <- wsi_stain_threshold_01(low_fraction_threshold, "low_fraction_threshold")
+  over_fraction_threshold <- wsi_stain_threshold_01(over_fraction_threshold, "over_fraction_threshold")
+  min_tissue_fraction <- wsi_stain_threshold_01(min_tissue_fraction, "min_tissue_fraction")
+  low_od_threshold <- wsi_check_scalar_number(low_od_threshold, "low_od_threshold")
+  high_od_threshold <- wsi_check_scalar_number(high_od_threshold, "high_od_threshold")
+  epsilon <- wsi_check_scalar_number(epsilon, "epsilon", allow_zero = FALSE)
+  if (epsilon >= 1) {
+    wsi_abort("`epsilon` must be less than 1.")
+  }
+  min_area <- as.integer(wsi_check_scalar_number(min_area, "min_area", allow_zero = FALSE))
+
+  hsv <- grDevices::rgb2hsv(r = as.vector(r), g = as.vector(g), b = as.vector(b), maxColorValue = 1)
+  saturation <- matrix(hsv["s", ], nrow = nrow(r), ncol = ncol(r))
+  brightness <- matrix(hsv["v", ], nrow = nrow(r), ncol = ncol(r))
+  od_r <- -log(pmax(r, epsilon))
+  od_g <- -log(pmax(g, epsilon))
+  od_b <- -log(pmax(b, epsilon))
+  od_sum <- od_r + od_g + od_b
+
+  tissue <- wsi_pen_tissue_matrix(tissue_mask, arr, estimate_tissue = estimate_tissue)
+  eval_mask <- if (is.null(tissue)) matrix(TRUE, nrow(r), ncol(r)) else tissue
+  tissue_fraction <- if (is.null(tissue)) NA_real_ else mean(tissue, na.rm = TRUE)
+  evaluable_fraction <- mean(eval_mask, na.rm = TRUE)
+  evaluable <- sum(eval_mask, na.rm = TRUE) > 0L &&
+    (is.na(tissue_fraction) || tissue_fraction >= min_tissue_fraction)
+
+  over_raw <- eval_mask & (
+    od_sum > high_od_threshold |
+      brightness < low_brightness_threshold
+  )
+  low_raw <- eval_mask & !over_raw & (
+    saturation < low_saturation_threshold |
+      brightness > high_brightness_threshold |
+      od_sum < low_od_threshold
+  )
+  low <- wsi_stain_component_bboxes(low_raw, min_area = min_area)
+  over <- wsi_stain_component_bboxes(over_raw, min_area = min_area)
+
+  low_fraction <- wsi_stain_fraction(low$mask, eval_mask)
+  over_fraction <- wsi_stain_fraction(over$mask, eval_mask)
+  abnormal_fraction <- if (is.na(low_fraction) && is.na(over_fraction)) {
+    NA_real_
+  } else {
+    sum((low$mask | over$mask) & eval_mask, na.rm = TRUE) / sum(eval_mask, na.rm = TRUE)
+  }
+  staining_score <- if (is.na(abnormal_fraction)) NA_real_ else 1 - min(1, abnormal_fraction)
+  low_stain <- if (isTRUE(evaluable) && is.finite(low_fraction)) low_fraction >= low_fraction_threshold else NA
+  over_stained <- if (isTRUE(evaluable) && is.finite(over_fraction)) over_fraction >= over_fraction_threshold else NA
+
+  values <- eval_mask
+  rgb_means <- c(
+    red = mean(r[values], na.rm = TRUE),
+    green = mean(g[values], na.rm = TRUE),
+    blue = mean(b[values], na.rm = TRUE)
+  )
+  od_means <- c(
+    red = mean(od_r[values], na.rm = TRUE),
+    green = mean(od_g[values], na.rm = TRUE),
+    blue = mean(od_b[values], na.rm = TRUE)
+  )
+
+  structure(
+    list(
+      low_stain_mask = low$mask,
+      over_stain_mask = over$mask,
+      tissue_mask = tissue,
+      staining_score = staining_score,
+      low_stain_fraction = low_fraction,
+      over_stain_fraction = over_fraction,
+      abnormal_stain_fraction = abnormal_fraction,
+      low_stain_percentage = low_fraction * 100,
+      over_stain_percentage = over_fraction * 100,
+      abnormal_stain_percentage = abnormal_fraction * 100,
+      low_stain = low_stain,
+      over_stained = over_stained,
+      stain_qc_flag = isTRUE(low_stain) || isTRUE(over_stained),
+      tissue_fraction = tissue_fraction,
+      evaluable_fraction = evaluable_fraction,
+      stain_evaluable = isTRUE(evaluable),
+      mean_rgb = rgb_means,
+      mean_od = od_means,
+      mean_od_sum = mean(od_sum[values], na.rm = TRUE),
+      mean_saturation = mean(saturation[values], na.rm = TRUE),
+      mean_brightness = mean(brightness[values], na.rm = TRUE),
+      low_stain_regions = low$bboxes,
+      over_stain_regions = over$bboxes,
+      parameters = list(
+        low_saturation_threshold = low_saturation_threshold,
+        high_brightness_threshold = high_brightness_threshold,
+        low_od_threshold = low_od_threshold,
+        high_od_threshold = high_od_threshold,
+        low_brightness_threshold = low_brightness_threshold,
+        low_fraction_threshold = low_fraction_threshold,
+        over_fraction_threshold = over_fraction_threshold,
+        min_tissue_fraction = min_tissue_fraction,
+        min_area = min_area,
+        epsilon = epsilon,
+        estimate_tissue = isTRUE(estimate_tissue)
+      )
+    ),
+    class = "wsi_stain_quality"
+  )
+}
+
+#' Build a tiled stain-quality heatmap for a slide
+#'
+#' Reads a slide tile grid one region at a time and computes
+#' [wsi_detect_stain_quality()] for each tile. The result is designed for
+#' quality-control maps and tile manifests without loading the whole slide into
+#' R memory.
+#'
+#' @param slide A `wsi_slide` object.
+#' @param grid Optional tile grid. If `NULL`, one is created with
+#'   [wsi_tile_grid()].
+#' @param tile_size,overlap,level,region,include_partial Arguments used when
+#'   `grid = NULL`.
+#' @param tissue_mask Optional `wsi_tissue_mask` used to evaluate staining
+#'   inside tissue pixels only.
+#' @param ... Thresholds passed to [wsi_detect_stain_quality()].
+#'
+#' @return A `wsi_stain_quality_heatmap` object with tile metrics and matrix
+#'   views for staining score, low-stain tiles, and over-stained tiles.
+#' @export
+#' @examples
+#' slide <- wsiTools:::wsi_mock_slide(width = 256, height = 256)
+#' stain <- wsi_stain_quality_heatmap(slide, tile_size = 128)
+wsi_stain_quality_heatmap <- function(slide,
+                                      grid = NULL,
+                                      tile_size = 512,
+                                      overlap = 0,
+                                      level = 0,
+                                      region = NULL,
+                                      include_partial = FALSE,
+                                      tissue_mask = NULL,
+                                      ...) {
+  wsi_check_slide(slide)
+  if (is.null(grid)) {
+    grid <- wsi_tile_grid(
+      slide,
+      tile_size = tile_size,
+      overlap = overlap,
+      level = level,
+      region = region,
+      tissue_mask = if (inherits(tissue_mask, "wsi_tissue_mask")) tissue_mask else NULL,
+      include_partial = include_partial
+    )
+  }
+  needed <- c("x", "y", "width", "height")
+  if (!is.data.frame(grid) || !all(needed %in% names(grid))) {
+    wsi_abort("`grid` must be a data frame with `x`, `y`, `width`, and `height` columns.")
+  }
+  if (!"level" %in% names(grid)) {
+    grid$level <- level
+  }
+
+  rows <- vector("list", nrow(grid))
+  read_errors <- character()
+  for (i in seq_len(nrow(grid))) {
+    rows[[i]] <- tryCatch(
+      {
+        tile <- wsi_read_region(
+          slide,
+          x = grid$x[[i]],
+          y = grid$y[[i]],
+          width = grid$width[[i]],
+          height = grid$height[[i]],
+          level = grid$level[[i]],
+          format = "array"
+        )
+        downsample <- if ("downsample" %in% names(grid)) grid$downsample[[i]] else wsi_level_row(slide, grid$level[[i]])$downsample[[1L]]
+        tile_tissue_mask <- if (inherits(tissue_mask, "wsi_tissue_mask")) {
+          wsi_tissue_mask_for_tile(
+            tissue_mask,
+            x = grid$x[[i]],
+            y = grid$y[[i]],
+            width = grid$width[[i]],
+            height = grid$height[[i]],
+            downsample = downsample
+          )
+        } else {
+          tissue_mask
+        }
+        quality <- wsi_detect_stain_quality(
+          tile,
+          tissue_mask = tile_tissue_mask,
+          estimate_tissue = FALSE,
+          ...
+        )
+        data.frame(
+          stain_score = quality$staining_score,
+          stain_low_fraction = quality$low_stain_fraction,
+          stain_over_fraction = quality$over_stain_fraction,
+          stain_abnormal_fraction = quality$abnormal_stain_fraction,
+          stain_low = quality$low_stain,
+          stain_over = quality$over_stained,
+          stain_qc_flag = quality$stain_qc_flag,
+          stain_tissue_fraction = quality$tissue_fraction,
+          stain_evaluable_fraction = quality$evaluable_fraction,
+          stain_evaluable = quality$stain_evaluable,
+          stain_mean_saturation = quality$mean_saturation,
+          stain_mean_brightness = quality$mean_brightness,
+          stain_mean_od_sum = quality$mean_od_sum,
+          stain_mean_red = quality$mean_rgb[["red"]],
+          stain_mean_green = quality$mean_rgb[["green"]],
+          stain_mean_blue = quality$mean_rgb[["blue"]],
+          stain_read_error = FALSE,
+          stringsAsFactors = FALSE
+        )
+      },
+      error = function(err) {
+        tile_label <- if ("tile_id" %in% names(grid)) grid$tile_id[[i]] else i
+        read_errors <<- c(read_errors, sprintf("%s: %s", tile_label %||% i, conditionMessage(err)))
+        data.frame(
+          stain_score = NA_real_,
+          stain_low_fraction = NA_real_,
+          stain_over_fraction = NA_real_,
+          stain_abnormal_fraction = NA_real_,
+          stain_low = NA,
+          stain_over = NA,
+          stain_qc_flag = TRUE,
+          stain_tissue_fraction = if ("tissue_fraction" %in% names(grid)) grid$tissue_fraction[[i]] else NA_real_,
+          stain_evaluable_fraction = NA_real_,
+          stain_evaluable = FALSE,
+          stain_mean_saturation = NA_real_,
+          stain_mean_brightness = NA_real_,
+          stain_mean_od_sum = NA_real_,
+          stain_mean_red = NA_real_,
+          stain_mean_green = NA_real_,
+          stain_mean_blue = NA_real_,
+          stain_read_error = TRUE,
+          stringsAsFactors = FALSE
+        )
+      }
+    )
+  }
+  if (length(read_errors)) {
+    wsi_warn(sprintf(
+      "Stain-quality heatmap could not read %s tile%s; those rows have `stain_read_error = TRUE`.",
+      length(read_errors),
+      if (length(read_errors) == 1L) "" else "s"
+    ))
+  }
+  metrics <- if (length(rows)) do.call(rbind, rows) else data.frame(
+    stain_score = numeric(),
+    stain_low_fraction = numeric(),
+    stain_over_fraction = numeric(),
+    stain_abnormal_fraction = numeric(),
+    stain_low = logical(),
+    stain_over = logical(),
+    stain_qc_flag = logical(),
+    stain_tissue_fraction = numeric(),
+    stain_evaluable_fraction = numeric(),
+    stain_evaluable = logical(),
+    stain_mean_saturation = numeric(),
+    stain_mean_brightness = numeric(),
+    stain_mean_od_sum = numeric(),
+    stain_mean_red = numeric(),
+    stain_mean_green = numeric(),
+    stain_mean_blue = numeric(),
+    stain_read_error = logical(),
+    stringsAsFactors = FALSE
+  )
+  tiles <- cbind(grid, metrics)
+  evaluable <- tiles$stain_evaluable %in% TRUE & is.finite(tiles$stain_score)
+  slide_staining_score <- if (any(evaluable)) stats::median(tiles$stain_score[evaluable], na.rm = TRUE) else NA_real_
+  low_values <- tiles$stain_low
+  over_values <- tiles$stain_over
+  low_tile_fraction <- if (any(!is.na(low_values))) mean(low_values %in% TRUE, na.rm = TRUE) else NA_real_
+  over_tile_fraction <- if (any(!is.na(over_values))) mean(over_values %in% TRUE, na.rm = TRUE) else NA_real_
+
+  structure(
+    list(
+      tiles = tiles,
+      stain_score_heatmap = wsi_matrix_from_tile_values(tiles, "stain_score"),
+      low_stain_tile_mask = wsi_matrix_from_tile_values(tiles, "stain_low"),
+      over_stain_tile_mask = wsi_matrix_from_tile_values(tiles, "stain_over"),
+      abnormal_stain_heatmap = wsi_matrix_from_tile_values(tiles, "stain_abnormal_fraction"),
+      slide_staining_score = slide_staining_score,
+      low_stain_tile_fraction = low_tile_fraction,
+      over_stain_tile_fraction = over_tile_fraction
+    ),
+    class = "wsi_stain_quality_heatmap"
+  )
 }
 
 #' Detect blur or out-of-focus content in a small image
