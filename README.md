@@ -11,9 +11,23 @@ default.
 
 ## Installation
 
+### Quick install from GitHub
+
+Start with the lightweight R package. This installs the core package only;
+large WSI backends are checked at runtime and are not downloaded silently.
+
 ```r
-# install.packages("remotes")
-remotes::install_github("tkcaccia/wsiTools", upgrade = "never")
+install.packages("remotes", repos = "https://cloud.r-project.org")
+
+remotes::install_github(
+  "tkcaccia/wsiTools",
+  upgrade = "never",
+  build_vignettes = FALSE
+)
+
+library(wsiTools)
+packageVersion("wsiTools")
+wsi_backends()
 ```
 
 From a local checkout:
@@ -22,11 +36,48 @@ From a local checkout:
 install.packages(".", repos = NULL, type = "source")
 ```
 
-wsiTools keeps its R dependency footprint small and the default GitHub/CRAN
-install path is pure R, so Windows users do not need Rtools just to install the
-package. OpenSlide, libvips, StarDist, Cellpose, OME-Zarr pixel access, and
-local web services are treated as optional runtime capabilities rather than
-installation requirements.
+The current GitHub package is designed to install without OpenSlide, libvips,
+Python, StarDist, Cellpose, Bio-Formats, or OME-Zarr pixel readers. It also does
+not require Rtools just to install on Windows. If future versions add optional
+C++ acceleration, the README and setup checks will say so explicitly.
+
+### Windows clean reinstall
+
+If a previous installation was interrupted, remove the stale lock and retry:
+
+```r
+lib <- Sys.getenv("R_LIBS_USER")
+unlink(file.path(lib, "00LOCK-wsiTools"), recursive = TRUE, force = TRUE)
+unlink(file.path(lib, "wsiTools"), recursive = TRUE, force = TRUE)
+
+remotes::install_github(
+  "tkcaccia/wsiTools",
+  upgrade = "never",
+  build_vignettes = FALSE
+)
+```
+
+If R asks whether to update packages, choose `3: None` unless you deliberately
+want to update your local package library. This avoids accidental long updates
+on managed Windows workstations.
+
+### Optional viewer packages
+
+The package loads without these, but the live viewer and previews are more
+useful when they are installed:
+
+```r
+install.packages(
+  c("magick", "httpuv", "callr"),
+  repos = "https://cloud.r-project.org"
+)
+```
+
+Use `sf` only if you need polygon-aware spatial operations:
+
+```r
+install.packages("sf", repos = "https://cloud.r-project.org")
+```
 
 ## System dependencies
 
@@ -48,19 +99,15 @@ functions need the corresponding tools at runtime:
 - OME-Zarr metadata reading is lightweight; full chunked pixel decoding should
   remain an optional backend capability.
 
-The CRAN core should stay small: no `Rcpp` linking, no mandatory compiler
-toolchain, no mandatory Python bridge, and no mandatory OpenSlide/libvips
-library at install time. Performance-sensitive helpers keep pure-R fallbacks so
-the package remains installable on locked-down Windows workstations.
-
-Check your local capabilities with:
+Check your local capabilities after installing:
 
 ```r
 library(wsiTools)
 wsi_backends()
 ```
 
-New users can also ask wsiTools for a setup plan:
+New users can ask wsiTools for a setup plan. This is the recommended second
+step after installation:
 
 ```r
 plan <- wsi_setup()
@@ -81,6 +128,23 @@ wsi_install_deps(method = "homebrew")
 
 On Debian/Ubuntu or Fedora, system installs may require `sudo`; wsiTools will
 not run those commands unless you explicitly set `allow_sudo = TRUE`.
+
+Typical manual backend installs are:
+
+```sh
+# macOS
+brew install vips openslide
+
+# Ubuntu/Debian
+sudo apt install libvips-tools openslide-tools
+
+# Fedora
+sudo dnf install vips-tools openslide-tools
+```
+
+On Windows, install libvips/OpenSlide with a system package manager such as
+winget, MSYS2, vcpkg, or the official binary distributions, then make sure the
+tool directories are on `PATH`. Re-run `wsi_backends()` afterwards.
 
 StarDist is a Python/TensorFlow tool, so it is not installed silently during
 `install.packages()` or `remotes::install_github()`. To enable the viewer's

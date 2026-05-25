@@ -33,6 +33,41 @@ therefore designed around:
 - backend-driven thumbnails and conversion
 - streaming export where libvips supports it
 
+## Installation and setup
+
+Install the lightweight package first, then check which optional WSI backends
+are available on your machine.
+
+```{r, eval=FALSE}
+install.packages("remotes", repos = "https://cloud.r-project.org")
+remotes::install_github(
+  "tkcaccia/wsiTools",
+  upgrade = "never",
+  build_vignettes = FALSE
+)
+
+library(wsiTools)
+wsi_backends()
+```
+
+OpenSlide, libvips, StarDist, Cellpose, Bio-Formats, and live web services are
+runtime capabilities rather than mandatory installation dependencies. Use
+`wsi_setup()` after installation to print a setup report with copyable commands
+for optional tools.
+
+```{r, eval=FALSE}
+wsi_setup()
+```
+
+On Windows, if a previous installation was interrupted, remove stale lock
+directories before retrying:
+
+```{r, eval=FALSE}
+lib <- Sys.getenv("R_LIBS_USER")
+unlink(file.path(lib, "00LOCK-wsiTools"), recursive = TRUE, force = TRUE)
+unlink(file.path(lib, "wsiTools"), recursive = TRUE, force = TRUE)
+```
+
 ## Opening slides
 
 ```{r, eval=FALSE, purl=FALSE}
@@ -48,14 +83,6 @@ slide
 chooses a backend, and reads metadata. It does not load the full slide.
 OpenSlide, libvips, StarDist, Cellpose, `httpuv`, and `callr` are optional
 runtime capabilities; the package should still install and load without them.
-
-Use `wsi_setup()` after installation to see a CRAN-safe setup report with
-copyable commands for optional tools. It does not install system libraries
-unless you explicitly opt in.
-
-```{r, eval=FALSE}
-wsi_setup()
-```
 
 ## Reading metadata
 
