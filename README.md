@@ -87,8 +87,8 @@ functions need the corresponding tools at runtime:
 - OpenSlide command-line tools for OpenSlide-backed metadata and region reads.
 - libvips command-line tools (`vips`, `vipsheader`) for conversion, pyramids,
   thumbnails, cropping, and export.
-- Bio-Formats command-line tools are planned for future microscopy format
-  support.
+- Bio-Formats command-line tools (`showinf`, `bfconvert`) for optional
+  microscopy format metadata, CZI inspection, and conversion workflows.
 - StarDist, Cellpose, or other segmentation engines remain external commands or
   services; wsiTools can export ROI crops and import their outputs without
   depending on Python.
@@ -160,7 +160,7 @@ wsi_install_backends(
 
 # Conda or mamba environment
 wsi_install_backends(
-  tools = c("openslide", "libvips", "imagemagick"),
+  tools = c("openslide", "libvips", "imagemagick", "bioformats"),
   method = "conda"
 )
 ```
@@ -178,6 +178,59 @@ OpenSlide on Windows is still best installed through conda-forge, MSYS2/vcpkg,
 or the official binary distribution, then added to `PATH`. The winget helper is
 useful for libvips and ImageMagick, but it does not currently install OpenSlide
 for Windows.
+
+### Installing Bio-Formats
+
+Bio-Formats is optional. wsiTools detects it by looking for the command-line
+tools `showinf` and `bfconvert` on `PATH`. Installing the Bio-Formats plugin
+inside Fiji/ImageJ is useful for Fiji, but it is not enough for wsiTools unless
+the command-line tools are also available to R.
+
+The simplest route is usually conda:
+
+```sh
+conda create -n wsitools-bioformats -c ome bftools
+conda activate wsitools-bioformats
+showinf -version
+bfconvert -version
+```
+
+If you already use conda for R, you can install into the active environment
+from R:
+
+```r
+wsi_install_backends(
+  tools = "bioformats",
+  method = "conda"
+)
+
+wsi_backends()
+```
+
+If you use RStudio outside conda, launch RStudio from the activated conda
+environment, or add the conda environment tools directory to `PATH` before
+starting R. On macOS/Linux this is usually the environment's `bin` directory;
+on Windows it is usually `Scripts` or `Library/bin`.
+
+Manual install from the official OME download is also reliable:
+
+1. Install Java if `java -version` is not available.
+2. Download `bftools.zip` from the
+   [OME Bio-Formats downloads page](https://www.openmicroscopy.org/bio-formats/downloads/).
+3. Unzip it to a permanent folder, for example `~/tools/bftools` or
+   `C:\Users\<you>\tools\bftools`.
+4. Add that folder to `PATH`.
+5. Restart R/RStudio and run:
+
+```r
+Sys.which(c("showinf", "bfconvert"))
+wsi_backends()
+```
+
+The official Bio-Formats command-line documentation describes `bftools.zip` as
+the bundle containing the scripts and bundled JAR needed for command-line use.
+wsiTools uses `showinf` for metadata/version checks and `bfconvert` for
+Bio-Formats conversion workflows where available.
 
 Typical manual backend installs are:
 

@@ -67,7 +67,9 @@ Nothing is installed unless \code{install = TRUE} is supplied.
 \details{
 This keeps the package CRAN-safe: installation remains lightweight, while
 users can opt in to helper commands for OpenSlide, libvips, ImageMagick, and
-optional analysis tools.
+optional analysis tools. For Bio-Formats, wsiTools expects OME bftools
+command-line programs (\code{showinf} and \code{bfconvert}) on \code{PATH}; conda installs
+use the OME \code{bftools} package.
 }
 \examples{
 plan <- wsi_setup(method = "manual")

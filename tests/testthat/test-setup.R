@@ -25,6 +25,20 @@ test_that("Windows winget backend plan installs supported tools and reports gaps
   expect_true(any(grepl("ImageMagick.Q16-HDRI", plan$command_line, fixed = TRUE)))
 })
 
+test_that("Bio-Formats setup points to OME bftools", {
+  conda_plan <- wsi_dependency_plan(tools = "bioformats", method = "conda")
+  expect_equal(conda_plan$tool, "bioformats")
+  expect_equal(conda_plan$command, "conda")
+  expect_true(all(c("-c", "ome", "bftools") %in% conda_plan$args[[1L]]))
+  expect_match(conda_plan$notes, "showinf")
+  expect_match(conda_plan$notes, "bfconvert")
+
+  brew_plan <- wsi_dependency_plan(tools = "bioformats", method = "homebrew")
+  expect_true(is.na(brew_plan$command))
+  expect_true(is.na(brew_plan$command_line))
+  expect_match(brew_plan$notes, "bftools.zip", fixed = TRUE)
+})
+
 test_that("setup reports missing dependencies without installing by default", {
   plan <- wsi_setup(
     tools = c("openslide", "libvips"),

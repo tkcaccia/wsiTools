@@ -25,8 +25,9 @@ A data frame with installation status and copyable commands.
 }
 \description{
 Builds a CRAN-safe setup plan for optional system tools. It does not install
-anything by itself; use \code{\link[=wsi_setup]{wsi_setup()}}, \code{\link[=wsi_install_backends]{wsi_install_backends()}}, or \code{\link[=wsi_install_deps]{wsi_install_deps()}} with
-\code{install = TRUE} only when the user explicitly wants to run commands.
+anything by itself; use \code{\link[=wsi_setup]{wsi_setup()}}, \code{\link[=wsi_install_backends]{wsi_install_backends()}}, or
+\code{\link[=wsi_install_deps]{wsi_install_deps()}} with \code{install = TRUE} only when the user explicitly
+wants to run commands.
 }
 \examples{
 wsi_dependency_plan(method = "manual")

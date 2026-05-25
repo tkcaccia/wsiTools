@@ -88,7 +88,7 @@ wsi_install_backends(
 
 # Conda or mamba environment
 wsi_install_backends(
-  tools = c("openslide", "libvips", "imagemagick"),
+  tools = c("openslide", "libvips", "imagemagick", "bioformats"),
   method = "conda"
 )
 ```
@@ -97,6 +97,33 @@ Restart R or RStudio after installing system tools, then run `wsi_backends()`
 again. StarDist and Cellpose are external segmentation tools; keep them in
 separate environments and enable them explicitly rather than making them
 mandatory package dependencies.
+
+### Bio-Formats command-line tools
+
+Bio-Formats support in wsiTools means the command-line tools are visible to R.
+The commands wsiTools checks for are `showinf` and `bfconvert`.
+
+The recommended conda route is:
+
+```{bash, eval=FALSE}
+conda create -n wsitools-bioformats -c ome bftools
+conda activate wsitools-bioformats
+showinf -version
+bfconvert -version
+```
+
+If R is running inside the active conda environment, this can also be requested
+from R:
+
+```{r, eval=FALSE}
+wsi_install_backends(tools = "bioformats", method = "conda")
+wsi_backends()
+```
+
+Manual installation is also possible: download `bftools.zip` from the official
+OME Bio-Formats downloads page, unzip it into a permanent folder, add that
+folder to `PATH`, then restart R/RStudio. Installing the Bio-Formats plugin in
+Fiji/ImageJ alone does not usually expose `showinf` and `bfconvert` to R.
 
 On Windows, if a previous installation was interrupted, remove stale lock
 directories before retrying:

@@ -71,7 +71,6 @@ wsi_setup_tool_packages <- function(tool, method) {
       openslide = "openslide",
       libvips = "vips",
       imagemagick = "imagemagick",
-      bioformats = "bioformats",
       character()
     ),
     apt = switch(
@@ -99,7 +98,7 @@ wsi_setup_tool_packages <- function(tool, method) {
       openslide = "openslide",
       libvips = "libvips",
       imagemagick = "imagemagick",
-      bioformats = "bioformats",
+      bioformats = "bftools",
       stardist = "stardist",
       cellpose = "cellpose",
       character()
@@ -127,7 +126,15 @@ wsi_setup_tool_command <- function(tool, method) {
       )),
       notes = "Requires Windows Package Manager. Restart R/RStudio after installation so PATH changes are visible."
     ),
-    conda = list(command = "conda", args = list(c("install", "-y", "-c", "conda-forge", packages)), notes = "Installs into the active conda environment."),
+    conda = {
+      channel <- if (identical(tool, "bioformats")) "ome" else "conda-forge"
+      note <- if (identical(tool, "bioformats")) {
+        "Installs OME bftools (`showinf` and `bfconvert`) into the active conda environment."
+      } else {
+        "Installs into the active conda environment."
+      }
+      list(command = "conda", args = list(c("install", "-y", "-c", channel, packages)), notes = note)
+    },
     manual = list(command = NA_character_, args = list(character()), notes = wsi_setup_manual_note(tool, method))
   )
 }
@@ -136,8 +143,8 @@ wsi_setup_manual_note <- function(tool, method = "manual") {
   if (tool %in% c("stardist", "cellpose") && !identical(method, "conda")) {
     return("Python segmentation tools are best installed in a dedicated conda/pip environment; configure the command path afterwards.")
   }
-  if (tool == "bioformats" && method %in% c("apt", "dnf", "manual")) {
-    return("Install Bio-Formats command-line tools manually or use conda-forge where available.")
+  if (tool == "bioformats" && method %in% c("homebrew", "apt", "dnf", "manual")) {
+    return("Install OME Bio-Formats command-line tools (`bftools.zip`) manually, or run `conda install -c ome bftools` and ensure `showinf`/`bfconvert` are on PATH.")
   }
   if (tool == "openslide" && identical(method, "winget")) {
     return("No reliable winget OpenSlide package is configured. Use conda-forge, MSYS2/vcpkg, or official OpenSlide binaries and add the tools to PATH.")
@@ -539,13 +546,14 @@ print.wsi_stardist_installation <- function(x, ...) {
 #' Create an installation plan for optional wsiTools tools
 #'
 #' Builds a CRAN-safe setup plan for optional system tools. It does not install
-#' anything by itself; use [wsi_setup()] or [wsi_install_deps()] with
-#' `install = TRUE` only when the user explicitly wants to run commands.
+#' anything by itself; use [wsi_setup()], [wsi_install_backends()], or
+#' [wsi_install_deps()] with `install = TRUE` only when the user explicitly
+#' wants to run commands.
 #'
 #' @param tools Optional system tools to check. Defaults to OpenSlide, libvips,
 #'   and ImageMagick.
 #' @param method Package manager to target. `"auto"` detects Homebrew, apt, dnf,
-#'   or conda when available.
+#'   winget, or conda when available.
 #' @param include_optional Whether to include Bio-Formats, StarDist, and
 #'   Cellpose in the default `tools` set.
 #'
@@ -650,7 +658,9 @@ wsi_setup_install_r_packages <- function(plan, ask = interactive()) {
 #'
 #' This keeps the package CRAN-safe: installation remains lightweight, while
 #' users can opt in to helper commands for OpenSlide, libvips, ImageMagick, and
-#' optional analysis tools.
+#' optional analysis tools. For Bio-Formats, wsiTools expects OME bftools
+#' command-line programs (`showinf` and `bfconvert`) on `PATH`; conda installs
+#' use the OME `bftools` package.
 #'
 #' @param tools Optional system tools to check.
 #' @param r_packages Optional R packages to check.
