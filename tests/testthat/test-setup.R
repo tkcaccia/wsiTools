@@ -11,6 +11,20 @@ test_that("dependency plans are CRAN-safe and copyable", {
   expect_true(all(vapply(plan$args, length, integer(1)) >= 2L))
 })
 
+test_that("Windows winget backend plan installs supported tools and reports gaps", {
+  plan <- wsi_dependency_plan(
+    tools = c("openslide", "libvips", "imagemagick"),
+    method = "winget"
+  )
+
+  expect_equal(plan$method, rep("winget", 3))
+  expect_true(is.na(plan$command[plan$tool == "openslide"]))
+  expect_match(plan$notes[plan$tool == "openslide"], "OpenSlide", fixed = TRUE)
+  expect_equal(plan$command[plan$tool == "libvips"], "winget")
+  expect_true(any(grepl("libvips.libvips", plan$command_line, fixed = TRUE)))
+  expect_true(any(grepl("ImageMagick.Q16-HDRI", plan$command_line, fixed = TRUE)))
+})
+
 test_that("setup reports missing dependencies without installing by default", {
   plan <- wsi_setup(
     tools = c("openslide", "libvips"),
@@ -29,6 +43,20 @@ test_that("setup reports missing dependencies without installing by default", {
 
   printed <- capture.output(print(plan))
   expect_true(any(grepl("Nothing is installed", printed, fixed = TRUE)))
+})
+
+test_that("backend installer can return a setup plan without running commands", {
+  plan <- wsi_install_backends(
+    tools = "libvips",
+    r_packages = character(),
+    method = "manual",
+    install = FALSE
+  )
+
+  expect_s3_class(plan, "wsi_setup_plan")
+  expect_equal(plan$system_tools$tool, "libvips")
+  expect_equal(plan$system_tools$method, "manual")
+  expect_length(plan$command_output, 0)
 })
 
 test_that("setup rejects unknown tool names", {

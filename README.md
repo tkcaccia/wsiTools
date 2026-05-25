@@ -122,8 +122,8 @@ install anything unless you explicitly opt in:
 # Review the plan first
 wsi_setup()
 
-# Then optionally install supported optional dependencies
-wsi_install_deps(method = "homebrew")
+# Then optionally install supported optional R packages and system backends
+wsi_install_backends(method = "homebrew")
 ```
 
 On Debian/Ubuntu or Fedora, system installs may require `sudo`; wsiTools will
@@ -145,6 +145,18 @@ sudo dnf install vips-tools openslide-tools
 On Windows, install libvips/OpenSlide with a system package manager such as
 winget, MSYS2, vcpkg, or the official binary distributions, then make sure the
 tool directories are on `PATH`. Re-run `wsi_backends()` afterwards.
+
+For the supported automatic Windows pieces:
+
+```r
+wsi_install_backends(
+  tools = c("libvips", "imagemagick"),
+  method = "winget"
+)
+```
+
+OpenSlide on Windows is still best installed through conda-forge, MSYS2/vcpkg,
+or the official binary distribution, then added to `PATH`.
 
 StarDist is a Python/TensorFlow tool, so it is not installed silently during
 `install.packages()` or `remotes::install_github()`. To enable the viewer's

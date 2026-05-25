@@ -6,7 +6,7 @@
 \usage{
 wsi_dependency_plan(
   tools = NULL,
-  method = c("auto", "homebrew", "apt", "dnf", "conda", "manual"),
+  method = c("auto", "homebrew", "apt", "dnf", "winget", "conda", "manual"),
   include_optional = FALSE
 )
 }
@@ -15,7 +15,7 @@ wsi_dependency_plan(
 and ImageMagick.}
 
 \item{method}{Package manager to target. \code{"auto"} detects Homebrew, apt, dnf,
-or conda when available.}
+winget, or conda when available.}
 
 \item{include_optional}{Whether to include Bio-Formats, StarDist, and
 Cellpose in the default \code{tools} set.}
@@ -25,7 +25,7 @@ A data frame with installation status and copyable commands.
 }
 \description{
 Builds a CRAN-safe setup plan for optional system tools. It does not install
-anything by itself; use \code{\link[=wsi_setup]{wsi_setup()}} or \code{\link[=wsi_install_deps]{wsi_install_deps()}} with
+anything by itself; use \code{\link[=wsi_setup]{wsi_setup()}}, \code{\link[=wsi_install_backends]{wsi_install_backends()}}, or \code{\link[=wsi_install_deps]{wsi_install_deps()}} with
 \code{install = TRUE} only when the user explicitly wants to run commands.
 }
 \examples{

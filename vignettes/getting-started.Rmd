@@ -57,6 +57,9 @@ for optional tools.
 
 ```{r, eval=FALSE}
 wsi_setup()
+
+# After reviewing the plan, optionally run supported installers
+wsi_install_backends(method = "auto")
 ```
 
 On Windows, if a previous installation was interrupted, remove stale lock

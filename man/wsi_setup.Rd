@@ -3,12 +3,13 @@
 \name{wsi_setup}
 \alias{wsi_setup}
 \alias{wsi_install_deps}
+\alias{wsi_install_backends}
 \title{Check and optionally install optional wsiTools dependencies}
 \usage{
 wsi_setup(
   tools = NULL,
   r_packages = c("magick", "httpuv", "callr"),
-  method = c("auto", "homebrew", "apt", "dnf", "conda", "manual"),
+  method = c("auto", "homebrew", "apt", "dnf", "winget", "conda", "manual"),
   include_optional = FALSE,
   install = FALSE,
   install_r_packages = install,
@@ -18,6 +19,18 @@ wsi_setup(
 )
 
 wsi_install_deps(..., install = TRUE, install_system_tools = TRUE)
+
+wsi_install_backends(
+  tools = NULL,
+  r_packages = c("magick", "httpuv", "callr"),
+  method = c("auto", "homebrew", "apt", "dnf", "winget", "conda", "manual"),
+  include_optional = FALSE,
+  install = TRUE,
+  install_r_packages = TRUE,
+  install_system_tools = TRUE,
+  allow_sudo = FALSE,
+  ask = interactive()
+)
 }
 \arguments{
 \item{tools}{Optional system tools to check.}
@@ -25,12 +38,13 @@ wsi_install_deps(..., install = TRUE, install_system_tools = TRUE)
 \item{r_packages}{Optional R packages to check.}
 
 \item{method}{Package manager target. \code{"auto"} detects Homebrew, apt, dnf,
-or conda when available.}
+winget, or conda when available.}
 
 \item{include_optional}{Whether to include Bio-Formats, StarDist, and
 Cellpose in the default system-tool plan.}
 
-\item{install}{Whether to run installation steps. Defaults to \code{FALSE}.}
+\item{install}{Whether to run installation steps. Defaults to \code{FALSE} for
+\code{wsi_setup()} and \code{TRUE} for installer wrappers.}
 
 \item{install_r_packages, install_system_tools}{Whether \code{install = TRUE}
 applies to optional R packages and/or system tools.}

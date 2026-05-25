@@ -10,10 +10,13 @@ wsi_setup_default_tools <- function(include_optional = FALSE) {
   tools
 }
 
-wsi_setup_method <- function(method = c("auto", "homebrew", "apt", "dnf", "conda", "manual")) {
+wsi_setup_method <- function(method = c("auto", "homebrew", "apt", "dnf", "winget", "conda", "manual")) {
   method <- match.arg(method)
   if (!identical(method, "auto")) {
     return(method)
+  }
+  if (.Platform$OS.type == "windows" && wsi_command_exists("winget")) {
+    return("winget")
   }
   if (wsi_command_exists("brew")) {
     return("homebrew")
@@ -85,6 +88,12 @@ wsi_setup_tool_packages <- function(tool, method) {
       imagemagick = "ImageMagick",
       character()
     ),
+    winget = switch(
+      tool,
+      libvips = "libvips.libvips",
+      imagemagick = "ImageMagick.Q16-HDRI",
+      character()
+    ),
     conda = switch(
       tool,
       openslide = "openslide",
@@ -110,6 +119,14 @@ wsi_setup_tool_command <- function(tool, method) {
     homebrew = list(command = "brew", args = list(c("install", packages)), notes = "Requires Homebrew."),
     apt = list(command = "sudo", args = list(c("apt-get", "install", "-y", packages)), notes = "Requires Debian/Ubuntu apt and sudo privileges."),
     dnf = list(command = "sudo", args = list(c("dnf", "install", "-y", packages)), notes = "Requires Fedora/RHEL dnf and sudo privileges."),
+    winget = list(
+      command = "winget",
+      args = list(c(
+        "install", "--id", packages, "--exact", "--silent",
+        "--accept-package-agreements", "--accept-source-agreements"
+      )),
+      notes = "Requires Windows Package Manager. Restart R/RStudio after installation so PATH changes are visible."
+    ),
     conda = list(command = "conda", args = list(c("install", "-y", "-c", "conda-forge", packages)), notes = "Installs into the active conda environment."),
     manual = list(command = NA_character_, args = list(character()), notes = wsi_setup_manual_note(tool, method))
   )
@@ -122,8 +139,14 @@ wsi_setup_manual_note <- function(tool, method = "manual") {
   if (tool == "bioformats" && method %in% c("apt", "dnf", "manual")) {
     return("Install Bio-Formats command-line tools manually or use conda-forge where available.")
   }
+  if (tool == "openslide" && identical(method, "winget")) {
+    return("No reliable winget OpenSlide package is configured. Use conda-forge, MSYS2/vcpkg, or official OpenSlide binaries and add the tools to PATH.")
+  }
+  if (tool %in% c("bioformats", "stardist", "cellpose") && identical(method, "winget")) {
+    return("No winget command is configured for this optional backend. Use conda/pip or install manually.")
+  }
   if (identical(method, "manual")) {
-    return("No supported package manager was detected; install this tool manually or use conda/homebrew/apt/dnf.")
+    return("No supported package manager was detected; install this tool manually or use conda/homebrew/apt/dnf/winget.")
   }
   "No automatic command is known for this tool and package manager."
 }
@@ -132,7 +155,8 @@ wsi_setup_command_line <- function(command, args) {
   if (is.na(command) || !nzchar(command)) {
     return(NA_character_)
   }
-  paste(c(command, shQuote(args)), collapse = " ")
+  quote_type <- if (.Platform$OS.type == "windows") "cmd" else "sh"
+  paste(c(command, shQuote(args, type = quote_type)), collapse = " ")
 }
 
 wsi_stardist_setup_method <- function(method = c("auto", "conda", "pip", "manual")) {
@@ -531,7 +555,7 @@ print.wsi_stardist_installation <- function(x, ...) {
 #' @examples
 #' wsi_dependency_plan(method = "manual")
 wsi_dependency_plan <- function(tools = NULL,
-                                method = c("auto", "homebrew", "apt", "dnf", "conda", "manual"),
+                                method = c("auto", "homebrew", "apt", "dnf", "winget", "conda", "manual"),
                                 include_optional = FALSE) {
   method <- wsi_setup_method(method)
   tools <- wsi_setup_normalize_tools(tools, include_optional = include_optional)
@@ -631,10 +655,11 @@ wsi_setup_install_r_packages <- function(plan, ask = interactive()) {
 #' @param tools Optional system tools to check.
 #' @param r_packages Optional R packages to check.
 #' @param method Package manager target. `"auto"` detects Homebrew, apt, dnf,
-#'   or conda when available.
+#'   winget, or conda when available.
 #' @param include_optional Whether to include Bio-Formats, StarDist, and
 #'   Cellpose in the default system-tool plan.
-#' @param install Whether to run installation steps. Defaults to `FALSE`.
+#' @param install Whether to run installation steps. Defaults to `FALSE` for
+#'   `wsi_setup()` and `TRUE` for installer wrappers.
 #' @param install_r_packages,install_system_tools Whether `install = TRUE`
 #'   applies to optional R packages and/or system tools.
 #' @param allow_sudo Whether commands using `sudo` may be executed.
@@ -648,7 +673,7 @@ wsi_setup_install_r_packages <- function(plan, ask = interactive()) {
 #' plan
 wsi_setup <- function(tools = NULL,
                       r_packages = c("magick", "httpuv", "callr"),
-                      method = c("auto", "homebrew", "apt", "dnf", "conda", "manual"),
+                      method = c("auto", "homebrew", "apt", "dnf", "winget", "conda", "manual"),
                       include_optional = FALSE,
                       install = FALSE,
                       install_r_packages = install,
@@ -682,6 +707,30 @@ wsi_install_deps <- function(..., install = TRUE, install_system_tools = TRUE) {
   wsi_setup(..., install = install, install_system_tools = install_system_tools)
 }
 
+#' @rdname wsi_setup
+#' @export
+wsi_install_backends <- function(tools = NULL,
+                                 r_packages = c("magick", "httpuv", "callr"),
+                                 method = c("auto", "homebrew", "apt", "dnf", "winget", "conda", "manual"),
+                                 include_optional = FALSE,
+                                 install = TRUE,
+                                 install_r_packages = TRUE,
+                                 install_system_tools = TRUE,
+                                 allow_sudo = FALSE,
+                                 ask = interactive()) {
+  wsi_setup(
+    tools = tools,
+    r_packages = r_packages,
+    method = method,
+    include_optional = include_optional,
+    install = install,
+    install_r_packages = isTRUE(install) && isTRUE(install_r_packages),
+    install_system_tools = isTRUE(install) && isTRUE(install_system_tools),
+    allow_sudo = allow_sudo,
+    ask = ask
+  )
+}
+
 #' @export
 print.wsi_setup_plan <- function(x, ...) {
   cat("<wsi_setup_plan>\n")
@@ -701,7 +750,7 @@ print.wsi_setup_plan <- function(x, ...) {
     print(display, row.names = FALSE)
   }
   if (tool_missing || r_missing) {
-    cat("\nNothing is installed unless you call `wsi_install_deps()` or `wsi_setup(install = TRUE, ...)`.\n")
+    cat("\nNothing is installed unless you call `wsi_install_backends()`, `wsi_install_deps()`, or `wsi_setup(install = TRUE, ...)`.\n")
   }
   invisible(x)
 }
