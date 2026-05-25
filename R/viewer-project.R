@@ -268,9 +268,42 @@ wsi_viewer_project_item_from_czi <- function(path, index = 1L, width = 768, heig
   }
 
   bioformats_available <- wsi_has_bioformats()
+  bioformats_preview <- if (bioformats_available) {
+    tryCatch(
+      wsi_bioformats_project_preview(path, width = width, height = height),
+      error = function(err) err
+    )
+  } else {
+    NULL
+  }
+  if (is.list(bioformats_preview) && !inherits(bioformats_preview, "error") &&
+      length(bioformats_preview$sections %||% list())) {
+    first <- bioformats_preview$sections[[1L]]
+    return(list(
+      id = sprintf("project_czi_%d", index),
+      label = basename(path),
+      path = path,
+      backend = "bioformats",
+      type = "czi",
+      width = first$width,
+      height = first$height,
+      status = "ready",
+      message = "CZI preview generated with Bio-Formats bfconvert; full-resolution pixels remain on disk.",
+      image_data_uri = first$image_data_uri,
+      navigator_image_data_uri = first$image_data_uri,
+      sections = bioformats_preview$sections,
+      active = FALSE
+    ))
+  }
+
   label <- basename(path)
   message <- if (bioformats_available) {
-    "CZI detected. Bio-Formats is available; metadata/preview extraction is prepared for this optional backend."
+    paste(
+      "CZI detected. Bio-Formats is available, but a browser preview could not be generated.",
+      if (inherits(bioformats_preview, "error")) conditionMessage(bioformats_preview) else "",
+      "Install/configure `bfconvert`, libvips or ImageMagick for preview generation, or configure the optional aicspylibczi bridge.",
+      sep = "\n"
+    )
   } else {
     "CZI detected. Install Bio-Formats command-line tools (`showinf`/`bfconvert`) to inspect scenes and generate real previews."
   }

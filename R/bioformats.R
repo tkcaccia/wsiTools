@@ -207,6 +207,150 @@ wsi_bioformats_open <- function(path) {
   )
 }
 
+wsi_bioformats_preview_resize <- function(input, output, width, height = NULL) {
+  width <- as.integer(wsi_check_scalar_number(width, "width", allow_zero = FALSE))
+  if (!is.null(height)) {
+    height <- as.integer(wsi_check_scalar_number(height, "height", allow_zero = FALSE))
+  }
+
+  if (wsi_has_vips()) {
+    args <- c("thumbnail", input, output, as.character(width))
+    if (!is.null(height)) {
+      args <- c(args, "--height", as.character(height))
+    }
+    wsi_run_command("vips", args = args, error_message = "libvips failed to resize the Bio-Formats preview.")
+    return(invisible(output))
+  }
+
+  geometry <- if (is.null(height)) sprintf("%dx", width) else sprintf("%dx%d>", width, height)
+  if (wsi_imagemagick_cli()) {
+    wsi_run_command(
+      "magick",
+      args = c(wsi_imagemagick_input(input), "-auto-orient", "-thumbnail", geometry, output),
+      error_message = "ImageMagick failed to resize the Bio-Formats preview."
+    )
+    return(invisible(output))
+  }
+
+  wsi_require_magick("resize a Bio-Formats preview for the browser")
+  image <- magick::image_read(input)
+  image <- magick::image_resize(image, geometry)
+  magick::image_write(image, path = output, format = "png")
+  invisible(output)
+}
+
+wsi_bioformats_preview_series <- function(path, series, output, width, height = NULL) {
+  bfconvert <- wsi_bioformats_command("bfconvert")
+  if (!wsi_command_exists(bfconvert)) {
+    wsi_abort(
+      "Bio-Formats CZI preview generation requires `bfconvert` on PATH. Install OME bftools, then retry.",
+      class = "wsi_backend_unavailable"
+    )
+  }
+
+  tmp <- tempfile("wsi_bioformats_series_", fileext = ".tif")
+  on.exit(unlink(tmp, force = TRUE), add = TRUE)
+  args <- c(
+    "-overwrite",
+    "-series", as.character(as.integer(series)),
+    path,
+    tmp
+  )
+  wsi_run_command(
+    bfconvert,
+    args = args,
+    error_message = sprintf("Bio-Formats could not export series %d for preview.", as.integer(series))
+  )
+  wsi_bioformats_preview_resize(tmp, output, width = width, height = height)
+  invisible(output)
+}
+
+wsi_bioformats_preview_rows <- function(series, width, max_series = 8L, max_input_pixels = 8e7) {
+  series <- series[!is.na(series$width) & !is.na(series$height), , drop = FALSE]
+  if (!nrow(series)) {
+    return(series)
+  }
+  series$preview_pixels <- series$width * series$height
+  small_enough <- series[series$preview_pixels <= max_input_pixels, , drop = FALSE]
+  if (nrow(small_enough)) {
+    small_enough$preview_score <- abs(small_enough$width - width)
+    small_enough <- small_enough[order(small_enough$preview_score, small_enough$preview_pixels), , drop = FALSE]
+    return(utils::head(small_enough, max_series))
+  }
+
+  # Last resort: expose the smallest available series. This still avoids R
+  # loading the source pixels, but bfconvert may be slow for very large images.
+  series <- series[order(series$preview_pixels), , drop = FALSE]
+  utils::head(series, 1L)
+}
+
+wsi_bioformats_project_preview <- function(path, width = 768, height = NULL,
+                                           max_series = 8L,
+                                           max_input_pixels = 8e7) {
+  if (!wsi_has_bioformats()) {
+    wsi_abort(
+      "Bio-Formats CZI preview generation requires `showinf` and `bfconvert` on PATH.",
+      class = "wsi_backend_unavailable"
+    )
+  }
+  if (!wsi_command_exists(wsi_bioformats_command("bfconvert"))) {
+    wsi_abort(
+      "Bio-Formats metadata is available, but CZI preview generation also requires `bfconvert` on PATH.",
+      class = "wsi_backend_unavailable"
+    )
+  }
+
+  info <- wsi_bioformats_series_metadata(path)
+  rows <- wsi_bioformats_preview_rows(
+    info$series,
+    width = width,
+    max_series = max_series,
+    max_input_pixels = max_input_pixels
+  )
+  if (!nrow(rows)) {
+    wsi_abort("Bio-Formats did not report any previewable CZI series.")
+  }
+
+  output_dir <- tempfile("wsi_bioformats_preview_")
+  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+  on.exit(unlink(output_dir, recursive = TRUE, force = TRUE), add = TRUE)
+
+  sections <- lapply(seq_len(nrow(rows)), function(i) {
+    row <- rows[i, , drop = FALSE]
+    png <- file.path(output_dir, sprintf("series_%d.png", row$series[[1L]]))
+    wsi_bioformats_preview_series(
+      path,
+      series = row$series[[1L]],
+      output = png,
+      width = width,
+      height = height
+    )
+    list(
+      id = sprintf("bioformats_series_%d", row$series[[1L]]),
+      label = sprintf(
+        "Series %d (%sx%s)",
+        row$series[[1L]],
+        format(row$width[[1L]], scientific = FALSE, trim = TRUE),
+        format(row$height[[1L]], scientific = FALSE, trim = TRUE)
+      ),
+      series = as.integer(row$series[[1L]]),
+      width = as.numeric(row$width[[1L]]),
+      height = as.numeric(row$height[[1L]]),
+      preview_width = width,
+      preview_height = height %||% NA_real_,
+      status = "preview",
+      message = "Preview generated with Bio-Formats bfconvert; full-resolution pixels remain on disk.",
+      image_data_uri = wsi_image_data_uri(png, mime = "image/png"),
+      navigator_image_data_uri = wsi_image_data_uri(png, mime = "image/png")
+    )
+  })
+
+  list(
+    sections = sections,
+    metadata = info
+  )
+}
+
 wsi_bioformats_read_region_file <- function(slide, region, output) {
   bfconvert <- wsi_bioformats_command("bfconvert")
   if (!wsi_command_exists(bfconvert)) {

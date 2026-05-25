@@ -29,6 +29,18 @@ test_that("Bio-Formats OME-XML metadata parser extracts series dimensions", {
   expect_equal(series$size_c[[1]], 3L)
 })
 
+test_that("Bio-Formats preview selection prefers browser-sized series", {
+  series <- data.frame(
+    series = 0:2,
+    width = c(40000, 4096, 1200),
+    height = c(30000, 3000, 900),
+    stringsAsFactors = FALSE
+  )
+  rows <- wsiTools:::wsi_bioformats_preview_rows(series, width = 1000, max_series = 2, max_input_pixels = 5e7)
+  expect_equal(rows$series[[1]], 2L)
+  expect_true(all(rows$width * rows$height <= 5e7))
+})
+
 test_that("mock slides support metadata helpers", {
   slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 800, levels = c(1, 4))
   expect_s3_class(slide, "wsi_slide")

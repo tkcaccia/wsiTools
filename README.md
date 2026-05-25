@@ -310,6 +310,71 @@ Supported formats depend on the installed backend and the specific file. The
 package reports backend availability and errors explicitly rather than claiming
 that every WSI variant is guaranteed to work.
 
+## Open one image
+
+Use this when you simply want to select one local image and open it in the
+viewer. `file.choose()` is the easiest option on Windows because it handles
+spaces and backslashes in the file path.
+
+```r
+library(wsiTools)
+
+# 1. Check which optional backends R can see
+wsi_backends()
+
+# 2. Choose one image file: SVS, TIFF/BTF, PNG/JPEG, OME-TIFF, etc.
+path <- file.choose()
+
+# 3. Open metadata only. This does not load the full image into R memory.
+slide <- wsi_open(path)
+
+# 4. Inspect metadata
+wsi_info(slide)
+wsi_levels(slide)
+
+# 5. Open an interactive preview
+html <- wsi_viewer(slide, width = 1600, open = TRUE)
+
+# 6. Close the lightweight slide handle when finished
+wsi_close(slide)
+```
+
+For full-resolution tiled viewing of a large WSI, use tiled mode. This requires
+libvips and writes Deep Zoom tiles next to the HTML viewer:
+
+```r
+slide <- wsi_open(path)
+
+html <- wsi_viewer(
+  slide,
+  mode = "tiles",
+  output = "single_image_viewer.html",
+  tile_dir = "single_image_viewer_tiles",
+  open = TRUE,
+  overwrite = TRUE
+)
+
+wsi_close(slide)
+```
+
+For Zeiss CZI files, install Bio-Formats first and open with the Bio-Formats
+backend:
+
+```r
+wsi_install_backends(tools = "bioformats", method = "conda")
+
+# Restart R/RStudio after installation, then:
+library(wsiTools)
+Sys.which(c("showinf", "bfconvert"))
+
+czi_path <- file.choose()
+czi <- wsi_open(czi_path, backend = "bioformats")
+wsi_info(czi)
+
+# For scene/section-style CZI viewing
+wsi_viewer_project(czi_path, open = TRUE)
+```
+
 ## Basic example
 
 ```r
@@ -378,16 +443,17 @@ html
 ```
 
 For sharper preview zoom, increase `width`; for smaller HTML files, decrease
-it. CZI previews are optional and require a Python executable with
-`aicspylibczi`, `numpy`, and `Pillow`:
+it. CZI previews can be generated either with the optional Python bridge
+(`aicspylibczi`, `numpy`, and `Pillow`) or with Bio-Formats `bfconvert`.
+The Python bridge is usually better for CZI mosaic previews:
 
 ```r
 Sys.setenv(WSITOOLS_CZI_PYTHON = "/path/to/python")
 wsi_has_czi_python()
 ```
 
-For CZI metadata through Bio-Formats, install OME bftools and check that
-`showinf` is visible to R:
+For CZI metadata and first-plane browser previews through Bio-Formats, install
+OME bftools and check that both `showinf` and `bfconvert` are visible to R:
 
 ```r
 wsi_install_backends(tools = "bioformats", method = "conda")
@@ -396,6 +462,8 @@ wsi_backends()
 
 slide <- wsi_open("case_01_section_01.czi", backend = "bioformats")
 wsi_info(slide)
+
+wsi_viewer_project("case_01_section_01.czi", open = TRUE)
 ```
 
 If Windows reports `NoDecodeDelegateForThisImageFormat` for a `.czi`, that is
