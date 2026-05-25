@@ -150,6 +150,19 @@ chooses a backend, and reads metadata. It does not load the full slide.
 OpenSlide, libvips, StarDist, Cellpose, `httpuv`, and `callr` are optional
 runtime capabilities; the package should still install and load without them.
 
+For Zeiss CZI files on Windows, ImageMagick is not a CZI backend. Install
+Bio-Formats command-line tools first, then open metadata explicitly:
+
+```{r, eval=FALSE, purl=FALSE}
+wsi_install_backends(tools = "bioformats", method = "conda")
+Sys.which(c("showinf", "bfconvert"))
+
+czi <- wsi_open("sample.czi", backend = "bioformats")
+wsi_info(czi)
+```
+
+Use `wsi_viewer_project("sample.czi")` for the multi-scene CZI project viewer.
+
 ## Reading metadata
 
 ```{r, eval=FALSE, purl=FALSE}

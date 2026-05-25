@@ -5,8 +5,8 @@
 #' does not load the full slide into R memory.
 #'
 #' @param path Path to a WSI or large image file.
-#' @param backend Backend to use. `"auto"` detects OME-Zarr directories, then
-#'   prefers OpenSlide when available and falls back to libvips.
+#' @param backend Backend to use. `"auto"` detects OME-Zarr directories and CZI
+#'   files, then prefers OpenSlide when available and falls back to libvips.
 #'
 #' @return An S3 object of class `wsi_slide`.
 #' @export
@@ -16,7 +16,7 @@
 #' wsi_info(slide)
 #' wsi_close(slide)
 #' }
-wsi_open <- function(path, backend = c("auto", "openslide", "vips", "omezarr", "imagemagick")) {
+wsi_open <- function(path, backend = c("auto", "openslide", "vips", "bioformats", "omezarr", "imagemagick")) {
   backend <- match.arg(backend)
   path <- wsi_validate_input_path(path)
 
@@ -24,12 +24,17 @@ wsi_open <- function(path, backend = c("auto", "openslide", "vips", "omezarr", "
     if (wsi_is_omezarr_path(path)) {
       return(open_omezarr(path))
     }
+    is_czi <- wsi_is_czi_path(path)
     candidates <- c(
       if (wsi_has_openslide()) "openslide",
       if (wsi_has_vips()) "vips",
-      if (wsi_has_imagemagick()) "imagemagick"
+      if (is_czi && wsi_has_bioformats()) "bioformats",
+      if (!is_czi && wsi_has_imagemagick()) "imagemagick"
     )
     if (!length(candidates)) {
+      if (is_czi) {
+        wsi_abort(wsi_czi_backend_message(path), class = "wsi_backend_unavailable")
+      }
       wsi_abort(
         "No WSI/image backend is available. Install OpenSlide, libvips, or ImageMagick, then retry.",
         class = "wsi_backend_unavailable"
@@ -43,6 +48,7 @@ wsi_open <- function(path, backend = c("auto", "openslide", "vips", "omezarr", "
           candidate,
           openslide = wsi_openslide_open(path),
           vips = wsi_vips_open(path),
+          bioformats = wsi_bioformats_open(path),
           imagemagick = wsi_imagemagick_open(path)
         ),
         error = function(err) {
@@ -58,7 +64,8 @@ wsi_open <- function(path, backend = c("auto", "openslide", "vips", "omezarr", "
     wsi_abort(
       paste(
         "No available backend could open this file.",
-        paste(sprintf("%s: %s", names(errors), errors), collapse = "\n")
+        paste(sprintf("%s: %s", names(errors), errors), collapse = "\n"),
+        if (is_czi) paste0("\n", wsi_czi_backend_message(path)) else ""
       )
     )
   }
@@ -67,6 +74,7 @@ wsi_open <- function(path, backend = c("auto", "openslide", "vips", "omezarr", "
     backend,
     openslide = wsi_openslide_open(path),
     vips = wsi_vips_open(path),
+    bioformats = wsi_bioformats_open(path),
     omezarr = open_omezarr(path),
     imagemagick = wsi_imagemagick_open(path)
   )

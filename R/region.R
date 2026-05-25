@@ -1,4 +1,4 @@
-wsi_region_to_file <- function(slide, region, output, backend = c("auto", "vips", "openslide", "imagemagick")) {
+wsi_region_to_file <- function(slide, region, output, backend = c("auto", "vips", "openslide", "bioformats", "imagemagick")) {
   backend <- wsi_choose_region_backend(slide, backend)
 
   if (identical(slide$backend, "mock")) {
@@ -10,6 +10,9 @@ wsi_region_to_file <- function(slide, region, output, backend = c("auto", "vips"
   }
   if (backend == "openslide") {
     return(wsi_openslide_read_region_file(slide, region, output))
+  }
+  if (backend == "bioformats") {
+    return(wsi_bioformats_read_region_file(slide, region, output))
   }
   if (backend == "imagemagick") {
     return(wsi_imagemagick_read_region_file(slide, region, output))

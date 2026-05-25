@@ -379,6 +379,22 @@ Sys.setenv(WSITOOLS_CZI_PYTHON = "/path/to/python")
 wsi_has_czi_python()
 ```
 
+For CZI metadata through Bio-Formats, install OME bftools and check that
+`showinf` is visible to R:
+
+```r
+wsi_install_backends(tools = "bioformats", method = "conda")
+Sys.which(c("showinf", "bfconvert"))
+wsi_backends()
+
+slide <- wsi_open("case_01_section_01.czi", backend = "bioformats")
+wsi_info(slide)
+```
+
+If Windows reports `NoDecodeDelegateForThisImageFormat` for a `.czi`, that is
+ImageMagick saying it cannot decode CZI. Install Bio-Formats or configure the
+optional Python CZI bridge; do not rely on ImageMagick for CZI files.
+
 You can also add related images to a normal slide viewer:
 
 ```r

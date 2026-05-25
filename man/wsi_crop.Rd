@@ -13,7 +13,7 @@ wsi_crop(
   level = 0,
   output = NULL,
   format = c("tiff", "png", "jpeg", "ome-tiff"),
-  backend = c("auto", "vips", "openslide", "imagemagick"),
+  backend = c("auto", "vips", "openslide", "bioformats", "imagemagick"),
   overwrite = FALSE
 )
 }

@@ -6,14 +6,14 @@
 \usage{
 wsi_open(
   path,
-  backend = c("auto", "openslide", "vips", "omezarr", "imagemagick")
+  backend = c("auto", "openslide", "vips", "bioformats", "omezarr", "imagemagick")
 )
 }
 \arguments{
 \item{path}{Path to a WSI or large image file.}
 
-\item{backend}{Backend to use. \code{"auto"} detects OME-Zarr directories, then
-prefers OpenSlide when available and falls back to libvips.}
+\item{backend}{Backend to use. \code{"auto"} detects OME-Zarr directories and CZI
+files, then prefers OpenSlide when available and falls back to libvips.}
 }
 \value{
 An S3 object of class \code{wsi_slide}.

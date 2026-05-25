@@ -229,7 +229,7 @@ wsi_choose_open_backend <- function() {
   )
 }
 
-wsi_choose_region_backend <- function(slide, backend = c("auto", "vips", "openslide", "imagemagick")) {
+wsi_choose_region_backend <- function(slide, backend = c("auto", "vips", "openslide", "bioformats", "imagemagick")) {
   backend <- match.arg(backend)
   if (backend != "auto") {
     return(backend)
@@ -239,6 +239,9 @@ wsi_choose_region_backend <- function(slide, backend = c("auto", "vips", "opensl
   }
   if (identical(slide$backend, "openslide") && wsi_command_exists("openslide-write-png")) {
     return("openslide")
+  }
+  if (identical(slide$backend, "bioformats")) {
+    return("bioformats")
   }
   if (identical(slide$backend, "imagemagick")) {
     return("imagemagick")

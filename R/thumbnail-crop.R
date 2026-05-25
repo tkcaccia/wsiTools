@@ -74,7 +74,7 @@ wsi_thumbnail <- function(slide, width = 1024, height = NULL,
 #' @export
 wsi_crop <- function(slide, x, y, width, height, level = 0, output = NULL,
                      format = c("tiff", "png", "jpeg", "ome-tiff"),
-                     backend = c("auto", "vips", "openslide", "imagemagick"),
+                     backend = c("auto", "vips", "openslide", "bioformats", "imagemagick"),
                      overwrite = FALSE) {
   format <- match.arg(format)
   backend <- match.arg(backend)
