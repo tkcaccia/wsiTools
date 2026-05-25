@@ -12,3 +12,14 @@ test_that("backend checks return stable structures", {
   expect_type(wsi_has_czi_python(), "logical")
   expect_type(wsi_has_cellpose(), "logical")
 })
+
+test_that("invalid UTF-8 from command-line tools is cleaned before regex parsing", {
+  invalid <- rawToChar(c(charToRaw("openslide.level-count: 1"), as.raw(0xff)))
+  Encoding(invalid) <- "UTF-8"
+
+  expect_false(validUTF8(invalid))
+  expect_warning(parsed <- wsiTools:::wsi_parse_key_value(invalid), NA)
+  expect_true(startsWith(parsed[["openslide.level-count"]], "1"))
+  expect_true(validUTF8(names(parsed)))
+  expect_true(validUTF8(unlist(parsed, use.names = FALSE)))
+})

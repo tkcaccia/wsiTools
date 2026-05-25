@@ -28,6 +28,24 @@ wsi_warn <- function(message, class = "wsi_warning", call = NULL) {
   cli::cli_warn(message, class = class, call = call)
 }
 
+wsi_clean_text <- function(x) {
+  if (is.null(x)) {
+    return(x)
+  }
+  original_names <- names(x)
+  x <- as.character(x)
+  out <- suppressWarnings(iconv(x, from = "", to = "UTF-8", sub = "byte"))
+  missing <- is.na(out) & !is.na(x)
+  if (any(missing)) {
+    fallback <- x[missing]
+    Encoding(fallback) <- "unknown"
+    out[missing] <- suppressWarnings(iconv(fallback, from = "latin1", to = "UTF-8", sub = "byte"))
+  }
+  out[is.na(out) & !is.na(x)] <- ""
+  names(out) <- original_names
+  out
+}
+
 wsi_command_exists <- function(command) {
   if (!is.character(command) || length(command) != 1L || is.na(command) || !nzchar(command)) {
     return(FALSE)
@@ -64,6 +82,7 @@ wsi_run_command <- function(command, args = character(), error_message = NULL) {
   )
 
   status <- attr(output, "status", exact = TRUE) %||% 0L
+  output <- wsi_clean_text(output)
   if (!identical(as.integer(status), 0L)) {
     details <- paste(output, collapse = "\n")
     if (identical(command, "conda") && grepl("CondaToSNonInteractiveError", details, fixed = TRUE)) {
@@ -98,6 +117,7 @@ wsi_command_version <- function(command, args = "--version") {
   if (!identical(as.integer(status), 0L) || length(out) == 0) {
     return(NA_character_)
   }
+  out <- wsi_clean_text(out)
   out <- trimws(out)
   out <- out[nzchar(out)]
   out <- out[!grepl("WARNING|VIPS-WARNING", out)]
@@ -108,6 +128,7 @@ wsi_command_version <- function(command, args = "--version") {
 }
 
 wsi_parse_key_value <- function(lines) {
+  lines <- wsi_clean_text(lines)
   lines <- lines[nzchar(lines)]
   pos <- regexpr(":\\s*", lines)
   keep <- pos > 1

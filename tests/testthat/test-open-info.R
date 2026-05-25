@@ -29,6 +29,19 @@ test_that("Bio-Formats OME-XML metadata parser extracts series dimensions", {
   expect_equal(series$size_c[[1]], 3L)
 })
 
+test_that("Bio-Formats parser tolerates invalid UTF-8 bytes in tool output", {
+  line <- rawToChar(c(
+    as.raw(0xff),
+    charToRaw("<Pixels ID=\"Pixels:0\" DimensionOrder=\"XYCZT\" Type=\"uint16\" SizeX=\"64\" SizeY=\"32\" SizeZ=\"1\" SizeC=\"1\" SizeT=\"1\">")
+  ))
+  Encoding(line) <- "UTF-8"
+
+  expect_false(validUTF8(line))
+  expect_warning(series <- wsiTools:::wsi_bioformats_parse_omexml(line), NA)
+  expect_equal(series$width[[1]], 64)
+  expect_equal(series$height[[1]], 32)
+})
+
 test_that("Bio-Formats preview selection prefers browser-sized series", {
   series <- data.frame(
     series = 0:2,

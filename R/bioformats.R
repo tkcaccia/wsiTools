@@ -31,6 +31,7 @@ wsi_bioformats_showinf <- function(path, omexml = TRUE) {
 }
 
 wsi_bioformats_xml_attrs <- function(tag) {
+  tag <- wsi_clean_text(tag)
   matches <- gregexpr("([A-Za-z_:][-A-Za-z0-9_:.]*)\\s*=\\s*\"([^\"]*)\"", tag, perl = TRUE)
   pieces <- regmatches(tag, matches)[[1L]]
   if (!length(pieces)) {
@@ -46,6 +47,7 @@ wsi_bioformats_xml_attrs <- function(tag) {
 }
 
 wsi_bioformats_parse_omexml <- function(lines) {
+  lines <- wsi_clean_text(lines)
   text <- paste(lines, collapse = "\n")
   matches <- gregexpr("<Pixels\\b[^>]*>", text, perl = TRUE)
   tags <- regmatches(text, matches)[[1L]]
@@ -75,6 +77,7 @@ wsi_bioformats_parse_omexml <- function(lines) {
 }
 
 wsi_bioformats_parse_plain <- function(lines) {
+  lines <- wsi_clean_text(lines)
   current <- 0L
   series <- list()
   for (line in lines) {

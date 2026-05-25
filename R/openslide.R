@@ -8,6 +8,7 @@ wsi_openslide_properties <- function(path) {
 }
 
 wsi_properties_to_levels <- function(properties) {
+  names(properties) <- wsi_clean_text(names(properties))
   count <- suppressWarnings(as.integer(properties[["openslide.level-count"]] %||% NA_integer_))
 
   if (is.na(count)) {
@@ -41,6 +42,7 @@ wsi_properties_to_levels <- function(properties) {
 }
 
 wsi_openslide_associated_images <- function(properties) {
+  names(properties) <- wsi_clean_text(names(properties))
   keys <- names(properties)
   matches <- regmatches(keys, regexec("^openslide\\.associated\\.([^\\.]+)\\.width$", keys))
   names <- vapply(matches, function(x) if (length(x) == 2L) x[[2L]] else NA_character_, character(1))
