@@ -2080,7 +2080,8 @@ wsi_tiled_viewer_html <- function(config) {
 #'   messages.
 #' @param project_images Optional paths, slide objects, or project records to
 #'   list in the left Project section. CZI paths are listed without loading the
-#'   full file into R; real CZI previews require optional Bio-Formats tools.
+#'   full file into R; real CZI previews require the optional native libCZI
+#'   bridge, or an explicitly enabled legacy Python bridge.
 #' @param channel_sources Optional tiled channel sources created with
 #'   [wsi_channel_source()].
 #'

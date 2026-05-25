@@ -10,7 +10,6 @@
 ^README\.Rmd$
 ^scripts$
 ^manuscript$
-^src$
 ^.*\.Rcheck$
 ^\.\.Rcheck$
 ^.*\.tar\.gz$

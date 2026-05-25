@@ -65,8 +65,8 @@ wsi_backends <- function() {
       "Requires vips and vipsheader on PATH.",
       "Optional backend; install Bio-Formats command-line tools (`showinf`/`bfconvert`) for CZI metadata and conversion, not first visualization.",
       "Optional fallback for standard TIFF/PNG/JPEG previews; install libvips/OpenSlide for WSI-scale tiled viewing.",
-      "Optional future backend. Native libCZI support is not compiled into the CRAN-safe build yet.",
-      "Optional Python runtime. Set WSITOOLS_CZI_PYTHON to a Python executable with `aicspylibczi`, `numpy`, and `Pillow`.",
+      "Optional direct CZI backend. Install ZEISS libCZI/libCZIAPI and set WSITOOLS_LIBCZIAPI if it is not on the dynamic library path.",
+      "Legacy optional fallback. Only used for CZI previews when WSITOOLS_CZI_ALLOW_PYTHON=true.",
       "Suggested R package; not required for static viewers or package installation.",
       "Suggested R package; not required unless async jobs are requested.",
       "Optional command. Set WSITOOLS_STARDIST_COMMAND or pass command/args when running.",
@@ -97,8 +97,9 @@ wsi_has_bioformats <- function() {
 }
 
 #' @rdname wsi_backends
-#' @param python Optional Python executable used to check the CZI preview
-#'   bridge. When `NULL`, `WSITOOLS_CZI_PYTHON` and then `python3` are checked.
+#' @param python Optional Python executable used to check the legacy CZI
+#'   preview bridge. When `NULL`, `WSITOOLS_CZI_PYTHON` and then `python3` are
+#'   checked.
 #' @export
 wsi_has_czi_python <- function(python = NULL) {
   python <- wsi_czi_python_command(python)
@@ -234,10 +235,13 @@ wsi_choose_open_backend <- function() {
   )
 }
 
-wsi_choose_region_backend <- function(slide, backend = c("auto", "vips", "openslide", "bioformats", "imagemagick")) {
+wsi_choose_region_backend <- function(slide, backend = c("auto", "vips", "openslide", "native_czi", "bioformats", "imagemagick")) {
   backend <- match.arg(backend)
   if (backend != "auto") {
     return(backend)
+  }
+  if (identical(slide$backend, "native_czi")) {
+    return("native_czi")
   }
   if (wsi_has_vips()) {
     return("vips")

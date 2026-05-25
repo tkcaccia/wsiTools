@@ -50,8 +50,9 @@ Browser annotations are stored separately for each project image/section, so
 ROIs drawn on one tissue section do not appear on another section.
 }
 \details{
-CZI first visualization uses an optional tile/region reader when available:
-native libCZI in future builds, then the optional \code{aicspylibczi} bridge.
+CZI first visualization uses the direct native libCZI/libCZIAPI bridge when
+available. The older \code{aicspylibczi} bridge is used only if the user
+explicitly sets \code{WSITOOLS_CZI_ALLOW_PYTHON=true}.
 Bio-Formats is used for CZI metadata/conversion workflows, but \code{bfconvert}
 is not used automatically for first visualization because it is too slow for
 interactive opening.

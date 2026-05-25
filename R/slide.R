@@ -16,7 +16,7 @@
 #' wsi_info(slide)
 #' wsi_close(slide)
 #' }
-wsi_open <- function(path, backend = c("auto", "openslide", "vips", "bioformats", "omezarr", "imagemagick")) {
+wsi_open <- function(path, backend = c("auto", "openslide", "vips", "native_czi", "bioformats", "omezarr", "imagemagick")) {
   backend <- match.arg(backend)
   path <- wsi_validate_input_path(path)
 
@@ -26,6 +26,7 @@ wsi_open <- function(path, backend = c("auto", "openslide", "vips", "bioformats"
     }
     is_czi <- wsi_is_czi_path(path)
     candidates <- c(
+      if (is_czi && wsi_has_native_czi()) "native_czi",
       if (wsi_has_openslide()) "openslide",
       if (wsi_has_vips()) "vips",
       if (is_czi && wsi_has_bioformats()) "bioformats",
@@ -48,6 +49,7 @@ wsi_open <- function(path, backend = c("auto", "openslide", "vips", "bioformats"
           candidate,
           openslide = wsi_openslide_open(path),
           vips = wsi_vips_open(path),
+          native_czi = wsi_native_czi_open(path),
           bioformats = wsi_bioformats_open(path),
           imagemagick = wsi_imagemagick_open(path)
         ),
@@ -74,6 +76,7 @@ wsi_open <- function(path, backend = c("auto", "openslide", "vips", "bioformats"
     backend,
     openslide = wsi_openslide_open(path),
     vips = wsi_vips_open(path),
+    native_czi = wsi_native_czi_open(path),
     bioformats = wsi_bioformats_open(path),
     omezarr = open_omezarr(path),
     imagemagick = wsi_imagemagick_open(path)

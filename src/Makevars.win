@@ -1,0 +1,1 @@
+# Dynamic loading uses the Windows API and does not need libdl.

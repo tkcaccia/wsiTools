@@ -151,7 +151,8 @@ messages.}
 
 \item{project_images}{Optional paths, slide objects, or project records to
 list in the left Project section. CZI paths are listed without loading the
-full file into R; real CZI previews require optional Bio-Formats tools.}
+full file into R; real CZI previews require the optional native libCZI
+bridge, or an explicitly enabled legacy Python bridge.}
 
 \item{channel_sources}{Optional tiled channel sources created with
 \code{\link[=wsi_channel_source]{wsi_channel_source()}}.}

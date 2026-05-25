@@ -154,22 +154,24 @@ chooses a backend, and reads metadata. It does not load the full slide.
 OpenSlide, libvips, StarDist, Cellpose, `httpuv`, and `callr` are optional
 runtime capabilities; the package should still install and load without them.
 
-For Zeiss CZI files on Windows, ImageMagick is not a CZI backend. Use a CZI
-tile/region reader for visualization: native libCZI in future optional builds,
-or the current `aicspylibczi` bridge. Bio-Formats remains useful for metadata
-and conversion, but wsiTools does not run `bfconvert` automatically for first
-visualization.
+For Zeiss CZI files on Windows, ImageMagick is not a CZI backend. Use the
+native CZI tile/region reader for visualization by installing ZEISS
+libCZI/libCZIAPI and setting `WSITOOLS_LIBCZIAPI` when needed. Bio-Formats
+remains useful for metadata and conversion, but wsiTools does not run
+`bfconvert` automatically for first visualization.
 
-For first visualization with the current optional bridge, install
-`aicspylibczi`, `numpy`, and `Pillow` into a Python environment, then tell
-wsiTools which Python to use:
+For first visualization with the native bridge:
 
 ```{r, eval=FALSE, purl=FALSE}
-Sys.setenv(WSITOOLS_CZI_PYTHON = "C:/path/to/python.exe")
-wsi_has_czi_python()
+Sys.setenv(WSITOOLS_LIBCZIAPI = "C:/path/to/libCZIAPI.dll")
+wsi_has_native_czi()
 
 wsi_viewer_project("sample.czi")
 ```
+
+The old Python wrapper route is kept only as a legacy fallback. To use it
+explicitly, set `WSITOOLS_CZI_ALLOW_PYTHON=true` and configure
+`WSITOOLS_CZI_PYTHON`.
 
 For metadata only, install Bio-Formats command-line tools and open explicitly
 with `backend = "bioformats"`.

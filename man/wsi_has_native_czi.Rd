@@ -11,9 +11,10 @@ wsi_has_native_czi()
 }
 \description{
 \code{wsi_has_native_czi()} reports whether the optional native CZI reader is
-available. The intended native backend is ZEISS libCZI through a small C/C++
-bridge. It is kept optional so the CRAN-safe R package can still install on
-systems without libCZI.
+available. The native backend calls ZEISS libCZI/libCZIAPI directly from R
+through the package's compiled code; it does not use the Python wrappers.
+Set \code{WSITOOLS_LIBCZIAPI} to the full path of the libCZIAPI shared library
+when it is not already on the operating-system dynamic library path.
 }
 \examples{
 wsi_has_native_czi()

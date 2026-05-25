@@ -25,8 +25,9 @@ wsi_has_cellpose(command = NULL)
 wsi_has_imagemagick()
 }
 \arguments{
-\item{python}{Optional Python executable used to check the CZI preview
-bridge. When \code{NULL}, \code{WSITOOLS_CZI_PYTHON} and then \code{python3} are checked.}
+\item{python}{Optional Python executable used to check the legacy CZI
+preview bridge. When \code{NULL}, \code{WSITOOLS_CZI_PYTHON} and then \code{python3} are
+checked.}
 
 \item{command}{Optional command to check for command-backed helpers such as
 Cellpose.}

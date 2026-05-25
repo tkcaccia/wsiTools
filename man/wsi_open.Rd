@@ -6,7 +6,8 @@
 \usage{
 wsi_open(
   path,
-  backend = c("auto", "openslide", "vips", "bioformats", "omezarr", "imagemagick")
+  backend = c("auto", "openslide", "vips", "native_czi", "bioformats", "omezarr",
+    "imagemagick")
 )
 }
 \arguments{

@@ -6,10 +6,10 @@ wsi_czi_backend_message <- function(path = NULL) {
   paste(
     "CZI files are not readable through the ImageMagick fallback backend.",
     "Install one CZI-capable backend, then restart R/RStudio:",
-    "1. For first visualization now: install `aicspylibczi`, `numpy`, and `Pillow`, then set `WSITOOLS_CZI_PYTHON`.",
+    "1. For first visualization: install ZEISS libCZI/libCZIAPI and set `WSITOOLS_LIBCZIAPI` if the shared library is not already discoverable.",
     "2. For metadata/conversion: install Bio-Formats with `conda install --override-channels -c ome -c conda-forge bftools`, or download `bftools.zip` and add `showinf`/`bfconvert` to PATH.",
-    "3. Future native path: use a wsiTools build compiled with ZEISS libCZI.",
-    "Check with `wsi_has_czi_python()`, `wsi_has_native_czi()`, and `wsi_backends()`.",
+    "3. Legacy fallback only if you explicitly opt in: set `WSITOOLS_CZI_ALLOW_PYTHON=true` and configure `WSITOOLS_CZI_PYTHON` for `aicspylibczi`.",
+    "Check with `wsi_has_native_czi()`, `wsi_has_czi_python()`, and `wsi_backends()`.",
     "For CZI project viewing, use `wsi_viewer_project(\"file.czi\")`.",
     sep = "\n"
   )

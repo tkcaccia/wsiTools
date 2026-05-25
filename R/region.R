@@ -1,4 +1,4 @@
-wsi_region_to_file <- function(slide, region, output, backend = c("auto", "vips", "openslide", "bioformats", "imagemagick")) {
+wsi_region_to_file <- function(slide, region, output, backend = c("auto", "vips", "openslide", "native_czi", "bioformats", "imagemagick")) {
   backend <- wsi_choose_region_backend(slide, backend)
 
   if (identical(slide$backend, "mock")) {
@@ -10,6 +10,9 @@ wsi_region_to_file <- function(slide, region, output, backend = c("auto", "vips"
   }
   if (backend == "openslide") {
     return(wsi_openslide_read_region_file(slide, region, output))
+  }
+  if (backend == "native_czi") {
+    wsi_abort("Native CZI region export to files is not implemented yet; use `wsi_read_region(..., format = \"array\")` for native CZI previews.")
   }
   if (backend == "bioformats") {
     return(wsi_bioformats_read_region_file(slide, region, output))
@@ -53,6 +56,22 @@ wsi_read_region <- function(slide, x, y, width, height, level = 0,
       return(magick::image_blank(region$width, region$height, color = "grey95"))
     }
     return(structure(list(array = array, format = "mock-array"), class = "wsi_region_file"))
+  }
+
+  if (identical(slide$backend, "native_czi")) {
+    if (format != "array") {
+      wsi_abort("Native CZI region reading currently returns `format = \"array\"`; file/raster/magick export will be added after the native tile writer lands.")
+    }
+    return(wsi_native_czi_read_region(
+      slide$path,
+      x = region$x,
+      y = region$y,
+      width = region$width,
+      height = region$height,
+      zoom = 1 / region$downsample,
+      channel = 0,
+      scene = NA_integer_
+    ))
   }
 
   tmp <- tempfile(fileext = ".png")

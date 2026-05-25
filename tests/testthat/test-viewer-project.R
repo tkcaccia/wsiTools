@@ -43,6 +43,8 @@ test_that("wsi_viewer_project lists CZI paths without loading them into R", {
   expect_match(html, basename(czi2), fixed = TRUE)
   expect_match(html, "CZI detected", fixed = TRUE)
   expect_match(html, "Bio-Formats", fixed = TRUE)
+  expect_match(html, "WSITOOLS_LIBCZIAPI", fixed = TRUE)
+  expect_match(html, "will not use Python unless", fixed = TRUE)
   expect_false(grepl("CZI preview generated with Bio-Formats bfconvert", html, fixed = TRUE))
   expect_match(html, "Project section selected", fixed = TRUE)
   expect_match(html, '"viewer_mode":"project"', fixed = TRUE)
