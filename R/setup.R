@@ -127,13 +127,14 @@ wsi_setup_tool_command <- function(tool, method) {
       notes = "Requires Windows Package Manager. Restart R/RStudio after installation so PATH changes are visible."
     ),
     conda = {
-      channel <- if (identical(tool, "bioformats")) "ome" else "conda-forge"
+      channels <- if (identical(tool, "bioformats")) c("ome", "conda-forge") else "conda-forge"
+      channel_args <- as.vector(rbind("-c", channels))
       note <- if (identical(tool, "bioformats")) {
-        "Installs OME bftools (`showinf` and `bfconvert`) into the active conda environment."
+        "Installs OME bftools (`showinf` and `bfconvert`) into the active conda environment, using only explicit conda channels."
       } else {
-        "Installs into the active conda environment."
+        "Installs into the active conda environment, using only explicit conda-forge channels."
       }
-      list(command = "conda", args = list(c("install", "-y", "-c", channel, packages)), notes = note)
+      list(command = "conda", args = list(c("install", "-y", "--override-channels", channel_args, packages)), notes = note)
     },
     manual = list(command = NA_character_, args = list(character()), notes = wsi_setup_manual_note(tool, method))
   )
@@ -144,7 +145,7 @@ wsi_setup_manual_note <- function(tool, method = "manual") {
     return("Python segmentation tools are best installed in a dedicated conda/pip environment; configure the command path afterwards.")
   }
   if (tool == "bioformats" && method %in% c("homebrew", "apt", "dnf", "manual")) {
-    return("Install OME Bio-Formats command-line tools (`bftools.zip`) manually, or run `conda install -c ome bftools` and ensure `showinf`/`bfconvert` are on PATH.")
+    return("Install OME Bio-Formats command-line tools (`bftools.zip`) manually, or run `conda install --override-channels -c ome -c conda-forge bftools` and ensure `showinf`/`bfconvert` are on PATH.")
   }
   if (tool == "openslide" && identical(method, "winget")) {
     return("No reliable winget OpenSlide package is configured. Use conda-forge, MSYS2/vcpkg, or official OpenSlide binaries and add the tools to PATH.")

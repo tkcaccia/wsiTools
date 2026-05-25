@@ -189,11 +189,18 @@ the command-line tools are also available to R.
 The simplest route is usually conda:
 
 ```sh
-conda create -n wsitools-bioformats -c ome bftools
+conda create -n wsitools-bioformats --override-channels -c ome -c conda-forge bftools
 conda activate wsitools-bioformats
 showinf -version
 bfconvert -version
 ```
+
+The `--override-channels` flag prevents conda from also consulting Anaconda's
+default channels. This avoids `CondaToSNonInteractiveError` on machines where
+the Anaconda default-channel Terms of Service have not been accepted. If your
+institution requires the Anaconda default channels, accept the Terms of Service
+in Anaconda Prompt using the `conda tos accept ...` commands printed by conda,
+then retry.
 
 If you already use conda for R, you can install into the active environment
 from R:

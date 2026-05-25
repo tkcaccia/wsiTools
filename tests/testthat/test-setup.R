@@ -29,7 +29,7 @@ test_that("Bio-Formats setup points to OME bftools", {
   conda_plan <- wsi_dependency_plan(tools = "bioformats", method = "conda")
   expect_equal(conda_plan$tool, "bioformats")
   expect_equal(conda_plan$command, "conda")
-  expect_true(all(c("-c", "ome", "bftools") %in% conda_plan$args[[1L]]))
+  expect_true(all(c("--override-channels", "-c", "ome", "conda-forge", "bftools") %in% conda_plan$args[[1L]]))
   expect_match(conda_plan$notes, "showinf")
   expect_match(conda_plan$notes, "bfconvert")
 
@@ -37,6 +37,20 @@ test_that("Bio-Formats setup points to OME bftools", {
   expect_true(is.na(brew_plan$command))
   expect_true(is.na(brew_plan$command_line))
   expect_match(brew_plan$notes, "bftools.zip", fixed = TRUE)
+})
+
+test_that("conda backend plans avoid default Anaconda channels", {
+  plan <- wsi_dependency_plan(
+    tools = c("openslide", "libvips", "imagemagick"),
+    method = "conda"
+  )
+
+  for (args in plan$args) {
+    expect_true("--override-channels" %in% args)
+    expect_true("conda-forge" %in% args)
+    expect_false("defaults" %in% args)
+  }
+  expect_true(all(grepl("--override-channels", plan$command_line, fixed = TRUE)))
 })
 
 test_that("setup reports missing dependencies without installing by default", {

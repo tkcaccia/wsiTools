@@ -106,11 +106,15 @@ The commands wsiTools checks for are `showinf` and `bfconvert`.
 The recommended conda route is:
 
 ```{bash, eval=FALSE}
-conda create -n wsitools-bioformats -c ome bftools
+conda create -n wsitools-bioformats --override-channels -c ome -c conda-forge bftools
 conda activate wsitools-bioformats
 showinf -version
 bfconvert -version
 ```
+
+`--override-channels` tells conda to use only the explicitly listed channels.
+This avoids Anaconda default-channel Terms of Service prompts on managed
+Windows computers.
 
 If R is running inside the active conda environment, this can also be requested
 from R:

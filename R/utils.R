@@ -66,6 +66,15 @@ wsi_run_command <- function(command, args = character(), error_message = NULL) {
   status <- attr(output, "status", exact = TRUE) %||% 0L
   if (!identical(as.integer(status), 0L)) {
     details <- paste(output, collapse = "\n")
+    if (identical(command, "conda") && grepl("CondaToSNonInteractiveError", details, fixed = TRUE)) {
+      details <- paste(
+        details,
+        "wsiTools note: Conda tried to use Anaconda default channels that require Terms of Service acceptance.",
+        "Update wsiTools and retry; current conda backend commands use `--override-channels` with explicit `conda-forge`/`ome` channels.",
+        "If your institution allows Anaconda default channels, you can instead run the `conda tos accept ...` commands printed by conda in an Anaconda Prompt.",
+        sep = "\n"
+      )
+    }
     wsi_abort(
       paste0(
         error_message %||% sprintf("Command `%s` failed.", command),
