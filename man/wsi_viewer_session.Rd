@@ -15,6 +15,11 @@ wsi_viewer_session(
   port = 8788,
   path = "/viewer-state",
   max_tries = 20L,
+  transport = c("auto", "websocket", "polling"),
+  dynamic_tiles = FALSE,
+  dynamic_tile_format = c("png", "jpg", "jpeg"),
+  dynamic_tile_cache_dir = NULL,
+  dynamic_tile_path = "/tiles",
   wait = interactive(),
   open = interactive(),
   autosave = !is.null(autosave_path),
@@ -49,6 +54,11 @@ wsi_viewer_live(
   port = 8788,
   path = "/viewer-state",
   max_tries = 20L,
+  transport = c("auto", "websocket", "polling"),
+  dynamic_tiles = FALSE,
+  dynamic_tile_format = c("png", "jpg", "jpeg"),
+  dynamic_tile_cache_dir = NULL,
+  dynamic_tile_path = "/tiles",
   wait = interactive(),
   open = interactive(),
   autosave = !is.null(autosave_path),
@@ -92,9 +102,21 @@ every browser sync or R-side measurement update.}
 
 \item{envir}{Environment where live state objects are assigned.}
 
-\item{host, port, path}{Local HTTP address used for browser-to-R sync.}
+\item{host, port, path}{Local HTTP/WebSocket address used for browser-to-R
+sync.}
 
 \item{max_tries}{Number of subsequent ports to try if \code{port} is busy.}
+
+\item{transport}{Live browser-to-R transport. \code{"auto"} enables WebSocket
+sync with HTTP polling fallback, \code{"websocket"} requests WebSocket first,
+and \code{"polling"} disables the WebSocket URL in the generated viewer.}
+
+\item{dynamic_tiles}{Whether live tiled mode should use the local \code{httpuv}
+dynamic tile server instead of precomputing Deep Zoom tiles. Static Deep
+Zoom generation in \code{\link[=wsi_viewer]{wsi_viewer()}} is unchanged.}
+
+\item{dynamic_tile_format, dynamic_tile_cache_dir, dynamic_tile_path}{Format,
+cache directory, and HTTP route for on-demand live tiles.}
 
 \item{wait}{If \code{TRUE}, service the HTTP bridge until interrupted. This is
 the most reliable mode for plain R sessions. Press Esc or Ctrl+C to return
@@ -142,7 +164,8 @@ methods:
 \code{service()}, and \code{stop()}.
 }
 \description{
-Opens an interactive viewer with a local HTTP bridge. Browser-side
+Opens an interactive viewer with a local WebSocket bridge and an HTTP polling
+fallback. Browser-side
 annotations, imported GeoJSON, edited ROI labels/classes, distance
 measurements, and segmentation overlays are posted back to the current R
 session. ROI area, cell-density, cell, stain-measurement, and class-summary

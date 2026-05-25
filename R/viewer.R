@@ -109,11 +109,29 @@ wsi_dz_suffix <- function(tile_format, quality) {
   ".png"
 }
 
+wsi_dzi_overlap <- function(dzi_file, default = 0L) {
+  if (!file.exists(dzi_file)) {
+    return(as.integer(default))
+  }
+  line <- tryCatch(readLines(dzi_file, warn = FALSE, n = 3L), error = function(err) character())
+  text <- paste(line, collapse = " ")
+  value <- suppressWarnings(as.integer(sub(".*\\bOverlap=\"([0-9]+)\".*", "\\1", text)))
+  if (length(value) != 1L || is.na(value) || !is.finite(value) || value < 0L) {
+    return(as.integer(default))
+  }
+  as.integer(value)
+}
+
 wsi_create_deepzoom_tiles <- function(slide, tile_dir, tile_size = 512,
+                                      tile_overlap = 1,
                                       tile_format = c("jpg", "png"),
                                       quality = 90, rebuild = FALSE) {
   tile_format <- match.arg(tile_format)
   tile_size <- as.integer(wsi_check_scalar_number(tile_size, "tile_size", allow_zero = FALSE))
+  tile_overlap <- as.integer(wsi_check_scalar_number(tile_overlap, "tile_overlap"))
+  if (tile_overlap >= tile_size) {
+    wsi_abort("`tile_overlap` must be smaller than `tile_size`.")
+  }
   quality <- as.integer(wsi_check_scalar_number(quality, "quality", allow_zero = FALSE))
   if (quality > 100L) {
     wsi_abort("`quality` must be between 1 and 100.")
@@ -141,7 +159,7 @@ wsi_create_deepzoom_tiles <- function(slide, tile_dir, tile_size = 512,
   tile_files <- paste0(dzi_base, "_files")
 
   if (file.exists(dzi_file) && dir.exists(tile_files) && !isTRUE(rebuild)) {
-    return(list(dzi = dzi_file, tiles = tile_files))
+    return(list(dzi = dzi_file, tiles = tile_files, overlap = wsi_dzi_overlap(dzi_file, default = tile_overlap)))
   }
 
   if (isTRUE(rebuild)) {
@@ -170,7 +188,7 @@ wsi_create_deepzoom_tiles <- function(slide, tile_dir, tile_size = 512,
     "--tile-size",
     as.character(tile_size),
     "--overlap",
-    "0",
+    as.character(tile_overlap),
     "--suffix",
     wsi_dz_suffix(tile_format, quality)
   )
@@ -185,7 +203,7 @@ wsi_create_deepzoom_tiles <- function(slide, tile_dir, tile_size = 512,
     wsi_abort("libvips completed but did not create the expected Deep Zoom output.")
   }
 
-  list(dzi = dzi_file, tiles = tile_files)
+  list(dzi = dzi_file, tiles = tile_files, overlap = tile_overlap)
 }
 
 wsi_viewer_point <- function(point) {
@@ -662,6 +680,9 @@ wsi_viewer_stain_controls <- function(config) {
       title = "Stain deconvolution display options",
       class = "stainMenu",
       contents = paste0(
+        "<div class=\"menuTitle\">Base image</div>",
+        "<label class=\"control\" title=\"Show or hide the H&E/base image\"><input id=\"baseImageVisible\" type=\"checkbox\" checked><span id=\"baseImageName\">Base image</span></label>",
+        "<label class=\"control\" title=\"Base image opacity\">opacity <input id=\"baseImageOpacity\" type=\"range\" min=\"0\" max=\"1\" step=\"0.05\" value=\"1\"></label>",
         "<div class=\"menuTitle\">Display</div>",
         "<div class=\"menuGrid\">",
         "<button id=\"stainToggle\" type=\"button\" disabled title=\"Open the viewer with stain = 'ihc' or channel data to enable stain controls\">Stains</button>",
@@ -669,7 +690,10 @@ wsi_viewer_stain_controls <- function(config) {
         "</div>",
         "<div class=\"menuTitle\">Channels</div>",
         "<span id=\"stainChannelControls\"></span>",
-        "<div id=\"stainMessage\" class=\"menuHint\">No stain channels are configured for this viewer.</div>"
+        "<div id=\"stainMessage\" class=\"menuHint\">No stain channels are configured for this viewer.</div>",
+        "<div class=\"menuTitle\">Image channels</div>",
+        "<div id=\"channelMenuSummary\" class=\"menuHint\"></div>",
+        "<div id=\"channelMenuList\"></div>"
       )
     ))
   }
@@ -690,6 +714,9 @@ wsi_viewer_stain_controls <- function(config) {
     id <- wsi_html_escape(channel$id)
     name <- wsi_html_escape(channel$name)
     strength <- format(channel$strength, trim = TRUE, scientific = FALSE)
+    opacity <- format(channel$opacity %||% 1, trim = TRUE, scientific = FALSE)
+    contrast_min <- format(channel$contrast_min %||% 0, trim = TRUE, scientific = FALSE)
+    contrast_max <- format(channel$contrast_max %||% 1, trim = TRUE, scientific = FALSE)
     paste0(
       "<label class=\"control stainChannel\" title=\"Show ", name, " channel\"><input id=\"stainVisible_",
       id,
@@ -707,6 +734,21 @@ wsi_viewer_stain_controls <- function(config) {
       id,
       "\" type=\"range\" min=\"0\" max=\"3\" step=\"0.05\" value=\"",
       wsi_html_escape(strength),
+      "\"></label>",
+      "<label class=\"control\" title=\"", name, " display opacity\">opacity <input id=\"stainOpacity_",
+      id,
+      "\" type=\"range\" min=\"0\" max=\"1\" step=\"0.05\" value=\"",
+      wsi_html_escape(opacity),
+      "\"></label>",
+      "<label class=\"control\" title=\"", name, " contrast minimum\">min <input id=\"stainContrastMin_",
+      id,
+      "\" type=\"range\" min=\"0\" max=\"2\" step=\"0.02\" value=\"",
+      wsi_html_escape(contrast_min),
+      "\"></label>",
+      "<label class=\"control\" title=\"", name, " contrast maximum\">max <input id=\"stainContrastMax_",
+      id,
+      "\" type=\"range\" min=\"0.05\" max=\"4\" step=\"0.02\" value=\"",
+      wsi_html_escape(contrast_max),
       "\"></label>"
     )
   }, character(1))
@@ -715,6 +757,9 @@ wsi_viewer_stain_controls <- function(config) {
     title = "Stain deconvolution display options",
     class = "stainMenu",
     contents = paste0(
+      "<div class=\"menuTitle\">Base image</div>",
+      "<label class=\"control\" title=\"Show or hide the H&E/base image\"><input id=\"baseImageVisible\" type=\"checkbox\" checked><span id=\"baseImageName\">Base image</span></label>",
+      "<label class=\"control\" title=\"Base image opacity\">opacity <input id=\"baseImageOpacity\" type=\"range\" min=\"0\" max=\"1\" step=\"0.05\" value=\"1\"></label>",
       "<div class=\"menuTitle\">Display</div>",
       "<div class=\"menuGrid\">",
       "<button id=\"stainToggle\" class=\"active\" title=\"Toggle stain-channel deconvolution display\">",
@@ -731,7 +776,10 @@ wsi_viewer_stain_controls <- function(config) {
       "<span id=\"stainChannelControls\">",
       paste(channel_controls, collapse = ""),
       "</span>",
-      "<div id=\"stainMessage\" class=\"menuHint\"></div>"
+      "<div id=\"stainMessage\" class=\"menuHint\"></div>",
+      "<div class=\"menuTitle\">Image channels</div>",
+      "<div id=\"channelMenuSummary\" class=\"menuHint\"></div>",
+      "<div id=\"channelMenuList\"></div>"
     )
   )
 }
@@ -963,6 +1011,7 @@ wsi_viewer_chrome <- function(config, loading_message, tiled = FALSE) {
     "<button id=\"annotationExportSelected\" title=\"Export checked annotations, or the selected annotation when none are checked\">Export selected ROIs</button>",
     "</div>",
     "<div class=\"sideTitle\">Layers</div><div class=\"sideMeta\">R-controlled overlays</div><div id=\"layerSummary\" class=\"sideMeta\"></div><div id=\"layerList\"></div>",
+    "<div class=\"sideTitle\">Channels</div><div class=\"sideMeta\">H&E/mIHC tiled overlays</div><div id=\"channelSummary\" class=\"sideMeta\"></div><div id=\"channelList\"></div>",
     "<div class=\"sideTitle\">ROIs</div>",
     "<div class=\"annotationSearch\" aria-label=\"ROI search and filter controls\">",
     "<input id=\"annotationSearchInput\" type=\"text\" maxlength=\"120\" placeholder=\"search name/class\" title=\"Search annotations by name, class, ID, or source\">",
@@ -1084,14 +1133,14 @@ wsi_viewer_preferences_js <- function() {
     "function preferenceNumber(value,min,max){const n=Number(value);return Number.isFinite(n)?clamp(n,min,max):NaN;}\n",
     "function setPreferenceInput(id,value){const input=el(id);if(input&&value!==null&&typeof value!=='undefined'&&!Number.isNaN(value))input.value=String(value);}\n",
     "function applyPanelPreferences(prefs){const panel=el('roiPanel');if(!panel)return;const panelPrefs=prefs.panel||{};if(Number.isFinite(Number(panelPrefs.left))&&Number.isFinite(Number(panelPrefs.top)))setRoiPanelPosition(Number(panelPrefs.left),Number(panelPrefs.top),false);if(typeof panelPrefs.minimized==='boolean')setRoiPanelMinimized(panelPrefs.minimized);}\n",
-    "function applyStainPreferences(prefs){if(!stainEnabled||!prefs.stain)return;stainOn=typeof prefs.stain.enabled==='boolean'?prefs.stain.enabled:stainOn;const saved=Array.isArray(prefs.stain.channels)?prefs.stain.channels:[];stainChannels.forEach((ch,i)=>{const pref=saved.find(s=>String(s.id||'')===String(ch.id))||saved[i]||{};if(!stainState[i])stainState[i]={visible:true,color:'#666666',strength:1};if(typeof pref.visible==='boolean')stainState[i].visible=pref.visible;if(pref.color)stainState[i].color=pref.color;const strength=Number(pref.strength);if(Number.isFinite(strength))stainState[i].strength=strength;const vis=el('stainVisible_'+ch.id),color=el('stainColor_'+ch.id),gain=el('stainStrength_'+ch.id);if(vis)vis.checked=!!stainState[i].visible;if(color)color.value=stainState[i].color;if(gain)gain.value=String(stainState[i].strength);});if(typeof updateStainControls==='function')updateStainControls();if(typeof invalidateBaseImage==='function')invalidateBaseImage();}\n",
+    "function applyStainPreferences(prefs){if(!stainEnabled||!prefs.stain)return;stainOn=typeof prefs.stain.enabled==='boolean'?prefs.stain.enabled:stainOn;const saved=Array.isArray(prefs.stain.channels)?prefs.stain.channels:[];stainChannels.forEach((ch,i)=>{const pref=saved.find(s=>String(s.id||'')===String(ch.id))||saved[i]||{};if(!stainState[i])stainState[i]={visible:true,color:'#666666',strength:1,opacity:1,contrast_min:0,contrast_max:1};if(typeof pref.visible==='boolean')stainState[i].visible=pref.visible;if(pref.color)stainState[i].color=pref.color;const strength=Number(pref.strength??pref.gain),opacity=Number(pref.opacity),cmin=Number(pref.contrast_min),cmax=Number(pref.contrast_max);if(Number.isFinite(strength))stainState[i].strength=strength;if(Number.isFinite(opacity))stainState[i].opacity=opacity;if(Number.isFinite(cmin))stainState[i].contrast_min=cmin;if(Number.isFinite(cmax))stainState[i].contrast_max=cmax;const vis=el('stainVisible_'+ch.id),color=el('stainColor_'+ch.id),gain=el('stainStrength_'+ch.id),op=el('stainOpacity_'+ch.id),lo=el('stainContrastMin_'+ch.id),hi=el('stainContrastMax_'+ch.id);if(vis)vis.checked=!!stainState[i].visible;if(color)color.value=stainState[i].color;if(gain)gain.value=String(stainState[i].strength);if(op)op.value=String(stainState[i].opacity);if(lo)lo.value=String(stainState[i].contrast_min);if(hi)hi.value=String(stainState[i].contrast_max);});if(typeof updateStainControls==='function')updateStainControls();if(typeof invalidateBaseImage==='function')invalidateBaseImage();}\n",
     "function applyViewerPreferences(){const prefs=loadViewerPreferences();const brush=preferenceNumber(prefs.brush_size,8,240);if(Number.isFinite(brush)){brushScreenRadius=brush;setPreferenceInput('brushSize',brush);}const opacity=preferenceNumber(prefs.roi_opacity,0,1);if(Number.isFinite(opacity)){roiOpacity=opacity;setPreferenceInput('roiOpacity',opacity);}const cls=String(prefs.selected_class||'').trim();if(cls){nextRoiClass=cls;activeRoiClass=cls;if(typeof ensureRoiClassOption==='function')ensureRoiClassOption(cls);setPreferenceInput('roiClassSelect',cls);}if(prefs.custom_class){setPreferenceInput('roiClassCustom',prefs.custom_class);}if(typeof updateBrushControls==='function')updateBrushControls();applyStainPreferences(prefs);applyPanelPreferences(prefs);viewerPreferencesReady=true;saveViewerPreferences({__initial:true,viewer_mode:cfg.viewer_mode||'',last_opened_at:new Date().toISOString()});return validToolMode(prefs.tool_mode)||'pan';}\n",
     "function saveToolPreference(){saveViewerPreferences({tool_mode:mode});}\n",
     "function saveBrushPreference(){saveViewerPreferences({brush_size:brushScreenRadius});}\n",
     "function saveRoiOpacityPreference(){saveViewerPreferences({roi_opacity:roiOpacity});}\n",
     "function currentClassPreference(){const custom=el('roiClassCustom');const customValue=String((custom&&custom.value)||'').trim();return {selected_class:nextRoiClass||activeRoiClass||currentRoiClass(),custom_class:customValue};}\n",
     "function saveRoiClassPreference(){saveViewerPreferences(currentClassPreference());}\n",
-    "function currentStainPreferences(){if(!stainEnabled)return null;syncStainStateFromControls();return {enabled:stainOn,channels:stainChannels.map((ch,i)=>({id:ch.id,name:ch.name,visible:!!(stainState[i]&&stainState[i].visible),color:stainState[i]?stainState[i].color:ch.colour,strength:stainState[i]?stainState[i].strength:ch.strength}))};}\n",
+    "function currentStainPreferences(){if(!stainEnabled)return null;syncStainStateFromControls();return {enabled:stainOn,channels:stainChannels.map((ch,i)=>({id:ch.id,name:ch.name,visible:!!(stainState[i]&&stainState[i].visible),color:stainState[i]?stainState[i].color:ch.colour,strength:stainState[i]?stainState[i].strength:ch.strength,gain:stainState[i]?stainState[i].strength:ch.strength,opacity:stainState[i]?stainState[i].opacity:(ch.opacity??1),contrast_min:stainState[i]?stainState[i].contrast_min:(ch.contrast_min??0),contrast_max:stainState[i]?stainState[i].contrast_max:(ch.contrast_max??1)}))};}\n",
     "function saveStainPreferences(){const stain=currentStainPreferences();if(stain)saveViewerPreferences({stain:stain});}\n",
     "function roiPanelPosition(){const panel=el('roiPanel');if(!panel)return null;const rect=panel.getBoundingClientRect();return {left:Math.round(rect.left),top:Math.round(rect.top),open:panel.classList.contains('open'),minimized:panel.classList.contains('minimized')};}\n",
     "function savePanelPreferences(){const panel=roiPanelPosition();if(panel)saveViewerPreferences({panel:panel});}\n",
@@ -1122,7 +1171,7 @@ wsi_viewer_stain_js <- function() {
     "const stainEnabled=!!(cfg.stain&&cfg.stain.enabled);\n",
     "const stainChannels=stainEnabled?(cfg.stain.channels||[]):[];\n",
     "let stainOn=stainEnabled;\n",
-    "let stainState=stainChannels.map(ch=>({visible:ch.visible!==false,color:ch.colour||'#666666',strength:Number(ch.strength||1)}));\n",
+    "let stainState=stainChannels.map(ch=>({visible:ch.visible!==false,color:ch.colour||'#666666',strength:Number(ch.strength||ch.gain||1),opacity:Number(ch.opacity??1),contrast_min:Number(ch.contrast_min??0),contrast_max:Number(ch.contrast_max??1)}));\n",
     "let stainInv=null;\n",
     "let stainError='';\n",
     "function rgbHex(hex){const h=String(hex||'#000000').replace('#','');const s=h.length===3?h.split('').map(c=>c+c).join(''):h;const n=parseInt(s,16);return {r:(n>>16)&255,g:(n>>8)&255,b:n&255};}\n",
@@ -1130,38 +1179,77 @@ wsi_viewer_stain_js <- function() {
     "function cross3(a,b){return [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];}\n",
     "function inv3(m){const a=m[0][0],b=m[0][1],c=m[0][2],d=m[1][0],e=m[1][1],f=m[1][2],g=m[2][0],h=m[2][1],i=m[2][2];const A=e*i-f*h,B=-(d*i-f*g),C=d*h-e*g,D=-(b*i-c*h),E=a*i-c*g,F=-(a*h-b*g),G=b*f-c*e,H=-(a*f-c*d),I=a*e-b*d;const det=a*A+b*B+c*C;if(Math.abs(det)<1e-8)return null;return [[A/det,D/det,G/det],[B/det,E/det,H/det],[C/det,F/det,I/det]];}\n",
     "function initStain(){if(!stainEnabled)return;const b=(cfg.stain.basis||[]).map(norm3);if(b.length!==3){notify('IHC stain basis incomplete','error',4200);return;}stainInv=inv3([[b[0][0],b[1][0],b[2][0]],[b[0][1],b[1][1],b[2][1]],[b[0][2],b[1][2],b[2][2]]]);if(!stainInv)notify('IHC stain vectors invalid','error',4200);}\n",
-    "function syncStainStateFromControls(){if(!stainEnabled)return;stainChannels.forEach((ch,i)=>{if(!stainState[i])stainState[i]={visible:true,color:'#666666',strength:1};const vis=el('stainVisible_'+ch.id),color=el('stainColor_'+ch.id),strength=el('stainStrength_'+ch.id);if(vis)stainState[i].visible=!!vis.checked;if(color)stainState[i].color=color.value;if(strength)stainState[i].strength=Number(strength.value);});}\n",
+    "function syncStainStateFromControls(){if(!stainEnabled)return;stainChannels.forEach((ch,i)=>{if(!stainState[i])stainState[i]={visible:true,color:'#666666',strength:1,opacity:1,contrast_min:0,contrast_max:1};const vis=el('stainVisible_'+ch.id),color=el('stainColor_'+ch.id),strength=el('stainStrength_'+ch.id),opacity=el('stainOpacity_'+ch.id),cmin=el('stainContrastMin_'+ch.id),cmax=el('stainContrastMax_'+ch.id);if(vis)stainState[i].visible=!!vis.checked;if(color)stainState[i].color=color.value;if(strength)stainState[i].strength=Number(strength.value);if(opacity)stainState[i].opacity=Number(opacity.value);if(cmin)stainState[i].contrast_min=Number(cmin.value);if(cmax)stainState[i].contrast_max=Number(cmax.value);});}\n",
     "function activeStainNames(){syncStainStateFromControls();return stainChannels.filter((ch,i)=>stainState[i]&&stainState[i].visible).map(ch=>ch.name||ch.id).join(', ');}\n",
     "function setStainMessage(msg){const box=el('stainMessage');if(box)box.textContent=msg||'';}\n",
     "function stainStatus(){if(!stainEnabled)return '';if(stainError)return ' | stains unavailable: '+stainError;if(!stainOn)return ' | original RGB';const active=activeStainNames();return ' | '+(cfg.stain.label||'IHC channels')+(active?' '+active:' no channels');}\n",
-    "function applyStainToCanvas(targetCtx=ctx,targetCanvas=canvas){if(!stainEnabled||!stainOn||!stainInv||!stainChannels.length)return;syncStainStateFromControls();let img;try{img=targetCtx.getImageData(0,0,targetCanvas.width,targetCanvas.height);stainError='';setStainMessage('');}catch(e){stainError=(location.protocol==='file:')?'open the viewer through localhost/http, not file://':'canvas pixel access blocked';setStainMessage('Stain selection needs canvas pixel access. Open this viewer through http://127.0.0.1/localhost.');return;}const data=img.data,colors=stainState.map(s=>rgbHex(s.color));for(let p=0;p<data.length;p+=4){const r=data[p],g=data[p+1],b=data[p+2];if(data[p+3]===0||(r<28&&g<28&&b<28))continue;const odR=-Math.log((r+1)/256),odG=-Math.log((g+1)/256),odB=-Math.log((b+1)/256);const c=[Math.max(0,stainInv[0][0]*odR+stainInv[0][1]*odG+stainInv[0][2]*odB),Math.max(0,stainInv[1][0]*odR+stainInv[1][1]*odG+stainInv[1][2]*odB),Math.max(0,stainInv[2][0]*odR+stainInv[2][1]*odG+stainInv[2][2]*odB)];let rr=255,gg=255,bb=255;for(let i=0;i<stainChannels.length&&i<c.length;i++){const state=stainState[i];if(!state||!state.visible)continue;const t=clamp(1-Math.exp(-c[i]*state.strength),0,1),col=colors[i];rr=rr*(1-t)+col.r*t;gg=gg*(1-t)+col.g*t;bb=bb*(1-t)+col.b*t;}data[p]=rr;data[p+1]=gg;data[p+2]=bb;}targetCtx.putImageData(img,0,0);}\n",
-    "function setStainVisible(indices){const keep=new Set(indices);stainOn=true;stainChannels.forEach((ch,i)=>{const input=el('stainVisible_'+ch.id);const visible=keep.has(i);if(input)input.checked=visible;if(!stainState[i])stainState[i]={visible:true,color:'#666666',strength:1};stainState[i].visible=visible;});updateStainControls();saveStainPreferences();scheduleViewerStateSync('stain_updated',{});if(typeof invalidateBaseImage==='function')invalidateBaseImage();draw();}\n",
+    "function applyStainToCanvas(targetCtx=ctx,targetCanvas=canvas){if(!stainEnabled||!stainOn||!stainInv||!stainChannels.length)return;syncStainStateFromControls();let img;try{img=targetCtx.getImageData(0,0,targetCanvas.width,targetCanvas.height);stainError='';setStainMessage('');}catch(e){stainError=(location.protocol==='file:')?'open the viewer through localhost/http, not file://':'canvas pixel access blocked';setStainMessage('Stain selection needs canvas pixel access. Open this viewer through http://127.0.0.1/localhost.');return;}const data=img.data,colors=stainState.map(s=>rgbHex(s.color));for(let p=0;p<data.length;p+=4){const r=data[p],g=data[p+1],b=data[p+2];if(data[p+3]===0||(r<28&&g<28&&b<28))continue;const odR=-Math.log((r+1)/256),odG=-Math.log((g+1)/256),odB=-Math.log((b+1)/256);const c=[Math.max(0,stainInv[0][0]*odR+stainInv[0][1]*odG+stainInv[0][2]*odB),Math.max(0,stainInv[1][0]*odR+stainInv[1][1]*odG+stainInv[1][2]*odB),Math.max(0,stainInv[2][0]*odR+stainInv[2][1]*odG+stainInv[2][2]*odB)];let rr=255,gg=255,bb=255;for(let i=0;i<stainChannels.length&&i<c.length;i++){const state=stainState[i];if(!state||!state.visible)continue;const lo=Number.isFinite(state.contrast_min)?state.contrast_min:0,hi=Math.max(lo+1e-6,Number.isFinite(state.contrast_max)?state.contrast_max:1),ci=clamp((c[i]-lo)/(hi-lo),0,1),t=clamp((1-Math.exp(-ci*state.strength))*(Number.isFinite(state.opacity)?state.opacity:1),0,1),col=colors[i];rr=rr*(1-t)+col.r*t;gg=gg*(1-t)+col.g*t;bb=bb*(1-t)+col.b*t;}data[p]=rr;data[p+1]=gg;data[p+2]=bb;}targetCtx.putImageData(img,0,0);}\n",
+    "function setStainVisible(indices){const keep=new Set(indices);stainOn=true;stainChannels.forEach((ch,i)=>{const input=el('stainVisible_'+ch.id);const visible=keep.has(i);if(input)input.checked=visible;if(!stainState[i])stainState[i]={visible:true,color:'#666666',strength:1,opacity:1,contrast_min:0,contrast_max:1};stainState[i].visible=visible;});updateStainControls();saveStainPreferences();scheduleViewerStateSync('stain_updated',{});if(typeof invalidateBaseImage==='function')invalidateBaseImage();draw();}\n",
     "function showOriginalStain(){stainOn=false;updateStainControls();saveStainPreferences();scheduleViewerStateSync('stain_updated',{});if(typeof invalidateBaseImage==='function')invalidateBaseImage();draw();}\n",
-    "function updateStainControls(){if(!stainEnabled)return;const toggle=el('stainToggle');if(toggle)toggle.classList.toggle('active',stainOn);const original=el('stainShowOriginal'),all=el('stainShowAll');if(original)original.classList.toggle('active',!stainOn);if(all)all.classList.toggle('active',stainOn&&stainState.every(s=>s&&s.visible));document.querySelectorAll('.stainOnly').forEach(button=>{const idx=Number(button.dataset.stainIndex);button.classList.toggle('active',stainOn&&stainState[idx]&&stainState[idx].visible&&stainState.filter(s=>s&&s.visible).length===1);});stainChannels.forEach(ch=>['Visible_','Color_','Strength_'].forEach(prefix=>{const input=el('stain'+prefix+ch.id);if(input)input.disabled=!stainOn;}));}\n",
-    "function bindStainControls(){if(!stainEnabled)return;initStain();syncStainStateFromControls();const toggle=el('stainToggle');if(toggle)toggle.onclick=()=>{stainOn=!stainOn;updateStainControls();saveStainPreferences();scheduleViewerStateSync('stain_updated',{});if(typeof invalidateBaseImage==='function')invalidateBaseImage();draw();};const original=el('stainShowOriginal'),all=el('stainShowAll');if(original)original.onclick=showOriginalStain;if(all)all.onclick=()=>setStainVisible(stainChannels.map((_,i)=>i));document.querySelectorAll('.stainOnly').forEach(button=>{button.onclick=()=>setStainVisible([Number(button.dataset.stainIndex)]);});const redraw=()=>{stainOn=true;syncStainStateFromControls();updateStainControls();saveStainPreferences();scheduleViewerStateSync('stain_updated',{});if(typeof invalidateBaseImage==='function')invalidateBaseImage();draw();};stainChannels.forEach(ch=>{['Visible_','Color_','Strength_'].forEach(prefix=>{const input=el('stain'+prefix+ch.id);if(input){input.addEventListener('input',redraw);input.addEventListener('change',redraw);}});});updateStainControls();}\n"
+    "function updateStainControls(){if(!stainEnabled)return;const toggle=el('stainToggle');if(toggle)toggle.classList.toggle('active',stainOn);const original=el('stainShowOriginal'),all=el('stainShowAll');if(original)original.classList.toggle('active',!stainOn);if(all)all.classList.toggle('active',stainOn&&stainState.every(s=>s&&s.visible));document.querySelectorAll('.stainOnly').forEach(button=>{const idx=Number(button.dataset.stainIndex);button.classList.toggle('active',stainOn&&stainState[idx]&&stainState[idx].visible&&stainState.filter(s=>s&&s.visible).length===1);});stainChannels.forEach(ch=>['Visible_','Color_','Strength_','Opacity_','ContrastMin_','ContrastMax_'].forEach(prefix=>{const input=el('stain'+prefix+ch.id);if(input)input.disabled=!stainOn;}));}\n",
+    "function bindStainControls(){if(!stainEnabled)return;initStain();syncStainStateFromControls();const toggle=el('stainToggle');if(toggle)toggle.onclick=()=>{stainOn=!stainOn;updateStainControls();saveStainPreferences();scheduleViewerStateSync('stain_updated',{});if(typeof invalidateBaseImage==='function')invalidateBaseImage();draw();};const original=el('stainShowOriginal'),all=el('stainShowAll');if(original)original.onclick=showOriginalStain;if(all)all.onclick=()=>setStainVisible(stainChannels.map((_,i)=>i));document.querySelectorAll('.stainOnly').forEach(button=>{button.onclick=()=>setStainVisible([Number(button.dataset.stainIndex)]);});const redraw=()=>{stainOn=true;syncStainStateFromControls();updateStainControls();saveStainPreferences();scheduleViewerStateSync('stain_updated',{});if(typeof invalidateBaseImage==='function')invalidateBaseImage();draw();};stainChannels.forEach(ch=>{['Visible_','Color_','Strength_','Opacity_','ContrastMin_','ContrastMax_'].forEach(prefix=>{const input=el('stain'+prefix+ch.id);if(input){input.addEventListener('input',redraw);input.addEventListener('change',redraw);}});});updateStainControls();}\n"
+  )
+}
+
+wsi_viewer_base_image_js <- function() {
+  paste0(
+    "let baseImageState={visible:!((cfg.base_layer||{}).visible===false),opacity:clamp(Number((cfg.base_layer||{}).opacity??1),0,1),name:String((cfg.base_layer||{}).name||'Base image')};\n",
+    "function baseImageOpacityValue(){return baseImageState.visible?clamp(Number(baseImageState.opacity??1),0,1):0;}\n",
+    "function baseImagePayload(){return {id:'base_image',name:baseImageState.name,type:'base',visible:!!baseImageState.visible,opacity:clamp(Number(baseImageState.opacity??1),0,1)};}\n",
+    "function applyBaseImageDisplay(){const opacity=baseImageOpacityValue();const item=(typeof osdItem==='function')?osdItem():null;if(item&&typeof item.setOpacity==='function')item.setOpacity(opacity);const vis=el('baseImageVisible'),op=el('baseImageOpacity'),name=el('baseImageName');if(vis)vis.checked=!!baseImageState.visible;if(op)op.value=String(clamp(Number(baseImageState.opacity??1),0,1));if(name)name.textContent=baseImageState.name;}\n",
+    "function setBaseImageVisible(visible){baseImageState.visible=!!visible;applyBaseImageDisplay();saveViewerPreferences({base_layer:baseImagePayload()});scheduleViewerStateSync('layer_visibility_updated',{id:'base_image',name:baseImageState.name,visible:baseImageState.visible});if(typeof requestDraw==='function')requestDraw();else if(typeof draw==='function')draw();}\n",
+    "function setBaseImageOpacity(opacity){const value=clamp(Number(opacity),0,1);if(Number.isFinite(value))baseImageState.opacity=value;applyBaseImageDisplay();saveViewerPreferences({base_layer:baseImagePayload()});scheduleViewerStateSync('layer_opacity_updated',{id:'base_image',name:baseImageState.name,opacity:baseImageState.opacity});if(typeof requestDraw==='function')requestDraw();else if(typeof draw==='function')draw();}\n",
+    "function bindBaseImageControls(){const prefs=loadViewerPreferences();if(prefs&&prefs.base_layer){if(typeof prefs.base_layer.visible==='boolean')baseImageState.visible=prefs.base_layer.visible;const op=Number(prefs.base_layer.opacity);if(Number.isFinite(op))baseImageState.opacity=clamp(op,0,1);}const vis=el('baseImageVisible'),op=el('baseImageOpacity');if(vis)vis.onchange=e=>setBaseImageVisible(e.target.checked);if(op)op.oninput=e=>setBaseImageOpacity(e.target.value);applyBaseImageDisplay();}\n"
+  )
+}
+
+wsi_viewer_channel_js <- function() {
+  paste0(
+    "let channelSources=Array.isArray(cfg.channel_sources)?cfg.channel_sources.slice():[];\n",
+    "const channelItems=new Map();\n",
+    "function normaliseChannelSource(src){if(!src)return null;const meta=src.metadata||{},id=String(src.id||src.name||'channel');return Object.assign({id:id,name:String(src.name||id),type:String(src.type||'deepzoom'),visible:src.visible!==false,opacity:Number(src.opacity??1),colour:String(src.colour||src.color||'#ffffff'),gain:Number(src.gain??src.strength??1),contrast_min:Number(src.contrast_min??0),contrast_max:Number(src.contrast_max??1),tile_url_style:String(src.tile_url_style||'deepzoom'),metadata:meta},src,{id:id,metadata:meta});}\n",
+    "function channelTileUrl(src,level,x,y){let url=tileUrlFromParts(String(src.tile_url_base||''),String(src.tile_url_template||''),String(src.tile_url_style||'deepzoom'),String(src.tile_format||cfg.tile_format||'png'),level,x,y);const meta=src.metadata||{};if(src.type==='dynamic'&&meta.server_colourized!==false){const params=new URLSearchParams();params.set('colour',String(src.colour||src.color||'#ffffff'));params.set('gain',String(Number(src.gain??src.strength??1)));params.set('contrast_min',String(Number(src.contrast_min??0)));params.set('contrast_max',String(Number(src.contrast_max??1)));if(src.cache_key||meta.cache_key||src.created)params.set('v',String(src.cache_key||meta.cache_key||src.created));url+=(url.indexOf('?')>=0?'&':'?')+params.toString();}return url;}\n",
+    "function channelTileSource(src){if(!src||(src.type==='stain'))return null;if(!(src.tile_url_base||src.tile_url_template))return null;return {width:Number(src.width||cfg.slide_width),height:Number(src.height||cfg.slide_height),tileSize:Number(src.tile_size||cfg.tile_size||512),tileOverlap:Number(src.tile_overlap||0),minLevel:Number(src.min_level||0),maxLevel:Number(src.max_level||cfg.max_level||0),getTileUrl:(level,x,y)=>channelTileUrl(src,level,x,y)};}\n",
+    "function setChannelItemSettings(src){const item=channelItems.get(src.id);if(item&&typeof item.setOpacity==='function')item.setOpacity(src.visible===false?0:clamp(Number(src.opacity??1),0,1));}\n",
+    "function channelPlacementOptions(src){const meta=src.metadata||{},extent=meta.extent||src.extent||null,out={};if(extent&&Number.isFinite(Number(extent.x))&&Number.isFinite(Number(extent.width))){out.x=Number(extent.x)/Math.max(Number(cfg.slide_width)||1,1);out.y=Number(extent.y||0)/Math.max(Number(cfg.slide_width)||1,1);out.width=Number(extent.width)/Math.max(Number(cfg.slide_width)||1,1);}else{out.x=0;out.y=0;out.width=1;}return out;}\n",
+    "function upsertChannelSource(src){src=normaliseChannelSource(src);if(!src)return;const idx=channelSources.findIndex(x=>String(x.id)===src.id);if(idx>=0)channelSources[idx]=Object.assign({},channelSources[idx],src);else channelSources.push(src);src=channelSources.find(x=>String(x.id)===src.id)||src;const existing=channelItems.get(src.id);if(existing){setChannelItemSettings(src);buildChannelList();return;}const tileSource=channelTileSource(src);if(!tileSource||!osdViewer||typeof osdViewer.addTiledImage!=='function'){buildChannelList();return;}const opts=Object.assign({tileSource:tileSource,opacity:src.visible===false?0:clamp(Number(src.opacity??1),0,1),success:event=>{channelItems.set(src.id,event.item);setChannelItemSettings(src);buildChannelList();},error:()=>notify('Channel '+(src.name||src.id)+' failed to load','warning',3600)},channelPlacementOptions(src));osdViewer.addTiledImage(opts);buildChannelList();}\n",
+    "function removeChannelSource(id){id=String(id||'');const item=channelItems.get(id);if(item&&osdViewer&&osdViewer.world&&typeof osdViewer.world.removeItem==='function')osdViewer.world.removeItem(item);channelItems.delete(id);channelSources=channelSources.filter(src=>String(src.id)!==id);buildChannelList();scheduleViewerStateSync('channel_source_removed',{id:id});}\n",
+    "function channelNeedsReload(settings){return settings&&(settings.colour||settings.color||typeof settings.gain!=='undefined'||typeof settings.contrast_min!=='undefined'||typeof settings.contrast_max!=='undefined');}\n",
+    "function reloadChannelSource(src){const id=String(src.id||'');const item=channelItems.get(id);if(item&&osdViewer&&osdViewer.world&&typeof osdViewer.world.removeItem==='function')osdViewer.world.removeItem(item);channelItems.delete(id);upsertChannelSource(src);}\n",
+    "function setChannelSettings(id,settings={}){id=String(id||'');const src=channelSources.find(x=>String(x.id)===id);if(!src)return;Object.assign(src,settings);if(typeof settings.visible==='boolean')src.visible=settings.visible;if(typeof settings.opacity!=='undefined')src.opacity=Number(settings.opacity);if(settings.colour||settings.color)src.colour=String(settings.colour||settings.color);if(typeof settings.gain!=='undefined')src.gain=Number(settings.gain);if(typeof settings.contrast_min!=='undefined')src.contrast_min=Number(settings.contrast_min);if(typeof settings.contrast_max!=='undefined')src.contrast_max=Number(settings.contrast_max);if(src.type==='dynamic'&&channelNeedsReload(settings))reloadChannelSource(src);else setChannelItemSettings(src);if(src.type==='stain'&&stainEnabled){const idx=stainChannels.findIndex(ch=>String(ch.id)===id);if(idx>=0){if(typeof src.visible==='boolean')stainState[idx].visible=src.visible;if(src.colour)stainState[idx].color=src.colour;if(Number.isFinite(src.gain))stainState[idx].strength=src.gain;if(Number.isFinite(src.opacity))stainState[idx].opacity=src.opacity;if(Number.isFinite(src.contrast_min))stainState[idx].contrast_min=src.contrast_min;if(Number.isFinite(src.contrast_max))stainState[idx].contrast_max=src.contrast_max;applyStainPreferences({stain:{enabled:stainOn,channels:stainState.map((s,i)=>Object.assign({id:stainChannels[i].id,name:stainChannels[i].name},s,{color:s.color,strength:s.strength,gain:s.strength}))}});invalidateBaseImage();}}buildChannelList();scheduleViewerStateSync('channel_updated',{id:id});}\n",
+    "function installInitialChannelSources(){channelSources.map(normaliseChannelSource).filter(Boolean).forEach(upsertChannelSource);}\n",
+    "function currentChannelSettingsPayload(){const tileSettings=channelSources.map(src=>({id:String(src.id||''),name:String(src.name||src.id||''),type:String(src.type||'deepzoom'),visible:src.visible!==false,opacity:Number(src.opacity??1),colour:String(src.colour||src.color||'#ffffff'),gain:Number(src.gain??src.strength??1),contrast_min:Number(src.contrast_min??0),contrast_max:Number(src.contrast_max??1)}));if(typeof currentStainPayload==='function'){const stain=currentStainPayload();if(stain&&Array.isArray(stain.channels))stain.channels.forEach(ch=>{if(!tileSettings.some(x=>x.id===String(ch.id)))tileSettings.push({id:String(ch.id),name:String(ch.name||ch.id),type:'stain',visible:ch.visible!==false,opacity:Number(ch.opacity??1),colour:String(ch.colour||ch.color||'#ffffff'),gain:Number(ch.gain??ch.strength??1),contrast_min:Number(ch.contrast_min??0),contrast_max:Number(ch.contrast_max??1)});});}return tileSettings;}\n",
+    "function channelSourceLabel(src){return String(src.name||src.id||'channel');}\n",
+    "function channelControlRow(src,compact=false){src=normaliseChannelSource(src);const row=document.createElement('div');row.className='layerItem channelItem';if(src.visible===false)row.classList.add('hidden');const top=document.createElement('div');top.className='layerTop';const box=document.createElement('input');box.type='checkbox';box.checked=src.visible!==false;box.title='Toggle channel visibility';box.onchange=e=>setChannelSettings(src.id,{visible:!!e.target.checked});const sw=document.createElement('input');sw.type='color';sw.value=src.colour||src.color||'#ffffff';sw.title='Channel colour';sw.onchange=e=>setChannelSettings(src.id,{colour:e.target.value});const nm=document.createElement('span');nm.className='roiName';nm.textContent=channelSourceLabel(src);const meta=document.createElement('span');meta.className='roiClass';meta.textContent=src.type||'channel';top.append(box,sw,nm,meta);const controls=document.createElement('div');controls.className='layerControls';const op=document.createElement('input');op.type='range';op.min='0';op.max='1';op.step='0.05';op.value=String(Number(src.opacity??1));op.title='Channel opacity';op.oninput=e=>setChannelSettings(src.id,{opacity:Number(e.target.value)});controls.append(document.createTextNode('opacity'),op);if(!compact){const gain=document.createElement('input');gain.type='range';gain.min='0';gain.max='5';gain.step='0.05';gain.value=String(Number(src.gain??1));gain.title='Channel gain';gain.onchange=e=>setChannelSettings(src.id,{gain:Number(e.target.value)});const cmin=document.createElement('input');cmin.type='range';cmin.min='0';cmin.max='1';cmin.step='0.01';cmin.value=String(Number(src.contrast_min??0));cmin.title='Contrast minimum';cmin.onchange=e=>setChannelSettings(src.id,{contrast_min:Number(e.target.value)});const cmax=document.createElement('input');cmax.type='range';cmax.min='0.01';cmax.max='1';cmax.step='0.01';cmax.value=String(Number(src.contrast_max??1));cmax.title='Contrast maximum';cmax.onchange=e=>setChannelSettings(src.id,{contrast_max:Number(e.target.value)});controls.append(document.createTextNode(' gain'),gain,document.createTextNode(' min'),cmin,document.createTextNode(' max'),cmax);}row.append(top,controls);return row;}\n",
+    "function buildChannelList(){const list=el('channelList'),summary=el('channelSummary'),menuList=el('channelMenuList'),menuSummary=el('channelMenuSummary');const count=channelSources.length,visible=channelSources.filter(s=>s.visible!==false).length;if(summary)summary.textContent=count?(visible+'/'+count+' channel overlays visible'):'No image channel overlays.';if(menuSummary)menuSummary.textContent=count?(visible+'/'+count+' overlay channels visible'):'No tiled mIHC/image channels configured.';if(list){list.innerHTML='';channelSources.forEach(src=>list.appendChild(channelControlRow(src,false)));}if(menuList){menuList.innerHTML='';channelSources.forEach(src=>menuList.appendChild(channelControlRow(src,true)));}}\n"
   )
 }
 
 wsi_viewer_sync_js <- function() {
   paste0(
     "let stateSyncTimer=null,stateSyncEvent='viewer_state',stateSyncDetail={},stateSyncSeq=0,lastSyncedSelectedRoi=-2;\n",
-    "function syncMessage(msg){const box=el('syncSummary');if(box)box.textContent=msg||((cfg.viewer_state_url||'')?'R sync ready':'R sync off');}\n",
+    "let stateSocket=null,stateSocketReady=false,stateSocketReconnectTimer=null,stateSocketFallbackNotified=false;\n",
+    "function liveSyncAvailable(){return !!(cfg.viewer_state_url||cfg.viewer_state_ws_url||'');}\n",
+    "function syncMessage(msg){const box=el('syncSummary');if(box)box.textContent=msg||(liveSyncAvailable()?'R sync ready':'R sync off');}\n",
     "function roiGeojsonObject(filterFn=null){const features=[];rois.forEach((roi,i)=>{if(filterFn&&!filterFn(roi,i))return;const feature=roiFeature(roi,i);if(feature)features.push(feature);});return {type:'FeatureCollection',features:features};}\n",
     "function selectedRoiFeatureObject(){if(selectedRoi<0||!rois[selectedRoi])return null;return roiFeature(rois[selectedRoi],selectedRoi);}\n",
     "function selectedRoisGeojsonObject(){const features=[];const indices=(typeof roiExportIndices==='function')?roiExportIndices():[];indices.forEach(i=>{if(i>=0&&rois[i]){const feature=roiFeature(rois[i],i);if(feature)features.push(feature);}});return {type:'FeatureCollection',features:features};}\n",
     "function segmentationGeojsonObject(){return roiGeojsonObject(roi=>{const source=String(roi.source||'').toLowerCase(),cls=String(roi.class||'').toLowerCase();return source.includes('stardist')||source.includes('segmentation')||cls==='cell'||cls==='cells';});}\n",
-    "function currentStainPayload(){if(!stainEnabled)return null;syncStainStateFromControls();return {enabled:stainOn,channels:stainChannels.map((ch,i)=>({id:ch.id,name:ch.name,visible:!!(stainState[i]&&stainState[i].visible),color:stainState[i]?stainState[i].color:ch.colour,strength:stainState[i]?stainState[i].strength:ch.strength}))};}\n",
-    "function viewerStatePayload(event,detail={}){return {event:event||'viewer_state',time:new Date().toISOString(),sequence:++stateSyncSeq,slide:{title:cfg.title,width:cfg.slide_width,height:cfg.slide_height},project:(typeof projectStatePayload==='function'?projectStatePayload():null),selected_index:selectedRoi,selected_roi:selectedRoiFeatureObject(),selected_rois:selectedRoisGeojsonObject(),rois:roiGeojsonObject(),segmentation:segmentationGeojsonObject(),layers:layerStatePayload(),measurements:measures,trajectories:(typeof trajectoryPayload==='function'?trajectoryPayload():[]),artifacts:(typeof artifactPayload==='function'?artifactPayload():[]),view:{mode:mode,scale:scale,offset_x:offsetX,offset_y:offsetY,roi_opacity:roiOpacity,show_rois:showRois,show_labels:showLabels,image_transform:(typeof imageTransformPayload==='function'?imageTransformPayload():null)},annotations:{dirty:annotationsDirty,dirty_reason:annotationDirtyReason},history:annotationHistoryPayload(),stain:currentStainPayload(),detail:detail};}\n",
+    "function currentStainPayload(){if(!stainEnabled)return null;syncStainStateFromControls();return {enabled:stainOn,channels:stainChannels.map((ch,i)=>({id:ch.id,name:ch.name,type:'stain',visible:!!(stainState[i]&&stainState[i].visible),color:stainState[i]?stainState[i].color:ch.colour,colour:stainState[i]?stainState[i].color:ch.colour,strength:stainState[i]?stainState[i].strength:ch.strength,gain:stainState[i]?stainState[i].strength:ch.strength,opacity:stainState[i]?stainState[i].opacity:(ch.opacity??1),contrast_min:stainState[i]?stainState[i].contrast_min:(ch.contrast_min??0),contrast_max:stainState[i]?stainState[i].contrast_max:(ch.contrast_max??1)}))};}\n",
+    "function viewerStatePayload(event,detail={}){return {event:event||'viewer_state',time:new Date().toISOString(),sequence:++stateSyncSeq,slide:{title:cfg.title,width:cfg.slide_width,height:cfg.slide_height},project:(typeof projectStatePayload==='function'?projectStatePayload():null),selected_index:selectedRoi,selected_roi:selectedRoiFeatureObject(),selected_rois:selectedRoisGeojsonObject(),rois:roiGeojsonObject(),segmentation:segmentationGeojsonObject(),layers:layerStatePayload(),measurements:measures,trajectories:(typeof trajectoryPayload==='function'?trajectoryPayload():[]),artifacts:(typeof artifactPayload==='function'?artifactPayload():[]),view:{mode:mode,scale:scale,offset_x:offsetX,offset_y:offsetY,roi_opacity:roiOpacity,show_rois:showRois,show_labels:showLabels,image_transform:(typeof imageTransformPayload==='function'?imageTransformPayload():null),base_layer:baseImagePayload()},annotations:{dirty:annotationsDirty,dirty_reason:annotationDirtyReason},history:annotationHistoryPayload(),stain:currentStainPayload(),channel_sources:channelSources,channel_settings:(typeof currentChannelSettingsPayload==='function'?currentChannelSettingsPayload():[]),tile_sources:cfg.tile_sources||[],detail:detail};}\n",
     "let stateCommandPollTimer=null,stateCommandSeen=new Set(),viewerAutosaveTimer=null,viewerAutosaveLastError='';\n",
-    "function handleViewerCommand(command){if(!command||!command.id||stateCommandSeen.has(command.id))return;stateCommandSeen.add(command.id);const payload=command.payload||{},geojson=payload.geojson||payload;if(command.type==='job_update'){if(typeof upsertViewerJob==='function')upsertViewerJob(payload.job||payload);syncMessage('R command: job update');return;}if(command.type==='add_rois'){if(typeof addImportedGeojson==='function')addImportedGeojson(geojson,payload.name||'R session');syncMessage('R command: added ROIs');return;}if(command.type==='add_segmentation'){if(typeof addSegmentationGeojson==='function')addSegmentationGeojson(geojson,{local:false,detail:{source:payload.name||'R session'}});syncMessage('R command: added segmentation');return;}if(command.type==='add_layer'){if(typeof upsertViewerLayer==='function')upsertViewerLayer(payload.layer||payload);syncMessage('R command: added layer');return;}if(command.type==='set_layer_visible'){if(typeof setViewerLayerVisible==='function')setViewerLayerVisible(payload.id||payload.name,payload.visible);syncMessage('R command: layer visibility');return;}if(command.type==='remove_layer'){if(typeof removeViewerLayer==='function')removeViewerLayer(payload.id||payload.name);syncMessage('R command: removed layer');return;}if(command.type==='annotations_saved'){markAnnotationsSaved(payload.reason||'project_saved');syncMessage('R command: annotations saved');return;}console.warn('Unknown wsiTools viewer command',command.type);}\n",
+    "function handleViewerCommand(command){if(!command||!command.id||stateCommandSeen.has(command.id))return;stateCommandSeen.add(command.id);const payload=command.payload||{},geojson=payload.geojson||payload;if(command.type==='job_update'){if(typeof upsertViewerJob==='function')upsertViewerJob(payload.job||payload);syncMessage('R command: job update');return;}if(command.type==='add_rois'){if(typeof addImportedGeojson==='function')addImportedGeojson(geojson,payload.name||'R session');syncMessage('R command: added ROIs');return;}if(command.type==='add_segmentation'){if(typeof addSegmentationGeojson==='function')addSegmentationGeojson(geojson,{local:false,detail:{source:payload.name||'R session'}});syncMessage('R command: added segmentation');return;}if(command.type==='add_layer'){if(typeof upsertViewerLayer==='function')upsertViewerLayer(payload.layer||payload);syncMessage('R command: added layer');return;}if(command.type==='set_layer_visible'){if(typeof setViewerLayerVisible==='function')setViewerLayerVisible(payload.id||payload.name,payload.visible);syncMessage('R command: layer visibility');return;}if(command.type==='remove_layer'){if(typeof removeViewerLayer==='function')removeViewerLayer(payload.id||payload.name);syncMessage('R command: removed layer');return;}if(command.type==='add_channel_source'){if(typeof upsertChannelSource==='function')upsertChannelSource(payload.source||payload);syncMessage('R command: added channel');return;}if(command.type==='remove_channel_source'){if(typeof removeChannelSource==='function')removeChannelSource(payload.id);syncMessage('R command: removed channel');return;}if(command.type==='set_channel_settings'){if(typeof setChannelSettings==='function')setChannelSettings(payload.id,payload.settings||payload);syncMessage('R command: channel settings');return;}if(command.type==='restore_project_state'){if(payload.rois&&typeof addImportedGeojson==='function')addImportedGeojson(payload.rois,'restored project');if(payload.segmentation&&typeof addSegmentationGeojson==='function')addSegmentationGeojson(payload.segmentation,{local:false,detail:{source:'restored project'}});if(Array.isArray(payload.channel_sources)&&typeof upsertChannelSource==='function')payload.channel_sources.forEach(upsertChannelSource);if(Array.isArray(payload.channel_settings)&&typeof setChannelSettings==='function')payload.channel_settings.forEach(s=>setChannelSettings(s.id,s));if(payload.stain&&typeof applyStainPreferences==='function')applyStainPreferences({stain:payload.stain});syncMessage('R command: project restored');draw();return;}if(command.type==='annotations_saved'){markAnnotationsSaved(payload.reason||'project_saved');syncMessage('R command: annotations saved');return;}console.warn('Unknown wsiTools viewer command',command.type);}\n",
     "function handleViewerCommands(body){if(typeof handleViewerJobs==='function')handleViewerJobs(body);const commands=(body&&body.commands)||[];if(Array.isArray(commands))commands.forEach(handleViewerCommand);}\n",
     "function viewerAutosaveMessage(body){const autosave=body&&body.autosave;if(!autosave||!autosave.enabled)return '';if(autosave.last_error){const msg='Autosave failed: '+autosave.last_error;if(viewerAutosaveLastError!==autosave.last_error){viewerAutosaveLastError=autosave.last_error;notify(msg,'error',5200);}return msg;}viewerAutosaveLastError='';if(autosave.last_save&&autosave.count>0){const t=new Date(autosave.last_save);const stamp=Number.isNaN(t.getTime())?autosave.last_save:t.toLocaleTimeString();return 'Autosaved '+stamp;}return 'Autosave ready';}\n",
-    "async function syncViewerState(event='viewer_state',detail={}){const url=cfg.viewer_state_url||'';if(!url)return false;try{const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(viewerStatePayload(event,detail))});if(!response.ok){const text=await response.text();throw new Error(text||('HTTP '+response.status));}let body=null;try{body=await response.json();}catch(e){}handleViewerCommands(body);syncMessage(viewerAutosaveMessage(body)||('R sync: '+event));return true;}catch(e){syncMessage('R sync failed: '+e.message);return false;}}\n",
-    "async function pollViewerCommands(){const url=cfg.viewer_state_url||'';if(!url)return;try{const response=await fetch(url,{method:'GET',headers:{'Accept':'application/json'}});if(response.ok)handleViewerCommands(await response.json());}catch(e){}}\n",
+    "function viewerSocketSend(event='viewer_state',detail={}){if(!stateSocketReady||!stateSocket||stateSocket.readyState!==WebSocket.OPEN)return false;try{stateSocket.send(JSON.stringify(viewerStatePayload(event,detail)));syncMessage('R sync: '+event+' via WebSocket');return true;}catch(e){stateSocketReady=false;return false;}}\n",
+    "function scheduleViewerSocketReconnect(){const url=cfg.viewer_state_ws_url||'';if(!url||stateSocketReconnectTimer)return;stateSocketReconnectTimer=setTimeout(()=>{stateSocketReconnectTimer=null;startViewerStateSocket();},2000);}\n",
+    "function startViewerStateSocket(){const url=cfg.viewer_state_ws_url||'';if(!url||typeof WebSocket==='undefined'||stateSocket||stateSocketReconnectTimer)return false;try{stateSocket=new WebSocket(url);}catch(e){stateSocket=null;startViewerCommandPolling();return false;}stateSocket.onopen=()=>{stateSocketReady=true;stateSocketFallbackNotified=false;syncMessage('R sync: WebSocket connected');};stateSocket.onmessage=event=>{try{const body=JSON.parse(event.data);if(body&&body.ok===false&&body.error){syncMessage('R sync failed: '+body.error);notify('R sync failed: '+body.error,'error',4200);return;}handleViewerCommands(body);syncMessage(viewerAutosaveMessage(body)||'R sync: WebSocket');}catch(e){console.warn('Could not parse wsiTools WebSocket message',e);}};stateSocket.onclose=()=>{stateSocketReady=false;stateSocket=null;if(!stateSocketFallbackNotified){stateSocketFallbackNotified=true;syncMessage('R sync: WebSocket unavailable; polling fallback active');}startViewerCommandPolling();scheduleViewerSocketReconnect();};stateSocket.onerror=()=>{stateSocketReady=false;try{if(stateSocket)stateSocket.close();}catch(e){}};return true;}\n",
+    "async function syncViewerState(event='viewer_state',detail={}){if(viewerSocketSend(event,detail))return true;const url=cfg.viewer_state_url||'';if(!url)return false;try{const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(viewerStatePayload(event,detail))});if(!response.ok){const text=await response.text();throw new Error(text||('HTTP '+response.status));}let body=null;try{body=await response.json();}catch(e){}handleViewerCommands(body);syncMessage(viewerAutosaveMessage(body)||('R sync: '+event));return true;}catch(e){syncMessage('R sync failed: '+e.message);return false;}}\n",
+    "async function pollViewerCommands(){if(stateSocketReady)return;const url=cfg.viewer_state_url||'';if(!url)return;try{const response=await fetch(url,{method:'GET',headers:{'Accept':'application/json'}});if(response.ok)handleViewerCommands(await response.json());}catch(e){}}\n",
     "function startViewerCommandPolling(){if(!(cfg.viewer_state_url||'')||stateCommandPollTimer)return;stateCommandPollTimer=setInterval(pollViewerCommands,1000);}\n",
-    "function startViewerAutosave(){if(!(cfg.viewer_state_url||'')||!cfg.autosave_enabled||viewerAutosaveTimer)return;const interval=Math.max(1000,Number(cfg.autosave_interval_ms||5000));viewerAutosaveTimer=setInterval(()=>syncViewerState('autosave_tick',{autosave:true,path:cfg.autosave_path||null}),interval);window.addEventListener('beforeunload',()=>{try{const url=cfg.viewer_state_url||'';if(!url)return;const payload=JSON.stringify(viewerStatePayload('autosave_unload',{autosave:true,path:cfg.autosave_path||null}));if(navigator.sendBeacon){navigator.sendBeacon(url,new Blob([payload],{type:'application/json'}));}else{fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:payload,keepalive:true});}}catch(e){}});syncMessage('Autosave ready');}\n",
-    "function syncRoiSelection(reason='selection'){if(!(cfg.viewer_state_url||''))return;const current=Number.isFinite(Number(selectedRoi))?Number(selectedRoi):-1;if(current===lastSyncedSelectedRoi)return;lastSyncedSelectedRoi=current;if(current>=0&&rois[current])scheduleViewerStateSync('roi_selected',{index:current,id:rois[current].id||null,reason:reason});}\n",
-    "function scheduleViewerStateSync(event='viewer_state',detail={}){if(!(cfg.viewer_state_url||'')){syncMessage('');return;}stateSyncEvent=event;stateSyncDetail=detail||{};clearTimeout(stateSyncTimer);stateSyncTimer=setTimeout(()=>syncViewerState(stateSyncEvent,stateSyncDetail),250);}\n"
+    "function startViewerAutosave(){if(!liveSyncAvailable()||!cfg.autosave_enabled||viewerAutosaveTimer)return;const interval=Math.max(1000,Number(cfg.autosave_interval_ms||5000));viewerAutosaveTimer=setInterval(()=>syncViewerState('autosave_tick',{autosave:true,path:cfg.autosave_path||null}),interval);window.addEventListener('beforeunload',()=>{try{const payload=JSON.stringify(viewerStatePayload('autosave_unload',{autosave:true,path:cfg.autosave_path||null}));const url=cfg.viewer_state_url||'';if(url&&navigator.sendBeacon){navigator.sendBeacon(url,new Blob([payload],{type:'application/json'}));}else if(url){fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:payload,keepalive:true});}else if(stateSocketReady&&stateSocket){stateSocket.send(payload);}}catch(e){}});syncMessage('Autosave ready');}\n",
+    "function syncRoiSelection(reason='selection'){if(!liveSyncAvailable())return;const current=Number.isFinite(Number(selectedRoi))?Number(selectedRoi):-1;if(current===lastSyncedSelectedRoi)return;lastSyncedSelectedRoi=current;if(current>=0&&rois[current])scheduleViewerStateSync('roi_selected',{index:current,id:rois[current].id||null,reason:reason});}\n",
+    "function scheduleViewerStateSync(event='viewer_state',detail={}){if(!liveSyncAvailable()){syncMessage('');return;}stateSyncEvent=event;stateSyncDetail=detail||{};clearTimeout(stateSyncTimer);stateSyncTimer=setTimeout(()=>syncViewerState(stateSyncEvent,stateSyncDetail),250);}\n"
   )
 }
 
@@ -1185,8 +1273,8 @@ wsi_viewer_command_palette_js <- function() {
     "function visibleSlideBounds(){const pts=[canvasToSlidePoint(0,0),canvasToSlidePoint(innerWidth,0),canvasToSlidePoint(0,innerHeight),canvasToSlidePoint(innerWidth,innerHeight)].filter(p=>p&&Number.isFinite(p.x)&&Number.isFinite(p.y));if(!pts.length)return {xmin:0,ymin:0,xmax:cfg.slide_width,ymax:cfg.slide_height};return {xmin:clamp(Math.min(...pts.map(p=>p.x)),0,cfg.slide_width),ymin:clamp(Math.min(...pts.map(p=>p.y)),0,cfg.slide_height),xmax:clamp(Math.max(...pts.map(p=>p.x)),0,cfg.slide_width),ymax:clamp(Math.max(...pts.map(p=>p.y)),0,cfg.slide_height)};}\n",
     "function drawTileGrid(){if(!tileGridVisible)return;const b=visibleSlideBounds();let step=tileGridSize(),base=step,a=slideToCanvas({x:0,y:0}),c=slideToCanvas({x:step,y:0}),spacing=Math.abs(c.x-a.x);while(Number.isFinite(spacing)&&spacing>0&&spacing<22&&step<base*64){step*=2;spacing*=2;}const x0=Math.floor(b.xmin/step)*step,y0=Math.floor(b.ymin/step)*step;ctx.save();ctx.strokeStyle='rgba(250,204,21,.55)';ctx.lineWidth=1;ctx.setLineDash([4,5]);ctx.beginPath();for(let x=x0;x<=b.xmax+step;x+=step){const p0=slideToCanvas({x:x,y:b.ymin}),p1=slideToCanvas({x:x,y:b.ymax});ctx.moveTo(p0.x,p0.y);ctx.lineTo(p1.x,p1.y);}for(let y=y0;y<=b.ymax+step;y+=step){const p0=slideToCanvas({x:b.xmin,y:y}),p1=slideToCanvas({x:b.xmax,y:y});ctx.moveTo(p0.x,p0.y);ctx.lineTo(p1.x,p1.y);}ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='rgba(250,204,21,.9)';ctx.font='11px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif';ctx.fillText('tile grid '+Math.round(tileGridSize())+' px',12,innerHeight-18);ctx.restore();}\n",
     "function toggleTileGrid(){tileGridVisible=!tileGridVisible;scheduleViewerStateSync('tile_grid_toggled',{visible:tileGridVisible,tile_size:tileGridSize()});notify(tileGridVisible?'Tile grid shown':'Tile grid hidden','success');draw();}\n",
-    "async function requestProjectSave(){if(!(cfg.viewer_state_url||'')){notify('Live R sync is off; use viewer$save_project(...) in R.','warning',4200);return;}const ok=await syncViewerState('project_save_requested',{dirty:annotationsDirty,reason:annotationDirtyReason});notify(ok?'Project save requested in R':'Project save request failed',ok?'success':'error',3600);}\n",
-    "function commandPaletteDefinitions(){return [{id:'new_roi',label:'New ROI',hint:'Deselect current annotation and start painting a separate ROI',kbd:'N',enabled:()=>true,run:()=>startNewAnnotation('brush')},{id:'draw_trajectory',label:'Draw trajectory',hint:'Click control points to create a smoothed path synced to R',kbd:'T',enabled:()=>true,run:()=>setMode('trajectory')},{id:'import_geojson',label:'Import GeoJSON',hint:'Load QuPath or wsiTools annotations',kbd:'file',enabled:()=>!!el('geojsonImportFile'),run:()=>{const b=el('importGeojson'),f=el('geojsonImportFile');if(b)b.click();else if(f)f.click();}},{id:'export_selected_rois',label:'Export selected ROIs',hint:'Download checked or selected ROI annotations',kbd:'GeoJSON',enabled:()=>typeof roiExportIndices==='function'&&roiExportIndices().length>0,run:()=>exportSelectedAnnotations()},{id:'run_stardist',label:'Run StarDist',hint:'Segment the selected ROI through the live R service',kbd:'ROI',enabled:()=>!!((cfg.segmentation_run_url||'')&&typeof selectedRoiFeatureText==='function'&&selectedRoiFeatureText()),run:()=>startSegmentationForSelectedRoi()},{id:'detect_artifacts',label:'Detect visible artifacts',hint:'Screen the current viewport and optionally create an artefact ROI',kbd:'QC',enabled:()=>typeof detectVisibleArtifacts==='function',run:()=>detectVisibleArtifacts()},{id:'show_tile_grid',label:(tileGridVisible?'Hide tile grid':'Show tile grid'),hint:'Overlay a coordinate-only tile grid; no pixels are read',kbd:Math.round(tileGridSize())+' px',enabled:()=>true,run:()=>toggleTileGrid()},{id:'save_project',label:'Save project',hint:'Sync viewer state and request project saving in R',kbd:'R',enabled:()=>!!(cfg.viewer_state_url||''),run:()=>requestProjectSave()}];}\n",
+    "async function requestProjectSave(){if(!liveSyncAvailable()){notify('Live R sync is off; use viewer$save_project(...) in R.','warning',4200);return;}const ok=await syncViewerState('project_save_requested',{dirty:annotationsDirty,reason:annotationDirtyReason});notify(ok?'Project save requested in R':'Project save request failed',ok?'success':'error',3600);}\n",
+    "function commandPaletteDefinitions(){return [{id:'new_roi',label:'New ROI',hint:'Deselect current annotation and start painting a separate ROI',kbd:'N',enabled:()=>true,run:()=>startNewAnnotation('brush')},{id:'draw_trajectory',label:'Draw trajectory',hint:'Click control points to create a smoothed path synced to R',kbd:'T',enabled:()=>true,run:()=>setMode('trajectory')},{id:'import_geojson',label:'Import GeoJSON',hint:'Load QuPath or wsiTools annotations',kbd:'file',enabled:()=>!!el('geojsonImportFile'),run:()=>{const b=el('importGeojson'),f=el('geojsonImportFile');if(b)b.click();else if(f)f.click();}},{id:'export_selected_rois',label:'Export selected ROIs',hint:'Download checked or selected ROI annotations',kbd:'GeoJSON',enabled:()=>typeof roiExportIndices==='function'&&roiExportIndices().length>0,run:()=>exportSelectedAnnotations()},{id:'run_stardist',label:'Run StarDist',hint:'Segment the selected ROI through the live R service',kbd:'ROI',enabled:()=>!!((cfg.segmentation_run_url||'')&&typeof selectedRoiFeatureText==='function'&&selectedRoiFeatureText()),run:()=>startSegmentationForSelectedRoi()},{id:'detect_artifacts',label:'Detect visible artifacts',hint:'Screen the current viewport and optionally create an artefact ROI',kbd:'QC',enabled:()=>typeof detectVisibleArtifacts==='function',run:()=>detectVisibleArtifacts()},{id:'show_tile_grid',label:(tileGridVisible?'Hide tile grid':'Show tile grid'),hint:'Overlay a coordinate-only tile grid; no pixels are read',kbd:Math.round(tileGridSize())+' px',enabled:()=>true,run:()=>toggleTileGrid()},{id:'save_project',label:'Save project',hint:'Sync viewer state and request project saving in R',kbd:'R',enabled:()=>liveSyncAvailable(),run:()=>requestProjectSave()}];}\n",
     "function commandPaletteQuery(){const input=el('commandPaletteSearch');return String(input&&input.value||'').trim().toLowerCase();}\n",
     "function commandPaletteItems(){const q=commandPaletteQuery();return commandPaletteDefinitions().filter(item=>!q||[item.label,item.hint,item.id].join(' ').toLowerCase().includes(q));}\n",
     "function updateCommandPaletteActive(){document.querySelectorAll('.commandItem').forEach((item,i)=>item.classList.toggle('active',i===commandPaletteActive));}\n",
@@ -1234,7 +1322,7 @@ wsi_viewer_image_transform_js <- function() {
     "function viewToImagePoint(p){const size=sourceImageSize(),w=size.width,h=size.height,r=normalizedImageRotation();let x=Number(p.x),y=Number(p.y),q;if(r===90)q={x:y,y:h-x};else if(r===180)q={x:w-x,y:h-y};else if(r===270)q={x:w-y,y:x};else q={x:x,y:y};if(imageFlipX)q.x=w-q.x;if(imageFlipY)q.y=h-q.y;return q;}\n",
     "function slideToViewImagePoint(p){return imageToViewPoint(slideToImage(p));}\n",
     "function applyCanvasImageTransform(img){const w=img.naturalWidth,h=img.naturalHeight,r=normalizedImageRotation();if(r===90){ctx.translate(h,0);ctx.rotate(Math.PI/2);}else if(r===180){ctx.translate(w,h);ctx.rotate(Math.PI);}else if(r===270){ctx.translate(0,w);ctx.rotate(-Math.PI/2);}if(imageFlipX||imageFlipY){ctx.translate(imageFlipX?w:0,imageFlipY?h:0);ctx.scale(imageFlipX?-1:1,imageFlipY?-1:1);}}\n",
-    "function drawTransformedImage(img){ctx.save();ctx.translate(offsetX,offsetY);ctx.scale(scale,scale);applyCanvasImageTransform(img);ctx.drawImage(img,0,0);ctx.restore();}\n",
+    "function drawTransformedImage(img){ctx.save();ctx.globalAlpha=baseImageOpacityValue();ctx.translate(offsetX,offsetY);ctx.scale(scale,scale);applyCanvasImageTransform(img);if(baseImageOpacityValue()>0)ctx.drawImage(img,0,0);ctx.restore();}\n",
     "function effectiveOpenSeadragonTransform(){let rotation=normalizedImageRotation(),flip=!!imageFlipX;if(imageFlipY){rotation=(rotation+180)%360;flip=!flip;}return {rotation:rotation,flip:flip};}\n",
     "function applyOpenSeadragonImageTransform(){if(typeof osdViewer==='undefined'||!osdViewer||!osdViewer.viewport)return false;const t=effectiveOpenSeadragonTransform();if(typeof osdViewer.viewport.setRotation==='function')osdViewer.viewport.setRotation(t.rotation,false);if(typeof osdViewer.viewport.setFlip==='function')osdViewer.viewport.setFlip(t.flip);if(typeof osdViewer.forceRedraw==='function')osdViewer.forceRedraw();return true;}\n",
     "function applyImageTransform(refit=false){updateImageTransformSummary();if(typeof osdViewer!=='undefined'&&osdViewer){applyOpenSeadragonImageTransform();syncViewState();prefetchNeighborTiles();draw();}else if(refit&&typeof fitView==='function'){fitView();}else if(typeof draw==='function'){draw();}scheduleViewerStateSync('image_transform_updated',imageTransformPayload());}\n",
@@ -1636,7 +1724,7 @@ wsi_viewer_segmentation_js <- function() {
     "function stardistSetupCommand(){return 'wsi_install_stardist(method = \"conda\")\\nviewer <- wsi_viewer_live(slide, stardist = TRUE, wait = FALSE)';}\n",
     "function stardistNotConfiguredMessage(){return 'No StarDist command was found. Install/configure it, or load a segmentation GeoJSON/CSV instead.';}\n",
     "function showStardistNotConfigured(){const command=stardistSetupCommand(),message=stardistNotConfiguredMessage();segmentationStatus(message+' Copyable R command: '+command.replace(/\\n/g,' '));if(typeof notifyAction==='function')notifyAction(message,'Copy R command',()=>copyViewerText(command).then(()=>notify('R command copied','success')).catch(()=>notify('Could not copy R command','error')),'warning',7600);else notify(message,'warning',5200);}\n",
-    "async function startSegmentationForSelectedRoi(){const url=cfg.segmentation_run_url||'';if(!url){showStardistNotConfigured();return;}const text=selectedRoiFeatureText();if(!text){segmentationStatus('Select an ROI before running segmentation.','warning',true);return;}const roi=rois[selectedRoi]||{},roiId=roi.id||roi.name||null,button=el('startSegmentation'),jobId='stardist_'+Date.now();if(typeof upsertViewerJob==='function')upsertViewerJob({id:jobId,name:'StarDist selected ROI',status:'queued',progress:0,progress_available:true,message:'Queued selected ROI segmentation.',log:[]});if(button)button.disabled=true;segmentationStatus('Sending selected ROI to R...');notify('Segmentation started','info');try{if(cfg.viewer_state_url)await syncViewerState('segmentation_requested',{roi_id:roiId,engine:'stardist',job_id:jobId});if(typeof updateViewerJob==='function')updateViewerJob(jobId,{status:'running',message:'Running segmentation on selected ROI.',log:['ROI sent to R.']});segmentationStatus('Running segmentation on selected ROI...');const response=await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain;charset=UTF-8'},body:text});const body=await response.text();if(!response.ok){let detail=body;try{const err=JSON.parse(body);detail=err.error||err.message||body;}catch(e){}throw new Error(detail||('HTTP '+response.status));}const result=JSON.parse(body);const geojson=result&&result.geojson?result.geojson:result,detail=segmentationResultDetail(result),log=Array.isArray(result&&result.log)?result.log:[];if(result&&result.message)segmentationStatus(result.message);if(geojson&&(geojson.type||geojson.features)){const n=geojsonFeatures(geojson).length;addSegmentationGeojson(geojson,{local:false,detail:Object.assign({job_id:jobId},detail),keepSelection:true});if(typeof updateViewerJob==='function')updateViewerJob(jobId,{status:'completed',progress:100,progress_available:true,message:'StarDist completed: '+countText(n)+' cell'+(n===1?'':'s')+'.',log:log.concat(result&&result.message?[result.message]:[])});}else{scheduleViewerStateSync('segmentation_completed',Object.assign({job_id:jobId},detail));segmentationStatus((result&&result.message)||'Segmentation completed, but no GeoJSON overlay was returned.');if(typeof updateViewerJob==='function')updateViewerJob(jobId,{status:'completed',progress:100,progress_available:true,message:'Segmentation completed, but no GeoJSON overlay was returned.',log:log});notify('Segmentation finished','warning');}}catch(e){segmentationStatus('Segmentation run failed: '+e.message);if(typeof updateViewerJob==='function')updateViewerJob(jobId,{status:'failed',message:e.message,log:[e.message]});notify('Segmentation failed','error',4200);}finally{if(button)button.disabled=false;}}\n",
+    "async function startSegmentationForSelectedRoi(){const url=cfg.segmentation_run_url||'';if(!url){showStardistNotConfigured();return;}const text=selectedRoiFeatureText();if(!text){segmentationStatus('Select an ROI before running segmentation.','warning',true);return;}const roi=rois[selectedRoi]||{},roiId=roi.id||roi.name||null,button=el('startSegmentation'),jobId='stardist_'+Date.now();if(typeof upsertViewerJob==='function')upsertViewerJob({id:jobId,name:'StarDist selected ROI',status:'queued',progress:0,progress_available:true,message:'Queued selected ROI segmentation.',log:[]});if(button)button.disabled=true;segmentationStatus('Sending selected ROI to R...');notify('Segmentation started','info');try{if(liveSyncAvailable())await syncViewerState('segmentation_requested',{roi_id:roiId,engine:'stardist',job_id:jobId});if(typeof updateViewerJob==='function')updateViewerJob(jobId,{status:'running',message:'Running segmentation on selected ROI.',log:['ROI sent to R.']});segmentationStatus('Running segmentation on selected ROI...');const response=await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain;charset=UTF-8'},body:text});const body=await response.text();if(!response.ok){let detail=body;try{const err=JSON.parse(body);detail=err.error||err.message||body;}catch(e){}throw new Error(detail||('HTTP '+response.status));}const result=JSON.parse(body);const geojson=result&&result.geojson?result.geojson:result,detail=segmentationResultDetail(result),log=Array.isArray(result&&result.log)?result.log:[];if(result&&result.message)segmentationStatus(result.message);if(geojson&&(geojson.type||geojson.features)){const n=geojsonFeatures(geojson).length;addSegmentationGeojson(geojson,{local:false,detail:Object.assign({job_id:jobId},detail),keepSelection:true});if(typeof updateViewerJob==='function')updateViewerJob(jobId,{status:'completed',progress:100,progress_available:true,message:'StarDist completed: '+countText(n)+' cell'+(n===1?'':'s')+'.',log:log.concat(result&&result.message?[result.message]:[])});}else{scheduleViewerStateSync('segmentation_completed',Object.assign({job_id:jobId},detail));segmentationStatus((result&&result.message)||'Segmentation completed, but no GeoJSON overlay was returned.');if(typeof updateViewerJob==='function')updateViewerJob(jobId,{status:'completed',progress:100,progress_available:true,message:'Segmentation completed, but no GeoJSON overlay was returned.',log:log});notify('Segmentation finished','warning');}}catch(e){segmentationStatus('Segmentation run failed: '+e.message);if(typeof updateViewerJob==='function')updateViewerJob(jobId,{status:'failed',message:e.message,log:[e.message]});notify('Segmentation failed','error',4200);}finally{if(button)button.disabled=false;}}\n",
     "function clearSegmentationOverlays(){const before=rois.length;for(let i=rois.length-1;i>=0;i--){if(rois[i].source==='stardist')rois.splice(i,1);}if(selectedRoi>=rois.length)selectedRoi=rois.length-1;buildRoiList();updateButtons();draw();scheduleViewerStateSync('segmentation_cleared',{});segmentationStatus('Removed '+countText(before-rois.length)+' StarDist overlay'+(before-rois.length===1?'':'s')+'.');notify('Segmentation cleared','success');}\n",
     "function bindSegmentationControls(){const exportButton=el('exportSelectedRoi'),startButton=el('startSegmentation'),loadButton=el('loadSegmentation'),loadCsvButton=el('loadSegmentationCsv'),clearButton=el('clearSegmentation'),file=el('segmentationFile'),tableFile=el('segmentationTableFile'),radius=el('segCellRadius');if(exportButton)exportButton.onclick=exportSelectedRoiForSegmentation;if(startButton)startButton.onclick=startSegmentationForSelectedRoi;if(loadButton&&file)loadButton.onclick=()=>{file.value='';file.click();};if(loadCsvButton&&tableFile)loadCsvButton.onclick=()=>{tableFile.value='';tableFile.click();};if(clearButton)clearButton.onclick=clearSegmentationOverlays;if(radius){radius.oninput=()=>segmentationCellRadius();segmentationCellRadius();}if(file){file.onchange=()=>{const picked=file.files&&file.files[0];if(!picked)return;const reader=new FileReader();reader.onload=()=>{try{addSegmentationGeojson(JSON.parse(reader.result));}catch(e){segmentationStatus('Could not read StarDist GeoJSON: '+e.message);}};reader.readAsText(picked);};}if(tableFile){tableFile.onchange=()=>{const picked=tableFile.files&&tableFile.files[0];if(!picked)return;const reader=new FileReader();reader.onload=()=>{try{addSegmentationCentroidTable(reader.result,picked.name);}catch(e){segmentationStatus('Could not read StarDist centroid table: '+e.message);}};reader.readAsText(picked);};}segmentationStatus('');}\n"
   )
@@ -1657,20 +1745,26 @@ wsi_viewer_project_js <- function() {
     "function projectAnnotationKey(index=activeProjectIndex,sectionIndex=activeProjectSectionIndex){const item=projectItems[index]||{},sections=projectSections(item),section=sectionIndex>=0?sections[sectionIndex]:null,itemId=projectSafeName(item.id||item.path||item.label||('image_'+(index+1))),sectionId=section?projectSafeName(section.id||section.label||('section_'+(sectionIndex+1))):'image';return itemId+'::'+sectionId;}\n",
     "function projectAnnotationSnapshotForStore(){return {rois:cloneProjectValue(rois),selectedRoi:selectedRoi,newRoiCount:newRoiCount,dirty:annotationsDirty,dirty_reason:annotationDirtyReason||'',undo:cloneProjectValue(annotationUndo||[]),redo:cloneProjectValue(annotationRedo||[])};}\n",
     "function saveActiveProjectAnnotations(){if(!projectItems.length)return;projectAnnotationStore.set(projectAnnotationKey(),projectAnnotationSnapshotForStore());}\n",
+    "let projectAnnotationStorePreloaded=false;\n",
+    "function preloadProjectAnnotations(){if(projectAnnotationStorePreloaded)return;projectAnnotationStorePreloaded=true;const sets=(cfg.project&&Array.isArray(cfg.project.annotation_sets))?cfg.project.annotation_sets:[];sets.forEach(set=>{if(!set)return;const key=String(set.key||'');if(!key)return;projectAnnotationStore.set(key,{rois:cloneProjectValue(set.rois||[]),selectedRoi:Number.isFinite(Number(set.selectedRoi))?Number(set.selectedRoi):-1,newRoiCount:Number.isFinite(Number(set.newRoiCount))?Number(set.newRoiCount):(set.rois||[]).length,dirty:!!set.dirty,dirty_reason:String(set.dirty_reason||''),undo:cloneProjectValue(set.undo||[]),redo:cloneProjectValue(set.redo||[])});});}\n",
     "function loadProjectAnnotations(redraw=true){if(!projectItems.length)return;const key=projectAnnotationKey();let state=projectAnnotationStore.get(key);if(!state){state={rois:[],selectedRoi:-1,newRoiCount:0,dirty:false,dirty_reason:'',undo:[],redo:[]};projectAnnotationStore.set(key,cloneProjectValue(state));}rois.splice(0,rois.length);(cloneProjectValue(state.rois)||[]).forEach(roi=>rois.push(roi));selectedRoi=Math.min(Math.max(Number(state.selectedRoi||-1),-1),rois.length-1);if(!Number.isFinite(selectedRoi))selectedRoi=-1;newRoiCount=Number.isFinite(Number(state.newRoiCount))?Number(state.newRoiCount):0;annotationUndo.splice(0,annotationUndo.length);(cloneProjectValue(state.undo)||[]).forEach(x=>annotationUndo.push(x));annotationRedo.splice(0,annotationRedo.length);(cloneProjectValue(state.redo)||[]).forEach(x=>annotationRedo.push(x));draft=[];measureStart=null;trajectoryDraft=[];brushing=false;brushPoints=[];activeVertex=null;draggingVertex=null;setAnnotationsDirty(!!state.dirty,state.dirty_reason||'',false);if(typeof buildRoiList==='function')buildRoiList();if(typeof updateButtons==='function')updateButtons();if(redraw&&typeof draw==='function')draw();}\n",
     "function projectAnnotationCounts(){const counts=[];projectAnnotationStore.forEach((state,key)=>counts.push({key:key,count:(state.rois||[]).length,dirty:!!state.dirty}));return counts;}\n",
     "function projectAnnotationFilename(){if(!projectItems.length)return cfg.annotation_filename||'wsiTools_annotations.geojson';const item=projectItems[activeProjectIndex]||{},section=activeProjectSection(),base=projectSafeName(item.label||item.path||item.id||'wsiTools'),suffix=section?projectSafeName(section.label||section.id||('section_'+(activeProjectSectionIndex+1))):'image';return base+'_'+suffix+'_annotations.geojson';}\n",
     "function projectStatePayload(){saveActiveProjectAnnotations();const item=projectItems[activeProjectIndex]||null,section=activeProjectSection();return {active_index:activeProjectIndex,active_section_index:activeProjectSectionIndex,active_key:projectAnnotationKey(),active:item?{id:item.id||null,label:item.label||null,path:item.path||null,backend:item.backend||null,type:item.type||null,status:item.status||null}:null,section:section?{id:section.id||null,label:section.label||null,scene:section.scene||null,status:section.status||null}:null,count:projectItems.length,annotation_sets:projectAnnotationCounts()};}\n",
     "function projectItemCanPreview(item){return !!(item&&item.image_data_uri);}\n",
+    "function projectItemCanTile(item){return !!(item&&(item.tile_url_base||item.tile_url_template)&&item.tile_format&&Number.isFinite(Number(item.max_level))&&Number.isFinite(Number(item.tile_size||cfg.tile_size||0)));}\n",
     "function projectItemMessage(item){return (item&&String(item.message||'').trim())||'';}\n",
     "function projectItemStatus(item){return (item&&String(item.status||'').trim())||'ready';}\n",
-    "function projectSwitchable(item){return projectItemCanPreview(item)||!!(item&&item.active);}\n",
+    "function projectSwitchable(item){return projectItemCanTile(item)||projectItemCanPreview(item)||!!(item&&item.active);}\n",
     "function renderProjectPanel(){const panel=el('projectPanel'),summary=el('projectSummary'),list=el('projectImageList'),sections=el('projectSectionList');if(!panel||!summary||!list||!sections)return;if(!projectItems.length){summary.textContent='No project images configured.';list.innerHTML='';sections.innerHTML='';return;}summary.textContent=projectItems.length+' image'+(projectItems.length===1?'':'s')+' available. Annotations are stored separately for each image/section; current section has '+rois.length+' ROI'+(rois.length===1?'':'s')+'.';list.innerHTML='';projectItems.forEach((item,i)=>{const b=document.createElement('button');b.type='button';b.className='projectItem';b.classList.toggle('active',i===activeProjectIndex);b.disabled=!projectSwitchable(item);const name=document.createElement('span');name.className='projectName';name.textContent=item.label||item.path||('Image '+(i+1));const status=document.createElement('span');status.className='projectStatus';status.textContent=projectItemStatus(item);const path=document.createElement('span');path.className='projectPath';path.textContent=item.path||item.backend||'';b.append(name,status,path);const msg=projectItemMessage(item);if(msg){const m=document.createElement('span');m.className='projectMessage';m.textContent=msg;b.appendChild(m);}b.onclick=()=>switchProjectItem(i);list.appendChild(b);});renderProjectSections();}\n",
-    "function renderProjectSections(){const sections=el('projectSectionList');if(!sections)return;sections.innerHTML='';const item=projectItems[activeProjectIndex]||null;const values=projectSections(item);if(!values.length)return;const title=document.createElement('div');title.className='sideMeta';title.textContent='Sections / pyramid levels';sections.appendChild(title);values.forEach((section,i)=>{const b=document.createElement('button');b.type='button';b.className='projectSectionItem';b.classList.toggle('active',i===activeProjectSectionIndex);b.disabled=!section.image_data_uri;const name=document.createElement('span');name.className='projectName';name.textContent=section.label||section.id||('Section '+(i+1));const status=document.createElement('span');status.className='projectStatus';const saved=projectAnnotationStore.get(projectAnnotationKey(activeProjectIndex,i));const n=saved&&saved.rois?saved.rois.length:(i===activeProjectSectionIndex?rois.length:0);status.textContent=(section.status||'')+(n?(' | '+n+' ROI'+(n===1?'':'s')):'');b.append(name,status);const msg=section.message||'';if(msg){const m=document.createElement('span');m.className='projectMessage';m.textContent=msg;b.appendChild(m);}b.onclick=()=>switchProjectSection(i);sections.appendChild(b);});}\n",
-    "function applyProjectPreview(item,section=null){const source=(section&&section.image_data_uri)||item.image_data_uri;if(!source){notify(projectItemMessage(section||item)||'No preview is available for this project item','warning',5200);return false;}if(typeof image==='undefined'){notify('Project image switching is available in thumbnail/project viewer mode. Use wsi_viewer_project() for CZI preview projects.','warning',5200);return false;}const dims=section||item;cfg.slide_width=Number(dims.width||item.width||cfg.slide_width);cfg.slide_height=Number(dims.height||item.height||cfg.slide_height);cfg.title=item.label||cfg.title;if(typeof setImageTransform==='function')setImageTransform(0,false,false,false);image.onload=()=>{fitView();loadProjectAnnotations(false);renderProjectPanel();if(typeof buildRoiList==='function')buildRoiList();if(typeof updateButtons==='function')updateButtons();draw();const label=(item.label||item.path||'image')+(section?(' / '+(section.label||section.id||'section')):'');notify('Project section selected: '+label+' | '+rois.length+' ROI'+(rois.length===1?'':'s'),'success',2200);scheduleViewerStateSync('project_section_selected',projectStatePayload());};image.src=source;if(typeof navigatorImage!=='undefined')navigatorImage.src=(section&&section.navigator_image_data_uri)||item.navigator_image_data_uri||source;return true;}\n",
-    "function switchProjectItem(index){if(index<0||index>=projectItems.length)return;const item=projectItems[index];if(!projectSwitchable(item)){notify(projectItemMessage(item)||'This project item has no preview yet. Install/configure the required backend or convert it to a supported tiled image.','warning',6200);return;}saveActiveProjectAnnotations();activeProjectIndex=index;activeProjectSectionIndex=defaultProjectSectionIndex(item);renderProjectPanel();if(item.active&&!item.image_data_uri){loadProjectAnnotations();notify('Active viewer image selected; section-specific annotations restored','success',1600);scheduleViewerStateSync('project_image_selected',projectStatePayload());return;}applyProjectPreview(item,activeProjectSection());}\n",
-    "function switchProjectSection(index){const item=projectItems[activeProjectIndex]||null;const section=item&&projectSections(item)[index];if(!item||!section)return;if(!section.image_data_uri){notify(section.message||'This section is listed from metadata but has no preview source yet.','warning',5200);return;}saveActiveProjectAnnotations();activeProjectSectionIndex=index;renderProjectPanel();applyProjectPreview(item,section);}\n",
-    "function bindProjectPanel(){if(projectItems.length&&!projectAnnotationStore.has(projectAnnotationKey()))saveActiveProjectAnnotations();renderProjectPanel();}\n"
+    "function renderProjectSections(){const sections=el('projectSectionList');if(!sections)return;sections.innerHTML='';const item=projectItems[activeProjectIndex]||null;const values=projectSections(item);if(!values.length)return;const title=document.createElement('div');title.className='sideMeta';title.textContent='Sections / pyramid levels';sections.appendChild(title);values.forEach((section,i)=>{const b=document.createElement('button');b.type='button';b.className='projectSectionItem';b.classList.toggle('active',i===activeProjectSectionIndex);b.disabled=!section.image_data_uri&&!projectItemCanTile(section);const name=document.createElement('span');name.className='projectName';name.textContent=section.label||section.id||('Section '+(i+1));const status=document.createElement('span');status.className='projectStatus';const saved=projectAnnotationStore.get(projectAnnotationKey(activeProjectIndex,i));const n=saved&&saved.rois?saved.rois.length:(i===activeProjectSectionIndex?rois.length:0);status.textContent=(section.status||'')+(n?(' | '+n+' ROI'+(n===1?'':'s')):'');b.append(name,status);const msg=section.message||'';if(msg){const m=document.createElement('span');m.className='projectMessage';m.textContent=msg;b.appendChild(m);}b.onclick=()=>switchProjectSection(i);sections.appendChild(b);});}\n",
+    "function projectTileSourceFromItem(item,section=null){const source=section||item;if(projectItemCanTile(source)||projectItemCanTile(item)){const src=projectItemCanTile(source)?source:item,base=String(src.tile_url_base||''),template=String(src.tile_url_template||''),fmt=String(src.tile_format),style=String(src.tile_url_style||'deepzoom'),tileSize=Number(src.tile_size||cfg.tile_size),maxLevel=Number(src.max_level);return {width:Number(src.width||item.width||cfg.slide_width),height:Number(src.height||item.height||cfg.slide_height),tileSize:tileSize,tileOverlap:Number(src.tile_overlap||0),minLevel:Number(src.min_level||0),maxLevel:maxLevel,getTileUrl:(level,x,y)=>tileUrlFromParts(base,template,style,fmt,level,x,y)};}const imageSource=(source&&source.image_data_uri)||item.image_data_uri;if(imageSource)return {type:'image',url:imageSource};return null;}\n",
+    "function finishProjectSwitch(item,section=null,redraw=true){loadProjectAnnotations(false);renderProjectPanel();if(typeof buildRoiList==='function')buildRoiList();if(typeof updateButtons==='function')updateButtons();if(redraw&&typeof fitView==='function')fitView();if(typeof draw==='function')draw();const label=(item.label||item.path||'image')+(section?(' / '+(section.label||section.id||'section')):'');notify('Project section selected: '+label+' | '+rois.length+' ROI'+(rois.length===1?'':'s'),'success',2200);scheduleViewerStateSync('project_section_selected',projectStatePayload());}\n",
+    "function applyProjectOsd(item,section=null){if(typeof osdViewer==='undefined'||!osdViewer)return false;const tileSource=projectTileSourceFromItem(item,section);if(!tileSource){notify(projectItemMessage(section||item)||'No tiled source or preview is available for this project item.','warning',5200);return true;}const dims=section||item;cfg.slide_width=Number(dims.width||item.width||cfg.slide_width);cfg.slide_height=Number(dims.height||item.height||cfg.slide_height);cfg.title=item.label||cfg.title;if(projectItemCanTile(dims)||projectItemCanTile(item)){const src=projectItemCanTile(dims)?dims:item;cfg.tile_url_base=String(src.tile_url_base);cfg.tile_format=String(src.tile_format);cfg.tile_size=Number(src.tile_size||cfg.tile_size);cfg.max_level=Number(src.max_level);cfg.tile_overlap=Number(src.tile_overlap||0);}else{cfg.tile_url_base='';cfg.tile_format='';cfg.max_level=0;}if(prefetchCache&&typeof prefetchCache.clear==='function')prefetchCache.clear();if(typeof navigatorImage!=='undefined')navigatorImage.src=(section&&section.navigator_image_data_uri)||item.navigator_image_data_uri||(section&&section.image_data_uri)||item.image_data_uri||'';if(typeof setImageTransform==='function')setImageTransform(0,false,false,false);osdReady=false;if(typeof osdViewer.addOnceHandler==='function')osdViewer.addOnceHandler('open',()=>finishProjectSwitch(item,section,true));else setTimeout(()=>finishProjectSwitch(item,section,true),120);osdViewer.open(tileSource);return true;}\n",
+    "function applyProjectPreview(item,section=null){if(applyProjectOsd(item,section))return true;const source=(section&&section.image_data_uri)||item.image_data_uri;if(!source){notify(projectItemMessage(section||item)||'No preview is available for this project item','warning',5200);return false;}if(typeof image==='undefined'){notify('Project image switching needs a tiled source or a thumbnail/project viewer preview.','warning',5200);return false;}const dims=section||item;cfg.slide_width=Number(dims.width||item.width||cfg.slide_width);cfg.slide_height=Number(dims.height||item.height||cfg.slide_height);cfg.title=item.label||cfg.title;if(typeof setImageTransform==='function')setImageTransform(0,false,false,false);image.onload=()=>{fitView();finishProjectSwitch(item,section,false);};image.src=source;if(typeof navigatorImage!=='undefined')navigatorImage.src=(section&&section.navigator_image_data_uri)||item.navigator_image_data_uri||source;return true;}\n",
+    "function switchProjectItem(index){if(index<0||index>=projectItems.length)return;const item=projectItems[index];if(!projectSwitchable(item)){notify(projectItemMessage(item)||'This project item has no preview or tiled source yet. Install/configure the required backend or convert it to a supported tiled image.','warning',6200);return;}saveActiveProjectAnnotations();activeProjectIndex=index;activeProjectSectionIndex=defaultProjectSectionIndex(item);renderProjectPanel();if(item.active&&!item.image_data_uri&&!projectItemCanTile(item)){loadProjectAnnotations();notify('Active viewer image selected; section-specific annotations restored','success',1600);scheduleViewerStateSync('project_image_selected',projectStatePayload());return;}applyProjectPreview(item,activeProjectSection());}\n",
+    "function switchProjectSection(index){const item=projectItems[activeProjectIndex]||null;const section=item&&projectSections(item)[index];if(!item||!section)return;if(!section.image_data_uri&&!projectItemCanTile(section)){notify(section.message||'This section is listed from metadata but has no preview or tiled source yet.','warning',5200);return;}saveActiveProjectAnnotations();activeProjectSectionIndex=index;renderProjectPanel();applyProjectPreview(item,section);}\n",
+    "function bindProjectPanel(){preloadProjectAnnotations();if(projectItems.length&&projectAnnotationStore.has(projectAnnotationKey()))loadProjectAnnotations(false);else if(projectItems.length&&!projectAnnotationStore.has(projectAnnotationKey()))saveActiveProjectAnnotations();renderProjectPanel();}\n"
   )
 }
 
@@ -1704,6 +1798,8 @@ wsi_viewer_html <- function(config) {
     wsi_viewer_preferences_js(),
     wsi_viewer_jobs_js(),
     wsi_viewer_stain_js(),
+    wsi_viewer_base_image_js(),
+    wsi_viewer_channel_js(),
     wsi_viewer_sync_js(),
     wsi_viewer_shortcuts_js(),
     wsi_viewer_command_palette_js(),
@@ -1756,7 +1852,7 @@ wsi_viewer_html <- function(config) {
     "el('roiToggle').onclick=()=>{showRois=!showRois;updateButtons();draw();};el('labelsToggle').onclick=()=>{showLabels=!showLabels;updateButtons();draw();};el('prevRoi').onclick=()=>centerRoi(selectedRoi<=0?rois.length-1:selectedRoi-1);el('nextRoi').onclick=()=>centerRoi(selectedRoi+1);el('layersToggle').onclick=()=>{toggleRoiPanel();updateButtons();};el('roiOpacity').oninput=e=>{roiOpacity=Number(e.target.value);saveRoiOpacityPreference();draw();};el('crosshairToggle').onclick=()=>{showCrosshair=!showCrosshair;updateButtons();draw();};el('copyCoord').onclick=copyCoord;\n",
     "window.addEventListener('keydown',e=>{const key=String(e.key||'').toLowerCase(),typing=e.target&&['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName);if(brushSubtractKeyEvent(e)){brushAltDown=true;updateCursorFeedback(e);draw();}if((e.ctrlKey||e.metaKey)&&!typing&&((e.shiftKey&&key==='z')||key==='y')){e.preventDefault();restoreAnnotationRedo();return;}if((e.ctrlKey||e.metaKey)&&!e.shiftKey&&key==='z'&&!typing){e.preventDefault();restoreAnnotationUndo();return;}if(!typing&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.shiftKey&&key==='n'){e.preventDefault();startNewAnnotation(mode==='draw'?'draw':'brush');return;}if(e.key==='f')fitView();if(e.key==='1')oneToOne();if(e.key==='d')setMode('draw');if(e.key==='b')setMode('brush');if(e.key==='e')setMode('edit');if(e.key==='m')setMode('measure');if(e.key==='t')setMode('trajectory');if(e.key==='Enter'&&mode==='draw')finishDraft();if(e.key==='Enter'&&mode==='trajectory'){e.preventDefault();finishTrajectory();}if((e.key==='Backspace'||e.key==='Delete')&&mode==='draw'){e.preventDefault();undoDraftPoint();}if((e.key==='Backspace'||e.key==='Delete')&&mode==='trajectory'){e.preventDefault();undoTrajectoryPoint();}if((e.key==='Backspace'||e.key==='Delete')&&mode==='edit'&&activeVertex){e.preventDefault();deleteSelectedVertex();}if(e.key==='r'&&rois.length)el('roiToggle').click();if(e.key==='l'&&rois.length)el('labelsToggle').click();if(e.key==='c')el('crosshairToggle').click();if(e.key==='['&&rois.length)el('prevRoi').click();if(e.key===']'&&rois.length)el('nextRoi').click();if(e.key==='Escape'){measureStart=null;trajectoryDraft=[];brushing=false;brushPoints=[];brushOperation='new';brushTargetRoi=-1;brushClass='';brushAdditiveSelection=false;brushTouchedSelection=new Set();draggingVertex=null;activeVertex=null;setMode('pan');draw();}});\n",
     "window.addEventListener('keyup',e=>{if(e.key==='Alt'||e.key==='Meta'||mode==='brush'||mode==='edit'){brushAltDown=brushSubtractModifier(e);updateCursorFeedback(e);draw();}});\n",
-    "bindExclusiveMenus();bindShortcutHelp();bindCommandPalette();bindMiniNavigator();bindProjectPanel();bindRoiPanelControls();bindSelectionCardControls();bindJobControls();bindStainControls();bindRoiClassControls();bindAnnotationListControls();bindAnnotationHistoryControls();bindAnnotationSectionMaximizeControls();bindMeasureControls();bindTrajectoryControls();bindImageTransformControls();bindGeojsonImportControls();bindSegmentationControls();bindArtifactControls();bindPreferenceControls();buildRoiList();buildLayerList();const initialMode=applyViewerPreferences();updateButtons();updateAnnotationDirtyIndicator();syncMessage('');setMode(initialMode||'pan');scheduleViewerStateSync('viewer_loaded',{});startViewerCommandPolling();startViewerAutosave();\n",
+    "bindExclusiveMenus();bindShortcutHelp();bindCommandPalette();bindMiniNavigator();bindProjectPanel();bindRoiPanelControls();bindSelectionCardControls();bindJobControls();bindStainControls();bindBaseImageControls();bindRoiClassControls();bindAnnotationListControls();bindAnnotationHistoryControls();bindAnnotationSectionMaximizeControls();bindMeasureControls();bindTrajectoryControls();bindImageTransformControls();bindGeojsonImportControls();bindSegmentationControls();bindArtifactControls();bindPreferenceControls();buildRoiList();buildLayerList();buildChannelList();const initialMode=applyViewerPreferences();updateButtons();updateAnnotationDirtyIndicator();syncMessage('');setMode(initialMode||'pan');startViewerStateSocket();scheduleViewerStateSync('viewer_loaded',{});startViewerCommandPolling();startViewerAutosave();\n",
     "window.addEventListener('resize',resize);\n",
     "image.onload=resize;\n",
     "image.src=cfg.image_data_uri;\n",
@@ -1799,6 +1895,8 @@ wsi_tiled_viewer_html <- function(config) {
     wsi_viewer_preferences_js(),
     wsi_viewer_jobs_js(),
     wsi_viewer_stain_js(),
+    wsi_viewer_base_image_js(),
+    wsi_viewer_channel_js(),
     wsi_viewer_sync_js(),
     wsi_viewer_shortcuts_js(),
     wsi_viewer_command_palette_js(),
@@ -1807,7 +1905,10 @@ wsi_tiled_viewer_html <- function(config) {
     wsi_viewer_project_js(),
     wsi_viewer_navigator_js(),
     "function setMode(m){mode=m;if(m==='brush'&&typeof setRoiPanelOpen==='function')setRoiPanelOpen(true);if(m!=='edit'){draggingVertex=null;activeVertex=null;}canvas.classList.toggle('selecting',m==='select');canvas.classList.toggle('drawing',m==='draw');canvas.classList.toggle('brushing',m==='brush');canvas.classList.toggle('editing',m==='edit');canvas.classList.toggle('measuring',m==='measure');canvas.classList.toggle('trajectory',m==='trajectory');el('toolPan').classList.toggle('active',m==='pan');el('toolSelect').classList.toggle('active',m==='select');el('toolDraw').classList.toggle('active',m==='draw');el('toolBrush').classList.toggle('active',m==='brush');el('toolEdit').classList.toggle('active',m==='edit');el('toolMeasure').classList.toggle('active',m==='measure');if(el('toolTrajectory'))el('toolTrajectory').classList.toggle('active',m==='trajectory');updateCursorFeedback();updateButtons();saveToolPreference();if(canvas.width)draw();}\n",
-    "function tileUrl(level,col,row){return cfg.tile_url_base+'/'+level+'/'+col+'_'+row+'.'+cfg.tile_format;}\n",
+    "function activeTileMode(){return !!((cfg.tile_url_base||cfg.tile_url_template)&&cfg.tile_format&&Number.isFinite(Number(cfg.max_level))&&Number(cfg.max_level)>0);}\n",
+    "function tileUrlFromParts(base,template,style,fmt,level,col,row){if(template)return String(template).replace(/\\{level\\}/g,level).replace(/\\{x\\}/g,col).replace(/\\{y\\}/g,row).replace(/\\{format\\}/g,fmt);return String(base).replace(/\\/$/,'')+'/'+level+'/'+col+(style==='slash'?('/'+row):('_'+row))+'.'+fmt;}\n",
+    "function tileUrl(level,col,row){return tileUrlFromParts(cfg.tile_url_base||'',cfg.tile_url_template||'',cfg.tile_url_style||'deepzoom',cfg.tile_format,level,col,row);}\n",
+    "function tileSourceFromConfig(){if(activeTileMode())return {width:cfg.slide_width,height:cfg.slide_height,tileSize:cfg.tile_size,tileOverlap:Number(cfg.tile_overlap||0),minLevel:0,maxLevel:cfg.max_level,getTileUrl:(level,x,y)=>tileUrl(level,x,y)};const source=cfg.image_data_uri||cfg.navigator_image_data_uri;if(source)return {type:'image',url:source};return {width:cfg.slide_width,height:cfg.slide_height,tileSize:cfg.tile_size,tileOverlap:0,minLevel:0,maxLevel:0,getTileUrl:()=>''};}\n",
     "function requestDraw(){if(renderQueued)return;renderQueued=true;requestAnimationFrame(()=>{renderQueued=false;draw();});}\n",
     "function osdItem(){return osdViewer&&osdViewer.world&&osdViewer.world.getItemAt(0);}\n",
     "function osdBaseCanvas(){return viewerEl.querySelector('.openseadragon-canvas canvas')||viewerEl.querySelector('canvas');}\n",
@@ -1818,10 +1919,10 @@ wsi_tiled_viewer_html <- function(config) {
     "function fitView(){if(osdViewer){osdViewer.viewport.goHome(false);syncViewState();prefetchNeighborTiles();draw();}}\n",
     "function zoomAt(factor,cx,cy){if(!osdViewer)return;const point=osdViewer.viewport.pointFromPixel(new OpenSeadragon.Point(cx,cy),true);osdViewer.viewport.zoomBy(factor,point,false);osdViewer.viewport.applyConstraints(false);syncViewState();prefetchNeighborTiles();draw();}\n",
     "function oneToOne(){syncViewState();zoomAt(1/Math.max(scale,1e-9),innerWidth/2,innerHeight/2);}\n",
-    "function currentLevel(){syncViewState();return clamp(Math.ceil(cfg.max_level+Math.log2(Math.max(scale,1e-9))),0,cfg.max_level);}\n",
-    "function visibleTileRange(level,margin=1){if(!osdReady||!osdItem())return null;const item=osdItem(),bounds=osdViewer.viewport.getBounds(true),p0=item.viewportToImageCoordinates(new OpenSeadragon.Point(bounds.x,bounds.y)),p1=item.viewportToImageCoordinates(new OpenSeadragon.Point(bounds.x+bounds.width,bounds.y+bounds.height)),down=Math.pow(2,cfg.max_level-level),levelW=Math.ceil(cfg.slide_width/down),levelH=Math.ceil(cfg.slide_height/down),tileSlide=cfg.tile_size*down;const left=clamp(Math.min(p0.x,p1.x),0,cfg.slide_width),right=clamp(Math.max(p0.x,p1.x),0,cfg.slide_width),top=clamp(Math.min(p0.y,p1.y),0,cfg.slide_height),bottom=clamp(Math.max(p0.y,p1.y),0,cfg.slide_height);return {c0:clamp(Math.floor(left/tileSlide)-margin,0,Math.ceil(levelW/cfg.tile_size)-1),c1:clamp(Math.floor(right/tileSlide)+margin,0,Math.ceil(levelW/cfg.tile_size)-1),r0:clamp(Math.floor(top/tileSlide)-margin,0,Math.ceil(levelH/cfg.tile_size)-1),r1:clamp(Math.floor(bottom/tileSlide)+margin,0,Math.ceil(levelH/cfg.tile_size)-1)};}\n",
-    "function prefetchTile(level,col,row){const key=level+'/'+col+'/'+row;if(prefetchCache.has(key))return;const img=new Image();img.decoding='async';img.src=tileUrl(level,col,row);prefetchCache.set(key,img);if(prefetchCache.size>384){const first=prefetchCache.keys().next().value;prefetchCache.delete(first);}}\n",
-    "function prefetchNeighborTiles(){const level=currentLevel(),range=visibleTileRange(level,1);if(!range)return;if(window.requestIdleCallback){requestIdleCallback(()=>prefetchTileRange(level,range),{timeout:400});}else{setTimeout(()=>prefetchTileRange(level,range),50);}}\n",
+    "function currentLevel(){syncViewState();if(!activeTileMode())return 0;return clamp(Math.ceil(cfg.max_level+Math.log2(Math.max(scale,1e-9))),0,cfg.max_level);}\n",
+    "function visibleTileRange(level,margin=1){if(!activeTileMode()||!osdReady||!osdItem())return null;const item=osdItem(),bounds=osdViewer.viewport.getBounds(true),p0=item.viewportToImageCoordinates(new OpenSeadragon.Point(bounds.x,bounds.y)),p1=item.viewportToImageCoordinates(new OpenSeadragon.Point(bounds.x+bounds.width,bounds.y+bounds.height)),down=Math.pow(2,cfg.max_level-level),levelW=Math.ceil(cfg.slide_width/down),levelH=Math.ceil(cfg.slide_height/down),tileSlide=cfg.tile_size*down;const left=clamp(Math.min(p0.x,p1.x),0,cfg.slide_width),right=clamp(Math.max(p0.x,p1.x),0,cfg.slide_width),top=clamp(Math.min(p0.y,p1.y),0,cfg.slide_height),bottom=clamp(Math.max(p0.y,p1.y),0,cfg.slide_height);return {c0:clamp(Math.floor(left/tileSlide)-margin,0,Math.ceil(levelW/cfg.tile_size)-1),c1:clamp(Math.floor(right/tileSlide)+margin,0,Math.ceil(levelW/cfg.tile_size)-1),r0:clamp(Math.floor(top/tileSlide)-margin,0,Math.ceil(levelH/cfg.tile_size)-1),r1:clamp(Math.floor(bottom/tileSlide)+margin,0,Math.ceil(levelH/cfg.tile_size)-1)};}\n",
+    "function prefetchTile(level,col,row){if(!activeTileMode())return;const key=tileUrl(level,col,row);if(prefetchCache.has(key))return;const img=new Image();img.decoding='async';img.src=key;prefetchCache.set(key,img);if(prefetchCache.size>384){const first=prefetchCache.keys().next().value;prefetchCache.delete(first);}}\n",
+    "function prefetchNeighborTiles(){const margin=Number(cfg.tile_prefetch_margin??-1);if(margin<0)return;const level=currentLevel(),range=visibleTileRange(level,margin);if(!range)return;if(window.requestIdleCallback){requestIdleCallback(()=>prefetchTileRange(level,range),{timeout:400});}else{setTimeout(()=>prefetchTileRange(level,range),50);}}\n",
     "function prefetchTileRange(level,range){for(let row=range.r0;row<=range.r1;row++){for(let col=range.c0;col<=range.c1;col++)prefetchTile(level,col,row);}}\n",
     "function applyOpenSeadragonStain(){if(!baseImageDirty)return;if(!stainEnabled){baseImageDirty=false;return;}const base=osdBaseCanvas();if(!base){return;}if(stainOn)applyStainToCanvas(base.getContext('2d'),base);baseImageDirty=false;}\n",
     "function draw(){ctx.clearRect(0,0,innerWidth,innerHeight);syncViewState();if(typeof syncBrushRadiusToZoom==='function')syncBrushRadiusToZoom();applyOpenSeadragonStain();drawLayers();drawTileGrid();drawArtifactOverlays();drawRois();drawDraft();drawBrushPreview();drawEditHandles();drawMeasurements();drawTrajectories();drawCrosshair();drawMiniNavigator();updateStatus(lastPointer,currentLevel());}\n",
@@ -1837,7 +1938,7 @@ wsi_tiled_viewer_html <- function(config) {
     "function drawCrosshair(){if(!showCrosshair||!pointInsideSlide(lastPointer))return;const q=slideToCanvas(lastPointer);ctx.save();ctx.strokeStyle='rgba(255,255,255,.55)';ctx.setLineDash([5,5]);ctx.beginPath();ctx.moveTo(q.x,0);ctx.lineTo(q.x,innerHeight);ctx.moveTo(0,q.y);ctx.lineTo(innerWidth,q.y);ctx.stroke();ctx.restore();}\n",
     "function panByPixels(dx,dy){if(!osdViewer)return;const delta=osdViewer.viewport.deltaPointsFromPixels(new OpenSeadragon.Point(-dx,-dy),true);osdViewer.viewport.panBy(delta,false);osdViewer.viewport.applyConstraints(false);syncViewState();prefetchNeighborTiles();draw();}\n",
     "function pointerToSlide(evt){const rect=canvas.getBoundingClientRect();const px=evt.clientX-rect.left,py=evt.clientY-rect.top;if(osdReady&&osdItem()){const vp=osdViewer.viewport.pointFromPixel(new OpenSeadragon.Point(px,py),true),img=osdItem().viewportToImageCoordinates(vp);return {x:img.x,y:img.y};}return {x:(px-offsetX)/scale,y:(py-offsetY)/scale};}\n",
-    "function updateStatus(p,level){let msg='Mode '+mode+' | Zoom '+(scale/minScale).toFixed(2)+'x | Deep Zoom level '+level+'/'+cfg.max_level;msg+=stainStatus();msg+=measureStatus();msg+=trajectoryStatus();msg+=imageTransformStatus();if(loadingTiles)msg+=' | loading '+loadingTiles+' tile'+(loadingTiles===1?'':'s');if(draft.length)msg+=' | drawing '+draft.length+' point'+(draft.length===1?'':'s');if(pointInsideSlide(p))msg+=' | x '+Math.round(p.x)+' y '+Math.round(p.y);if(rois.length)msg+=' | ROIs '+rois.length+(selectedRoi>=0?' | selected '+(rois[selectedRoi].name||rois[selectedRoi].id):'');status.textContent=msg+' | full-resolution tiled viewer, full slide not loaded into R';}\n",
+    "function updateStatus(p,level){let msg='Mode '+mode+' | Zoom '+(scale/minScale).toFixed(2)+'x';msg+=activeTileMode()?(' | Deep Zoom level '+level+'/'+cfg.max_level):' | preview image';msg+=stainStatus();msg+=measureStatus();msg+=trajectoryStatus();msg+=imageTransformStatus();if(loadingTiles)msg+=' | loading '+loadingTiles+' tile'+(loadingTiles===1?'':'s');if(draft.length)msg+=' | drawing '+draft.length+' point'+(draft.length===1?'':'s');if(pointInsideSlide(p))msg+=' | x '+Math.round(p.x)+' y '+Math.round(p.y);if(rois.length)msg+=' | ROIs '+rois.length+(selectedRoi>=0?' | selected '+(rois[selectedRoi].name||rois[selectedRoi].id):'');status.textContent=msg+(activeTileMode()?' | full-resolution tiled viewer, full slide not loaded into R':' | preview item; convert to tiled source for full-resolution zoom');}\n",
     "function updateRoiList(){document.querySelectorAll('.roiItem').forEach((b,i)=>b.classList.toggle('active',i===selectedRoi));}\n",
     "function buildRoiList(){const list=el('roiList');list.innerHTML='';rois.forEach((roi,i)=>{const b=document.createElement('button');b.className='roiItem';const sw=document.createElement('span');sw.className='swatch';sw.style.background=roi.colour;const nm=document.createElement('span');nm.className='roiName';nm.textContent=roi.name||roi.id;const cl=document.createElement('span');cl.className='roiClass';cl.textContent=roi.class||'';b.append(sw,nm,cl);b.onclick=()=>centerRoi(i);list.appendChild(b);});updateRoiList();}\n",
     "function hexToRgba(hex,a){const h=hex.replace('#','');const n=parseInt(h,16);return 'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+a+')';}\n",
@@ -1864,8 +1965,8 @@ wsi_tiled_viewer_html <- function(config) {
     "el('roiToggle').onclick=()=>{showRois=!showRois;updateButtons();draw();};el('labelsToggle').onclick=()=>{showLabels=!showLabels;updateButtons();draw();};el('prevRoi').onclick=()=>centerRoi(selectedRoi<=0?rois.length-1:selectedRoi-1);el('nextRoi').onclick=()=>centerRoi(selectedRoi+1);el('layersToggle').onclick=()=>{toggleRoiPanel();updateButtons();};el('roiOpacity').oninput=e=>{roiOpacity=Number(e.target.value);saveRoiOpacityPreference();draw();};el('crosshairToggle').onclick=()=>{showCrosshair=!showCrosshair;updateButtons();draw();};el('copyCoord').onclick=copyCoord;\n",
     "window.addEventListener('keydown',e=>{const key=String(e.key||'').toLowerCase(),typing=e.target&&['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName);if(brushSubtractKeyEvent(e)){brushAltDown=true;updateCursorFeedback(e);draw();}if((e.ctrlKey||e.metaKey)&&!typing&&((e.shiftKey&&key==='z')||key==='y')){e.preventDefault();restoreAnnotationRedo();return;}if((e.ctrlKey||e.metaKey)&&!e.shiftKey&&key==='z'&&!typing){e.preventDefault();restoreAnnotationUndo();return;}if(!typing&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.shiftKey&&key==='n'){e.preventDefault();startNewAnnotation(mode==='draw'?'draw':'brush');return;}if(e.key==='f')fitView();if(e.key==='1')oneToOne();if(e.key==='d')setMode('draw');if(e.key==='b')setMode('brush');if(e.key==='e')setMode('edit');if(e.key==='m')setMode('measure');if(e.key==='t')setMode('trajectory');if(e.key==='Enter'&&mode==='draw')finishDraft();if(e.key==='Enter'&&mode==='trajectory'){e.preventDefault();finishTrajectory();}if((e.key==='Backspace'||e.key==='Delete')&&mode==='draw'){e.preventDefault();undoDraftPoint();}if((e.key==='Backspace'||e.key==='Delete')&&mode==='trajectory'){e.preventDefault();undoTrajectoryPoint();}if((e.key==='Backspace'||e.key==='Delete')&&mode==='edit'&&activeVertex){e.preventDefault();deleteSelectedVertex();}if(e.key==='r'&&rois.length)el('roiToggle').click();if(e.key==='l'&&rois.length)el('labelsToggle').click();if(e.key==='c')el('crosshairToggle').click();if(e.key==='['&&rois.length)el('prevRoi').click();if(e.key===']'&&rois.length)el('nextRoi').click();if(e.key==='Escape'){measureStart=null;trajectoryDraft=[];brushing=false;brushPoints=[];brushOperation='new';brushTargetRoi=-1;brushClass='';brushAdditiveSelection=false;brushTouchedSelection=new Set();draggingVertex=null;activeVertex=null;setMode('pan');draw();}});\n",
     "window.addEventListener('keyup',e=>{if(e.key==='Alt'||e.key==='Meta'||mode==='brush'||mode==='edit'){brushAltDown=brushSubtractModifier(e);updateCursorFeedback(e);draw();}});\n",
-    "function initOpenSeadragon(){if(!window.OpenSeadragon){notify('OpenSeadragon failed to load','error',4200);return;}osdViewer=OpenSeadragon({element:viewerEl,showNavigationControl:false,showNavigator:false,blendTime:0.08,alwaysBlend:false,immediateRender:true,placeholderFillStyle:'rgba(16,16,16,0)',minPixelRatio:0.5,maxImageCacheCount:512,animationTime:0.12,springStiffness:9,visibilityRatio:0.8,constrainDuringPan:true,minZoomImageRatio:0.7,maxZoomPixelRatio:8,gestureSettingsMouse:{clickToZoom:false,dblClickToZoom:false,scrollToZoom:false,dragToPan:false},gestureSettingsTouch:{pinchToZoom:true,dragToPan:false},tileSources:{width:cfg.slide_width,height:cfg.slide_height,tileSize:cfg.tile_size,tileOverlap:0,minLevel:0,maxLevel:cfg.max_level,getTileUrl:(level,x,y)=>tileUrl(level,x,y)}});osdViewer.addHandler('open',()=>{osdReady=true;applyOpenSeadragonImageTransform();resize();prefetchNeighborTiles();notify('Tiled viewer ready','success');draw();});['animation','animation-finish','tile-drawn','tile-loaded','tile-load-failed','resize'].forEach(name=>osdViewer.addHandler(name,()=>{markBaseImageDirty();syncViewState();if(name==='animation-finish'||name==='tile-loaded')prefetchNeighborTiles();requestDraw();}));}\n",
-    "bindExclusiveMenus();bindShortcutHelp();bindCommandPalette();bindMiniNavigator();bindProjectPanel();bindRoiPanelControls();bindSelectionCardControls();bindJobControls();bindStainControls();bindRoiClassControls();bindAnnotationListControls();bindAnnotationHistoryControls();bindAnnotationSectionMaximizeControls();bindMeasureControls();bindTrajectoryControls();bindImageTransformControls();bindGeojsonImportControls();bindSegmentationControls();bindArtifactControls();bindPreferenceControls();buildRoiList();buildLayerList();const initialMode=applyViewerPreferences();updateButtons();updateAnnotationDirtyIndicator();syncMessage('');setMode(initialMode||'pan');scheduleViewerStateSync('viewer_loaded',{});startViewerCommandPolling();startViewerAutosave();\n",
+    "function initOpenSeadragon(){if(!window.OpenSeadragon){notify('OpenSeadragon failed to load','error',4200);return;}const roundMode=(OpenSeadragon.SUBPIXEL_ROUNDING_OCCURRENCES&&OpenSeadragon.SUBPIXEL_ROUNDING_OCCURRENCES.ALWAYS)||undefined;osdViewer=OpenSeadragon({element:viewerEl,showNavigationControl:false,showNavigator:false,blendTime:0,alwaysBlend:false,immediateRender:true,placeholderFillStyle:'#fff',subPixelRoundingForTransparency:roundMode,minPixelRatio:1,maxImageCacheCount:512,animationTime:0.12,springStiffness:9,visibilityRatio:0.8,constrainDuringPan:true,minZoomImageRatio:0.7,maxZoomPixelRatio:16,gestureSettingsMouse:{clickToZoom:false,dblClickToZoom:false,scrollToZoom:false,dragToPan:false},gestureSettingsTouch:{pinchToZoom:true,dragToPan:false},tileSources:tileSourceFromConfig()});osdViewer.addHandler('open',()=>{osdReady=true;applyOpenSeadragonImageTransform();applyBaseImageDisplay();installInitialChannelSources();resize();prefetchNeighborTiles();notify(activeTileMode()?'Tiled viewer ready':'Preview image ready',activeTileMode()?'success':'info');draw();});['animation','animation-finish','tile-drawn','tile-loaded','tile-load-failed','resize'].forEach(name=>osdViewer.addHandler(name,()=>{markBaseImageDirty();syncViewState();if(name==='animation-finish'){scheduleViewerStateSync('viewport_changed',{scale:scale,offset_x:offsetX,offset_y:offsetY});prefetchNeighborTiles();}else if(name==='tile-loaded')prefetchNeighborTiles();requestDraw();}));}\n",
+    "bindExclusiveMenus();bindShortcutHelp();bindCommandPalette();bindMiniNavigator();bindProjectPanel();bindRoiPanelControls();bindSelectionCardControls();bindJobControls();bindStainControls();bindBaseImageControls();bindRoiClassControls();bindAnnotationListControls();bindAnnotationHistoryControls();bindAnnotationSectionMaximizeControls();bindMeasureControls();bindTrajectoryControls();bindImageTransformControls();bindGeojsonImportControls();bindSegmentationControls();bindArtifactControls();bindPreferenceControls();buildRoiList();buildLayerList();buildChannelList();const initialMode=applyViewerPreferences();updateButtons();updateAnnotationDirtyIndicator();syncMessage('');setMode(initialMode||'pan');startViewerStateSocket();scheduleViewerStateSync('viewer_loaded',{});startViewerCommandPolling();startViewerAutosave();\n",
     "window.addEventListener('resize',resize);\n",
     "resize();initOpenSeadragon();\n",
     "</script>\n",
@@ -1922,6 +2023,21 @@ wsi_tiled_viewer_html <- function(config) {
 #' @param tile_format Tile image format for `mode = "tiles"`.
 #' @param quality JPEG quality for tiled viewers when `tile_format = "jpg"`.
 #' @param rebuild Whether to rebuild existing Deep Zoom tiles.
+#' @param tile_overlap Optional Deep Zoom tile overlap in pixels. Defaults to
+#'   one-pixel overlap for generated static tiles and zero for external tile
+#'   sources unless supplied.
+#' @param tile_url_base,tile_url_template Optional externally served tile source
+#'   for `mode = "tiles"`. These are normally set by [wsi_viewer_live()] when
+#'   `dynamic_tiles = TRUE`; when supplied, static Deep Zoom generation is
+#'   skipped.
+#' @param tile_url_style URL style for `tile_url_base`: `"deepzoom"` uses
+#'   `/{level}/{x}_{y}.{format}`, while `"slash"` uses
+#'   `/{level}/{x}/{y}.{format}`.
+#' @param max_level Optional maximum Deep Zoom level for externally served
+#'   tiles.
+#' @param tile_source_label Optional text shown in the viewer subtitle for
+#'   externally served tiles.
+#' @param tile_sources Optional metadata list for project/session tile sources.
 #' @param roi Optional ROI overlay. Supply a GeoJSON path or an object returned
 #'   by [wsi_read_geojson()]. Coordinates are interpreted as level-0 slide
 #'   pixel coordinates, matching QuPath-style GeoJSON exports.
@@ -1934,6 +2050,8 @@ wsi_tiled_viewer_html <- function(config) {
 #' @param channels Optional stain channels created by [wsi_stain_channels()].
 #'   RGB brightfield deconvolution supports up to three independent channels at
 #'   a time.
+#' @param base_layer_name Display name for the base image layer in the Stains
+#'   menu.
 #' @param hematoxylin,hrp RGB optical-density vectors used when
 #'   `stain = "ihc"` and `channels` is not supplied.
 #' @param hematoxylin_colour,hrp_colour Initial display colours for the
@@ -1948,6 +2066,12 @@ wsi_tiled_viewer_html <- function(config) {
 #' @param viewer_state_url Optional HTTP endpoint used to sync annotations,
 #'   measurements, segmentation overlays, and display state back to R. Use
 #'   [wsi_viewer_live()] or [wsi_viewer_session()] to create this endpoint.
+#' @param viewer_state_ws_url Optional WebSocket endpoint used by live viewers
+#'   for lower-latency browser-to-R sync. The HTTP polling bridge remains the
+#'   fallback when this is `NULL` or WebSockets are unavailable.
+#' @param viewer_transport Browser-to-R live transport advertised to the
+#'   viewer: `"auto"`, `"websocket"`, or `"polling"`. Static viewers ignore
+#'   this value.
 #' @param autosave_enabled Whether the viewer should periodically sync state to
 #'   the live R bridge for project autosave. This is normally set by
 #'   [wsi_viewer_live()].
@@ -1957,6 +2081,8 @@ wsi_tiled_viewer_html <- function(config) {
 #' @param project_images Optional paths, slide objects, or project records to
 #'   list in the left Project section. CZI paths are listed without loading the
 #'   full file into R; real CZI previews require optional Bio-Formats tools.
+#' @param channel_sources Optional tiled channel sources created with
+#'   [wsi_channel_source()].
 #'
 #' @return The HTML viewer path, invisibly.
 #' @export
@@ -1970,11 +2096,20 @@ wsi_viewer <- function(slide, width = 1600, height = NULL, output = NULL,
                        open = interactive(), title = NULL, overwrite = FALSE,
                        mode = c("thumbnail", "tiles"), tile_dir = NULL,
                        tile_size = 512, tile_format = c("jpg", "png"),
-                       quality = 90, rebuild = FALSE, roi = NULL,
+                       quality = 90, rebuild = FALSE,
+                       tile_overlap = NULL,
+                       tile_url_base = NULL,
+                       tile_url_template = NULL,
+                       tile_url_style = c("deepzoom", "slash"),
+                       max_level = NULL,
+                       tile_source_label = NULL,
+                       tile_sources = NULL,
+                       roi = NULL,
                        roi_fill_alpha = 0.15,
                        roi_class_presets = wsi_roi_class_presets(),
                        stain = c("none", "ihc"),
                        channels = NULL,
+                       base_layer_name = NULL,
                        hematoxylin = c(0.650, 0.704, 0.286),
                        hrp = c(0.268, 0.570, 0.776),
                        hematoxylin_colour = "#4b3f99",
@@ -1983,15 +2118,27 @@ wsi_viewer <- function(slide, width = 1600, height = NULL, output = NULL,
                        hrp_strength = 1,
                        segmentation_run_url = NULL,
                        viewer_state_url = NULL,
+                       viewer_state_ws_url = NULL,
                        autosave_enabled = FALSE,
                        autosave_interval = 5,
                        autosave_path = NULL,
-                       project_images = NULL) {
+                       project_images = NULL,
+                       channel_sources = NULL,
+                       viewer_transport = c("auto", "websocket", "polling")) {
   wsi_check_slide(slide)
   mode <- match.arg(mode)
   tile_format <- match.arg(tile_format)
+  tile_url_style <- match.arg(tile_url_style)
+  viewer_transport <- match.arg(viewer_transport)
   stain <- match.arg(stain)
   width <- as.integer(wsi_check_scalar_number(width, "width", allow_zero = FALSE))
+  tile_size <- as.integer(wsi_check_scalar_number(tile_size, "tile_size", allow_zero = FALSE))
+  if (!is.null(tile_overlap)) {
+    tile_overlap <- as.integer(wsi_check_scalar_number(tile_overlap, "tile_overlap"))
+    if (tile_overlap >= tile_size) {
+      wsi_abort("`tile_overlap` must be smaller than `tile_size`.")
+    }
+  }
   roi_fill_alpha <- wsi_check_scalar_number(roi_fill_alpha, "roi_fill_alpha")
   if (roi_fill_alpha > 1) {
     wsi_abort("`roi_fill_alpha` must be between 0 and 1.")
@@ -2010,6 +2157,26 @@ wsi_viewer <- function(slide, width = 1600, height = NULL, output = NULL,
         is.na(viewer_state_url) || !nzchar(viewer_state_url)) {
       wsi_abort("`viewer_state_url` must be `NULL` or a single non-empty URL.")
     }
+  }
+  if (!is.null(viewer_state_ws_url)) {
+    if (!is.character(viewer_state_ws_url) || length(viewer_state_ws_url) != 1L ||
+        is.na(viewer_state_ws_url) || !nzchar(viewer_state_ws_url)) {
+      wsi_abort("`viewer_state_ws_url` must be `NULL` or a single non-empty WebSocket URL.")
+    }
+    if (!grepl("^wss?://", viewer_state_ws_url)) {
+      wsi_abort("`viewer_state_ws_url` must start with `ws://` or `wss://`.")
+    }
+  }
+  if (!is.null(tile_url_base) &&
+      (!is.character(tile_url_base) || length(tile_url_base) != 1L || is.na(tile_url_base) || !nzchar(tile_url_base))) {
+    wsi_abort("`tile_url_base` must be `NULL` or a single non-empty URL/path string.")
+  }
+  if (!is.null(tile_url_template) &&
+      (!is.character(tile_url_template) || length(tile_url_template) != 1L || is.na(tile_url_template) || !nzchar(tile_url_template))) {
+    wsi_abort("`tile_url_template` must be `NULL` or a single non-empty URL template.")
+  }
+  if (!is.null(max_level)) {
+    max_level <- as.integer(wsi_check_scalar_number(max_level, "max_level"))
   }
   if (!is.logical(autosave_enabled) || length(autosave_enabled) != 1L || is.na(autosave_enabled)) {
     wsi_abort("`autosave_enabled` must be `TRUE` or `FALSE`.")
@@ -2044,6 +2211,12 @@ wsi_viewer <- function(slide, width = 1600, height = NULL, output = NULL,
     NULL
   }
   annotation_filename <- paste0(tools::file_path_sans_ext(basename(output)), "_annotations.geojson")
+  base_layer_config <- list(
+    id = "base_image",
+    name = as.character(base_layer_name %||% "Base image"),
+    visible = TRUE,
+    opacity = 1
+  )
   stain_config <- wsi_ihc_stain_config(
     stain = stain,
     channels = channels,
@@ -2076,29 +2249,42 @@ wsi_viewer <- function(slide, width = 1600, height = NULL, output = NULL,
       roi_class_presets = wsi_viewer_class_presets_payload(roi_class_presets),
       segmentation_run_url = segmentation_run_url,
       viewer_state_url = viewer_state_url,
-      autosave_enabled = isTRUE(autosave_enabled) && !is.null(viewer_state_url),
+      viewer_state_ws_url = viewer_state_ws_url,
+      viewer_transport = viewer_transport,
+      autosave_enabled = isTRUE(autosave_enabled) && (!is.null(viewer_state_url) || !is.null(viewer_state_ws_url)),
       autosave_interval_ms = as.integer(max(1000, round(autosave_interval * 1000))),
       autosave_path = autosave_path,
       stain = stain_config,
+      base_layer = base_layer_config,
       project = project_config,
+      channel_sources = wsi_channel_sources_payload(channel_sources),
+      tile_sources = tile_sources %||% list(),
       rois = rois,
       layers = list()
     )
     writeLines(wsi_viewer_html(config), output, useBytes = TRUE)
   } else {
-    tile_dir <- tile_dir %||% wsi_default_tile_dir(output)
-    tiles <- wsi_create_deepzoom_tiles(
-      slide = slide,
-      tile_dir = tile_dir,
-      tile_size = tile_size,
-      tile_format = tile_format,
-      quality = quality,
-      rebuild = rebuild
-    )
+    external_tiles <- !is.null(tile_url_base) || !is.null(tile_url_template)
+    requested_tile_overlap <- tile_overlap %||% if (isTRUE(external_tiles)) 0L else 1L
+    tiles <- NULL
+    if (!isTRUE(external_tiles)) {
+      tile_dir <- tile_dir %||% wsi_default_tile_dir(output)
+      tiles <- wsi_create_deepzoom_tiles(
+        slide = slide,
+        tile_dir = tile_dir,
+        tile_size = tile_size,
+        tile_overlap = requested_tile_overlap,
+        tile_format = tile_format,
+        quality = quality,
+        rebuild = rebuild
+      )
+    }
+    actual_tile_overlap <- if (!is.null(tiles$overlap)) tiles$overlap else requested_tile_overlap
+    max_level <- max_level %||% wsi_dz_max_level(slide$dimensions[["width"]], slide$dimensions[["height"]])
 
     config <- list(
       title = title,
-      subtitle = paste0(subtitle, " | Deep Zoom tiles"),
+      subtitle = paste0(subtitle, " | ", tile_source_label %||% if (isTRUE(external_tiles)) "served tiles" else "Deep Zoom tiles"),
       viewer_mode = mode,
       preference_key = "wsiTools.viewer.preferences.v1",
       slide_width = unname(slide$dimensions[["width"]]),
@@ -2106,19 +2292,27 @@ wsi_viewer <- function(slide, width = 1600, height = NULL, output = NULL,
       mpp = mpp_config,
       tile_size = as.integer(tile_size),
       tile_format = tile_format,
-      tile_url_base = wsi_tile_base_url(tile_dir, output),
+      tile_url_base = tile_url_base %||% if (!is.null(tile_url_template)) "" else wsi_tile_base_url(tile_dir, output),
+      tile_url_template = tile_url_template,
+      tile_url_style = tile_url_style,
+      tile_overlap = actual_tile_overlap,
       navigator_image_data_uri = wsi_viewer_navigator_data_uri(slide, width = 512),
-      dzi = basename(tiles$dzi),
-      max_level = wsi_dz_max_level(slide$dimensions[["width"]], slide$dimensions[["height"]]),
+      dzi = if (!is.null(tiles)) basename(tiles$dzi) else NULL,
+      max_level = max_level,
       annotation_filename = annotation_filename,
       roi_class_presets = wsi_viewer_class_presets_payload(roi_class_presets),
       segmentation_run_url = segmentation_run_url,
       viewer_state_url = viewer_state_url,
-      autosave_enabled = isTRUE(autosave_enabled) && !is.null(viewer_state_url),
+      viewer_state_ws_url = viewer_state_ws_url,
+      viewer_transport = viewer_transport,
+      autosave_enabled = isTRUE(autosave_enabled) && (!is.null(viewer_state_url) || !is.null(viewer_state_ws_url)),
       autosave_interval_ms = as.integer(max(1000, round(autosave_interval * 1000))),
       autosave_path = autosave_path,
       stain = stain_config,
+      base_layer = base_layer_config,
       project = project_config,
+      channel_sources = wsi_channel_sources_payload(channel_sources),
+      tile_sources = tile_sources %||% list(),
       rois = rois,
       layers = list()
     )

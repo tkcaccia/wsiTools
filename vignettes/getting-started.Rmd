@@ -135,11 +135,12 @@ with the same class label share the same class color. `Ctrl+Z` undoes
 annotation edits in the viewer, with the last 10 committed
 annotation states retained.
 
-For full-resolution zooming, use tiled mode. This asks libvips to create a
-Deep Zoom tile pyramid on disk, then writes an HTML viewer that requests the
-appropriate tile resolution as you zoom. The tiled viewer uses OpenSeadragon
-for rendering, tile caching, smooth transitions, and coordinate-stable
-annotation overlays.
+For full-resolution zooming, use tiled mode. OpenSeadragon is a browser tile
+viewer: it needs browser-readable tiles, not raw SVS, BTF, or OME-TIFF pixels.
+The static viewer asks libvips to create a Deep Zoom tile pyramid on disk, then
+writes an HTML viewer that requests the appropriate tile resolution as you
+zoom. This static viewer has no automatic feedback channel to R after it is
+opened.
 
 ```{r, eval=FALSE, purl=FALSE}
 viewer <- wsi_viewer(
@@ -150,6 +151,56 @@ viewer <- wsi_viewer(
   tile_size = 512
 )
 ```
+
+For R-interconnected work, use the live viewer. It starts a local `httpuv`
+bridge; WebSocket is used when available and HTTP POST/polling remains the
+fallback. Live mode can either use the same precomputed Deep Zoom tiles or a
+dynamic tile server that generates and caches tiles on demand from region
+reads:
+
+```{r, eval=FALSE, purl=FALSE}
+viewer <- wsi_viewer_live(
+  slide,
+  mode = "tiles",
+  dynamic_tiles = TRUE,
+  dynamic_tile_format = "jpg",
+  transport = "auto",
+  wait = FALSE
+)
+
+viewer$get_rois()
+viewer$get_measurements()
+viewer$get_channel_settings()
+```
+
+The dynamic endpoint uses URLs like
+`/tiles/{slide_id}/{level}/{x}/{y}.jpg`. It reads only requested regions
+through libvips/OpenSlide where available and removes its temporary tile cache
+when the live session is stopped.
+
+The same live tiled architecture can overlay mIHC or probability-map OME-TIFF
+pages on a registered H&E slide. The H&E slide remains the base image; each
+mIHC page becomes an independent OpenSeadragon channel layer with visibility,
+opacity, colour, gain, and contrast controls.
+
+```{r, eval=FALSE, purl=FALSE}
+viewer <- wsi_viewer_he_mihc(
+  he = "sample_he.svs",
+  mihc = "sample_mihc_probs.ome.tif",
+  registration = "shift.json",
+  dynamic_tiles = FALSE,
+  tile_dir = "sample_he_deepzoom",
+  transport = "auto",
+  wait = FALSE
+)
+
+viewer$get_channel_settings()
+```
+
+For H&E plus mIHC overlays, precomputed H&E Deep Zoom tiles are recommended for
+fluid pan/zoom. Use `dynamic_tiles = TRUE` only when a tile pyramid is not
+available; in that fallback mode `wsi_viewer_he_mihc()` uses JPEG base tiles by
+default.
 
 To compare H&E/IHC, original/processed images, serial sections, or WSI/mask
 views, use the side-by-side viewer. Zoom, pan, and cursor position are linked
@@ -207,7 +258,9 @@ ihc_viewer <- wsi_viewer_ihc(
 ```
 
 The `Stains` menu provides an `IHC` toggle, separate hematoxylin and HRP/DAB
-channel visibility controls, color pickers, and gain sliders.
+channel visibility controls, color pickers, opacity, gain, and contrast-window
+sliders. These display settings are synced back to R in live sessions through
+`viewer$get_channel_settings()`.
 
 For H&E images, use the H&E stain helpers on a patch, tile, or thumbnail. The
 functions work in optical-density space and avoid full-slide reads:

@@ -18,11 +18,19 @@ wsi_viewer(
   tile_format = c("jpg", "png"),
   quality = 90,
   rebuild = FALSE,
+  tile_overlap = NULL,
+  tile_url_base = NULL,
+  tile_url_template = NULL,
+  tile_url_style = c("deepzoom", "slash"),
+  max_level = NULL,
+  tile_source_label = NULL,
+  tile_sources = NULL,
   roi = NULL,
   roi_fill_alpha = 0.15,
   roi_class_presets = wsi_roi_class_presets(),
   stain = c("none", "ihc"),
   channels = NULL,
+  base_layer_name = NULL,
   hematoxylin = c(0.65, 0.704, 0.286),
   hrp = c(0.268, 0.57, 0.776),
   hematoxylin_colour = "#4b3f99",
@@ -31,10 +39,13 @@ wsi_viewer(
   hrp_strength = 1,
   segmentation_run_url = NULL,
   viewer_state_url = NULL,
+  viewer_state_ws_url = NULL,
   autosave_enabled = FALSE,
   autosave_interval = 5,
   autosave_path = NULL,
-  project_images = NULL
+  project_images = NULL,
+  channel_sources = NULL,
+  viewer_transport = c("auto", "websocket", "polling")
 )
 }
 \arguments{
@@ -65,6 +76,27 @@ preview or \code{"tiles"} for a full-resolution Deep Zoom viewer.}
 
 \item{rebuild}{Whether to rebuild existing Deep Zoom tiles.}
 
+\item{tile_overlap}{Optional Deep Zoom tile overlap in pixels. Defaults to
+one-pixel overlap for generated static tiles and zero for external tile
+sources unless supplied.}
+
+\item{tile_url_base, tile_url_template}{Optional externally served tile source
+for \code{mode = "tiles"}. These are normally set by \code{\link[=wsi_viewer_live]{wsi_viewer_live()}} when
+\code{dynamic_tiles = TRUE}; when supplied, static Deep Zoom generation is
+skipped.}
+
+\item{tile_url_style}{URL style for \code{tile_url_base}: \code{"deepzoom"} uses
+\verb{/\{level\}/\{x\}_\{y\}.\{format\}}, while \code{"slash"} uses
+\verb{/\{level\}/\{x\}/\{y\}.\{format\}}.}
+
+\item{max_level}{Optional maximum Deep Zoom level for externally served
+tiles.}
+
+\item{tile_source_label}{Optional text shown in the viewer subtitle for
+externally served tiles.}
+
+\item{tile_sources}{Optional metadata list for project/session tile sources.}
+
 \item{roi}{Optional ROI overlay. Supply a GeoJSON path or an object returned
 by \code{\link[=wsi_read_geojson]{wsi_read_geojson()}}. Coordinates are interpreted as level-0 slide
 pixel coordinates, matching QuPath-style GeoJSON exports.}
@@ -81,6 +113,9 @@ stain-channel color deconvolution in the browser.}
 \item{channels}{Optional stain channels created by \code{\link[=wsi_stain_channels]{wsi_stain_channels()}}.
 RGB brightfield deconvolution supports up to three independent channels at
 a time.}
+
+\item{base_layer_name}{Display name for the base image layer in the Stains
+menu.}
 
 \item{hematoxylin, hrp}{RGB optical-density vectors used when
 \code{stain = "ihc"} and \code{channels} is not supplied.}
@@ -101,6 +136,10 @@ response. Use
 measurements, segmentation overlays, and display state back to R. Use
 \code{\link[=wsi_viewer_live]{wsi_viewer_live()}} or \code{\link[=wsi_viewer_session]{wsi_viewer_session()}} to create this endpoint.}
 
+\item{viewer_state_ws_url}{Optional WebSocket endpoint used by live viewers
+for lower-latency browser-to-R sync. The HTTP polling bridge remains the
+fallback when this is \code{NULL} or WebSockets are unavailable.}
+
 \item{autosave_enabled}{Whether the viewer should periodically sync state to
 the live R bridge for project autosave. This is normally set by
 \code{\link[=wsi_viewer_live]{wsi_viewer_live()}}.}
@@ -113,6 +152,13 @@ messages.}
 \item{project_images}{Optional paths, slide objects, or project records to
 list in the left Project section. CZI paths are listed without loading the
 full file into R; real CZI previews require optional Bio-Formats tools.}
+
+\item{channel_sources}{Optional tiled channel sources created with
+\code{\link[=wsi_channel_source]{wsi_channel_source()}}.}
+
+\item{viewer_transport}{Browser-to-R live transport advertised to the
+viewer: \code{"auto"}, \code{"websocket"}, or \code{"polling"}. Static viewers ignore
+this value.}
 }
 \value{
 The HTML viewer path, invisibly.

@@ -437,6 +437,9 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "handleViewerCommands", fixed = TRUE)
   expect_match(html, "pollViewerCommands", fixed = TRUE)
   expect_match(html, "startViewerCommandPolling", fixed = TRUE)
+  expect_match(html, "startViewerStateSocket", fixed = TRUE)
+  expect_match(html, "viewer_state_ws_url", fixed = TRUE)
+  expect_match(html, "WebSocket unavailable; polling fallback active", fixed = TRUE)
   expect_match(html, "R command: added ROIs", fixed = TRUE)
   expect_match(html, "R command: added segmentation", fixed = TRUE)
   expect_match(html, "R command: added layer", fixed = TRUE)
@@ -562,6 +565,9 @@ test_that("interactive viewer can be configured with a live R state endpoint", {
   expect_match(html, "add_groups", fixed = TRUE)
   expect_match(html, "MultiPolygon", fixed = TRUE)
   expect_match(html, "startViewerCommandPolling", fixed = TRUE)
+  expect_match(html, "startViewerStateSocket", fixed = TRUE)
+  expect_match(html, "viewerSocketSend", fixed = TRUE)
+  expect_match(html, "viewer_state_ws_url", fixed = TRUE)
   expect_match(html, "commands", fixed = TRUE)
   expect_match(html, "add_layer", fixed = TRUE)
   expect_match(html, "set_layer_visible", fixed = TRUE)
@@ -874,6 +880,48 @@ test_that("live viewer sessions dispatch event callbacks", {
   expect_false(created_id %in% session$list_callbacks()$id)
 })
 
+test_that("live viewer state validates events and payload fields strictly", {
+  env <- new.env(parent = emptyenv())
+  state <- wsiTools:::wsi_new_viewer_state(name = "live", envir = env)
+  payload <- list(
+    event = "viewer_state",
+    time = "2026-05-18T12:00:00Z",
+    sequence = 1,
+    rois = list(type = "FeatureCollection", features = list()),
+    selected_rois = list(type = "FeatureCollection", features = list()),
+    segmentation = list(type = "FeatureCollection", features = list()),
+    measurements = list(),
+    trajectories = list(),
+    view = list(mode = "pan"),
+    annotations = list(dirty = FALSE),
+    history = list(),
+    detail = list()
+  )
+
+  expect_silent(wsiTools:::wsi_viewer_state_apply(state, payload))
+
+  bad_event <- payload
+  bad_event$event <- "not_a_real_event"
+  expect_error(
+    wsiTools:::wsi_viewer_state_apply(state, bad_event),
+    "Unsupported viewer event"
+  )
+
+  bad_field <- payload
+  bad_field$unexpected <- TRUE
+  expect_error(
+    wsiTools:::wsi_viewer_state_apply(state, bad_field),
+    "unsupported field"
+  )
+
+  bad_geojson <- payload
+  bad_geojson$rois <- list(type = "Feature", geometry = list())
+  expect_error(
+    wsiTools:::wsi_viewer_state_apply(state, bad_geojson),
+    "FeatureCollection"
+  )
+})
+
 test_that("live viewer state payloads update R objects", {
   env <- new.env(parent = emptyenv())
   state <- wsiTools:::wsi_new_viewer_state(name = "live", envir = env)
@@ -1136,6 +1184,8 @@ test_that("live viewer exposes a direct StarDist switch", {
   args <- names(formals(wsi_viewer_session))
 
   expect_true("stardist" %in% args)
+  expect_true("transport" %in% args)
+  expect_true("dynamic_tiles" %in% args)
   expect_true("stardist_command" %in% args)
   expect_true("stardist_args" %in% args)
   expect_true("stardist_output_dir" %in% args)
@@ -1144,6 +1194,227 @@ test_that("live viewer exposes a direct StarDist switch", {
   expect_true("autosave_interval" %in% args)
   expect_true("state" %in% names(formals(wsi_stardist_server)))
   expect_identical(formals(wsi_viewer_stardist)$stardist, TRUE)
+})
+
+test_that("dynamic tile sources create OpenSeadragon-compatible URLs and cache files", {
+  slide <- wsiTools:::wsi_mock_slide(width = 1024, height = 768, levels = c(1, 4, 16))
+  source <- wsi_dynamic_tile_source(slide, slide_id = "case 1", tile_size = 256)
+  on.exit(wsiTools:::wsi_dynamic_tile_cleanup(source), add = TRUE)
+  metadata <- wsiTools:::wsi_dynamic_tile_metadata(source, base_url = "http://127.0.0.1:8788")
+  request <- wsiTools:::wsi_dynamic_tile_parse("/tiles/case_1/10/0/0.png")
+  file <- wsiTools:::wsi_dynamic_tile_file(source, level = source$max_level, col = 0, row = 0)
+
+  expect_s3_class(source, "wsi_dynamic_tile_source")
+  expect_equal(source$id, "case_1")
+  expect_equal(source$tile_overlap, 1L)
+  expect_match(metadata$tile_url_template, "/tiles/case_1/{level}/{x}/{y}.{format}", fixed = TRUE)
+  expect_equal(metadata$tile_overlap, 1L)
+  expect_equal(request$slide_id, "case_1")
+  expect_equal(request$format, "png")
+  expect_true(file.exists(file))
+  expect_gt(file.info(file)$size, 0)
+})
+
+test_that("mIHC channel sources use registration extent and dynamic tiles", {
+  skip_if_not(wsi_has_vips())
+
+  input <- tempfile(fileext = ".png")
+  grDevices::png(input, width = 32, height = 24, units = "px", bg = "black")
+  graphics::par(mar = c(0, 0, 0, 0))
+  graphics::plot.new()
+  graphics::rect(0, 0, 1, 1, col = "white", border = NA)
+  grDevices::dev.off()
+  registration <- list(
+    crop_bbox_xyxy = list(x0 = 10, y0 = 20, x1 = 42, y1 = 44),
+    crop_size = list(width = 32, height = 24),
+    offset_crop_to_original = list(dx = 10, dy = 20)
+  )
+
+  sources <- wsi_mihc_channel_sources(
+    input,
+    pages = 0,
+    channel_names = "Marker A",
+    colours = "#ff00ff",
+    registration = registration,
+    tile_size = 16
+  )
+  dynamic <- sources$dynamic_sources[[1L]]
+  metadata <- wsiTools:::wsi_dynamic_tile_metadata(dynamic, base_url = "http://127.0.0.1:8788")
+  channel <- wsiTools:::wsi_channel_source_from_dynamic(dynamic, base_url = "http://127.0.0.1:8788")
+  file <- wsiTools:::wsi_dynamic_tile_file(dynamic, level = dynamic$max_level, col = 0, row = 0)
+  on.exit(wsiTools:::wsi_dynamic_tile_cleanup(dynamic), add = TRUE)
+
+  expect_s3_class(sources, "wsi_mihc_channel_sources")
+  expect_equal(unlist(dynamic$extent), c(x = 10, y = 20, width = 32, height = 24))
+  expect_match(metadata$tile_url_template, "/tiles/", fixed = TRUE)
+  expect_equal(metadata$tile_overlap, 1L)
+  expect_equal(channel$type, "dynamic")
+  expect_equal(channel$tile_overlap, 1L)
+  expect_equal(channel$metadata$extent$x, 10)
+  expect_true(isTRUE(channel$metadata$server_colourized))
+  expect_true(file.exists(file))
+  expect_gt(file.info(file)$size, 0)
+})
+
+test_that("dynamic mIHC channel tiles are colourized with alpha", {
+  skip_if_not(wsi_has_vips())
+
+  input <- tempfile(fileext = ".tif")
+  bright <- tempfile(fileext = ".tif")
+  wsiTools:::wsi_run_command(
+    "vips",
+    c("black", input, "32", "32", "--bands", "1"),
+    error_message = "libvips failed to create a test channel image."
+  )
+  wsiTools:::wsi_run_command(
+    "vips",
+    c("linear", input, bright, "0", "180"),
+    error_message = "libvips failed to create a test channel image."
+  )
+
+  source <- wsi_dynamic_image_tile_source(
+    bright,
+    source_id = "colour_test",
+    colour = "#ff3366",
+    tile_size = 16
+  )
+  on.exit(wsiTools:::wsi_dynamic_tile_cleanup(source), add = TRUE)
+
+  file <- wsiTools:::wsi_dynamic_tile_file(
+    source,
+    level = source$max_level,
+    col = 0,
+    row = 0,
+    format = "png",
+    settings = list(colour = "#ff3366")
+  )
+  expect_equal(as.integer(wsiTools:::wsi_vips_field(file, "bands")), 4L)
+
+  band_avg <- function(index) {
+    band <- tempfile(fileext = ".tif")
+    wsiTools:::wsi_run_command(
+      "vips",
+      c("extract_band", file, band, as.character(index), "--n", "1"),
+      error_message = "libvips failed to inspect a colourized test tile."
+    )
+    as.numeric(system2("vips", c("avg", band), stdout = TRUE))
+  }
+
+  expect_equal(round(band_avg(0)), 180)
+  expect_equal(round(band_avg(1)), 36)
+  expect_equal(round(band_avg(2)), 72)
+  expect_equal(round(band_avg(3)), 180)
+})
+
+test_that("H&E mIHC live wrapper defaults the dynamic base image to JPEG tiles", {
+  skip_if_not_installed("httpuv")
+  skip_if_not(wsi_has_vips())
+
+  input <- tempfile(fileext = ".png")
+  grDevices::png(input, width = 32, height = 24, units = "px", bg = "white")
+  graphics::par(mar = c(0, 0, 0, 0))
+  graphics::plot.new()
+  graphics::rect(0, 0, 1, 1, col = "#d8b5c8", border = NA)
+  grDevices::dev.off()
+
+  session <- wsi_viewer_he_mihc(
+    he = input,
+    mihc = input,
+    pages = 0,
+    dynamic_tiles = TRUE,
+    open = FALSE,
+    wait = FALSE,
+    transport = "polling",
+    name = "he_mihc_default_jpg"
+  )
+  on.exit(if (inherits(session, "wsi_viewer_session")) wsi_viewer_stop(session), add = TRUE)
+
+  expect_equal(session$dynamic_tile_source$tile_format, "jpg")
+  expect_equal(session$state$tile_sources$dynamic$tile_format, "jpg")
+  html <- paste(readLines(session$html, warn = FALSE), collapse = "\n")
+  expect_match(html, "H&E", fixed = TRUE)
+  expect_match(html, "baseImageVisible", fixed = TRUE)
+})
+
+test_that("live viewer can use dynamic tiles with polling transport", {
+  skip_if_not_installed("httpuv")
+  slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 500, levels = c(1, 4))
+  session <- wsi_viewer_live(
+    slide,
+    mode = "tiles",
+    dynamic_tiles = TRUE,
+    transport = "polling",
+    open = FALSE,
+    wait = FALSE
+  )
+  cache_dir <- session$dynamic_tile_cache_dir
+  on.exit(if (inherits(session, "wsi_viewer_session")) wsi_viewer_stop(session), add = TRUE)
+  html <- paste(readLines(session$html, warn = FALSE), collapse = "\n")
+
+  expect_s3_class(session, "wsi_viewer_session")
+  expect_equal(session$transport, "polling")
+  expect_false(grepl(session$ws_url, html, fixed = TRUE))
+  expect_match(html, "/tiles/wsi_viewer_live_state/{level}/{x}/{y}.{format}", fixed = TRUE)
+  expect_match(html, "dynamic tile server", fixed = TRUE)
+  expect_true(dir.exists(cache_dir))
+
+  wsi_viewer_stop(session)
+  expect_false(dir.exists(cache_dir))
+})
+
+test_that("viewer event validation allowlists live WebSocket events", {
+  expected <- c(
+    "roi_created", "roi_updated", "roi_deleted", "roi_selected",
+    "brush_committed", "viewport_changed", "layer_updated",
+    "segmentation_started", "segmentation_progress",
+    "segmentation_finished", "job_status"
+  )
+
+  expect_true(all(expected %in% wsiTools:::wsi_viewer_allowed_events()))
+  expect_equal(wsiTools:::wsi_viewer_validate_event("brush_committed"), "brush_committed")
+  expect_error(
+    wsiTools:::wsi_viewer_validate_state_payload(list(event = "eval_r_code")),
+    "Unsupported viewer event"
+  )
+  expect_error(
+    wsiTools:::wsi_viewer_validate_state_payload(list(event = "roi_created", code = "system('rm -rf /')")),
+    "unsupported field"
+  )
+})
+
+test_that("channel source API updates live viewer settings", {
+  slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 500, levels = c(1, 4))
+  state <- wsiTools:::wsi_new_viewer_state(name = "channel_test_state", envir = new.env(parent = emptyenv()))
+  session <- structure(
+    list(state = state, slide = slide, url = NULL, ws_url = NULL, jobs = list()),
+    class = "wsi_viewer_session"
+  )
+  session <- wsiTools:::wsi_attach_viewer_session_methods(session)
+  source <- wsi_channel_source(
+    "DAB",
+    type = "stain",
+    vector = c(0.268, 0.570, 0.776),
+    colour = "#8b5a2b",
+    opacity = 0.75,
+    contrast_min = 0.1,
+    contrast_max = 1.5
+  )
+
+  wsi_add_channel_source(session, source, service = FALSE)
+  wsi_set_channel_visible(session, "DAB", FALSE, service = FALSE)
+  wsi_set_channel_opacity(session, "DAB", 0.4, service = FALSE)
+  wsi_set_channel_contrast(session, "DAB", contrast_min = 0.2, contrast_max = 1.2, gain = 1.8, service = FALSE)
+  settings <- session$get_channel_settings(service = FALSE)
+  commands <- state$commands
+
+  expect_s3_class(source, "wsi_channel_source")
+  expect_equal(settings$id, "DAB")
+  expect_false(settings$visible)
+  expect_equal(settings$opacity, 0.4)
+  expect_equal(settings$gain, 1.8)
+  expect_equal(settings$contrast_min, 0.2)
+  expect_equal(settings$contrast_max, 1.2)
+  expect_true(any(vapply(commands, function(x) identical(x$type, "set_channel_settings"), logical(1))))
 })
 
 test_that("live viewer keeps StarDist optional when no command is available", {
@@ -1172,8 +1443,11 @@ test_that("live viewer keeps StarDist optional when no command is available", {
   expect_match(warning_message, "load a segmentation GeoJSON/CSV", fixed = TRUE)
   expect_match(warning_message, "wsi_install_stardist(method = \"conda\")", fixed = TRUE)
   expect_s3_class(session, "wsi_viewer_session")
+  expect_match(session$ws_url, "^ws://")
   expect_null(session$stardist_server)
   html <- paste(readLines(session$html, warn = FALSE), collapse = "\n")
+  expect_match(html, session$ws_url, fixed = TRUE)
+  expect_match(html, "WebSocket connected", fixed = TRUE)
   expect_match(html, "Run segmentation", fixed = TRUE)
 })
 
@@ -1275,6 +1549,7 @@ test_that("interactive tiled viewer writes Deep Zoom HTML when libvips is availa
   expect_true(file.exists(output))
   expect_true(file.exists(file.path(tile_dir, "slide.dzi")))
   expect_true(dir.exists(file.path(tile_dir, "slide_files")))
+  expect_match(paste(readLines(file.path(tile_dir, "slide.dzi"), warn = FALSE), collapse = " "), "Overlap=\"1\"", fixed = TRUE)
 
   html <- paste(readLines(output, warn = FALSE), collapse = "\n")
   expect_match(html, "full-resolution tiled viewer", fixed = TRUE)
@@ -1284,6 +1559,9 @@ test_that("interactive tiled viewer writes Deep Zoom HTML when libvips is availa
   expect_match(html, "maxImageCacheCount", fixed = TRUE)
   expect_match(html, "prefetchNeighborTiles", fixed = TRUE)
   expect_match(html, "placeholderFillStyle", fixed = TRUE)
+  expect_match(html, "baseImageVisible", fixed = TRUE)
+  expect_match(html, "baseImageOpacity", fixed = TRUE)
+  expect_match(html, "baseImagePayload", fixed = TRUE)
   expect_match(html, "showNavigator:false", fixed = TRUE)
   expect_match(html, "miniNavigator", fixed = TRUE)
   expect_match(html, "navigator_image_data_uri", fixed = TRUE)
@@ -1327,8 +1605,17 @@ test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
   expect_match(html, "openseadragon.min.js", fixed = TRUE)
   expect_match(html, "OpenSeadragon", fixed = TRUE)
   expect_match(html, "tileSources", fixed = TRUE)
+  expect_match(html, "tileSourceFromConfig", fixed = TRUE)
+  expect_match(html, "activeTileMode", fixed = TRUE)
   expect_match(html, "maxImageCacheCount:512", fixed = TRUE)
-  expect_match(html, "blendTime:0.08", fixed = TRUE)
+  expect_match(html, "blendTime:0", fixed = TRUE)
+  expect_match(html, "minPixelRatio:1", fixed = TRUE)
+  expect_match(html, "maxZoomPixelRatio:16", fixed = TRUE)
+  expect_match(html, "placeholderFillStyle:'#fff'", fixed = TRUE)
+  expect_match(html, "subPixelRoundingForTransparency", fixed = TRUE)
+  expect_match(html, "tileOverlap:Number", fixed = TRUE)
+  expect_match(html, "baseImageVisible", fixed = TRUE)
+  expect_match(html, "baseImagePayload", fixed = TRUE)
   expect_match(html, "showNavigator:false", fixed = TRUE)
   expect_match(html, "miniNavigatorCanvas", fixed = TRUE)
   expect_match(html, "navigatorImage", fixed = TRUE)
@@ -1344,6 +1631,46 @@ test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
   expect_match(html, "imageToViewportCoordinates", fixed = TRUE)
   expect_match(html, "viewportToImageCoordinates", fixed = TRUE)
   expect_match(html, "zoomToSlideBounds", fixed = TRUE)
+})
+
+test_that("tiled viewer HTML writes mIHC channel overlay controls", {
+  slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 500, levels = c(1, 4))
+  output <- tempfile(fileext = ".html")
+  source <- wsi_channel_source(
+    "Marker A",
+    type = "dynamic",
+    tile_url_template = "http://127.0.0.1:8788/tiles/marker_a/{level}/{x}/{y}.{format}",
+    width = 320,
+    height = 240,
+    max_level = 9,
+    colour = "#ff00ff",
+    opacity = 0.5,
+    metadata = list(
+      extent = list(x = 10, y = 20, width = 320, height = 240),
+      server_colourized = TRUE
+    )
+  )
+
+  result <- wsi_viewer(
+    slide,
+    output = output,
+    open = FALSE,
+    mode = "tiles",
+    tile_url_template = "http://127.0.0.1:8788/tiles/base/{level}/{x}/{y}.{format}",
+    tile_url_style = "slash",
+    tile_format = "png",
+    channel_sources = list(source)
+  )
+  html <- paste(readLines(result, warn = FALSE), collapse = "\n")
+
+  expect_match(html, "channelMenuList", fixed = TRUE)
+  expect_match(html, "channelList", fixed = TRUE)
+  expect_match(html, "buildChannelList", fixed = TRUE)
+  expect_match(html, "channelPlacementOptions", fixed = TRUE)
+  expect_match(html, "server_colourized", fixed = TRUE)
+  expect_match(html, "contrast_min", fixed = TRUE)
+  expect_match(html, "Marker A", fixed = TRUE)
+  expect_match(html, "baseImageVisible", fixed = TRUE)
 })
 
 test_that("interactive IHC viewer writes stain deconvolution controls", {
@@ -1368,6 +1695,9 @@ test_that("interactive IHC viewer writes stain deconvolution controls", {
   expect_match(html, "Stains", fixed = TRUE)
   expect_match(html, "stainShowOriginal", fixed = TRUE)
   expect_match(html, "stainShowAll", fixed = TRUE)
+  expect_match(html, "stainOpacity_hematoxylin", fixed = TRUE)
+  expect_match(html, "stainContrastMin_hematoxylin", fixed = TRUE)
+  expect_match(html, "stainContrastMax_hrp_dab", fixed = TRUE)
   expect_match(html, "class=\"stainOnly\"", fixed = TRUE)
   expect_match(html, "activeStainNames", fixed = TRUE)
   expect_match(html, "syncStainStateFromControls", fixed = TRUE)
@@ -1411,6 +1741,8 @@ test_that("interactive multi-IHC viewer writes selectable channel controls", {
   expect_match(html, "IHC channels", fixed = TRUE)
   expect_match(html, "stainVisible_fast_red", fixed = TRUE)
   expect_match(html, "stainStrength_fast_red", fixed = TRUE)
+  expect_match(html, "stainOpacity_fast_red", fixed = TRUE)
+  expect_match(html, "contrast_min", fixed = TRUE)
   expect_match(html, '"visible":false', fixed = TRUE)
 })
 

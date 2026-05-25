@@ -248,6 +248,10 @@ wsi_project_viewer_summary <- function(viewer) {
     selected_rois = viewer$selected_rois %||% NULL,
     tile_preview = viewer$tile_preview %||% wsi_empty_tile_preview(),
     layers = wsi_viewer_layer_summary(viewer$layers %||% list()),
+    layers_full = viewer$layers %||% list(),
+    channel_sources = viewer$channel_sources %||% list(),
+    channel_settings = viewer$channel_settings %||% wsi_empty_channel_settings(),
+    tile_sources = viewer$tile_sources %||% list(),
     annotations = viewer$annotations %||% list(dirty = FALSE, dirty_reason = ""),
     history = viewer$history %||% wsi_empty_annotation_history(),
     last_segmentation = viewer$last_segmentation %||% NULL,
@@ -610,6 +614,81 @@ wsi_read_project <- function(path, open_slide = FALSE) {
 #' @rdname wsi_read_project
 #' @export
 read_wsi_project <- wsi_read_project
+
+#' Restore saved project state into a live viewer
+#'
+#' Restores annotations, selected ROI IDs, layers, segmentation, measurements,
+#' stain/channel settings, tile source metadata, viewport state, and history
+#' from a `.wsiproject` object or directory into an existing
+#' [wsi_viewer_live()] session. Pixel data are not copied or loaded.
+#'
+#' @param viewer A `wsi_viewer_session`.
+#' @param project A `wsi_project` object or path to a `.wsiproject` directory.
+#' @param service Whether to service pending live-viewer events after queuing
+#'   the browser restore command.
+#'
+#' @return The live viewer session, invisibly.
+#' @export
+restore_project_state <- function(viewer, project, service = TRUE) {
+  if (!inherits(viewer, "wsi_viewer_session")) {
+    wsi_abort("`viewer` must be a `wsi_viewer_session` object.")
+  }
+  if (is.character(project) && length(project) == 1L && !is.na(project) && nzchar(project)) {
+    project <- wsi_read_project(project)
+  }
+  if (!inherits(project, "wsi_project")) {
+    wsi_abort("`project` must be a `wsi_project` object or project directory path.")
+  }
+  saved <- project$viewer_state %||% list()
+  state <- viewer$state
+  if (inherits(project$rois, "wsi_roi")) {
+    state$rois <- project$rois
+  }
+  if (is.data.frame(project$measurements)) {
+    state$measurements <- project$measurements
+  }
+  if (inherits(project$segmentation, "wsi_roi")) {
+    state$segmentation <- project$segmentation
+  }
+  state$selected_roi <- saved$selected_roi %||% NULL
+  state$selected_rois <- saved$selected_rois %||% wsi_empty_roi()
+  state$layers <- saved$layers_full %||% state$layers %||% list()
+  state$tile_preview <- saved$tile_preview %||% state$tile_preview %||% wsi_empty_tile_preview()
+  state$view <- saved$view %||% list()
+  state$stain <- saved$stain %||% project$stain_settings %||% NULL
+  state$channel_sources <- saved$channel_sources %||% list()
+  state$channel_settings <- if (!is.null(saved$channel_settings)) {
+    wsi_channel_settings_from_payload(saved$channel_settings)
+  } else if (!is.null(state$stain$channels)) {
+    wsi_channel_settings_from_payload(state$stain$channels)
+  } else {
+    wsi_empty_channel_settings()
+  }
+  state$tile_sources <- saved$tile_sources %||% list()
+  state$annotations <- saved$annotations %||% list(dirty = FALSE, dirty_reason = "project_restored")
+  state$history <- wsi_annotation_history_from_payload(saved$history %||% NULL)
+  state$last_segmentation <- saved$last_segmentation %||% NULL
+  state$last_event <- "r_restore_project_state"
+  state$last_sync <- Sys.time()
+  wsi_viewer_update_measurement_tables(state)
+  wsi_viewer_queue_command(
+    state,
+    "restore_project_state",
+    list(
+      rois = if (inherits(state$rois, "wsi_roi") && nrow(state$rois)) wsi_viewer_rois_to_geojson(state$rois) else NULL,
+      segmentation = if (inherits(state$segmentation, "wsi_roi") && nrow(state$segmentation)) wsi_viewer_rois_to_geojson(state$segmentation) else NULL,
+      channel_sources = state$channel_sources,
+      channel_settings = state$channel_settings,
+      view = state$view,
+      stain = state$stain
+    )
+  )
+  wsi_assign_viewer_state(state)
+  if (isTRUE(service)) {
+    wsi_viewer_session_pump(viewer, 0L)
+  }
+  invisible(viewer)
+}
 
 #' @export
 print.wsi_project <- function(x, ...) {

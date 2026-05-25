@@ -116,6 +116,50 @@ test_that("wsi_project can infer state from a live viewer-state object", {
   expect_equal(nrow(in_memory$measurements), 1)
 })
 
+test_that("project state round-trips channel and tile source metadata", {
+  slide <- wsiTools:::wsi_mock_slide(width = 512, height = 384, levels = c(1, 4))
+  env <- new.env(parent = emptyenv())
+  state <- wsiTools:::wsi_new_viewer_state(name = "channel_project", envir = env)
+  state$channel_sources <- list(wsi_channel_source(
+    "DAB",
+    type = "stain",
+    vector = c(0.268, 0.570, 0.776),
+    opacity = 0.6,
+    contrast_min = 0.1,
+    contrast_max = 1.4
+  ))
+  state$channel_settings <- wsiTools:::wsi_channel_settings_from_sources(state$channel_sources)
+  state$tile_sources <- list(dynamic = list(
+    id = "slide",
+    type = "dynamic",
+    tile_url_template = "http://127.0.0.1:8788/tiles/slide/{level}/{x}/{y}.{format}",
+    tile_format = "png"
+  ))
+  session <- structure(
+    list(state = state, slide = slide, url = NULL, ws_url = NULL, jobs = list()),
+    class = "wsi_viewer_session"
+  )
+  session <- wsiTools:::wsi_attach_viewer_session_methods(session)
+  dir <- tempfile("channel-project.wsiproject")
+  project <- wsi_project(dir, viewer_state = session, slide = slide)
+  reopened <- wsi_read_project(dir)
+
+  expect_equal(reopened$viewer_state$channel_settings[[1]]$id, "DAB")
+  expect_equal(reopened$viewer_state$tile_sources$dynamic$type, "dynamic")
+
+  target_state <- wsiTools:::wsi_new_viewer_state(name = "channel_project_restore", envir = env)
+  target <- structure(
+    list(state = target_state, slide = slide, url = NULL, ws_url = NULL, jobs = list()),
+    class = "wsi_viewer_session"
+  )
+  target <- wsiTools:::wsi_attach_viewer_session_methods(target)
+  restore_project_state(target, reopened, service = FALSE)
+
+  expect_equal(target$get_channel_settings(service = FALSE)$id, "DAB")
+  expect_equal(target$get_state(service = FALSE)$tile_sources$dynamic$type, "dynamic")
+  expect_true(any(vapply(target_state$commands, function(x) identical(x$type, "restore_project_state"), logical(1))))
+})
+
 test_that("wsi_project can be built in memory and saved later", {
   slide <- wsiTools:::wsi_mock_slide(width = 512, height = 384, levels = c(1, 4))
   rois <- wsiTools:::wsi_roi_from_geojson(list(

@@ -21,6 +21,8 @@ test_that("wsi_viewer adds a left-side project section", {
   expect_match(html, "projectStatePayload", fixed = TRUE)
   expect_match(html, "projectAnnotationStore", fixed = TRUE)
   expect_match(html, "projectAnnotationKey", fixed = TRUE)
+  expect_match(html, "projectItemCanTile", fixed = TRUE)
+  expect_match(html, "applyProjectOsd", fixed = TRUE)
   expect_match(html, "Annotations are stored separately for each image/section", fixed = TRUE)
   expect_match(html, "project_section_selected", fixed = TRUE)
   expect_match(html, '"project"', fixed = TRUE)

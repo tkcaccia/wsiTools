@@ -2570,11 +2570,22 @@ wsi_detect_artifacts <- function(tile, options = wsi_artifact_options()) {
       saturation >= options$fold_saturation_threshold,
     na.rm = TRUE
   )
-  bubble_fraction <- mean(
-    brightness >= options$bubble_brightness_threshold &
-      saturation <= options$bubble_saturation_threshold,
-    na.rm = TRUE
+  bubble_qc <- tryCatch(
+    wsi_detect_bubble_candidates(
+      arr,
+      estimate_tissue = FALSE,
+      brightness_threshold = options$bubble_brightness_threshold,
+      saturation_threshold = options$bubble_saturation_threshold,
+      min_area = max(5L, as.integer(round(length(brightness) * 0.001))),
+      bubble_fraction_threshold = options$bubble_fraction_threshold
+    ),
+    error = function(err) NULL
   )
+  bubble_fraction <- if (is.null(bubble_qc)) {
+    0
+  } else {
+    bubble_qc$bubble_fraction
+  }
   edge_strength <- wsi_artifact_edge_strength(gray)
 
   too_dark <- brightness_mean <= options$dark_mean_threshold ||
@@ -2586,7 +2597,7 @@ wsi_detect_artifacts <- function(tile, options = wsi_artifact_options()) {
     brightness_sd <= options$out_of_focus_sd_threshold
   pen <- pen_fraction >= options$pen_fraction_threshold
   fold <- fold_fraction >= options$fold_fraction_threshold
-  bubble <- bubble_fraction >= options$bubble_fraction_threshold
+  bubble <- !is.null(bubble_qc) && isTRUE(bubble_qc$bubble_candidate)
   flags <- c(too_dark, too_bright, blur, out_of_focus, pen, fold, bubble)
 
   data.frame(

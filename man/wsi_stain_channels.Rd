@@ -9,7 +9,10 @@ wsi_stain_channels(
   vector = list(c(0.65, 0.704, 0.286), c(0.268, 0.57, 0.776)),
   colour = wsi_stain_palette(length(vector)),
   strength = 1,
-  visible = TRUE
+  visible = TRUE,
+  opacity = 1,
+  contrast_min = 0,
+  contrast_max = 1
 )
 }
 \arguments{
@@ -22,6 +25,10 @@ wsi_stain_channels(
 \item{strength}{Initial display gain for each channel.}
 
 \item{visible}{Initial visibility for each channel.}
+
+\item{opacity}{Initial display opacity for each channel.}
+
+\item{contrast_min, contrast_max}{Initial concentration display window.}
 }
 \value{
 A \code{wsi_stain_channels} object.

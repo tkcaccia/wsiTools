@@ -317,9 +317,13 @@ committed states retained in each direction. In a static browser viewer this ope
 browser's normal save/download flow rather than silently writing to a server
 path.
 
-For a live R workflow, use `wsi_viewer_live()`. This starts an optional local
-`httpuv` bridge so browser-side annotations and analyses are posted back to the
-current R session automatically:
+For a live R workflow, use `wsi_viewer_live()`. The ordinary static
+`wsi_viewer()` writes an HTML file; it can export GeoJSON from the browser, but
+it cannot automatically update R objects after the file is opened. The live
+viewer starts an optional local `httpuv` bridge so browser-side annotations,
+measurements, channel settings, and analyses are posted back to the current R
+session automatically. WebSocket sync is used when available, with HTTP
+POST/polling retained as a fallback:
 
 ```r
 session <- wsi_viewer_live(
@@ -343,6 +347,7 @@ session$get_ihc_summary()
 session$get_ihc_class_summary()
 session$get_segmentation()
 session$get_layers()
+session$get_channel_settings()
 
 # After deconvolving a selected ROI or crop in R:
 session$measure_ihc_intensity(patch_channels, dab_threshold = 0.1)
@@ -368,6 +373,20 @@ session$add_layer("StarDist cells", session$get_segmentation())
 session$add_layer("DAB intensity", matrix(runif(100), nrow = 10), opacity = 0.4)
 session$set_layer_visible("StarDist cells", TRUE)
 
+# Optional channel-tile layers can also be pushed from R:
+dab_tiles <- wsi_channel_source(
+  "DAB tiles",
+  type = "deepzoom",
+  tile_url_base = "dab_tiles/slide_files",
+  width = slide$dimensions[["width"]],
+  height = slide$dimensions[["height"]],
+  max_level = 12,
+  opacity = 0.5,
+  colour = "#8b5a2b"
+)
+session$add_channel_source(dab_tiles)
+session$set_channel_opacity("DAB tiles", 0.35)
+
 # Save a reproducible project snapshot:
 session$save_project("case_001.wsiproject")
 ```
@@ -392,6 +411,58 @@ This writes browser-readable tiles next to the HTML file. Tiled mode uses
 OpenSeadragon for image rendering, tile caching, smooth transitions, and
 coordinate-stable overlays; zooming requests higher-resolution tiles instead of
 magnifying a thumbnail.
+
+OpenSeadragon is a browser tile viewer: it cannot read raw SVS, OME-TIFF, or
+BTF pixels directly. wsiTools therefore provides two tile backends. Static
+Deep Zoom tiles are precomputed with libvips and are fastest for shared HTML
+viewers. The live viewer can alternatively serve tiles on demand from R without
+precomputing a pyramid:
+
+```r
+session <- wsi_viewer_live(
+  slide,
+  mode = "tiles",
+  dynamic_tiles = TRUE,
+  dynamic_tile_format = "jpg",
+  transport = "auto",
+  wait = FALSE
+)
+```
+
+The dynamic tile server exposes URLs of the form
+`/tiles/{slide_id}/{level}/{x}/{y}.jpg`, caches generated tiles in a temporary
+directory, and removes that cache when `wsi_viewer_stop(session)` is called.
+Tiles are produced from region reads through the available libvips/OpenSlide
+backend; the full WSI is not loaded into R memory.
+
+### H&E plus mIHC channel overlays
+
+Use `wsi_viewer_he_mihc()` to open an H&E WSI as the base tiled image and
+overlay a matching mIHC OME-TIFF/probability image as independent channel
+layers. Each mIHC page is served as a dynamic OpenSeadragon layer with
+visibility, opacity, colour, gain, and contrast controls synced to the live R
+session.
+
+```r
+viewer <- wsi_viewer_he_mihc(
+  he = "AP-GY-26-04_HE.svs",
+  mihc = "gigatime_probs.ome.tif",
+  registration = "shift.json",
+  dynamic_tiles = FALSE,
+  tile_dir = "AP-GY-26-04_HE_deepzoom",
+  transport = "auto",
+  wait = FALSE
+)
+
+viewer$get_channel_settings()
+```
+
+For the smoothest interaction, precompute/reuse the H&E Deep Zoom tiles as
+shown above. If no tile pyramid is available, set `dynamic_tiles = TRUE`;
+`wsi_viewer_he_mihc()` then uses live JPEG base tiles by default as a fallback.
+
+The optional `registration` JSON is used to place the mIHC crop in H&E
+level-0 coordinates.
 
 ### H&E BTF interactive viewer and conversion
 
@@ -444,9 +515,9 @@ ihc_viewer <- wsi_viewer_ihc(
 ```
 
 The `Stains` menu adds an `IHC` toggle, separate hematoxylin and HRP/DAB
-visibility controls, color pickers, and gain sliders. In tiled mode the browser
-recolors only the visible Deep Zoom tiles, so the full WSI is not loaded into R
-memory.
+visibility controls, color pickers, opacity, gain, and contrast-window sliders.
+In tiled mode the browser recolors only the visible OpenSeadragon tiles, so the
+full WSI is not loaded into R memory.
 
 For H&E patches, `wsiTools` can separate hematoxylin/eosin channels and
 perform lightweight stain normalisation. Macenko-style estimation and an
@@ -509,9 +580,9 @@ multi_viewer <- wsi_viewer_multi_ihc(
 )
 ```
 
-The `Stains` menu exposes the `mIHC` toggle plus a checkbox, colour picker, and
-gain slider for each channel. The default vectors are only starting values; use
-assay-specific stain vectors for quantitative work.
+The `Stains` menu exposes the `mIHC` toggle plus visibility, colour, opacity,
+gain, and contrast controls for each channel. The default vectors are only
+starting values; use assay-specific stain vectors for quantitative work.
 
 ## Conversion example
 

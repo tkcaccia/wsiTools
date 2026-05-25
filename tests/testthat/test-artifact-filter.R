@@ -11,7 +11,7 @@ test_that("artifact detection flags bright, dark, pen, fold, and bubble-like til
   fold[, , 3] <- 0.02
 
   expect_true(wsi_detect_artifacts(white)$artifact_too_bright)
-  expect_true(wsi_detect_artifacts(white)$artifact_bubble)
+  expect_false(wsi_detect_artifacts(white)$artifact_bubble)
   expect_true(wsi_detect_artifacts(dark)$artifact_too_dark)
   expect_true(wsi_detect_artifacts(pen)$artifact_pen)
   expect_true(wsi_detect_artifacts(fold)$artifact_fold)

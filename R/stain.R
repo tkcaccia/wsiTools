@@ -89,6 +89,8 @@ wsi_stain_palette <- function(n) {
 #' @param colour Display colours for the channels.
 #' @param strength Initial display gain for each channel.
 #' @param visible Initial visibility for each channel.
+#' @param opacity Initial display opacity for each channel.
+#' @param contrast_min,contrast_max Initial concentration display window.
 #'
 #' @return A `wsi_stain_channels` object.
 #' @export
@@ -104,7 +106,10 @@ wsi_stain_channels <- function(name = c("Hematoxylin", "HRP/DAB"),
                                              c(0.268, 0.570, 0.776)),
                                colour = wsi_stain_palette(length(vector)),
                                strength = 1,
-                               visible = TRUE) {
+                               visible = TRUE,
+                               opacity = 1,
+                               contrast_min = 0,
+                               contrast_max = 1) {
   if (is.matrix(vector) || is.data.frame(vector)) {
     if (ncol(vector) != 3L) {
       wsi_abort("`vector` must have three columns when supplied as a matrix or data frame.")
@@ -126,6 +131,9 @@ wsi_stain_channels <- function(name = c("Hematoxylin", "HRP/DAB"),
   colour <- as.character(wsi_recycle_to(colour, n, "colour"))
   strength <- as.numeric(wsi_recycle_to(strength, n, "strength"))
   visible <- wsi_recycle_to(visible, n, "visible")
+  opacity <- as.numeric(wsi_recycle_to(opacity, n, "opacity"))
+  contrast_min <- as.numeric(wsi_recycle_to(contrast_min, n, "contrast_min"))
+  contrast_max <- as.numeric(wsi_recycle_to(contrast_max, n, "contrast_max"))
   if (!is.logical(visible) || anyNA(visible)) {
     wsi_abort("`visible` must be TRUE or FALSE for each stain channel.")
   }
@@ -138,7 +146,10 @@ wsi_stain_channels <- function(name = c("Hematoxylin", "HRP/DAB"),
       vector = wsi_normalize_stain_vector(vector[[i]], sprintf("vector[[%s]]", i)),
       colour = wsi_colour_to_hex(colour[[i]], sprintf("colour[[%s]]", i)),
       strength = wsi_check_scalar_number(strength[[i]], sprintf("strength[[%s]]", i)),
-      visible = isTRUE(visible[[i]])
+      visible = isTRUE(visible[[i]]),
+      opacity = wsi_channel_opacity(opacity[[i]]),
+      contrast_min = unname(wsi_channel_contrast(contrast_min[[i]], contrast_max[[i]])[["min"]]),
+      contrast_max = unname(wsi_channel_contrast(contrast_min[[i]], contrast_max[[i]])[["max"]])
     )
   })
   class(channels) <- "wsi_stain_channels"
@@ -188,12 +199,18 @@ wsi_as_stain_channels <- function(channels = NULL) {
     colour <- channels$colour %||% channels$color %||% wsi_stain_palette(nrow(channels))
     strength <- channels$strength %||% channels$gain %||% 1
     visible <- channels$visible %||% TRUE
+    opacity <- channels$opacity %||% 1
+    contrast_min <- channels$contrast_min %||% 0
+    contrast_max <- channels$contrast_max %||% 1
     return(wsi_stain_channels(
       name = name,
       vector = vector,
       colour = colour,
       strength = strength,
-      visible = visible
+      visible = visible,
+      opacity = opacity,
+      contrast_min = contrast_min,
+      contrast_max = contrast_max
     ))
   }
   if (is.list(channels) &&
@@ -222,12 +239,24 @@ wsi_as_stain_channels <- function(channels = NULL) {
     visible <- vapply(seq_len(n), function(i) {
       channels[[i]]$visible %||% TRUE
     }, logical(1))
+    opacity <- vapply(seq_len(n), function(i) {
+      channels[[i]]$opacity %||% 1
+    }, numeric(1))
+    contrast_min <- vapply(seq_len(n), function(i) {
+      channels[[i]]$contrast_min %||% 0
+    }, numeric(1))
+    contrast_max <- vapply(seq_len(n), function(i) {
+      channels[[i]]$contrast_max %||% 1
+    }, numeric(1))
     return(wsi_stain_channels(
       name = name,
       vector = vector,
       colour = colour,
       strength = strength,
-      visible = visible
+      visible = visible,
+      opacity = opacity,
+      contrast_min = contrast_min,
+      contrast_max = contrast_max
     ))
   }
   wsi_abort("`channels` must be created by `wsi_stain_channels()` or supplied as a compatible list/data.frame.")
