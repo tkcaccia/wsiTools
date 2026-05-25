@@ -40,8 +40,8 @@ test_that("native connected components match the R fallback", {
   )
 })
 
-test_that("native core is available without Rcpp or LinkingTo", {
-  expect_true(wsiTools:::wsi_native_available("wsi_cpp_edge_magnitude"))
-  expect_true(wsiTools:::wsi_native_available("wsi_cpp_binary_dilate"))
-  expect_true(wsiTools:::wsi_native_available("wsi_cpp_mask_components"))
+test_that("mask helper fallbacks do not require compiled code", {
+  expect_type(wsiTools:::wsi_native_available("wsi_cpp_edge_magnitude"), "logical")
+  expect_type(wsiTools:::wsi_native_available("wsi_cpp_binary_dilate"), "logical")
+  expect_type(wsiTools:::wsi_native_available("wsi_cpp_mask_components"), "logical")
 })

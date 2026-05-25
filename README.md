@@ -22,12 +22,11 @@ From a local checkout:
 install.packages(".", repos = NULL, type = "source")
 ```
 
-wsiTools keeps its R dependency footprint small and uses a few dependency-free
-native C++ kernels for performance-critical mask operations. OpenSlide, libvips,
-StarDist, Cellpose, OME-Zarr pixel access, and local web services are treated as
-optional runtime capabilities rather than installation requirements. Source
-installs from GitHub need a working R compiler toolchain, but they do not need
-WSI system libraries just to install the package.
+wsiTools keeps its R dependency footprint small and the default GitHub/CRAN
+install path is pure R, so Windows users do not need Rtools just to install the
+package. OpenSlide, libvips, StarDist, Cellpose, OME-Zarr pixel access, and
+local web services are treated as optional runtime capabilities rather than
+installation requirements.
 
 ## System dependencies
 
@@ -49,10 +48,10 @@ functions need the corresponding tools at runtime:
 - OME-Zarr metadata reading is lightweight; full chunked pixel decoding should
   remain an optional backend capability.
 
-The CRAN core should stay small: no `Rcpp` linking, no mandatory Python bridge,
-and no mandatory OpenSlide/libvips library at install time. The included native
-C++ code uses base R's `.Call` interface for connected components, binary
-dilation, and local edge maps used by tissue masks and artifact QC.
+The CRAN core should stay small: no `Rcpp` linking, no mandatory compiler
+toolchain, no mandatory Python bridge, and no mandatory OpenSlide/libvips
+library at install time. Performance-sensitive helpers keep pure-R fallbacks so
+the package remains installable on locked-down Windows workstations.
 
 Check your local capabilities with:
 
