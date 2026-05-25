@@ -209,6 +209,18 @@ single-channel/RGB preview regions through libCZIAPI. More complete scene,
 channel, and high-resolution dynamic-tile support can be built on the same
 bridge.
 
+CZI project viewing opens a low-resolution scene preview first. By default
+wsiTools caps the first preview to about 1024 px on the longest side and, when
+libCZI reports pyramid layers, selects the most downsampled native layer that is
+still useful for navigation. This keeps first open responsive; higher-resolution
+region or tiled access can be requested later.
+
+```r
+# Optional tuning for the first CZI overview.
+Sys.setenv(WSITOOLS_CZI_INITIAL_PREVIEW_WIDTH = "1024")
+Sys.setenv(WSITOOLS_CZI_MIN_PREVIEW_WIDTH = "768")
+```
+
 Only use the Python wrapper if native libCZIAPI is not available and you choose
 to enable that fallback:
 

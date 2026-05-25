@@ -169,6 +169,12 @@ wsi_has_native_czi()
 wsi_viewer_project("sample.czi")
 ```
 
+The project viewer opens CZI files with a low-resolution scene preview first.
+When libCZI reports pyramid layers, wsiTools chooses a downsampled layer for the
+first overview instead of immediately generating a high-resolution browser
+preview. You can tune the first overview size with
+`WSITOOLS_CZI_INITIAL_PREVIEW_WIDTH` and `WSITOOLS_CZI_MIN_PREVIEW_WIDTH`.
+
 The old Python wrapper route is kept only as a legacy fallback. To use it
 explicitly, set `WSITOOLS_CZI_ALLOW_PYTHON=true` and configure
 `WSITOOLS_CZI_PYTHON`.

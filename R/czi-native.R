@@ -41,15 +41,14 @@ wsi_native_czi_project_preview <- function(path, width = 768, height = NULL) {
   scene_height <- as.integer(info$height %||% height %||% width)
   x <- as.integer(info$x %||% 0L)
   y <- as.integer(info$y %||% 0L)
-  target <- as.integer(width)
-  scale <- min(1, target / max(scene_width, scene_height, 1))
+  preview_plan <- wsi_native_czi_preview_plan(info, width = width)
   preview <- wsi_native_czi_read_region(
     path,
     x = x,
     y = y,
     width = scene_width,
     height = scene_height,
-    zoom = scale,
+    zoom = preview_plan$zoom,
     channel = 0,
     scene = NA_integer_
   )
@@ -66,10 +65,16 @@ wsi_native_czi_project_preview <- function(path, width = 768, height = NULL) {
       height = scene_height,
       preview_width = dim(preview)[[2L]],
       preview_height = dim(preview)[[1L]],
+      preview_downsample = preview_plan$downsample,
+      preview_source = preview_plan$source,
       x = x,
       y = y,
-      status = "preview",
-      message = "Preview generated through direct libCZIAPI calls from R",
+      status = "low-resolution preview",
+      message = sprintf(
+        "Low-resolution CZI scene preview generated through direct libCZIAPI calls from R (%.3gx zoom, %s).",
+        preview_plan$zoom,
+        preview_plan$source
+      ),
       image_data_uri = preview_uri,
       navigator_image_data_uri = preview_uri
     ))
@@ -102,6 +107,88 @@ wsi_czi_project_preview <- function(path, width = 768, height = NULL) {
   }
 
   NULL
+}
+
+wsi_czi_initial_preview_width <- function(width) {
+  width <- as.integer(wsi_check_scalar_number(width, "width", allow_zero = FALSE))
+  cap <- suppressWarnings(as.integer(Sys.getenv("WSITOOLS_CZI_INITIAL_PREVIEW_WIDTH", unset = "1024")))
+  if (is.na(cap) || cap <= 0L) {
+    cap <- 1024L
+  }
+  min(width, cap)
+}
+
+wsi_czi_minimum_preview_width <- function(target) {
+  target <- as.integer(wsi_check_scalar_number(target, "target", allow_zero = FALSE))
+  minimum <- suppressWarnings(as.integer(Sys.getenv("WSITOOLS_CZI_MIN_PREVIEW_WIDTH", unset = "768")))
+  if (is.na(minimum) || minimum <= 0L) {
+    minimum <- 768L
+  }
+  min(target, minimum)
+}
+
+wsi_czi_pyramid_factors <- function(pyramid_json) {
+  if (is.null(pyramid_json) || length(pyramid_json) == 0L) {
+    return(numeric())
+  }
+  pyramid_json <- pyramid_json[[1L]]
+  if (is.na(pyramid_json) || !nzchar(pyramid_json)) {
+    return(numeric())
+  }
+  parsed <- tryCatch(
+    jsonlite::fromJSON(pyramid_json, simplifyVector = FALSE),
+    error = function(err) NULL
+  )
+  if (is.null(parsed)) {
+    return(numeric())
+  }
+  factors <- numeric()
+  collect <- function(node) {
+    if (!is.list(node)) {
+      return(invisible(NULL))
+    }
+    if (!is.null(node$minificationFactor)) {
+      factors <<- c(factors, suppressWarnings(as.numeric(node$minificationFactor)))
+    }
+    for (item in node) {
+      collect(item)
+    }
+    invisible(NULL)
+  }
+  collect(parsed)
+  sort(unique(factors[is.finite(factors) & factors > 1]))
+}
+
+wsi_native_czi_preview_plan <- function(info, width = 768) {
+  scene_width <- suppressWarnings(as.numeric(info$width %||% NA_real_))
+  scene_height <- suppressWarnings(as.numeric(info$height %||% NA_real_))
+  dimensions <- c(scene_width, scene_height)
+  max_dim <- if (all(is.na(dimensions))) NA_real_ else max(dimensions, na.rm = TRUE)
+  if (!is.finite(max_dim) || max_dim <= 0) {
+    max_dim <- as.numeric(width)
+  }
+  target <- wsi_czi_initial_preview_width(width)
+  minimum <- wsi_czi_minimum_preview_width(target)
+  factors <- wsi_czi_pyramid_factors(info$pyramid_json %||% NA_character_)
+
+  if (length(factors)) {
+    largest_usable <- max_dim / max(minimum, 1)
+    usable <- factors[factors <= largest_usable]
+    downsample <- if (length(usable)) max(usable) else min(factors)
+    source <- "native pyramid"
+  } else {
+    downsample <- max(1, max_dim / max(target, 1))
+    source <- "scaled native accessor"
+  }
+
+  list(
+    target_width = target,
+    minimum_width = minimum,
+    downsample = downsample,
+    zoom = min(1, 1 / downsample),
+    source = source,
+    pyramid_factors = factors
+  )
 }
 
 wsi_allow_czi_python <- function() {

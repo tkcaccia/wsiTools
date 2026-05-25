@@ -316,6 +316,7 @@ wsi_czi_python_project_preview <- function(path, width = 768) {
     )
   }
   python <- wsi_czi_python_command()
+  preview_width <- wsi_czi_initial_preview_width(width)
   output_dir <- tempfile("wsi_czi_preview_")
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
   on.exit(unlink(output_dir, recursive = TRUE, force = TRUE), add = TRUE)
@@ -327,7 +328,7 @@ wsi_czi_python_project_preview <- function(path, width = 768) {
     script_file,
     path,
     output_dir,
-    as.character(as.integer(width)),
+    as.character(as.integer(preview_width)),
     metadata
   )
   out <- tryCatch(

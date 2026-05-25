@@ -24,3 +24,34 @@ test_that("invalid UTF-8 from command-line tools is cleaned before regex parsing
   expect_true(validUTF8(names(parsed)))
   expect_true(validUTF8(unlist(parsed, use.names = FALSE)))
 })
+
+test_that("native CZI preview plan prefers a low-resolution pyramid layer first", {
+  pyramid_json <- paste0(
+    '{"scenePyramidStatistics":{"0":[',
+    '{"layerInfo":{"minificationFactor":2,"pyramidLayerNo":1},"count":1},',
+    '{"layerInfo":{"minificationFactor":16,"pyramidLayerNo":4},"count":1},',
+    '{"layerInfo":{"minificationFactor":64,"pyramidLayerNo":6},"count":1},',
+    '{"layerInfo":{"minificationFactor":128,"pyramidLayerNo":7},"count":1}',
+    ']}}'
+  )
+  plan <- wsiTools:::wsi_native_czi_preview_plan(
+    list(width = 50000, height = 30000, pyramid_json = pyramid_json),
+    width = 4096
+  )
+
+  expect_equal(plan$target_width, 1024L)
+  expect_equal(plan$downsample, 64)
+  expect_equal(plan$zoom, 1 / 64)
+  expect_equal(plan$source, "native pyramid")
+})
+
+test_that("native CZI preview plan falls back to a scaled low-resolution overview", {
+  plan <- wsiTools:::wsi_native_czi_preview_plan(
+    list(width = 50000, height = 30000, pyramid_json = NA_character_),
+    width = 4096
+  )
+
+  expect_equal(plan$target_width, 1024L)
+  expect_equal(plan$source, "scaled native accessor")
+  expect_equal(plan$zoom, 1024 / 50000, tolerance = 1e-8)
+})
