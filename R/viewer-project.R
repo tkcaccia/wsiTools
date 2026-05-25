@@ -9,9 +9,11 @@
 #' Browser annotations are stored separately for each project image/section, so
 #' ROIs drawn on one tissue section do not appear on another section.
 #'
-#' CZI files require Bio-Formats command-line tools for real image previews and
-#' metadata. Without Bio-Formats, CZI files are still listed in the project
-#' panel with an informative backend status instead of failing silently.
+#' CZI first visualization uses an optional tile/region reader when available:
+#' native libCZI in future builds, then the optional `aicspylibczi` bridge.
+#' Bio-Formats is used for CZI metadata/conversion workflows, but `bfconvert`
+#' is not used automatically for first visualization because it is too slow for
+#' interactive opening.
 #'
 #' @param images Character vector of image paths, `wsi_slide` objects, or a
 #'   data frame/list of project image records.
@@ -244,22 +246,20 @@ wsi_viewer_project_item_from_path <- function(path, index = 1L, width = 768, hei
 }
 
 wsi_viewer_project_item_from_czi <- function(path, index = 1L, width = 768, height = NULL) {
-  czi_preview <- tryCatch(
-    wsi_czi_python_project_preview(path, width = width),
-    error = function(err) NULL
-  )
+  czi_preview <- wsi_czi_project_preview(path, width = width, height = height)
   if (!is.null(czi_preview)) {
     first <- czi_preview$sections[[1L]]
+    backend <- czi_preview$backend %||% "aicspylibczi"
     return(list(
       id = sprintf("project_czi_%d", index),
       label = basename(path),
       path = path,
-      backend = "aicspylibczi",
+      backend = backend,
       type = "czi",
       width = first$width,
       height = first$height,
       status = "ready",
-      message = "CZI preview generated with optional aicspylibczi; full-resolution pixels remain on disk.",
+      message = sprintf("CZI preview generated with optional %s; full-resolution pixels remain on disk.", backend),
       image_data_uri = first$image_data_uri,
       navigator_image_data_uri = first$image_data_uri,
       sections = czi_preview$sections,
@@ -268,46 +268,22 @@ wsi_viewer_project_item_from_czi <- function(path, index = 1L, width = 768, heig
   }
 
   bioformats_available <- wsi_has_bioformats()
-  bioformats_preview <- if (bioformats_available) {
-    tryCatch(
-      wsi_bioformats_project_preview(path, width = width, height = height),
-      error = function(err) err
-    )
-  } else {
-    NULL
-  }
-  if (is.list(bioformats_preview) && !inherits(bioformats_preview, "error") &&
-      length(bioformats_preview$sections %||% list())) {
-    first <- bioformats_preview$sections[[1L]]
-    return(list(
-      id = sprintf("project_czi_%d", index),
-      label = basename(path),
-      path = path,
-      backend = "bioformats",
-      type = "czi",
-      width = first$width,
-      height = first$height,
-      status = "ready",
-      message = "CZI preview generated with Bio-Formats bfconvert; full-resolution pixels remain on disk.",
-      image_data_uri = first$image_data_uri,
-      navigator_image_data_uri = first$image_data_uri,
-      sections = bioformats_preview$sections,
-      active = FALSE
-    ))
-  }
-
   label <- basename(path)
   message <- if (bioformats_available) {
     paste(
-      "CZI detected. Bio-Formats is available, but a browser preview could not be generated.",
-      if (inherits(bioformats_preview, "error")) conditionMessage(bioformats_preview) else "",
-      "Install/configure `bfconvert`, libvips or ImageMagick for preview generation, or configure the optional aicspylibczi bridge.",
+      "CZI detected. Bio-Formats is available for metadata, but first visualization now requires a tile/region reader.",
+      "Configure optional `aicspylibczi` now, or use a future build with native libCZI support.",
+      "wsiTools no longer runs `bfconvert` automatically for first visualization.",
       sep = "\n"
     )
   } else {
-    "CZI detected. Install Bio-Formats command-line tools (`showinf`/`bfconvert`) to inspect scenes and generate real previews."
+    paste(
+      "CZI detected. Configure optional `aicspylibczi` for first visualization, or use a future build with native libCZI support.",
+      "Bio-Formats command-line tools (`showinf`/`bfconvert`) are still useful for metadata and conversion.",
+      sep = "\n"
+    )
   }
-  status <- if (bioformats_available) "Bio-Formats available" else "Bio-Formats required"
+  status <- if (bioformats_available) "CZI preview backend required" else "CZI backend required"
   list(
     id = sprintf("project_czi_%d", index),
     label = label,
@@ -322,7 +298,7 @@ wsi_viewer_project_item_from_czi <- function(path, index = 1L, width = 768, heig
     navigator_image_data_uri = NULL,
     sections = list(list(
       id = "czi_series_pending",
-      label = if (bioformats_available) "CZI scenes/sections: use Bio-Formats metadata extraction" else "CZI scenes/sections unavailable until Bio-Formats is installed",
+      label = "CZI scenes/sections unavailable until a tile/region preview backend is configured",
       status = status,
       message = message
     )),

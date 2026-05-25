@@ -36,7 +36,8 @@ Suggests:
     testthat (>= 3.0.0)
 SystemRequirements: None required for installation. Optional runtime tools:
     OpenSlide command-line tools; libvips command-line tools; Bio-Formats
-    command-line tools; external StarDist or Cellpose commands; optional local
-    web services for interactive workflows.
+    command-line tools; external StarDist or Cellpose commands; optional ZEISS
+    libCZI for native CZI builds; optional local web services for interactive
+    workflows.
 Config/testthat/edition: 3
 VignetteBuilder: knitr

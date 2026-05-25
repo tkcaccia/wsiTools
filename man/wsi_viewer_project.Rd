@@ -50,9 +50,11 @@ Browser annotations are stored separately for each project image/section, so
 ROIs drawn on one tissue section do not appear on another section.
 }
 \details{
-CZI files require Bio-Formats command-line tools for real image previews and
-metadata. Without Bio-Formats, CZI files are still listed in the project
-panel with an informative backend status instead of failing silently.
+CZI first visualization uses an optional tile/region reader when available:
+native libCZI in future builds, then the optional \code{aicspylibczi} bridge.
+Bio-Formats is used for CZI metadata/conversion workflows, but \code{bfconvert}
+is not used automatically for first visualization because it is too slow for
+interactive opening.
 }
 \examples{
 \dontrun{

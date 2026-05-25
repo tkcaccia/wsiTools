@@ -88,7 +88,8 @@ functions need the corresponding tools at runtime:
 - libvips command-line tools (`vips`, `vipsheader`) for conversion, pyramids,
   thumbnails, cropping, and export.
 - Bio-Formats command-line tools (`showinf`, `bfconvert`) for optional
-  microscopy format metadata, CZI inspection, and conversion workflows.
+  microscopy format metadata, CZI inspection, and conversion workflows. They
+  are not used for first visualization of CZI files.
 - StarDist, Cellpose, or other segmentation engines remain external commands or
   services; wsiTools can export ROI crops and import their outputs without
   depending on Python.
@@ -178,6 +179,32 @@ OpenSlide on Windows is still best installed through conda-forge, MSYS2/vcpkg,
 or the official binary distribution, then added to `PATH`. The winget helper is
 useful for libvips and ImageMagick, but it does not currently install OpenSlide
 for Windows.
+
+### Installing CZI first-visualization support
+
+CZI visualization uses a tile/region reader, not `bfconvert`. The current
+practical reader is the optional Python package `aicspylibczi`; the planned
+native path is a wsiTools build compiled against ZEISS libCZI.
+
+One simple setup is a small conda environment:
+
+```sh
+conda create -n wsitools-czi --override-channels -c conda-forge python pip
+conda activate wsitools-czi
+python -m pip install aicspylibczi numpy pillow
+python -c "import aicspylibczi, numpy, PIL"
+```
+
+Then point wsiTools to that Python executable before opening the viewer:
+
+```r
+Sys.setenv(WSITOOLS_CZI_PYTHON = "/path/to/wsitools-czi/bin/python")
+wsi_has_czi_python()
+wsi_viewer_project("sample.czi", open = TRUE)
+```
+
+On Windows the Python path is usually similar to
+`C:/Users/<you>/miniconda3/envs/wsitools-czi/python.exe`.
 
 ### Installing Bio-Formats
 
@@ -357,21 +384,19 @@ html <- wsi_viewer(
 wsi_close(slide)
 ```
 
-For Zeiss CZI files, install Bio-Formats first and open with the Bio-Formats
-backend:
+For Zeiss CZI files, use a CZI tile/region backend for visualization. The
+current practical option is `aicspylibczi`; a native C++ libCZI backend is the
+planned replacement. Bio-Formats is useful for metadata and conversion, but
+wsiTools no longer uses `bfconvert` automatically for first visualization.
 
 ```r
-wsi_install_backends(tools = "bioformats", method = "conda")
+wsi_has_native_czi()
+wsi_has_czi_python()
 
-# Restart R/RStudio after installation, then:
-library(wsiTools)
-Sys.which(c("showinf", "bfconvert"))
+# Configure a Python executable that has aicspylibczi, numpy, and Pillow.
+Sys.setenv(WSITOOLS_CZI_PYTHON = "C:/path/to/python.exe")
 
 czi_path <- file.choose()
-czi <- wsi_open(czi_path, backend = "bioformats")
-wsi_info(czi)
-
-# For scene/section-style CZI viewing
 wsi_viewer_project(czi_path, open = TRUE)
 ```
 
@@ -443,17 +468,18 @@ html
 ```
 
 For sharper preview zoom, increase `width`; for smaller HTML files, decrease
-it. CZI previews can be generated either with the optional Python bridge
-(`aicspylibczi`, `numpy`, and `Pillow`) or with Bio-Formats `bfconvert`.
-The Python bridge is usually better for CZI mosaic previews:
+it. CZI first visualization uses a tile/region reader: native libCZI when that
+future optional backend is compiled, otherwise the optional Python bridge
+(`aicspylibczi`, `numpy`, and `Pillow`). Bio-Formats `bfconvert` is kept for
+conversion/export workflows, not automatic first visualization:
 
 ```r
 Sys.setenv(WSITOOLS_CZI_PYTHON = "/path/to/python")
 wsi_has_czi_python()
 ```
 
-For CZI metadata and first-plane browser previews through Bio-Formats, install
-OME bftools and check that both `showinf` and `bfconvert` are visible to R:
+For CZI metadata through Bio-Formats, install OME bftools and check that both
+`showinf` and `bfconvert` are visible to R:
 
 ```r
 wsi_install_backends(tools = "bioformats", method = "conda")
@@ -462,13 +488,12 @@ wsi_backends()
 
 slide <- wsi_open("case_01_section_01.czi", backend = "bioformats")
 wsi_info(slide)
-
-wsi_viewer_project("case_01_section_01.czi", open = TRUE)
 ```
 
 If Windows reports `NoDecodeDelegateForThisImageFormat` for a `.czi`, that is
-ImageMagick saying it cannot decode CZI. Install Bio-Formats or configure the
-optional Python CZI bridge; do not rely on ImageMagick for CZI files.
+ImageMagick saying it cannot decode CZI. Configure the optional Python CZI
+bridge for visualization, and use Bio-Formats for metadata/conversion; do not
+rely on ImageMagick for CZI files.
 
 You can also add related images to a normal slide viewer:
 
