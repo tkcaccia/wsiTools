@@ -56,11 +56,47 @@ runtime capabilities rather than mandatory installation dependencies. Use
 for optional tools.
 
 ```{r, eval=FALSE}
+# Check what is available and what is missing
 wsi_setup()
 
-# After reviewing the plan, optionally run supported installers
+# Preview the backend install plan without running system commands
+wsi_install_backends(install = FALSE)
+
+# After reviewing the plan, optionally run supported installers.
+# In interactive R, wsiTools asks before running commands.
 wsi_install_backends(method = "auto")
 ```
+
+Examples for common platforms:
+
+```{r, eval=FALSE}
+# macOS with Homebrew
+wsi_install_backends(method = "homebrew")
+
+# Ubuntu/Debian. sudo is never used unless you opt in.
+wsi_install_backends(method = "apt", allow_sudo = TRUE)
+
+# Fedora
+wsi_install_backends(method = "dnf", allow_sudo = TRUE)
+
+# Windows. OpenSlide is usually installed separately through conda-forge,
+# MSYS2/vcpkg, or official binaries and then added to PATH.
+wsi_install_backends(
+  tools = c("libvips", "imagemagick"),
+  method = "winget"
+)
+
+# Conda or mamba environment
+wsi_install_backends(
+  tools = c("openslide", "libvips", "imagemagick"),
+  method = "conda"
+)
+```
+
+Restart R or RStudio after installing system tools, then run `wsi_backends()`
+again. StarDist and Cellpose are external segmentation tools; keep them in
+separate environments and enable them explicitly rather than making them
+mandatory package dependencies.
 
 On Windows, if a previous installation was interrupted, remove stale lock
 directories before retrying:

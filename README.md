@@ -122,12 +122,62 @@ install anything unless you explicitly opt in:
 # Review the plan first
 wsi_setup()
 
-# Then optionally install supported optional R packages and system backends
-wsi_install_backends(method = "homebrew")
+# Show the install plan without running it
+wsi_install_backends(install = FALSE)
 ```
 
-On Debian/Ubuntu or Fedora, system installs may require `sudo`; wsiTools will
-not run those commands unless you explicitly set `allow_sudo = TRUE`.
+### Automatic optional backend installer
+
+`wsi_install_backends()` is the convenience helper for first-time setup. It can
+install optional R packages such as `magick`, `httpuv`, and `callr`, and it can
+run supported system package managers for tools such as libvips, OpenSlide, and
+ImageMagick. These tools are optional runtime backends: wsiTools never installs
+them silently during `install.packages()` or `remotes::install_github()`.
+
+```r
+library(wsiTools)
+
+# Recommended: inspect what is missing first
+wsi_setup()
+
+# Let wsiTools choose a supported installer for this platform
+wsi_install_backends(method = "auto")
+
+# macOS with Homebrew
+wsi_install_backends(method = "homebrew")
+
+# Ubuntu/Debian. sudo is never used unless you opt in.
+wsi_install_backends(method = "apt", allow_sudo = TRUE)
+
+# Fedora
+wsi_install_backends(method = "dnf", allow_sudo = TRUE)
+
+# Windows pieces supported by winget
+wsi_install_backends(
+  tools = c("libvips", "imagemagick"),
+  method = "winget"
+)
+
+# Conda or mamba environment
+wsi_install_backends(
+  tools = c("openslide", "libvips", "imagemagick"),
+  method = "conda"
+)
+```
+
+In interactive R sessions, wsiTools asks before running system commands. On
+Debian/Ubuntu or Fedora, system installs may require `sudo`; wsiTools will not
+run those commands unless you explicitly set `allow_sudo = TRUE`. Restart R or
+RStudio after installing system tools, then check:
+
+```r
+wsi_backends()
+```
+
+OpenSlide on Windows is still best installed through conda-forge, MSYS2/vcpkg,
+or the official binary distribution, then added to `PATH`. The winget helper is
+useful for libvips and ImageMagick, but it does not currently install OpenSlide
+for Windows.
 
 Typical manual backend installs are:
 
@@ -145,18 +195,6 @@ sudo dnf install vips-tools openslide-tools
 On Windows, install libvips/OpenSlide with a system package manager such as
 winget, MSYS2, vcpkg, or the official binary distributions, then make sure the
 tool directories are on `PATH`. Re-run `wsi_backends()` afterwards.
-
-For the supported automatic Windows pieces:
-
-```r
-wsi_install_backends(
-  tools = c("libvips", "imagemagick"),
-  method = "winget"
-)
-```
-
-OpenSlide on Windows is still best installed through conda-forge, MSYS2/vcpkg,
-or the official binary distribution, then added to `PATH`.
 
 StarDist is a Python/TensorFlow tool, so it is not installed silently during
 `install.packages()` or `remotes::install_github()`. To enable the viewer's
