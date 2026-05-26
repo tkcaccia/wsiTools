@@ -1,1 +1,2 @@
+OBJECTS = native-czi.o
 PKG_LIBS = $(DL_LIBS)

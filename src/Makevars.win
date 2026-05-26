@@ -1,1 +1,8 @@
-# Dynamic loading uses the Windows API and does not need libdl.
+# Use a small native stub on Windows by default so the core package installs
+# reliably on Rtools systems. Advanced users can opt in to the experimental
+# native CZI bridge with WSITOOLS_ENABLE_NATIVE_CZI=1.
+ifeq ($(WSITOOLS_ENABLE_NATIVE_CZI),1)
+OBJECTS = native-czi.o
+else
+OBJECTS = native-stubs.o
+endif
