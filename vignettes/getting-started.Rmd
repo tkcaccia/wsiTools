@@ -52,7 +52,7 @@ packageVersion("wsiTools")
 wsi_backends()
 ```
 
-The current GitHub package version is `0.1.11`. If R reports an older version
+The current GitHub package version is `0.1.12`. If R reports an older version
 after installation, remove the old package directory and reinstall from
 `tkcaccia/wsiTools` without pinning an old commit.
 
@@ -286,13 +286,18 @@ viewer <- wsi_viewer(slide, width = 1600)
 coordinate readout. It visualizes a backend-generated thumbnail, so it remains
 safe for very large WSI files.
 
-The viewer toolbar is organized into menus: `Navigate`, `Annotations`,
-`GeoJSON`, `View`, and, when enabled, `Stains`. These menus group pan/select
-modes, fit and 1:1 zoom, ROI and label toggles, ROI opacity, previous/next ROI
-navigation, a side window listing all GeoJSON geometries, crosshair display,
-coordinate copying, polygon drawing, and GeoJSON export. Use `GeoJSON` to open
-the geometry list; each row shows the geometry type, bounds, point count,
-source, and id. Use `Draw ROI`, click polygon vertices, double-click or press
+The viewer toolbar is organized into menus such as `Project`, `Annotations`,
+`Segmentation`, `Artifacts`, `Measure`, `Trajectories`, `Image`, `View`,
+`Help`, and, when enabled, `Stains`. Use `Project` to reopen the left-side
+project panel or add ordinary browser-readable images as project items. Large
+WSI, CZI, SVS, OME-TIFF, and pyramidal images should still be opened from R or
+prepared as tiled project sources so the viewer can avoid loading full images
+into memory. These menus group pan/select modes, fit and 1:1 zoom, ROI and
+label toggles, ROI opacity, previous/next ROI navigation, a side window listing
+all GeoJSON geometries, crosshair display, coordinate copying, polygon drawing,
+and GeoJSON export. Use the annotation/GeoJSON tools to open the geometry list;
+each row shows the geometry type, bounds, point count, source, and id. Use
+`Draw ROI`, click polygon vertices, double-click or press
 `Finish`, then use `Save GeoJSON`. In `Brush` mode, each normal stroke creates
 a new automatically named annotation. If the painted area touches an existing
 annotation with the same label, the regions merge; holding `Alt` on

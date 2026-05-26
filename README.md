@@ -31,7 +31,7 @@ packageVersion("wsiTools")
 wsi_backends()
 ```
 
-The current GitHub package version is `0.1.11`. Avoid installing old commit
+The current GitHub package version is `0.1.12`. Avoid installing old commit
 references unless you are deliberately debugging a previous build; the command
 above always reinstalls the current GitHub version.
 
@@ -71,7 +71,7 @@ want to update your local package library. This avoids accidental long updates
 on managed Windows workstations.
 
 After installation, check `packageVersion("wsiTools")`. It should report
-`0.1.11` or newer. On Windows, the native CZI bridge is compiled by default.
+`0.1.12` or newer. On Windows, the native CZI bridge is compiled by default.
 If you need to install only the core package on a machine where that native
 bridge cannot compile, set `WSITOOLS_DISABLE_NATIVE_CZI=1` before installation
 to use the fallback stub.
@@ -678,13 +678,18 @@ viewer <- wsi_viewer(slide, width = 1600)
 thumbnail. It supports pan, zoom, and level-0 coordinate readout without loading
 the full slide into R memory.
 
-The interactive toolbar is organized into menus: `Navigate`, `Annotations`,
-`GeoJSON`, `View`, and, when enabled, `Stains`. These menus group pan/select
-modes, fit and 1:1 zoom, ROI and label toggles, ROI opacity, previous/next ROI
-navigation, a side window listing all GeoJSON geometries, crosshair display,
-coordinate copying, polygon drawing, and GeoJSON export. Use `GeoJSON` to open
-the geometry list; each row shows the geometry type, bounds, point count,
-source, and id. Use `Draw ROI`, click polygon vertices, double-click or press
+The interactive toolbar is organized into menus such as `Project`,
+`Annotations`, `Segmentation`, `Artifacts`, `Measure`, `Trajectories`, `Image`,
+`View`, `Help`, and, when enabled, `Stains`. Use `Project` to reopen the
+left-side project panel or add ordinary browser-readable images as project
+items. Large WSI, CZI, SVS, OME-TIFF, and pyramidal images should still be
+opened from R or prepared as tiled project sources so the viewer can avoid
+loading full images into memory. These menus group pan/select modes, fit and
+1:1 zoom, ROI and label toggles, ROI opacity, previous/next ROI navigation, a
+side window listing all GeoJSON geometries, crosshair display, coordinate
+copying, polygon drawing, and GeoJSON export. Use the annotation/GeoJSON tools
+to open the geometry list; each row shows the geometry type, bounds, point
+count, source, and id. Use `Draw ROI`, click polygon vertices, double-click or press
 `Finish`, then use `Save GeoJSON`. In `Brush` mode, each normal stroke creates
 a new automatically named annotation. If the painted area touches an existing
 annotation with the same label, the regions merge; holding `Alt` on
