@@ -373,6 +373,8 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "projectImageFile", fixed = TRUE)
   expect_match(html, "openProjectPanel", fixed = TRUE)
   expect_match(html, "ensureProjectWorkspaceVisible", fixed = TRUE)
+  expect_match(html, "setProjectPanelClosed(false)", fixed = TRUE)
+  expect_match(html, "setProjectPanelMinimized(false)", fixed = TRUE)
   expect_match(html, "loadProjectImageFile", fixed = TRUE)
   expect_match(html, "addProjectImageDataUri", fixed = TRUE)
   expect_match(html, "project_image_added", fixed = TRUE)
