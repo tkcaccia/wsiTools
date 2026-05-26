@@ -994,6 +994,7 @@ wsi_viewer_chrome <- function(config, loading_message, tiled = FALSE) {
         "<div id=\"syncSummary\" class=\"menuHint\"></div>"
       )
     ),
+    wsi_viewer_stain_controls(config),
     wsi_viewer_menu(
       "Help",
       "Keyboard shortcuts",
@@ -1002,7 +1003,6 @@ wsi_viewer_chrome <- function(config, loading_message, tiled = FALSE) {
         "<div class=\"menuHint\">Press ? anytime to open this help.</div>"
       )
     ),
-    wsi_viewer_stain_controls(config),
     "</div>\n",
     "</div>\n",
     "<div id=\"navDock\" class=\"panel navDock\" aria-label=\"Navigation controls\">",

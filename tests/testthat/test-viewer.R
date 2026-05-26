@@ -46,6 +46,10 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "New ROI", fixed = TRUE)
   expect_match(html, "toolEdit", fixed = TRUE)
   expect_match(html, "Stains", fixed = TRUE)
+  pos_stains_menu <- regexpr("<summary title=\"Stain deconvolution display options\">Stains</summary>", html, fixed = TRUE)[[1]]
+  pos_help_menu <- regexpr("<summary title=\"Keyboard shortcuts\">Help</summary>", html, fixed = TRUE)[[1]]
+  expect_true(all(c(pos_stains_menu, pos_help_menu) > 0))
+  expect_lt(pos_stains_menu, pos_help_menu)
   expect_match(html, "No stain channels are configured for this viewer.", fixed = TRUE)
   expect_match(html, "stainChannelControls", fixed = TRUE)
   expect_match(html, "Brush size", fixed = TRUE)

@@ -52,7 +52,7 @@ packageVersion("wsiTools")
 wsi_backends()
 ```
 
-The current GitHub package version is `0.1.15`. If R reports an older version
+The current GitHub package version is `0.1.16`. If R reports an older version
 after installation, remove the old package directory and reinstall from
 `tkcaccia/wsiTools` without pinning an old commit.
 
