@@ -20,7 +20,7 @@ make_he_patch <- function(width = 16, height = 12, stain_matrix = wsi_he_stain_m
   array(exp(-od), dim = c(height, width, 3))
 }
 
-test_that("H&E deconvolution returns hematoxylin and eosin channels", {
+test_that("H&E deconvolution returns hematoxylin, eosin, and residual channels", {
   image <- make_he_patch(width = 10, height = 8)
 
   channels <- wsi_deconvolve_he(image)
@@ -28,8 +28,27 @@ test_that("H&E deconvolution returns hematoxylin and eosin channels", {
   expect_s3_class(channels, "wsi_ihc_channels")
   expect_equal(dim(channels$hematoxylin), c(8, 10))
   expect_equal(dim(channels$eosin), c(8, 10))
+  expect_equal(dim(channels$residual), c(8, 10))
+  expect_equal(wsiTools:::wsi_channel_ids_from_output(channels), c("hematoxylin", "eosin", "residual"))
   expect_true(all(channels$hematoxylin >= 0))
   expect_true(all(channels$eosin >= 0))
+  expect_true(all(channels$residual >= 0))
+  expect_false(channels$channel_metadata[[3]]$visible)
+})
+
+test_that("H&E residual channel can be visualized in recoloured output", {
+  image <- make_he_patch(width = 6, height = 5)
+
+  recoloured <- wsi_deconvolve_he(
+    image,
+    format = "array",
+    residual_colour = "gray40",
+    residual_visible = TRUE
+  )
+
+  expect_equal(dim(recoloured), c(5, 6, 4))
+  expect_true(all(recoloured >= 0))
+  expect_true(all(recoloured <= 1))
 })
 
 test_that("H&E stain matrices can be estimated and reconstructed", {
@@ -129,6 +148,24 @@ test_that("region-based IHC deconvolution works on mock slides", {
 
   expect_s3_class(channels, "wsi_ihc_channels")
   expect_equal(dim(channels$hematoxylin), c(24, 32))
+})
+
+test_that("region-based H&E deconvolution returns residual channel on mock slides", {
+  slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 800, levels = c(1, 4))
+
+  channels <- wsi_deconvolve_he_region(
+    slide,
+    x = 10,
+    y = 20,
+    width = 32,
+    height = 24,
+    level = 0
+  )
+
+  expect_s3_class(channels, "wsi_ihc_channels")
+  expect_equal(dim(channels$hematoxylin), c(24, 32))
+  expect_equal(dim(channels$eosin), c(24, 32))
+  expect_equal(dim(channels$residual), c(24, 32))
 })
 
 test_that("region-based IHC deconvolution accepts image paths with spaces", {

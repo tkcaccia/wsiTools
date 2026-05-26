@@ -473,7 +473,11 @@ wsi_mihc_channel_sources <- function(path, pages = NULL, channel_names = NULL,
 #'
 #' Convenience wrapper for the common workflow where an H&E WSI is the base
 #' OpenSeadragon image and an mIHC OME-TIFF/probability image supplies one or
-#' more dynamic tiled overlay channels. The full images are not loaded into R.
+#' more dynamic tiled overlay channels. By default the H&E base image also gets
+#' interactive hematoxylin/eosin/residual deconvolution controls in the
+#' `Stains` menu. Pass `stain = "none"` through `...` to disable H&E
+#' deconvolution, or pass custom H&E `channels` through `...`. The full images
+#' are not loaded into R.
 #'
 #' @param he H&E slide path or an existing `wsi_slide`.
 #' @param mihc mIHC image path readable by libvips.
@@ -525,6 +529,7 @@ wsi_viewer_he_mihc <- function(he, mihc, pages = NULL, channel_names = NULL,
     list(path = mihc, name = "mIHC", role = "overlay")
   )
   dots$base_layer_name <- dots$base_layer_name %||% "H&E"
+  dots$stain <- dots$stain %||% "he"
   if (isTRUE(dynamic_tiles) && is.null(dots$dynamic_tile_format)) {
     dots$dynamic_tile_format <- "jpg"
   }

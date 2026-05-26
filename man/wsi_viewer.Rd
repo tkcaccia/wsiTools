@@ -28,7 +28,7 @@ wsi_viewer(
   roi = NULL,
   roi_fill_alpha = 0.15,
   roi_class_presets = wsi_roi_class_presets(),
-  stain = c("none", "ihc"),
+  stain = c("none", "ihc", "he"),
   channels = NULL,
   base_layer_name = NULL,
   hematoxylin = c(0.65, 0.704, 0.286),
@@ -108,7 +108,8 @@ pixel coordinates, matching QuPath-style GeoJSON exports.}
 colours, and optional export rules.}
 
 \item{stain}{Optional stain display mode. Use \code{"ihc"} for interactive
-stain-channel color deconvolution in the browser.}
+stain-channel color deconvolution in the browser, or \code{"he"} for
+hematoxylin/eosin/residual H&E deconvolution.}
 
 \item{channels}{Optional stain channels created by \code{\link[=wsi_stain_channels]{wsi_stain_channels()}}.
 RGB brightfield deconvolution supports up to three independent channels at
@@ -193,10 +194,12 @@ StarDist, showing a coordinate-only tile grid, and requesting a project save
 from a live R session. A \verb{?} shortcut and Help menu show the keyboard map for
 pan, draw, brush, edit, measure, undo, redo, save, import, and export.
 Optional \code{stain = "ihc"} adds an RGB optical-density deconvolution display
-with selectable stain channels, colours, and gains. Use \code{channels} to provide
-multi-IHC channel definitions. \code{project_images} adds a left-side Project
-section for related images or multi-scene microscopy files, including CZI
-entries that can be activated through optional Bio-Formats tooling.
+with selectable stain channels, colours, and gains. \code{stain = "he"} uses
+hematoxylin, eosin, and residual H&E channels. Use \code{channels} to provide
+multi-IHC or custom H&E channel definitions. \code{project_images} adds a
+left-side Project section for related images or multi-scene microscopy files,
+including CZI entries that can be activated through optional Bio-Formats
+tooling.
 }
 \examples{
 \dontrun{

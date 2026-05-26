@@ -6,13 +6,149 @@ wsi_czi_backend_message <- function(path = NULL) {
   paste(
     "CZI files are not readable through the ImageMagick fallback backend.",
     "Install one CZI-capable backend, then restart R/RStudio:",
-    "1. For first visualization: install ZEISS libCZI/libCZIAPI and set `WSITOOLS_LIBCZIAPI` if the shared library is not already discoverable.",
-    "2. For metadata/conversion: install Bio-Formats with `conda install --override-channels -c ome -c conda-forge bftools`, or download `bftools.zip` and add `showinf`/`bfconvert` to PATH.",
-    "3. Legacy fallback only if you explicitly opt in: set `WSITOOLS_CZI_ALLOW_PYTHON=true` and configure `WSITOOLS_CZI_PYTHON` for `aicspylibczi`.",
+    "1. If OpenSlide or libvips can read this CZI variant, wsiTools will use them first because they are fast and tile-friendly.",
+    "2. Otherwise, for first visualization: install ZEISS libCZI/libCZIAPI and set `WSITOOLS_LIBCZIAPI` if the shared library is not already discoverable.",
+    "3. Alternative first visualization: configure the Bio-Formats Java helper with Java plus `bioformats_package.jar`, then set `WSITOOLS_BIOFORMATS_JAR` if needed.",
+    "4. For metadata/conversion: install Bio-Formats with `conda install --override-channels -c ome -c conda-forge bftools`, or download `bftools.zip` and add `showinf`/`bfconvert` to PATH.",
+    "5. Legacy fallback only if you explicitly opt in: set `WSITOOLS_CZI_ALLOW_PYTHON=true` and configure `WSITOOLS_CZI_PYTHON` for `aicspylibczi`.",
     "Check with `wsi_has_native_czi()`, `wsi_has_czi_python()`, and `wsi_backends()`.",
     "For CZI project viewing, use `wsi_viewer_project(\"file.czi\")`.",
     sep = "\n"
   )
+}
+
+wsi_bioformats_java_source <- function() {
+  template <- system.file("java", "WsiToolsBioFormatsHelper.java.txt", package = "wsiTools", mustWork = FALSE)
+  if (!nzchar(template) || !file.exists(template)) {
+    template <- file.path(getwd(), "inst", "java", "WsiToolsBioFormatsHelper.java.txt")
+  }
+  if (!file.exists(template)) {
+    return("")
+  }
+  source <- file.path(wsi_bioformats_java_class_dir(), "WsiToolsBioFormatsHelper.java")
+  if (!file.exists(source) || file.info(source)$mtime < file.info(template)$mtime) {
+    file.copy(template, source, overwrite = TRUE)
+  }
+  source
+}
+
+wsi_bioformats_java_class_dir <- function() {
+  dir <- file.path(tempdir(), "wsiTools_bioformats_java")
+  dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+  dir
+}
+
+wsi_bioformats_java_compile <- function(jar = NULL, class_dir = NULL) {
+  jar <- wsi_bioformats_java_jar(jar)
+  if (!nzchar(jar) || !file.exists(jar)) {
+    wsi_abort(
+      paste(
+        "Bio-Formats Java helper requires `bioformats_package.jar`.",
+        "Set `WSITOOLS_BIOFORMATS_JAR` to the full jar path, or set `WSITOOLS_BIOFORMATS_HOME` to the Bio-Formats folder.",
+        sep = "\n"
+      ),
+      class = "wsi_backend_unavailable"
+    )
+  }
+  source <- wsi_bioformats_java_source()
+  if (!file.exists(source)) {
+    wsi_abort("The Bio-Formats Java helper source file is missing from this wsiTools installation.")
+  }
+  class_dir <- class_dir %||% wsi_bioformats_java_class_dir()
+  class_file <- file.path(class_dir, "WsiToolsBioFormatsHelper.class")
+  if (file.exists(class_file) && file.info(class_file)$mtime >= file.info(source)$mtime) {
+    return(class_dir)
+  }
+  javac <- wsi_bioformats_javac_command()
+  if (!wsi_command_exists(javac)) {
+    wsi_abort(
+      "Compiling the Bio-Formats Java helper requires `javac`. Install a JDK, not only a JRE, then retry.",
+      class = "wsi_backend_unavailable"
+    )
+  }
+  dir.create(class_dir, recursive = TRUE, showWarnings = FALSE)
+  wsi_run_command(
+    javac,
+    args = c("-cp", jar, "-d", class_dir, source),
+    error_message = "Bio-Formats Java helper compilation failed."
+  )
+  class_dir
+}
+
+wsi_bioformats_java_run <- function(args, jar = NULL, java = NULL, class_dir = NULL) {
+  jar <- wsi_bioformats_java_jar(jar)
+  java <- wsi_bioformats_java_command(java)
+  if (!wsi_command_exists(java)) {
+    wsi_abort("Bio-Formats Java helper requires `java` on PATH or `WSITOOLS_JAVA`.")
+  }
+  class_dir <- wsi_bioformats_java_compile(jar = jar, class_dir = class_dir)
+  classpath <- paste(c(class_dir, jar), collapse = .Platform$path.sep)
+  wsi_run_command(
+    java,
+    args = c("-cp", classpath, "WsiToolsBioFormatsHelper", args),
+    error_message = "Bio-Formats Java helper failed."
+  )
+}
+
+wsi_bioformats_java_metadata <- function(path, jar = NULL) {
+  path <- wsi_validate_input_path(path)
+  out <- wsi_bioformats_java_run(c("metadata", path), jar = jar)
+  parsed <- tryCatch(
+    jsonlite::fromJSON(paste(out, collapse = "\n"), simplifyVector = FALSE),
+    error = function(err) {
+      wsi_abort(sprintf("Bio-Formats Java helper returned invalid metadata JSON: %s", conditionMessage(err)))
+    }
+  )
+  rows <- parsed$series %||% list()
+  if (!length(rows)) {
+    wsi_abort("Bio-Formats Java helper did not report image dimensions for this file.")
+  }
+  series <- do.call(rbind, lapply(rows, function(row) {
+    data.frame(
+      series = as.integer(row$series %||% 0L),
+      resolution = as.integer(row$resolution %||% 0L),
+      width = as.numeric(row$width %||% NA_real_),
+      height = as.numeric(row$height %||% NA_real_),
+      size_z = as.integer(row$size_z %||% NA_integer_),
+      size_c = as.integer(row$size_c %||% NA_integer_),
+      size_t = as.integer(row$size_t %||% NA_integer_),
+      pixel_type = as.character(row$pixel_type %||% NA_character_),
+      dimension_order = as.character(row$dimension_order %||% NA_character_),
+      rgb = isTRUE(row$rgb),
+      stringsAsFactors = FALSE
+    )
+  }))
+  series <- series[!is.na(series$width) & !is.na(series$height), , drop = FALSE]
+  if (!nrow(series)) {
+    wsi_abort("Bio-Formats Java helper did not report usable image dimensions for this file.")
+  }
+  list(series = series, raw = out, source = "bioformats-java", json = parsed)
+}
+
+wsi_bioformats_java_read_region_file <- function(path, output, series = 0L,
+                                                 resolution = 0L, x = 0L, y = 0L,
+                                                 width, height, z = 0L, channel = 0L,
+                                                 time = 0L, format = "png",
+                                                 jar = NULL) {
+  path <- wsi_validate_input_path(path)
+  output <- wsi_validate_output_path(output, overwrite = TRUE)
+  args <- c(
+    "region",
+    path,
+    as.character(as.integer(series)),
+    as.character(as.integer(resolution)),
+    as.character(as.integer(z)),
+    as.character(as.integer(channel)),
+    as.character(as.integer(time)),
+    as.character(as.integer(x)),
+    as.character(as.integer(y)),
+    as.character(as.integer(width)),
+    as.character(as.integer(height)),
+    output,
+    format
+  )
+  wsi_bioformats_java_run(args, jar = jar)
+  invisible(output)
 }
 
 wsi_bioformats_showinf <- function(path, omexml = TRUE) {
@@ -125,6 +261,16 @@ wsi_bioformats_parse_plain <- function(lines) {
 }
 
 wsi_bioformats_series_metadata <- function(path) {
+  if (wsi_has_bioformats_java()) {
+    java <- tryCatch(
+      wsi_bioformats_java_metadata(path),
+      error = function(err) NULL
+    )
+    if (!is.null(java)) {
+      return(java)
+    }
+  }
+
   xml <- tryCatch(
     wsi_bioformats_showinf(path, omexml = TRUE),
     error = function(err) NULL
@@ -288,9 +434,95 @@ wsi_bioformats_preview_rows <- function(series, width, max_series = 8L, max_inpu
   utils::head(series, 1L)
 }
 
+wsi_bioformats_java_project_preview <- function(path, width = 768, height = NULL,
+                                                max_series = 8L,
+                                                max_input_pixels = 2e7) {
+  if (!wsi_has_bioformats_java()) {
+    wsi_abort(
+      paste(
+        "Bio-Formats Java preview requires Java and `bioformats_package.jar`.",
+        "Set `WSITOOLS_BIOFORMATS_JAR` to the jar path, then retry.",
+        sep = "\n"
+      ),
+      class = "wsi_backend_unavailable"
+    )
+  }
+  info <- wsi_bioformats_java_metadata(path)
+  rows <- wsi_bioformats_preview_rows(
+    info$series,
+    width = width,
+    max_series = max_series,
+    max_input_pixels = max_input_pixels
+  )
+  rows <- rows[rows$width * rows$height <= max_input_pixels, , drop = FALSE]
+  if (!nrow(rows)) {
+    wsi_abort(
+      "Bio-Formats Java helper did not report a low-resolution series suitable for first visualization.",
+      class = "wsi_backend_unavailable"
+    )
+  }
+
+  output_dir <- tempfile("wsi_bioformats_java_preview_")
+  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+  on.exit(unlink(output_dir, recursive = TRUE, force = TRUE), add = TRUE)
+
+  sections <- lapply(seq_len(nrow(rows)), function(i) {
+    row <- rows[i, , drop = FALSE]
+    raw_png <- file.path(output_dir, sprintf("series_%d_res_%d_raw.png", row$series[[1L]], row$resolution[[1L]] %||% 0L))
+    png <- file.path(output_dir, sprintf("series_%d_res_%d.png", row$series[[1L]], row$resolution[[1L]] %||% 0L))
+    wsi_bioformats_java_read_region_file(
+      path,
+      output = raw_png,
+      series = row$series[[1L]],
+      resolution = row$resolution[[1L]] %||% 0L,
+      x = 0L,
+      y = 0L,
+      width = row$width[[1L]],
+      height = row$height[[1L]],
+      format = "png"
+    )
+    wsi_bioformats_preview_resize(raw_png, png, width = width, height = height)
+    list(
+      id = sprintf("bioformats_series_%d_resolution_%d", row$series[[1L]], row$resolution[[1L]] %||% 0L),
+      label = sprintf(
+        "Series %d, resolution %d (%sx%s)",
+        row$series[[1L]],
+        row$resolution[[1L]] %||% 0L,
+        format(row$width[[1L]], scientific = FALSE, trim = TRUE),
+        format(row$height[[1L]], scientific = FALSE, trim = TRUE)
+      ),
+      series = as.integer(row$series[[1L]]),
+      resolution = as.integer(row$resolution[[1L]] %||% 0L),
+      width = as.numeric(row$width[[1L]]),
+      height = as.numeric(row$height[[1L]]),
+      preview_width = width,
+      preview_height = height %||% NA_real_,
+      status = "low-resolution preview",
+      message = "Preview generated with Bio-Formats ImageReader region reads; full-resolution pixels remain on disk.",
+      image_data_uri = wsi_image_data_uri(png, mime = "image/png"),
+      navigator_image_data_uri = wsi_image_data_uri(png, mime = "image/png")
+    )
+  })
+
+  list(
+    backend = "bioformats_java",
+    sections = sections,
+    metadata = info
+  )
+}
+
 wsi_bioformats_project_preview <- function(path, width = 768, height = NULL,
                                            max_series = 8L,
                                            max_input_pixels = 8e7) {
+  if (wsi_has_bioformats_java()) {
+    return(wsi_bioformats_java_project_preview(
+      path,
+      width = width,
+      height = height,
+      max_series = max_series,
+      max_input_pixels = min(max_input_pixels, 2e7)
+    ))
+  }
   if (!wsi_has_bioformats()) {
     wsi_abort(
       "Bio-Formats CZI preview generation requires `showinf` and `bfconvert` on PATH.",

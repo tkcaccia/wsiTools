@@ -16,6 +16,7 @@ wsi_backends <- function() {
       "openslide",
       "libvips",
       "bioformats",
+      "bioformats_java",
       "imagemagick",
       "native_czi",
       "aicspylibczi",
@@ -28,6 +29,7 @@ wsi_backends <- function() {
       wsi_has_openslide(),
       wsi_has_vips(),
       wsi_has_bioformats(),
+      wsi_has_bioformats_java(),
       wsi_has_imagemagick(),
       wsi_has_native_czi(),
       wsi_has_czi_python(),
@@ -40,6 +42,7 @@ wsi_backends <- function() {
       wsi_command_version("openslide-show-properties"),
       wsi_command_version("vips"),
       wsi_bioformats_version(),
+      wsi_bioformats_java_version(),
       wsi_first_available_version(wsi_command_version("magick"), wsi_optional_package_version("magick")),
       wsi_native_czi_version(),
       wsi_czi_python_version(),
@@ -52,6 +55,7 @@ wsi_backends <- function() {
       "metadata, pyramid levels, region reads via openslide-write-png when available",
       "large-image conversion, thumbnails, cropping, pyramidal TIFF export",
       "optional microscopy format bridge for CZI and other Bio-Formats-readable files",
+      "optional Bio-Formats region reader through a small Java ImageReader helper",
       "ordinary image metadata, thumbnails, and level-0 crop previews",
       "optional native CZI region/tile reader through ZEISS libCZI",
       "optional CZI mosaic metadata and lightweight preview generation",
@@ -63,7 +67,8 @@ wsi_backends <- function() {
     notes = c(
       "Requires OpenSlide command-line tools for this milestone; native C bindings are planned.",
       "Requires vips and vipsheader on PATH.",
-      "Optional backend; install Bio-Formats command-line tools (`showinf`/`bfconvert`) for CZI metadata and conversion, not first visualization.",
+      "Optional backend; install Bio-Formats command-line tools (`showinf`/`bfconvert`) for metadata and conversion workflows.",
+      "Optional first-visualization helper. Requires Java plus `bioformats_package.jar`; set WSITOOLS_BIOFORMATS_JAR when needed.",
       "Optional fallback for standard TIFF/PNG/JPEG previews; install libvips/OpenSlide for WSI-scale tiled viewing.",
       "Optional direct CZI backend. Install ZEISS libCZI/libCZIAPI and set WSITOOLS_LIBCZIAPI if it is not on the dynamic library path.",
       "Legacy optional fallback. Only used for CZI previews when WSITOOLS_CZI_ALLOW_PYTHON=true.",
@@ -92,7 +97,8 @@ wsi_has_vips <- function() {
 #' @rdname wsi_backends
 #' @export
 wsi_has_bioformats <- function() {
-  wsi_command_exists(wsi_bioformats_command("bfconvert")) ||
+  wsi_has_bioformats_java() ||
+    wsi_command_exists(wsi_bioformats_command("bfconvert")) ||
     wsi_command_exists(wsi_bioformats_command("showinf"))
 }
 
@@ -156,6 +162,10 @@ wsi_default_cellpose_command <- function(command = NULL) {
 }
 
 wsi_bioformats_version <- function() {
+  java <- wsi_bioformats_java_version()
+  if (!is.na(java)) {
+    return(java)
+  }
   bfconvert <- wsi_bioformats_command("bfconvert")
   showinf <- wsi_bioformats_command("showinf")
   if (wsi_command_exists(bfconvert)) {
@@ -165,6 +175,84 @@ wsi_bioformats_version <- function() {
     return(wsi_command_version(showinf, "-version"))
   }
   NA_character_
+}
+
+wsi_bioformats_java_command <- function(command = NULL) {
+  if (!is.null(command)) {
+    return(command)
+  }
+  env <- Sys.getenv("WSITOOLS_JAVA", unset = "")
+  if (nzchar(env)) {
+    return(env)
+  }
+  java <- Sys.which("java")
+  if (nzchar(java)) unname(java) else "java"
+}
+
+wsi_bioformats_javac_command <- function(command = NULL) {
+  if (!is.null(command)) {
+    return(command)
+  }
+  env <- Sys.getenv("WSITOOLS_JAVAC", unset = "")
+  if (nzchar(env)) {
+    return(env)
+  }
+  javac <- Sys.which("javac")
+  if (nzchar(javac)) unname(javac) else "javac"
+}
+
+wsi_bioformats_java_jar <- function(jar = NULL) {
+  if (!is.null(jar) && nzchar(jar)) {
+    return(jar)
+  }
+  env <- Sys.getenv("WSITOOLS_BIOFORMATS_JAR", unset = "")
+  if (nzchar(env)) {
+    return(env)
+  }
+  home <- Sys.getenv("WSITOOLS_BIOFORMATS_HOME", unset = "")
+  candidates <- character()
+  if (nzchar(home)) {
+    candidates <- c(
+      file.path(home, "bioformats_package.jar"),
+      file.path(home, "loci_tools.jar"),
+      file.path(home, "artifacts", "bioformats_package.jar")
+    )
+  }
+  candidates <- c(
+    candidates,
+    file.path(getwd(), "bioformats_package.jar"),
+    file.path(getwd(), "loci_tools.jar")
+  )
+  existing <- candidates[file.exists(candidates)]
+  if (length(existing)) {
+    return(existing[[1L]])
+  }
+  ""
+}
+
+wsi_has_bioformats_java <- function(jar = NULL, java = NULL) {
+  jar <- wsi_bioformats_java_jar(jar)
+  java <- wsi_bioformats_java_command(java)
+  nzchar(jar) && file.exists(jar) && wsi_command_exists(java)
+}
+
+wsi_bioformats_java_version <- function(jar = NULL, java = NULL) {
+  if (!wsi_has_bioformats_java(jar = jar, java = java)) {
+    return(NA_character_)
+  }
+  out <- tryCatch(
+    wsi_bioformats_java_run(c("version"), jar = jar, java = java),
+    error = function(err) character()
+  )
+  if (!length(out)) {
+    return("Bio-Formats Java helper")
+  }
+  parsed <- tryCatch(jsonlite::fromJSON(paste(out, collapse = "\n")), error = function(err) NULL)
+  version <- parsed$bioformats_version %||% NA_character_
+  if (is.na(version) || !nzchar(version)) {
+    return("Bio-Formats Java helper")
+  }
+  paste("Bio-Formats", version)
 }
 
 wsi_bioformats_command <- function(command = c("bfconvert", "showinf")) {

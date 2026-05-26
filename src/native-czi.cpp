@@ -3,6 +3,7 @@
 #include <Rinternals.h>
 #include <R_ext/Rdynload.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -11,7 +12,27 @@
 #include <vector>
 
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+// R defines Realloc/Free macros that collide with COM method names pulled in by
+// Windows headers. The native CZI bridge does not use those R allocation macros.
+#ifdef Realloc
+#undef Realloc
+#endif
+#ifdef Free
+#undef Free
+#endif
 #include <windows.h>
+#ifdef TRUE
+#undef TRUE
+#endif
+#ifdef FALSE
+#undef FALSE
+#endif
 #else
 #include <dlfcn.h>
 #endif
@@ -68,6 +89,23 @@ struct SubBlockStatisticsInterop {
   IntRectInterop bounding_box;
   IntRectInterop bounding_box_layer0;
   DimBoundsInterop dim_bounds;
+};
+
+struct BoundingBoxesInterop {
+  int32_t sceneIndex;
+  IntRectInterop bounding_box;
+  IntRectInterop bounding_box_layer0_only;
+};
+
+struct SubBlockStatisticsInteropEx {
+  int32_t sub_block_count;
+  int32_t min_m_index;
+  int32_t max_m_index;
+  IntRectInterop bounding_box;
+  IntRectInterop bounding_box_layer0;
+  DimBoundsInterop dim_bounds;
+  int32_t number_of_per_scenes_bounding_boxes;
+  BoundingBoxesInterop per_scenes_bounding_boxes[1];
 };
 
 struct MetadataAsXmlInterop {
@@ -190,6 +228,7 @@ typedef int32_t (*CreateInputStreamFromFileUTF8Fn)(const char*, InputStreamObjec
 typedef int32_t (*ReleaseInputStreamFn)(InputStreamObjectHandle);
 typedef int32_t (*ReaderOpenFn)(CziReaderObjectHandle, const ReaderOpenInfoInterop*);
 typedef int32_t (*ReaderGetStatisticsSimpleFn)(CziReaderObjectHandle, SubBlockStatisticsInterop*);
+typedef int32_t (*ReaderGetStatisticsExFn)(CziReaderObjectHandle, SubBlockStatisticsInteropEx*, int32_t*);
 typedef int32_t (*ReaderGetPyramidStatisticsFn)(CziReaderObjectHandle, char**);
 typedef int32_t (*ReaderGetMetadataSegmentFn)(CziReaderObjectHandle, MetadataSegmentObjectHandle*);
 typedef int32_t (*MetadataSegmentGetMetadataAsXmlFn)(MetadataSegmentObjectHandle, MetadataAsXmlInterop*);
@@ -281,6 +320,90 @@ SEXP dim_bounds_to_r(const DimBoundsInterop& dims) {
   SET_STRING_ELT(names, 2, Rf_mkChar("size"));
   Rf_setAttrib(out, R_NamesSymbol, names);
   UNPROTECT(5);
+  return out;
+}
+
+SEXP scene_boxes_to_r(DynamicLibrary& lib, CziReaderObjectHandle reader) {
+  ReaderGetStatisticsExFn get_stats_ex =
+      sym<ReaderGetStatisticsExFn>(lib, "libCZI_ReaderGetStatisticsEx", false);
+  if (!get_stats_ex) {
+    return R_NilValue;
+  }
+
+  int32_t count = 0;
+  std::vector<unsigned char> probe(sizeof(SubBlockStatisticsInteropEx));
+  std::memset(probe.data(), 0, probe.size());
+  SubBlockStatisticsInteropEx* probe_stats =
+      reinterpret_cast<SubBlockStatisticsInteropEx*>(probe.data());
+  int32_t err = get_stats_ex(reader, probe_stats, &count);
+  if (err != 0 || count <= 0) {
+    return R_NilValue;
+  }
+
+  size_t bytes = sizeof(SubBlockStatisticsInteropEx) +
+    static_cast<size_t>(std::max<int32_t>(count, 1) - 1) * sizeof(BoundingBoxesInterop);
+  std::vector<unsigned char> buffer(bytes);
+  std::memset(buffer.data(), 0, buffer.size());
+  SubBlockStatisticsInteropEx* stats =
+      reinterpret_cast<SubBlockStatisticsInteropEx*>(buffer.data());
+  int32_t requested = count;
+  err = get_stats_ex(reader, stats, &requested);
+  if (err != 0 || stats->number_of_per_scenes_bounding_boxes <= 0) {
+    return R_NilValue;
+  }
+
+  int n = stats->number_of_per_scenes_bounding_boxes;
+  SEXP scene = PROTECT(Rf_allocVector(INTSXP, n));
+  SEXP x = PROTECT(Rf_allocVector(INTSXP, n));
+  SEXP y = PROTECT(Rf_allocVector(INTSXP, n));
+  SEXP width = PROTECT(Rf_allocVector(INTSXP, n));
+  SEXP height = PROTECT(Rf_allocVector(INTSXP, n));
+  SEXP pyramid_x = PROTECT(Rf_allocVector(INTSXP, n));
+  SEXP pyramid_y = PROTECT(Rf_allocVector(INTSXP, n));
+  SEXP pyramid_width = PROTECT(Rf_allocVector(INTSXP, n));
+  SEXP pyramid_height = PROTECT(Rf_allocVector(INTSXP, n));
+
+  for (int i = 0; i < n; ++i) {
+    const BoundingBoxesInterop& box = stats->per_scenes_bounding_boxes[i];
+    IntRectInterop layer0 = box.bounding_box_layer0_only.w > 0 && box.bounding_box_layer0_only.h > 0 ?
+      box.bounding_box_layer0_only : box.bounding_box;
+    INTEGER(scene)[i] = box.sceneIndex;
+    INTEGER(x)[i] = layer0.x;
+    INTEGER(y)[i] = layer0.y;
+    INTEGER(width)[i] = layer0.w;
+    INTEGER(height)[i] = layer0.h;
+    INTEGER(pyramid_x)[i] = box.bounding_box.x;
+    INTEGER(pyramid_y)[i] = box.bounding_box.y;
+    INTEGER(pyramid_width)[i] = box.bounding_box.w;
+    INTEGER(pyramid_height)[i] = box.bounding_box.h;
+  }
+
+  SEXP out = PROTECT(Rf_allocVector(VECSXP, 9));
+  SET_VECTOR_ELT(out, 0, scene);
+  SET_VECTOR_ELT(out, 1, x);
+  SET_VECTOR_ELT(out, 2, y);
+  SET_VECTOR_ELT(out, 3, width);
+  SET_VECTOR_ELT(out, 4, height);
+  SET_VECTOR_ELT(out, 5, pyramid_x);
+  SET_VECTOR_ELT(out, 6, pyramid_y);
+  SET_VECTOR_ELT(out, 7, pyramid_width);
+  SET_VECTOR_ELT(out, 8, pyramid_height);
+
+  SEXP names = PROTECT(Rf_allocVector(STRSXP, 9));
+  const char* name_values[] = {
+    "scene", "x", "y", "width", "height",
+    "pyramid_x", "pyramid_y", "pyramid_width", "pyramid_height"
+  };
+  for (int i = 0; i < 9; ++i) SET_STRING_ELT(names, i, Rf_mkChar(name_values[i]));
+  Rf_setAttrib(out, R_NamesSymbol, names);
+
+  SEXP row_names = PROTECT(Rf_allocVector(INTSXP, 2));
+  INTEGER(row_names)[0] = NA_INTEGER;
+  INTEGER(row_names)[1] = -n;
+  Rf_setAttrib(out, R_RowNamesSymbol, row_names);
+  Rf_setAttrib(out, R_ClassSymbol, Rf_mkString("data.frame"));
+
+  UNPROTECT(12);
   return out;
 }
 
@@ -429,6 +552,8 @@ extern "C" SEXP wsi_native_czi_info(SEXP path_) {
     }
   }
 
+  SEXP scenes = PROTECT(scene_boxes_to_r(lib, czi.reader));
+
   std::string version = version_string(lib);
   close_czi(lib, czi);
 
@@ -436,14 +561,14 @@ extern "C" SEXP wsi_native_czi_info(SEXP path_) {
     stats.bounding_box_layer0 : stats.bounding_box;
 
   SEXP dims = PROTECT(dim_bounds_to_r(stats.dim_bounds));
-  SEXP out = PROTECT(Rf_allocVector(VECSXP, 15));
-  SEXP names = PROTECT(Rf_allocVector(STRSXP, 15));
+  SEXP out = PROTECT(Rf_allocVector(VECSXP, 16));
+  SEXP names = PROTECT(Rf_allocVector(STRSXP, 16));
   const char* name_values[] = {
     "path", "library", "version", "x", "y", "width", "height",
     "sub_block_count", "min_m_index", "max_m_index", "dimensions",
-    "pyramid_json", "metadata_xml", "attachment_count", "backend"
+    "pyramid_json", "metadata_xml", "attachment_count", "backend", "scenes"
   };
-  for (int i = 0; i < 15; ++i) SET_STRING_ELT(names, i, Rf_mkChar(name_values[i]));
+  for (int i = 0; i < 16; ++i) SET_STRING_ELT(names, i, Rf_mkChar(name_values[i]));
   SET_VECTOR_ELT(out, 0, Rf_mkString(path));
   SET_VECTOR_ELT(out, 1, Rf_mkString(lib.name().c_str()));
   SET_VECTOR_ELT(out, 2, version.empty() ? Rf_ScalarString(NA_STRING) : Rf_mkString(version.c_str()));
@@ -459,8 +584,9 @@ extern "C" SEXP wsi_native_czi_info(SEXP path_) {
   SET_VECTOR_ELT(out, 12, metadata_xml);
   SET_VECTOR_ELT(out, 13, Rf_ScalarInteger(attachment_count));
   SET_VECTOR_ELT(out, 14, Rf_mkString("native_czi"));
+  SET_VECTOR_ELT(out, 15, scenes);
   Rf_setAttrib(out, R_NamesSymbol, names);
-  UNPROTECT(5);
+  UNPROTECT(6);
   return out;
 }
 
@@ -606,5 +732,5 @@ static const R_CallMethodDef CallEntries[] = {
 
 extern "C" void R_init_wsiTools(DllInfo* dll) {
   R_registerRoutines(dll, NULL, CallEntries, NULL, NULL);
-  R_useDynamicSymbols(dll, FALSE);
+  R_useDynamicSymbols(dll, static_cast<Rboolean>(FALSE));
 }

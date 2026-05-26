@@ -8,8 +8,14 @@
 wsi_he_stain_channels(
   hematoxylin = c(0.644, 0.717, 0.267),
   eosin = c(0.093, 0.954, 0.283),
+  include_residual = TRUE,
   hematoxylin_colour = "#4b3f99",
-  eosin_colour = "#e85b90"
+  eosin_colour = "#e85b90",
+  residual_colour = "#6b7280",
+  hematoxylin_strength = 1,
+  eosin_strength = 1,
+  residual_strength = 1,
+  residual_visible = FALSE
 )
 
 wsi_he_stain_matrix(
@@ -20,11 +26,23 @@ wsi_he_stain_matrix(
 \arguments{
 \item{hematoxylin, eosin}{RGB optical-density vectors.}
 
+\item{include_residual}{Include the residual optical-density channel in the
+returned channel definitions.}
+
 \item{hematoxylin_colour, eosin_colour}{Display colours for recoloured
 channel visualisation.}
+
+\item{residual_colour}{Display colour for the residual channel.}
+
+\item{hematoxylin_strength, eosin_strength, residual_strength}{Initial display
+gains for the channels.}
+
+\item{residual_visible}{Whether the residual channel is visible by default in
+the interactive viewer and recoloured image outputs.}
 }
 \value{
-A \code{wsi_stain_channels} object with hematoxylin and eosin channels.
+A \code{wsi_stain_channels} object with hematoxylin, eosin, and optionally
+residual channels.
 
 \code{wsi_he_stain_matrix()} returns a 3 x 3 matrix with hematoxylin,
 eosin, and residual optical-density vectors.

@@ -20,6 +20,7 @@ wsi_viewer_session(
   dynamic_tile_format = c("png", "jpg", "jpeg"),
   dynamic_tile_cache_dir = NULL,
   dynamic_tile_path = "/tiles",
+  project_tile_sources = NULL,
   wait = interactive(),
   open = interactive(),
   autosave = !is.null(autosave_path),
@@ -59,6 +60,7 @@ wsi_viewer_live(
   dynamic_tile_format = c("png", "jpg", "jpeg"),
   dynamic_tile_cache_dir = NULL,
   dynamic_tile_path = "/tiles",
+  project_tile_sources = NULL,
   wait = interactive(),
   open = interactive(),
   autosave = !is.null(autosave_path),
@@ -117,6 +119,10 @@ Zoom generation in \code{\link[=wsi_viewer]{wsi_viewer()}} is unchanged.}
 
 \item{dynamic_tile_format, dynamic_tile_cache_dir, dynamic_tile_path}{Format,
 cache directory, and HTTP route for on-demand live tiles.}
+
+\item{project_tile_sources}{Optional dynamic tile sources used only by
+Project-panel image/section entries. These sources are served by the live
+tile server but are not exposed as Stains/channel layers.}
 
 \item{wait}{If \code{TRUE}, service the HTTP bridge until interrupted. This is
 the most reliable mode for plain R sessions. Press Esc or Ctrl+C to return

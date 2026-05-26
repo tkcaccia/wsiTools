@@ -98,10 +98,32 @@ again. StarDist and Cellpose are external segmentation tools; keep them in
 separate environments and enable them explicitly rather than making them
 mandatory package dependencies.
 
-### Bio-Formats command-line tools
+### Bio-Formats Java helper and command-line tools
 
-Bio-Formats support in wsiTools means the command-line tools are visible to R.
-The commands wsiTools checks for are `showinf` and `bfconvert`.
+For first visualization of CZI files, wsiTools should use a tile/region reader,
+not `bfconvert`. wsiTools first tries OpenSlide and libvips for CZI variants
+they can already read, because those backends are fast and tile-friendly. The
+next preferred path is the native CZI bridge. A second optional path is the
+Bio-Formats Java helper, which uses a tiny Java class around Bio-Formats
+`ImageReader` region reads.
+
+```{r, eval=FALSE}
+Sys.setenv(WSITOOLS_BIOFORMATS_JAR = "/path/to/bioformats_package.jar")
+# Optional if java/javac are not on PATH:
+# Sys.setenv(WSITOOLS_JAVA = "/path/to/java")
+# Sys.setenv(WSITOOLS_JAVAC = "/path/to/javac")
+
+wsi_backends()
+wsi_viewer_project("sample.czi")
+```
+
+The helper compiles into R's temporary directory and reads only requested
+regions or low-resolution scenes. It does not convert the whole file for first
+opening.
+
+Bio-Formats command-line support means the command-line tools are visible to R.
+The commands wsiTools checks for are `showinf` and `bfconvert`; these remain
+useful for metadata and conversion workflows.
 
 The recommended conda route is:
 
@@ -154,19 +176,39 @@ chooses a backend, and reads metadata. It does not load the full slide.
 OpenSlide, libvips, StarDist, Cellpose, `httpuv`, and `callr` are optional
 runtime capabilities; the package should still install and load without them.
 
-For Zeiss CZI files on Windows, ImageMagick is not a CZI backend. Use the
-native CZI tile/region reader for visualization by installing ZEISS
-libCZI/libCZIAPI and setting `WSITOOLS_LIBCZIAPI` when needed. Bio-Formats
-remains useful for metadata and conversion, but wsiTools does not run
-`bfconvert` automatically for first visualization.
+For Zeiss CZI files on Windows, ImageMagick is not a CZI backend. wsiTools first
+tries OpenSlide and libvips; if neither can read the CZI variant, use the native
+CZI tile/region reader for visualization by installing ZEISS libCZI/libCZIAPI
+and setting `WSITOOLS_LIBCZIAPI` when needed. Alternatively, configure
+`WSITOOLS_BIOFORMATS_JAR` for the Bio-Formats Java helper. Bio-Formats
+command-line tools remain useful for metadata and conversion, but wsiTools does
+not run `bfconvert` automatically for first visualization.
 
 For first visualization with the native bridge:
 
 ```{r, eval=FALSE, purl=FALSE}
-Sys.setenv(WSITOOLS_LIBCZIAPI = "C:/path/to/libCZIAPI.dll")
+# Inspect the commands first; nothing is installed in this call.
+wsi_install_native_czi(install = FALSE)
+
+# Build ZEISS libCZI/libCZIAPI into the user cache after reviewing
+# and accepting the libCZI license notice. Requires git, cmake, and
+# a working C/C++ toolchain.
+wsi_install_native_czi(
+  accept_license = TRUE,
+  ask = FALSE,
+  persist = TRUE
+)
+
 wsi_has_native_czi()
 
 wsi_viewer_project("sample.czi")
+```
+
+If you already installed libCZIAPI manually, point wsiTools at the shared
+library instead:
+
+```{r, eval=FALSE, purl=FALSE}
+Sys.setenv(WSITOOLS_LIBCZIAPI = "C:/path/to/libCZIAPI.dll")
 ```
 
 The project viewer opens CZI files with a low-resolution scene preview first.
@@ -388,7 +430,8 @@ sliders. These display settings are synced back to R in live sessions through
 `viewer$get_channel_settings()`.
 
 For H&E images, use the H&E stain helpers on a patch, tile, or thumbnail. The
-functions work in optical-density space and avoid full-slide reads:
+functions separate hematoxylin, eosin, and residual staining in
+optical-density space and avoid full-slide reads:
 
 ```{r, eval=FALSE, purl=FALSE}
 patch <- wsi_read_region(
@@ -400,6 +443,9 @@ patch <- wsi_read_region(
 )
 
 he_channels <- wsi_deconvolve_he(patch)
+names(he_channels)
+#> hematoxylin, eosin, residual
+
 stain_matrix <- wsi_estimate_stain_matrix(patch, method = "macenko")
 
 normalized <- wsi_normalize_stains(
@@ -409,9 +455,27 @@ normalized <- wsi_normalize_stains(
 )
 ```
 
+The same three-channel H&E separation is available in the interactive viewer:
+
+```{r, eval=FALSE, purl=FALSE}
+he_viewer <- wsi_viewer_he(
+  slide,
+  mode = "tiles",
+  output = "he_stain_viewer.html"
+)
+```
+
 There is also a region wrapper for WSI preprocessing pipelines:
 
 ```{r, eval=FALSE, purl=FALSE}
+he_region <- wsi_deconvolve_he_region(
+  slide,
+  x = 10000,
+  y = 20000,
+  width = 1024,
+  height = 1024
+)
+
 normalized_region <- wsi_stain_normalize_region(
   slide,
   x = 10000,

@@ -12,6 +12,20 @@ test_that("wsi_open gives CZI-specific guidance instead of falling through to Im
   )
 })
 
+test_that("CZI auto backend order gives OpenSlide and libvips first refusal", {
+  candidates <- wsiTools:::wsi_auto_backend_candidates(
+    is_czi = TRUE,
+    has_openslide = TRUE,
+    has_vips = TRUE,
+    has_native_czi = TRUE,
+    has_bioformats = TRUE,
+    has_imagemagick = TRUE
+  )
+
+  expect_equal(candidates, c("openslide", "vips", "native_czi", "bioformats"))
+  expect_false("imagemagick" %in% candidates)
+})
+
 test_that("Bio-Formats OME-XML metadata parser extracts series dimensions", {
   xml <- c(
     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",

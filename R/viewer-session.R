@@ -3155,6 +3155,9 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 #'   Zoom generation in [wsi_viewer()] is unchanged.
 #' @param dynamic_tile_format,dynamic_tile_cache_dir,dynamic_tile_path Format,
 #'   cache directory, and HTTP route for on-demand live tiles.
+#' @param project_tile_sources Optional dynamic tile sources used only by
+#'   Project-panel image/section entries. These sources are served by the live
+#'   tile server but are not exposed as Stains/channel layers.
 #' @param wait If `TRUE`, service the HTTP bridge until interrupted. This is
 #'   the most reliable mode for plain R sessions. Press Esc or Ctrl+C to return
 #'   to the console; synced objects remain in `envir`.
@@ -3249,6 +3252,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
                                dynamic_tile_format = c("png", "jpg", "jpeg"),
                                dynamic_tile_cache_dir = NULL,
                                dynamic_tile_path = "/tiles",
+                               project_tile_sources = NULL,
                                wait = interactive(),
                                open = interactive(),
                                autosave = !is.null(autosave_path),
@@ -3300,6 +3304,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   dots <- list(...)
   requested_channel_sources <- dots$channel_sources %||% NULL
   dynamic_channel_sources <- wsi_dynamic_channel_sources(requested_channel_sources)
+  dynamic_project_sources <- wsi_dynamic_channel_sources(project_tile_sources)
   dynamic_source <- NULL
   if (isTRUE(dynamic_tiles)) {
     dynamic_source <- wsi_dynamic_tile_source(
@@ -3312,7 +3317,8 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   }
   all_dynamic_sources <- c(
     if (is.null(dynamic_source)) list() else list(dynamic_source),
-    dynamic_channel_sources
+    dynamic_channel_sources,
+    dynamic_project_sources
   )
 
   bridge <- wsi_start_viewer_state_server(
@@ -3430,7 +3436,8 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
         dynamic_tile_source = dynamic_source,
         dynamic_tile_sources = all_dynamic_sources,
         dynamic_tile_cache_dir = if (!is.null(dynamic_source)) dynamic_source$cache_dir else NULL,
-        dynamic_channel_cache_dirs = unique(vapply(dynamic_channel_sources, function(x) as.character(x$cache_dir %||% ""), character(1)))
+        dynamic_channel_cache_dirs = unique(vapply(dynamic_channel_sources, function(x) as.character(x$cache_dir %||% ""), character(1))),
+        dynamic_project_cache_dirs = unique(vapply(dynamic_project_sources, function(x) as.character(x$cache_dir %||% ""), character(1)))
       )
     ),
     class = "wsi_viewer_session"
@@ -3452,6 +3459,9 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   }
   if (length(dynamic_channel_sources)) {
     message("Dynamic channel tile overlays active: ", length(dynamic_channel_sources), " channel", if (length(dynamic_channel_sources) == 1L) "" else "s")
+  }
+  if (length(dynamic_project_sources)) {
+    message("Dynamic project tile sources active: ", length(dynamic_project_sources), " tissue/section source", if (length(dynamic_project_sources) == 1L) "" else "s")
   }
   message("Browser edits update `", name, "` and companion objects in the chosen R environment.")
   if (!is.null(stardist_bridge)) {

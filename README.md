@@ -168,6 +168,15 @@ wsi_install_backends(
   tools = c("openslide", "libvips", "imagemagick", "bioformats"),
   method = "conda"
 )
+
+# Optional native CZI reader. This builds ZEISS libCZI/libCZIAPI in
+# the user cache after you explicitly accept the libCZI license notice.
+wsi_install_native_czi(install = FALSE)          # inspect commands first
+wsi_install_native_czi(
+  accept_license = TRUE,
+  ask = FALSE,
+  persist = TRUE
+)
 ```
 
 In interactive R sessions, wsiTools asks before running system commands. On
@@ -187,22 +196,62 @@ for Windows.
 ### Installing CZI first-visualization support
 
 CZI visualization uses a tile/region reader, not `bfconvert`. wsiTools now
-prefers direct calls to ZEISS libCZI/libCZIAPI from the package's native code.
-The Python wrapper path is kept only as a legacy fallback and is not used unless
-you explicitly set `WSITOOLS_CZI_ALLOW_PYTHON=true`.
+gives OpenSlide and libvips first refusal for CZI variants they can already
+read, because these backends are fast and tile-friendly. If neither can open
+the file, wsiTools tries direct calls to ZEISS libCZI/libCZIAPI from the
+package's native code. As an alternative, wsiTools can use a small optional
+Bio-Formats Java helper that calls Bio-Formats `ImageReader` region APIs for
+metadata and low-resolution scene previews. The Python wrapper path is kept only
+as a legacy fallback and is not used unless you explicitly set
+`WSITOOLS_CZI_ALLOW_PYTHON=true`.
 
-Install or build libCZI/libCZIAPI, then make the shared library visible to R:
+The easiest route is the explicit native CZI setup helper. It does not bundle
+libCZI inside wsiTools; it downloads/builds ZEISS libCZI/libCZIAPI into your
+user cache, then sets `WSITOOLS_LIBCZIAPI` for the current R session. Use
+`persist = TRUE` to save that path in `~/.Renviron` for future R sessions.
 
 ```r
-# Use the full path when the operating system cannot find libCZIAPI itself.
-Sys.setenv(WSITOOLS_LIBCZIAPI = "/path/to/libCZIAPI.dylib") # macOS
-# Sys.setenv(WSITOOLS_LIBCZIAPI = "/path/to/libCZIAPI.so")  # Linux
-# Sys.setenv(WSITOOLS_LIBCZIAPI = "C:/path/to/libCZIAPI.dll") # Windows
+# Review the download/configure/build commands without running them.
+wsi_install_native_czi(install = FALSE)
+
+# Build and activate the native CZI backend.
+# Requires git, cmake, and a working C/C++ toolchain.
+native <- wsi_install_native_czi(
+  accept_license = TRUE,
+  ask = FALSE,
+  persist = TRUE
+)
+native
 
 wsi_has_native_czi()
 wsi_backends()
 wsi_viewer_project("sample.czi", open = TRUE)
 ```
+
+If you already installed libCZIAPI yourself, set the shared library path
+manually instead:
+
+```r
+Sys.setenv(WSITOOLS_LIBCZIAPI = "/path/to/libCZIAPI.dylib") # macOS
+# Sys.setenv(WSITOOLS_LIBCZIAPI = "/path/to/libCZIAPI.so")  # Linux
+# Sys.setenv(WSITOOLS_LIBCZIAPI = "C:/path/to/libCZIAPI.dll") # Windows
+```
+
+To use the Bio-Formats Java helper instead of `bfconvert`, install Java plus
+the Bio-Formats JAR, then point wsiTools at it:
+
+```r
+Sys.setenv(WSITOOLS_BIOFORMATS_JAR = "/path/to/bioformats_package.jar")
+# Optional if java/javac are not on PATH:
+# Sys.setenv(WSITOOLS_JAVA = "/path/to/java")
+# Sys.setenv(WSITOOLS_JAVAC = "/path/to/javac")
+
+wsi_backends()
+wsi_viewer_project("sample.czi", open = TRUE)
+```
+
+This helper compiles a tiny Java class into R's temporary directory and reads
+only requested regions with Bio-Formats; it does not batch-convert the full CZI.
 
 The native bridge currently supports CZI metadata, basic dimensions, and
 single-channel/RGB preview regions through libCZIAPI. More complete scene,
@@ -254,10 +303,17 @@ On Windows the Python path is usually similar to
 
 ### Installing Bio-Formats
 
-Bio-Formats is optional. wsiTools detects it by looking for the command-line
-tools `showinf` and `bfconvert` on `PATH`. Installing the Bio-Formats plugin
-inside Fiji/ImageJ is useful for Fiji, but it is not enough for wsiTools unless
-the command-line tools are also available to R.
+Bio-Formats is optional. wsiTools can use it in two ways:
+
+- Java helper for first visualization and region previews via
+  `ImageReader`/region reads when `WSITOOLS_BIOFORMATS_JAR` points to
+  `bioformats_package.jar`.
+- Command-line tools `showinf` and `bfconvert` for metadata and conversion
+  workflows.
+
+Installing the Bio-Formats plugin inside Fiji/ImageJ is useful for Fiji, but it
+is not enough for wsiTools unless the JAR or command-line tools are also visible
+to R.
 
 The simplest route is usually conda:
 
@@ -310,7 +366,9 @@ wsi_backends()
 The official Bio-Formats command-line documentation describes `bftools.zip` as
 the bundle containing the scripts and bundled JAR needed for command-line use.
 wsiTools uses `showinf` for metadata/version checks and `bfconvert` for
-Bio-Formats conversion workflows where available.
+Bio-Formats conversion workflows where available. For first visualization,
+prefer either the native CZI bridge or the Java helper; do not use `bfconvert`
+as the interactive opening path.
 
 Typical manual backend installs are:
 
@@ -430,13 +488,14 @@ html <- wsi_viewer(
 wsi_close(slide)
 ```
 
-For Zeiss CZI files, use the native CZI tile/region backend for visualization.
-Bio-Formats is useful for metadata and conversion, but wsiTools no longer uses
-`bfconvert` automatically for first visualization and does not use Python CZI
-wrappers unless explicitly enabled.
+For Zeiss CZI files, wsiTools first tries OpenSlide and libvips. If they cannot
+read that CZI variant, use the native CZI tile/region backend for
+visualization. Bio-Formats is useful for metadata and conversion, but wsiTools
+no longer uses `bfconvert` automatically for first visualization and does not
+use Python CZI wrappers unless explicitly enabled.
 
 ```r
-Sys.setenv(WSITOOLS_LIBCZIAPI = "/path/to/libCZIAPI")
+wsi_install_native_czi(accept_license = TRUE, ask = FALSE, persist = TRUE)
 wsi_has_native_czi()
 
 czi_path <- file.choose()
@@ -516,7 +575,7 @@ library is installed. Bio-Formats `bfconvert` is kept for conversion/export
 workflows, not automatic first visualization:
 
 ```r
-Sys.setenv(WSITOOLS_LIBCZIAPI = "/path/to/libCZIAPI")
+wsi_install_native_czi(accept_license = TRUE, ask = FALSE, persist = TRUE)
 wsi_has_native_czi()
 ```
 
@@ -843,10 +902,10 @@ visibility controls, color pickers, opacity, gain, and contrast-window sliders.
 In tiled mode the browser recolors only the visible OpenSeadragon tiles, so the
 full WSI is not loaded into R memory.
 
-For H&E patches, `wsiTools` can separate hematoxylin/eosin channels and
-perform lightweight stain normalisation. Macenko-style estimation and an
-experimental Vahadane-style NMF estimator are implemented in pure R for
-already-small regions, tiles, or thumbnails:
+For H&E patches, `wsiTools` can separate hematoxylin, eosin, and residual
+staining channels and perform lightweight stain normalisation. Macenko-style
+estimation and an experimental Vahadane-style NMF estimator are implemented in
+pure R for already-small regions, tiles, or thumbnails:
 
 ```r
 patch <- wsi_read_region(
@@ -858,6 +917,9 @@ patch <- wsi_read_region(
 )
 
 he_channels <- wsi_deconvolve_he(patch)
+names(he_channels)
+#> hematoxylin, eosin, residual
+
 stain_matrix <- wsi_estimate_stain_matrix(patch, method = "macenko")
 
 normalized <- wsi_normalize_stains(
@@ -867,10 +929,30 @@ normalized <- wsi_normalize_stains(
 )
 ```
 
+For interactive H&E inspection, open the H&E stain viewer. The `Stains` menu
+contains hematoxylin, eosin, and residual channels with independent visibility,
+colour, opacity, gain, and contrast controls:
+
+```r
+he_viewer <- wsi_viewer_he(
+  slide,
+  mode = "tiles",
+  output = "he_stain_viewer.html"
+)
+```
+
 For WSI workflows, normalise only the requested region or apply the function
 inside a tile loop:
 
 ```r
+he_region <- wsi_deconvolve_he_region(
+  slide,
+  x = 10000,
+  y = 20000,
+  width = 1024,
+  height = 1024
+)
+
 normalized_region <- wsi_stain_normalize_region(
   slide,
   x = 10000,

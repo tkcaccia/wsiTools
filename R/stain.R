@@ -270,6 +270,12 @@ wsi_cross_product <- function(a, b) {
   )
 }
 
+wsi_residual_stain_vector <- function(primary, secondary, name = "residual") {
+  primary <- wsi_normalize_stain_vector(primary, "primary")
+  secondary <- wsi_normalize_stain_vector(secondary, "secondary")
+  wsi_normalize_stain_vector(wsi_cross_product(primary, secondary), name)
+}
+
 wsi_complete_stain_basis <- function(channels) {
   vectors <- lapply(channels, `[[`, "vector")
   n <- length(vectors)
@@ -352,21 +358,49 @@ wsi_validate_stain_matrix <- function(matrix, name = "stain_matrix",
 #' laboratory-specific vectors when quantitative reproducibility matters.
 #'
 #' @param hematoxylin,eosin RGB optical-density vectors.
+#' @param include_residual Include the residual optical-density channel in the
+#'   returned channel definitions.
 #' @param hematoxylin_colour,eosin_colour Display colours for recoloured
 #'   channel visualisation.
+#' @param residual_colour Display colour for the residual channel.
+#' @param hematoxylin_strength,eosin_strength,residual_strength Initial display
+#'   gains for the channels.
+#' @param residual_visible Whether the residual channel is visible by default in
+#'   the interactive viewer and recoloured image outputs.
 #'
-#' @return A `wsi_stain_channels` object with hematoxylin and eosin channels.
+#' @return A `wsi_stain_channels` object with hematoxylin, eosin, and optionally
+#'   residual channels.
 #' @export
 wsi_he_stain_channels <- function(hematoxylin = c(0.644, 0.717, 0.267),
                                   eosin = c(0.093, 0.954, 0.283),
+                                  include_residual = TRUE,
                                   hematoxylin_colour = "#4b3f99",
-                                  eosin_colour = "#e85b90") {
+                                  eosin_colour = "#e85b90",
+                                  residual_colour = "#6b7280",
+                                  hematoxylin_strength = 1,
+                                  eosin_strength = 1,
+                                  residual_strength = 1,
+                                  residual_visible = FALSE) {
+  hematoxylin <- wsi_normalize_stain_vector(hematoxylin, "hematoxylin")
+  eosin <- wsi_normalize_stain_vector(eosin, "eosin")
+  names <- c("Hematoxylin", "Eosin")
+  vectors <- list(hematoxylin, eosin)
+  colours <- c(hematoxylin_colour, eosin_colour)
+  strengths <- c(hematoxylin_strength, eosin_strength)
+  visible <- c(TRUE, TRUE)
+  if (isTRUE(include_residual)) {
+    names <- c(names, "Residual")
+    vectors <- c(vectors, list(wsi_residual_stain_vector(hematoxylin, eosin, "residual")))
+    colours <- c(colours, residual_colour)
+    strengths <- c(strengths, residual_strength)
+    visible <- c(visible, isTRUE(residual_visible))
+  }
   wsi_stain_channels(
-    name = c("Hematoxylin", "Eosin"),
-    vector = list(hematoxylin, eosin),
-    colour = c(hematoxylin_colour, eosin_colour),
-    strength = c(1, 1),
-    visible = c(TRUE, TRUE)
+    name = names,
+    vector = vectors,
+    colour = colours,
+    strength = strengths,
+    visible = visible
   )
 }
 
@@ -376,7 +410,11 @@ wsi_he_stain_channels <- function(hematoxylin = c(0.644, 0.717, 0.267),
 #' @export
 wsi_he_stain_matrix <- function(hematoxylin = c(0.644, 0.717, 0.267),
                                 eosin = c(0.093, 0.954, 0.283)) {
-  channels <- wsi_he_stain_channels(hematoxylin = hematoxylin, eosin = eosin)
+  channels <- wsi_he_stain_channels(
+    hematoxylin = hematoxylin,
+    eosin = eosin,
+    include_residual = FALSE
+  )
   matrix <- wsi_complete_stain_basis(channels)$matrix
   colnames(matrix) <- c("hematoxylin", "eosin", "residual")
   matrix
@@ -384,12 +422,19 @@ wsi_he_stain_matrix <- function(hematoxylin = c(0.644, 0.717, 0.267),
 
 wsi_channels_from_matrix <- function(matrix,
                                      names = c("Hematoxylin", "Eosin"),
-                                     colours = c("#4b3f99", "#e85b90")) {
+                                     colours = c("#4b3f99", "#e85b90"),
+                                     strengths = 1,
+                                     visible = TRUE) {
   matrix <- wsi_validate_stain_matrix(matrix, "matrix", min_channels = length(names))
+  colours <- as.character(wsi_recycle_to(colours, length(names), "colours"))
+  strengths <- as.numeric(wsi_recycle_to(strengths, length(names), "strengths"))
+  visible <- wsi_recycle_to(visible, length(names), "visible")
   wsi_stain_channels(
     name = names,
     vector = lapply(seq_along(names), function(i) matrix[, i]),
-    colour = colours[seq_along(names)]
+    colour = colours,
+    strength = strengths,
+    visible = visible
   )
 }
 
@@ -769,22 +814,31 @@ wsi_deconvolve_ihc <- function(image,
   )
 }
 
-#' Deconvolve hematoxylin and eosin from an H&E image
+#' Deconvolve hematoxylin, eosin, and residual staining from an H&E image
 #'
 #' Separates an already-small H&E image patch, tile, or thumbnail into
-#' hematoxylin and eosin optical-density concentration channels. This is the
-#' H&E counterpart to [wsi_deconvolve_ihc()] and can use fixed stain vectors or
-#' vectors estimated separately with [wsi_estimate_stain_matrix()].
+#' hematoxylin, eosin, and residual optical-density concentration channels. This
+#' is the H&E counterpart to [wsi_deconvolve_ihc()] and can use fixed stain
+#' vectors or vectors estimated separately with [wsi_estimate_stain_matrix()].
 #'
 #' @param image RGB/RGBA array, raster object, or magick image.
 #' @param format Output format. `"channels"` returns numeric concentration
-#'   matrices for `hematoxylin` and `eosin`; image formats return a recoloured
-#'   two-channel visualisation.
+#'   matrices for `hematoxylin`, `eosin`, and, when `include_residual = TRUE`,
+#'   `residual`; image formats return a recoloured visualisation.
 #' @param stain_matrix Optional 3 x 3 stain matrix. When supplied, the first two
-#'   columns are used as hematoxylin and eosin.
+#'   columns are used as hematoxylin and eosin and the third column is used as
+#'   residual when `include_residual = TRUE`.
 #' @param hematoxylin,eosin RGB optical-density vectors used when
 #'   `stain_matrix` is not supplied.
-#' @param hematoxylin_colour,eosin_colour Display colours for recoloured output.
+#' @param include_residual Include residual staining as an explicit output
+#'   channel.
+#' @param hematoxylin_colour,eosin_colour,residual_colour Display colours for
+#'   recoloured output.
+#' @param hematoxylin_strength,eosin_strength,residual_strength Display gains
+#'   for recoloured output.
+#' @param residual_visible Whether residual is visible by default in recoloured
+#'   outputs. The numeric `residual` matrix is still returned when
+#'   `include_residual = TRUE`.
 #' @param epsilon Lower bound used before taking optical-density logarithms.
 #'
 #' @return A `wsi_ihc_channels` object, array, raster, or magick image.
@@ -797,34 +851,60 @@ wsi_deconvolve_he <- function(image,
                               stain_matrix = NULL,
                               hematoxylin = c(0.644, 0.717, 0.267),
                               eosin = c(0.093, 0.954, 0.283),
+                              include_residual = TRUE,
                               hematoxylin_colour = "#4b3f99",
                               eosin_colour = "#e85b90",
+                              residual_colour = "#6b7280",
+                              hematoxylin_strength = 1,
+                              eosin_strength = 1,
+                              residual_strength = 1,
+                              residual_visible = FALSE,
                               epsilon = 1 / 255) {
   format <- match.arg(format)
   epsilon <- wsi_check_scalar_number(epsilon, "epsilon", allow_zero = FALSE)
   if (epsilon >= 1) {
     wsi_abort("`epsilon` must be less than 1.")
   }
+  include_residual <- isTRUE(include_residual)
+  names <- c("Hematoxylin", "Eosin")
+  colours <- c(hematoxylin_colour, eosin_colour)
+  strengths <- c(hematoxylin_strength, eosin_strength)
+  visible <- c(TRUE, TRUE)
+  if (include_residual) {
+    names <- c(names, "Residual")
+    colours <- c(colours, residual_colour)
+    strengths <- c(strengths, residual_strength)
+    visible <- c(visible, isTRUE(residual_visible))
+  }
   if (is.null(stain_matrix)) {
     channel_definitions <- wsi_he_stain_channels(
       hematoxylin = hematoxylin,
       eosin = eosin,
+      include_residual = include_residual,
       hematoxylin_colour = hematoxylin_colour,
-      eosin_colour = eosin_colour
+      eosin_colour = eosin_colour,
+      residual_colour = residual_colour,
+      hematoxylin_strength = hematoxylin_strength,
+      eosin_strength = eosin_strength,
+      residual_strength = residual_strength,
+      residual_visible = residual_visible
     )
   } else {
     channel_definitions <- wsi_channels_from_matrix(
       stain_matrix,
-      names = c("Hematoxylin", "Eosin"),
-      colours = c(hematoxylin_colour, eosin_colour)
+      names = names,
+      colours = colours,
+      strengths = strengths,
+      visible = visible
     )
   }
   channels <- wsi_deconvolve_array(image, channel_definitions, epsilon = epsilon)
   wsi_format_ihc_output(
     channels,
     format = format,
-    colours = c(hematoxylin_colour, eosin_colour),
-    strengths = c(1, 1)
+    colours = colours,
+    strengths = strengths,
+    visible = visible
   )
 }
 
@@ -1178,7 +1258,41 @@ wsi_deconvolve_region <- function(slide, x, y, width, height, level = 0, ...) {
   wsi_deconvolve_ihc(patch, ...)
 }
 
-wsi_ihc_stain_config <- function(stain = c("none", "ihc"),
+#' Deconvolve hematoxylin, eosin, and residual staining from a slide region
+#'
+#' Reads only the requested region, then applies [wsi_deconvolve_he()]. This is
+#' the preferred R-side H&E workflow for WSI patches because the full slide is
+#' never loaded into memory.
+#'
+#' @inheritParams wsi_deconvolve_region
+#' @param ... Arguments passed to [wsi_deconvolve_he()], including
+#'   `include_residual`, stain vectors, colours, and display gains.
+#'
+#' @return See [wsi_deconvolve_he()].
+#' @export
+wsi_deconvolve_he_region <- function(slide, x, y, width, height, level = 0, ...) {
+  opened <- NULL
+  on.exit(if (!is.null(opened)) wsi_close(opened), add = TRUE)
+  if (is.character(slide) && length(slide) == 1L) {
+    opened <- wsi_open(slide, backend = "auto")
+    slide <- opened
+  } else {
+    wsi_check_slide(slide)
+  }
+
+  patch <- wsi_read_region(
+    slide,
+    x = x,
+    y = y,
+    width = width,
+    height = height,
+    level = level,
+    format = "array"
+  )
+  wsi_deconvolve_he(patch, ...)
+}
+
+wsi_ihc_stain_config <- function(stain = c("none", "ihc", "he"),
                                  channels = NULL,
                                  hematoxylin = c(0.650, 0.704, 0.286),
                                  hrp = c(0.268, 0.570, 0.776),
@@ -1191,24 +1305,36 @@ wsi_ihc_stain_config <- function(stain = c("none", "ihc"),
     return(list(enabled = FALSE))
   }
   if (is.null(channels)) {
-    channels <- wsi_stain_channels(
-      name = c("Hematoxylin", "HRP/DAB"),
-      vector = list(hematoxylin, hrp),
-      colour = c(hematoxylin_colour, hrp_colour),
-      strength = c(hematoxylin_strength, hrp_strength),
-      visible = c(TRUE, TRUE)
-    )
+    channels <- if (identical(stain, "he")) {
+      wsi_he_stain_channels()
+    } else {
+      wsi_stain_channels(
+        name = c("Hematoxylin", "HRP/DAB"),
+        vector = list(hematoxylin, hrp),
+        colour = c(hematoxylin_colour, hrp_colour),
+        strength = c(hematoxylin_strength, hrp_strength),
+        visible = c(TRUE, TRUE)
+      )
+    }
   } else {
     channels <- wsi_as_stain_channels(channels)
   }
   basis <- wsi_complete_stain_basis(channels)
   channel_count <- length(channels)
-  label <- if (channel_count > 2L) "IHC channels" else "IHC H-DAB"
+  ids <- vapply(channels, `[[`, character(1), "id")
+  is_he <- all(c("hematoxylin", "eosin") %in% ids)
+  label <- if (is_he) {
+    if ("residual" %in% ids) "H&E H/E/residual" else "H&E"
+  } else if (channel_count > 2L) {
+    "IHC channels"
+  } else {
+    "IHC H-DAB"
+  }
   list(
     enabled = TRUE,
-    type = if (channel_count > 2L) "multi-IHC" else "H-DAB",
+    type = if (is_he) "H&E" else if (channel_count > 2L) "multi-IHC" else "H-DAB",
     label = label,
-    button_label = if (channel_count > 2L) "mIHC" else "IHC",
+    button_label = if (is_he) "H&E" else if (channel_count > 2L) "mIHC" else "IHC",
     channels = unclass(channels),
     basis = basis$basis,
     channel_count = channel_count
@@ -1278,6 +1404,75 @@ wsi_viewer_ihc <- function(slide, mode = c("tiles", "thumbnail"),
   )
 }
 
+#' View an H&E slide with interactive hematoxylin/eosin/residual deconvolution
+#'
+#' Convenience wrapper around [wsi_viewer()] for H&E brightfield images. The
+#' `Stains` menu exposes hematoxylin, eosin, and residual channels with
+#' visibility, colour, opacity, gain, and contrast controls. In tiled mode, the
+#' browser recolours only visible tiles, so the full WSI is not loaded into R
+#' memory.
+#'
+#' @inheritParams wsi_viewer_ihc
+#' @param hematoxylin,eosin RGB optical-density vectors.
+#' @param hematoxylin_colour,eosin_colour,residual_colour Initial display
+#'   colours.
+#' @param hematoxylin_strength,eosin_strength,residual_strength Initial display
+#'   gains.
+#' @param residual_visible Whether residual staining is visible by default.
+#'
+#' @return The HTML viewer path, invisibly.
+#' @export
+#' @examples
+#' \dontrun{
+#' slide <- wsi_open("he_sample.svs")
+#' html <- wsi_viewer_he(slide, output = "he_viewer.html", open = FALSE)
+#' wsi_close(slide)
+#' }
+wsi_viewer_he <- function(slide, mode = c("tiles", "thumbnail"),
+                          channels = NULL,
+                          hematoxylin = c(0.644, 0.717, 0.267),
+                          eosin = c(0.093, 0.954, 0.283),
+                          hematoxylin_colour = "#4b3f99",
+                          eosin_colour = "#e85b90",
+                          residual_colour = "#6b7280",
+                          hematoxylin_strength = 1,
+                          eosin_strength = 1,
+                          residual_strength = 1,
+                          residual_visible = FALSE,
+                          ...) {
+  mode <- match.arg(mode)
+  opened <- NULL
+  on.exit(if (!is.null(opened)) wsi_close(opened), add = TRUE)
+  if (is.character(slide) && length(slide) == 1L) {
+    opened <- wsi_open(slide, backend = "auto")
+    slide <- opened
+  } else {
+    wsi_check_slide(slide)
+  }
+  if (is.null(channels)) {
+    channels <- wsi_he_stain_channels(
+      hematoxylin = hematoxylin,
+      eosin = eosin,
+      include_residual = TRUE,
+      hematoxylin_colour = hematoxylin_colour,
+      eosin_colour = eosin_colour,
+      residual_colour = residual_colour,
+      hematoxylin_strength = hematoxylin_strength,
+      eosin_strength = eosin_strength,
+      residual_strength = residual_strength,
+      residual_visible = residual_visible
+    )
+  }
+
+  wsi_viewer(
+    slide,
+    mode = mode,
+    stain = "he",
+    channels = channels,
+    ...
+  )
+}
+
 #' View a multi-IHC slide with selectable stain channels
 #'
 #' Convenience wrapper around [wsi_viewer()] for brightfield multiplex IHC.
@@ -1342,6 +1537,7 @@ print.wsi_stain_normalization <- function(x, ...) {
   cat("<wsi_stain_normalization>\n")
   cat("  method: ", x$method %||% "unknown", "\n", sep = "")
   cat("  size: ", dims[[2L]], " x ", dims[[1L]], " px\n", sep = "")
-  cat("  channels: hematoxylin, eosin\n", sep = "")
+  ids <- tryCatch(wsi_channel_ids_from_output(x$channels), error = function(err) c("hematoxylin", "eosin"))
+  cat("  channels: ", paste(ids, collapse = ", "), "\n", sep = "")
   invisible(x)
 }

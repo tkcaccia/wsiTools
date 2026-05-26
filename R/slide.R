@@ -25,13 +25,7 @@ wsi_open <- function(path, backend = c("auto", "openslide", "vips", "native_czi"
       return(open_omezarr(path))
     }
     is_czi <- wsi_is_czi_path(path)
-    candidates <- c(
-      if (is_czi && wsi_has_native_czi()) "native_czi",
-      if (wsi_has_openslide()) "openslide",
-      if (wsi_has_vips()) "vips",
-      if (is_czi && wsi_has_bioformats()) "bioformats",
-      if (!is_czi && wsi_has_imagemagick()) "imagemagick"
-    )
+    candidates <- wsi_auto_backend_candidates(is_czi = is_czi)
     if (!length(candidates)) {
       if (is_czi) {
         wsi_abort(wsi_czi_backend_message(path), class = "wsi_backend_unavailable")
@@ -80,6 +74,21 @@ wsi_open <- function(path, backend = c("auto", "openslide", "vips", "native_czi"
     bioformats = wsi_bioformats_open(path),
     omezarr = open_omezarr(path),
     imagemagick = wsi_imagemagick_open(path)
+  )
+}
+
+wsi_auto_backend_candidates <- function(is_czi,
+                                        has_openslide = wsi_has_openslide(),
+                                        has_vips = wsi_has_vips(),
+                                        has_native_czi = wsi_has_native_czi(),
+                                        has_bioformats = wsi_has_bioformats(),
+                                        has_imagemagick = wsi_has_imagemagick()) {
+  c(
+    if (isTRUE(has_openslide)) "openslide",
+    if (isTRUE(has_vips)) "vips",
+    if (isTRUE(is_czi) && isTRUE(has_native_czi)) "native_czi",
+    if (isTRUE(is_czi) && isTRUE(has_bioformats)) "bioformats",
+    if (!isTRUE(is_czi) && isTRUE(has_imagemagick)) "imagemagick"
   )
 }
 

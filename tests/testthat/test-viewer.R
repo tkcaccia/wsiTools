@@ -1,3 +1,24 @@
+wsi_skip_if_no_httpuv_server <- function(port = 8788L) {
+  skip_if_not_installed("httpuv")
+  app <- list(call = function(req) {
+    list(status = 200L, headers = list("Content-Type" = "text/plain"), body = "ok")
+  })
+  server <- NULL
+  last_error <- NULL
+  for (candidate in seq.int(as.integer(port), as.integer(port) + 20L)) {
+    server <- try(httpuv::startServer("127.0.0.1", candidate, app), silent = TRUE)
+    if (!inherits(server, "try-error")) {
+      httpuv::stopServer(server)
+      return(invisible(TRUE))
+    }
+    last_error <- conditionMessage(attr(server, "condition"))
+  }
+  if (is.null(last_error) || !nzchar(last_error)) {
+    last_error <- "unknown error"
+  }
+  skip(sprintf("httpuv cannot start a local test server: %s", last_error))
+}
+
 test_that("interactive viewer writes a self-contained HTML file for mock slides", {
   slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 500, levels = c(1, 4))
   output <- tempfile(fileext = ".html")
@@ -28,6 +49,9 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "No stain channels are configured for this viewer.", fixed = TRUE)
   expect_match(html, "stainChannelControls", fixed = TRUE)
   expect_match(html, "Brush size", fixed = TRUE)
+  expect_match(html, "value=\"32\"", fixed = TRUE)
+  expect_match(html, "brushRadius=32,brushScreenRadius=32", fixed = TRUE)
+  expect_match(html, "effective 32 slide px", fixed = TRUE)
   expect_match(html, "annotationBrushControls", fixed = TRUE)
   expect_match(html, "brushSizeValue", fixed = TRUE)
   expect_match(html, "brushZoomHint", fixed = TRUE)
@@ -349,17 +373,25 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "drawTransformedImage", fixed = TRUE)
   expect_match(html, "bindImageTransformControls", fixed = TRUE)
   expect_match(html, "mpp", fixed = TRUE)
+  expect_match(html, "id=\"scaleBar\"", fixed = TRUE)
+  expect_match(html, "Micron scale bar", fixed = TRUE)
+  expect_match(html, "updateScaleBar", fixed = TRUE)
+  expect_match(html, "niceScaleLength", fixed = TRUE)
+  expect_match(html, "\\u00b5m", fixed = TRUE)
   expect_match(html, "saveGeojson", fixed = TRUE)
   expect_match(html, "FeatureCollection", fixed = TRUE)
   expect_match(html, "crosshairToggle", fixed = TRUE)
   expect_match(html, "copyCoord", fixed = TRUE)
   expect_match(html, "GeoJSON Geometries", fixed = TRUE)
-  expect_match(html, "#roiPanel{position:fixed;left:12px", fixed = TRUE)
+  expect_match(html, "#workspacePanel{position:fixed;left:12px;top:72px", fixed = TRUE)
+  expect_match(html, "#roiPanel{position:static;width:auto", fixed = TRUE)
   expect_match(html, "roiPanelHeader", fixed = TRUE)
   expect_match(html, "roiPanelBody", fixed = TRUE)
   expect_match(html, "roiPanelMinimizeState", fixed = TRUE)
   expect_match(html, "Double-click to minimize or restore the annotation manager", fixed = TRUE)
   expect_match(html, "#roiPanel.minimized #roiPanelBody{display:none;}", fixed = TRUE)
+  expect_match(html, "Project and annotation panels", fixed = TRUE)
+  expect_true(regexpr("id=\"projectPanel\"", html, fixed = TRUE) < regexpr("id=\"roiPanel\"", html, fixed = TRUE))
   expect_match(html, "toggleRoiPanelMinimized", fixed = TRUE)
   expect_match(html, "bindRoiPanelControls", fixed = TRUE)
   expect_match(html, "selectionCard", fixed = TRUE)
@@ -381,7 +413,8 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "bindSelectionCardControls", fixed = TRUE)
   expect_match(html, ".bar{position:fixed;left:12px;right:12px;top:12px", fixed = TRUE)
   expect_match(html, "z-index:30", fixed = TRUE)
-  expect_match(html, "#roiPanel{position:fixed;left:12px;top:72px", fixed = TRUE)
+  expect_match(html, "#workspacePanel{position:fixed;left:12px;top:72px", fixed = TRUE)
+  expect_match(html, "#roiPanel{position:static;width:auto", fixed = TRUE)
   expect_match(html, "z-index:29", fixed = TRUE)
   expect_match(html, "Annotation manager", fixed = TRUE)
   expect_match(html, "annotationSearchInput", fixed = TRUE)
@@ -454,6 +487,9 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "navDock", fixed = TRUE)
   expect_match(html, "navPanButton", fixed = TRUE)
   expect_match(html, "Annotations", fixed = TRUE)
+  expect_match(html, "Draw, select, import, export, and manage annotations", fixed = TRUE)
+  expect_match(html, "GeoJSON and display", fixed = TRUE)
+  expect_false(grepl("<summary title=\"ROI overlay and GeoJSON geometry list\">GeoJSON</summary>", html, fixed = TRUE))
   expect_match(html, "Geometry list", fixed = TRUE)
   expect_match(html, "Import GeoJSON", fixed = TRUE)
   expect_match(html, "importGeojson", fixed = TRUE)
@@ -1307,7 +1343,7 @@ test_that("dynamic mIHC channel tiles are colourized with alpha", {
 })
 
 test_that("H&E mIHC live wrapper defaults the dynamic base image to JPEG tiles", {
-  skip_if_not_installed("httpuv")
+  wsi_skip_if_no_httpuv_server()
   skip_if_not(wsi_has_vips())
 
   input <- tempfile(fileext = ".png")
@@ -1333,11 +1369,16 @@ test_that("H&E mIHC live wrapper defaults the dynamic base image to JPEG tiles",
   expect_equal(session$state$tile_sources$dynamic$tile_format, "jpg")
   html <- paste(readLines(session$html, warn = FALSE), collapse = "\n")
   expect_match(html, "H&E", fixed = TRUE)
+  expect_match(html, "H&E H/E/residual", fixed = TRUE)
+  expect_match(html, "stainVisible_hematoxylin", fixed = TRUE)
+  expect_match(html, "stainVisible_eosin", fixed = TRUE)
+  expect_match(html, "stainVisible_residual", fixed = TRUE)
+  expect_match(html, "stainShowOriginal", fixed = TRUE)
   expect_match(html, "baseImageVisible", fixed = TRUE)
 })
 
 test_that("live viewer can use dynamic tiles with polling transport", {
-  skip_if_not_installed("httpuv")
+  wsi_skip_if_no_httpuv_server()
   slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 500, levels = c(1, 4))
   session <- wsi_viewer_live(
     slide,
@@ -1418,7 +1459,7 @@ test_that("channel source API updates live viewer settings", {
 })
 
 test_that("live viewer keeps StarDist optional when no command is available", {
-  skip_if_not_installed("httpuv")
+  wsi_skip_if_no_httpuv_server()
   slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 500, levels = c(1, 4))
   session <- NULL
   warning_message <- NULL
@@ -1572,7 +1613,8 @@ test_that("interactive tiled viewer writes Deep Zoom HTML when libvips is availa
   expect_match(html, "id=\"overlay\"", fixed = TRUE)
   expect_match(html, ".bar{position:fixed;left:12px;right:12px;top:12px", fixed = TRUE)
   expect_match(html, "z-index:30", fixed = TRUE)
-  expect_match(html, "#roiPanel{position:fixed;left:12px;top:72px", fixed = TRUE)
+  expect_match(html, "#workspacePanel{position:fixed;left:12px;top:72px", fixed = TRUE)
+  expect_match(html, "#roiPanel{position:static;width:auto", fixed = TRUE)
   expect_match(html, "z-index:29", fixed = TRUE)
   expect_match(html, "requestDraw", fixed = TRUE)
   expect_match(html, "loadingTiles", fixed = TRUE)
@@ -1626,7 +1668,8 @@ test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
   expect_match(html, "id=\"overlay\"", fixed = TRUE)
   expect_match(html, ".bar{position:fixed;left:12px;right:12px;top:12px", fixed = TRUE)
   expect_match(html, "z-index:30", fixed = TRUE)
-  expect_match(html, "#roiPanel{position:fixed;left:12px;top:72px", fixed = TRUE)
+  expect_match(html, "#workspacePanel{position:fixed;left:12px;top:72px", fixed = TRUE)
+  expect_match(html, "#roiPanel{position:static;width:auto", fixed = TRUE)
   expect_match(html, "z-index:29", fixed = TRUE)
   expect_match(html, "imageToViewportCoordinates", fixed = TRUE)
   expect_match(html, "viewportToImageCoordinates", fixed = TRUE)
@@ -1709,6 +1752,33 @@ test_that("interactive IHC viewer writes stain deconvolution controls", {
   expect_match(html, "applyStainToCanvas", fixed = TRUE)
   expect_match(html, "open the viewer through localhost/http", fixed = TRUE)
   expect_match(html, "IHC H-DAB", fixed = TRUE)
+})
+
+test_that("interactive H&E viewer writes hematoxylin, eosin, and residual controls", {
+  slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 500, levels = c(1, 4))
+  output <- tempfile(fileext = ".html")
+
+  result <- wsi_viewer_he(
+    slide,
+    mode = "thumbnail",
+    width = 256,
+    output = output,
+    open = FALSE
+  )
+
+  expect_identical(result, output)
+  expect_true(file.exists(output))
+  html <- paste(readLines(output, warn = FALSE), collapse = "\n")
+  expect_match(html, "H&amp;E", fixed = TRUE)
+  expect_match(html, "H&E H/E/residual", fixed = TRUE)
+  expect_match(html, "stainColor_hematoxylin", fixed = TRUE)
+  expect_match(html, "stainColor_eosin", fixed = TRUE)
+  expect_match(html, "stainColor_residual", fixed = TRUE)
+  expect_match(html, "stainVisible_residual", fixed = TRUE)
+  expect_match(html, "stainOpacity_residual", fixed = TRUE)
+  expect_match(html, "stainContrastMax_residual", fixed = TRUE)
+  expect_match(html, "Residual", fixed = TRUE)
+  expect_match(html, '"visible":false', fixed = TRUE)
 })
 
 test_that("interactive multi-IHC viewer writes selectable channel controls", {

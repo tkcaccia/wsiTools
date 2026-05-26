@@ -12,7 +12,8 @@ wsi_viewer_project(
   height = NULL,
   title = "wsiTools project viewer",
   overwrite = FALSE,
-  roi_class_presets = wsi_roi_class_presets()
+  roi_class_presets = wsi_roi_class_presets(),
+  czi_sections = TRUE
 )
 }
 \arguments{
@@ -35,6 +36,10 @@ load the full source image into R.}
 \item{overwrite}{Overwrite \code{output} if it already exists.}
 
 \item{roi_class_presets}{ROI class presets used by the annotation UI.}
+
+\item{czi_sections}{For CZI files, show detected scenes/sections separately
+in the Project panel. Set to \code{FALSE} to preview the whole CZI bounding box
+as a single image when the backend supports it.}
 }
 \value{
 Path to the generated HTML file, invisibly when opened.
@@ -51,11 +56,13 @@ ROIs drawn on one tissue section do not appear on another section.
 }
 \details{
 CZI first visualization uses the direct native libCZI/libCZIAPI bridge when
-available. The older \code{aicspylibczi} bridge is used only if the user
-explicitly sets \code{WSITOOLS_CZI_ALLOW_PYTHON=true}.
-Bio-Formats is used for CZI metadata/conversion workflows, but \code{bfconvert}
-is not used automatically for first visualization because it is too slow for
-interactive opening.
+available, but only after giving OpenSlide and libvips first refusal for CZI
+variants they can already read. The older \code{aicspylibczi} bridge is used only
+if the user explicitly sets \code{WSITOOLS_CZI_ALLOW_PYTHON=true}.
+Bio-Formats command-line tools are used for metadata/conversion workflows.
+For first visualization, wsiTools can also use a small optional Java helper
+around Bio-Formats \code{ImageReader} region reads; it does not call \code{bfconvert}
+automatically because batch conversion is too slow for interactive opening.
 }
 \examples{
 \dontrun{

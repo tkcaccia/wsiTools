@@ -2,7 +2,7 @@
 % Please edit documentation in R/stain.R
 \name{wsi_deconvolve_he}
 \alias{wsi_deconvolve_he}
-\title{Deconvolve hematoxylin and eosin from an H&E image}
+\title{Deconvolve hematoxylin, eosin, and residual staining from an H&E image}
 \usage{
 wsi_deconvolve_he(
   image,
@@ -10,8 +10,14 @@ wsi_deconvolve_he(
   stain_matrix = NULL,
   hematoxylin = c(0.644, 0.717, 0.267),
   eosin = c(0.093, 0.954, 0.283),
+  include_residual = TRUE,
   hematoxylin_colour = "#4b3f99",
   eosin_colour = "#e85b90",
+  residual_colour = "#6b7280",
+  hematoxylin_strength = 1,
+  eosin_strength = 1,
+  residual_strength = 1,
+  residual_visible = FALSE,
   epsilon = 1/255
 )
 }
@@ -19,16 +25,28 @@ wsi_deconvolve_he(
 \item{image}{RGB/RGBA array, raster object, or magick image.}
 
 \item{format}{Output format. \code{"channels"} returns numeric concentration
-matrices for \code{hematoxylin} and \code{eosin}; image formats return a recoloured
-two-channel visualisation.}
+matrices for \code{hematoxylin}, \code{eosin}, and, when \code{include_residual = TRUE},
+\code{residual}; image formats return a recoloured visualisation.}
 
 \item{stain_matrix}{Optional 3 x 3 stain matrix. When supplied, the first two
-columns are used as hematoxylin and eosin.}
+columns are used as hematoxylin and eosin and the third column is used as
+residual when \code{include_residual = TRUE}.}
 
 \item{hematoxylin, eosin}{RGB optical-density vectors used when
 \code{stain_matrix} is not supplied.}
 
-\item{hematoxylin_colour, eosin_colour}{Display colours for recoloured output.}
+\item{include_residual}{Include residual staining as an explicit output
+channel.}
+
+\item{hematoxylin_colour, eosin_colour, residual_colour}{Display colours for
+recoloured output.}
+
+\item{hematoxylin_strength, eosin_strength, residual_strength}{Display gains
+for recoloured output.}
+
+\item{residual_visible}{Whether residual is visible by default in recoloured
+outputs. The numeric \code{residual} matrix is still returned when
+\code{include_residual = TRUE}.}
 
 \item{epsilon}{Lower bound used before taking optical-density logarithms.}
 }
@@ -37,9 +55,9 @@ A \code{wsi_ihc_channels} object, array, raster, or magick image.
 }
 \description{
 Separates an already-small H&E image patch, tile, or thumbnail into
-hematoxylin and eosin optical-density concentration channels. This is the
-H&E counterpart to \code{\link[=wsi_deconvolve_ihc]{wsi_deconvolve_ihc()}} and can use fixed stain vectors or
-vectors estimated separately with \code{\link[=wsi_estimate_stain_matrix]{wsi_estimate_stain_matrix()}}.
+hematoxylin, eosin, and residual optical-density concentration channels. This
+is the H&E counterpart to \code{\link[=wsi_deconvolve_ihc]{wsi_deconvolve_ihc()}} and can use fixed stain
+vectors or vectors estimated separately with \code{\link[=wsi_estimate_stain_matrix]{wsi_estimate_stain_matrix()}}.
 }
 \examples{
 patch <- array(0.8, dim = c(32, 32, 3))

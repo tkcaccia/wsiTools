@@ -44,5 +44,9 @@ A \code{wsi_viewer_session}.
 \description{
 Convenience wrapper for the common workflow where an H&E WSI is the base
 OpenSeadragon image and an mIHC OME-TIFF/probability image supplies one or
-more dynamic tiled overlay channels. The full images are not loaded into R.
+more dynamic tiled overlay channels. By default the H&E base image also gets
+interactive hematoxylin/eosin/residual deconvolution controls in the
+\code{Stains} menu. Pass \code{stain = "none"} through \code{...} to disable H&E
+deconvolution, or pass custom H&E \code{channels} through \code{...}. The full images
+are not loaded into R.
 }

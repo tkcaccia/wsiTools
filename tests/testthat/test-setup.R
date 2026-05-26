@@ -39,6 +39,46 @@ test_that("Bio-Formats setup points to OME bftools", {
   expect_match(brew_plan$notes, "bftools.zip", fixed = TRUE)
 })
 
+test_that("native CZI setup is explicit and CRAN-safe", {
+  backend_plan <- wsi_dependency_plan(tools = "native_czi", method = "manual")
+
+  expect_equal(backend_plan$tool, "native_czi")
+  expect_true(is.na(backend_plan$command))
+  expect_true(is.na(backend_plan$command_line))
+  expect_match(backend_plan$notes, "wsi_install_native_czi", fixed = TRUE)
+
+  plan <- wsi_install_native_czi(
+    install = FALSE,
+    install_dir = tempfile("native-czi-plan-")
+  )
+
+  expect_s3_class(plan, "wsi_native_czi_installation")
+  expect_s3_class(plan$plan, "data.frame")
+  expect_named(plan$plan, c("step", "command", "command_line", "notes", "args"))
+  expect_equal(plan$plan$command, c("git", "cmake", "cmake"))
+  expect_true(any(grepl("libCZIAPI", plan$plan$command_line, fixed = TRUE)))
+  expect_match(plan$license_notice, "LGPL")
+  expect_length(plan$command_output, 0)
+})
+
+test_that("native CZI installer finds built shared libraries", {
+  root <- tempfile("native-czi-lib-")
+  build_dir <- file.path(root, "libczi-build", "Src", "libCZIAPI")
+  dir.create(build_dir, recursive = TRUE)
+  ext <- if (.Platform$OS.type == "windows") {
+    ".dll"
+  } else if (identical(Sys.info()[["sysname"]], "Darwin")) {
+    ".dylib"
+  } else {
+    ".so"
+  }
+  lib <- file.path(build_dir, paste0("liblibCZIAPI", ext))
+  file.create(lib)
+
+  found <- wsiTools:::wsi_native_czi_find_library(root)
+  expect_equal(normalizePath(found, winslash = "/", mustWork = TRUE), normalizePath(lib, winslash = "/", mustWork = TRUE))
+})
+
 test_that("conda backend plans avoid default Anaconda channels", {
   plan <- wsi_dependency_plan(
     tools = c("openslide", "libvips", "imagemagick"),

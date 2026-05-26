@@ -1,4 +1,7 @@
 wsi_dynamic_tile_format <- function(format = "png") {
+  if (length(format) > 1L) {
+    format <- format[[1L]]
+  }
   format <- match.arg(format, c("png", "jpg", "jpeg"))
   if (identical(format, "jpeg")) "jpg" else format
 }
@@ -335,6 +338,102 @@ wsi_dynamic_image_tile_source <- function(path, source_id = NULL, name = NULL,
   source
 }
 
+#' Create an on-demand tiled CZI section source
+#'
+#' `wsi_dynamic_czi_section_tile_source()` describes an OpenSeadragon-compatible
+#' tile endpoint for one CZI scene/section. Tiles are generated from the native
+#' CZI region reader and cached one at a time; the complete CZI scene is not
+#' loaded into R memory.
+#'
+#' @param path CZI file path.
+#' @param section A scene row/list with `scene`, `x`, `y`, `width`, and
+#'   `height` fields, typically from native CZI metadata.
+#' @param source_id Stable tile source ID.
+#' @param name Human-readable section name.
+#' @param tile_size,tile_overlap Tile size and overlap in pixels.
+#' @param format Tile image format.
+#' @param cache_dir Tile cache directory.
+#' @param route HTTP route prefix.
+#' @param channel Zero-based CZI channel index.
+#' @param pyramid_factors Optional native pyramid downsample factors.
+#' @param metadata Optional source metadata.
+#'
+#' @return A `wsi_dynamic_czi_section_tile_source` object.
+#' @export
+wsi_dynamic_czi_section_tile_source <- function(path, section, source_id = NULL,
+                                                name = NULL, tile_size = 512,
+                                                tile_overlap = 1,
+                                                format = c("png", "jpg", "jpeg"),
+                                                cache_dir = NULL,
+                                                route = "/tiles",
+                                                channel = 0,
+                                                pyramid_factors = NULL,
+                                                metadata = list()) {
+  if (!wsi_has_native_czi()) {
+    wsi_abort("Full-resolution CZI section tiles require the optional native CZI backend. Run `wsi_install_native_czi()` first.", class = "wsi_backend_unavailable")
+  }
+  path <- wsi_validate_input_path(path)
+  if (!is.list(section) && !is.data.frame(section)) {
+    wsi_abort("`section` must be a CZI scene row or list with `scene`, `x`, `y`, `width`, and `height`.")
+  }
+  if (is.data.frame(section)) {
+    section <- as.list(section[1L, , drop = FALSE])
+    section <- lapply(section, function(x) if (length(x)) x[[1L]] else NULL)
+  }
+  needed <- c("scene", "x", "y", "width", "height")
+  missing <- setdiff(needed, names(section))
+  if (length(missing)) {
+    wsi_abort(sprintf("`section` is missing required field%s: %s", if (length(missing) == 1L) "" else "s", paste(missing, collapse = ", ")))
+  }
+  format <- wsi_dynamic_tile_format(format)
+  tile_size <- as.integer(wsi_check_scalar_number(tile_size, "tile_size", allow_zero = FALSE))
+  tile_overlap <- as.integer(wsi_check_scalar_number(tile_overlap, "tile_overlap"))
+  if (tile_overlap >= tile_size) {
+    wsi_abort("`tile_overlap` must be smaller than `tile_size`.")
+  }
+  route <- wsi_dynamic_tile_route(route)
+  width <- as.numeric(wsi_check_scalar_number(section$width, "section$width", allow_zero = FALSE))
+  height <- as.numeric(wsi_check_scalar_number(section$height, "section$height", allow_zero = FALSE))
+  scene <- as.integer(wsi_check_scalar_number(section$scene, "section$scene", allow_zero = TRUE))
+  id <- wsi_safe_id(source_id %||% sprintf("%s_scene_%d", tools::file_path_sans_ext(basename(path)), scene), "czi")
+  name <- as.character(name %||% sprintf("Scene %d", scene))
+  cache_dir <- wsi_dynamic_tile_cache_dir(cache_dir)
+  pyramid_factors <- suppressWarnings(as.numeric(pyramid_factors %||% numeric()))
+  pyramid_factors <- sort(unique(pyramid_factors[is.finite(pyramid_factors) & pyramid_factors > 1]))
+  levels <- data.frame(
+    level = seq_len(length(pyramid_factors) + 1L) - 1L,
+    width = ceiling(width / c(1, pyramid_factors)),
+    height = ceiling(height / c(1, pyramid_factors)),
+    downsample = c(1, pyramid_factors),
+    subifd = NA_integer_,
+    stringsAsFactors = FALSE
+  )
+  source <- list(
+    id = id,
+    kind = "czi_section",
+    path = path,
+    scene = scene,
+    channel = as.integer(channel),
+    name = name,
+    x = as.numeric(section$x),
+    y = as.numeric(section$y),
+    width = unname(width),
+    height = unname(height),
+    levels = levels,
+    tile_size = tile_size,
+    tile_format = format,
+    max_level = as.integer(wsi_dz_max_level(width, height)),
+    min_level = 0L,
+    tile_overlap = tile_overlap,
+    route = route,
+    cache_dir = cache_dir,
+    metadata = metadata %||% list(),
+    created = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS%z")
+  )
+  class(source) <- c("wsi_dynamic_czi_section_tile_source", "wsi_dynamic_tile_source", "list")
+  source
+}
+
 wsi_dynamic_tile_metadata <- function(source, base_url = NULL) {
   if (!inherits(source, "wsi_dynamic_tile_source")) {
     wsi_abort("`source` must be a `wsi_dynamic_tile_source` object.")
@@ -408,6 +507,20 @@ wsi_dynamic_native_level <- function(slide, downsample) {
 }
 
 wsi_dynamic_source_native_level <- function(source, downsample) {
+  if (identical(source$kind %||% "slide", "czi_section")) {
+    levels <- source$levels
+    if (!is.data.frame(levels) || !nrow(levels)) {
+      return(list(level = 0L, downsample = 1, subifd = NA_integer_))
+    }
+    ds <- suppressWarnings(as.numeric(levels$downsample))
+    ds[!is.finite(ds) | ds <= 0] <- 1
+    idx <- which.min(abs(log(ds / max(downsample, 1e-9))))
+    return(list(
+      level = as.integer(levels$level[[idx]]),
+      downsample = ds[[idx]],
+      subifd = NA_integer_
+    ))
+  }
   if (identical(source$kind %||% "slide", "image")) {
     levels <- source$levels
     if (!is.data.frame(levels) || !nrow(levels)) {
@@ -490,7 +603,8 @@ wsi_dynamic_tile_cache_file <- function(source, level, col, row, format = NULL,
   } else {
     ""
   }
-  if (identical(source$kind %||% "slide", "image")) {
+  if (identical(source$kind %||% "slide", "image") ||
+      identical(source$kind %||% "slide", "czi_section")) {
     key <- paste(c("r2", key[nzchar(key)]), collapse = "_")
   }
   suffix <- if (nzchar(key)) paste0("_", key) else ""
@@ -717,6 +831,54 @@ wsi_dynamic_image_region_to_file <- function(source, region, output, settings = 
   invisible(output)
 }
 
+wsi_dynamic_array_to_file <- function(array, output, format = "png") {
+  format <- wsi_dynamic_tile_format(format)
+  dims <- dim(array)
+  if (length(dims) != 3L || dims[[1L]] <= 0L || dims[[2L]] <= 0L || dims[[3L]] < 3L) {
+    wsi_abort("Dynamic CZI tile decoding did not return an RGB array.")
+  }
+  if (identical(format, "jpg")) {
+    grDevices::jpeg(output, width = dims[[2L]], height = dims[[1L]], units = "px", bg = "white", quality = 92)
+  } else {
+    grDevices::png(output, width = dims[[2L]], height = dims[[1L]], units = "px", bg = "white")
+  }
+  on.exit(grDevices::dev.off(), add = TRUE)
+  graphics::par(mar = c(0, 0, 0, 0), xaxs = "i", yaxs = "i")
+  graphics::plot.new()
+  graphics::plot.window(xlim = c(0, dims[[2L]]), ylim = c(0, dims[[1L]]), asp = NA)
+  graphics::rasterImage(wsi_array_to_raster(array), 0, 0, dims[[2L]], dims[[1L]], interpolate = FALSE)
+  invisible(output)
+}
+
+wsi_dynamic_czi_section_region_to_file <- function(source, region, output, format = "png") {
+  full_width <- max(1L, as.integer(ceiling(region$width * region$downsample)))
+  full_height <- max(1L, as.integer(ceiling(region$height * region$downsample)))
+  array <- wsi_native_czi_read_region(
+    source$path,
+    x = as.integer(round(source$x + region$x)),
+    y = as.integer(round(source$y + region$y)),
+    width = full_width,
+    height = full_height,
+    zoom = 1 / max(region$downsample, 1e-9),
+    channel = source$channel %||% 0L,
+    scene = NA_integer_
+  )
+  tmp <- tempfile(fileext = paste0(".", format), tmpdir = dirname(output))
+  on.exit(unlink(tmp), add = TRUE)
+  wsi_dynamic_array_to_file(array, tmp, format = format)
+  current_width <- suppressWarnings(as.numeric(wsi_vips_field(tmp, "width")))
+  current_height <- suppressWarnings(as.numeric(wsi_vips_field(tmp, "height")))
+  needs_resize <- !is.finite(current_width) || !is.finite(current_height) ||
+    as.integer(round(current_width)) != region$desired_width ||
+    as.integer(round(current_height)) != region$desired_height
+  if (isTRUE(needs_resize)) {
+    wsi_dynamic_resize_tile(tmp, output, region$desired_width, region$desired_height, format)
+  } else if (!file.copy(tmp, output, overwrite = TRUE)) {
+    wsi_abort(sprintf("Could not write dynamic CZI tile cache file: %s", output))
+  }
+  invisible(output)
+}
+
 wsi_dynamic_tile_file <- function(source, level, col, row, format = NULL,
                                   settings = list()) {
   format <- wsi_dynamic_tile_format(format %||% source$tile_format)
@@ -730,6 +892,10 @@ wsi_dynamic_tile_file <- function(source, level, col, row, format = NULL,
 
   if (identical(source$kind %||% "slide", "image")) {
     wsi_dynamic_image_region_to_file(source, region, output, settings = settings)
+    return(output)
+  }
+  if (identical(source$kind %||% "slide", "czi_section")) {
+    wsi_dynamic_czi_section_region_to_file(source, region, output, format = format)
     return(output)
   }
 

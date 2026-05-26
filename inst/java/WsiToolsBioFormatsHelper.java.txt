@@ -1,0 +1,178 @@
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.lang.reflect.Method;
+import javax.imageio.ImageIO;
+import loci.formats.FormatTools;
+import loci.formats.ImageReader;
+import loci.formats.gui.BufferedImageReader;
+
+public class WsiToolsBioFormatsHelper {
+  public static void main(String[] args) throws Exception {
+    if (args.length < 1) {
+      usage();
+    }
+    String command = args[0];
+    if ("version".equals(command)) {
+      version();
+    } else if ("metadata".equals(command)) {
+      if (args.length != 2) usage();
+      metadata(args[1]);
+    } else if ("region".equals(command)) {
+      if (args.length != 13) usage();
+      region(
+        args[1],
+        Integer.parseInt(args[2]),
+        Integer.parseInt(args[3]),
+        Integer.parseInt(args[4]),
+        Integer.parseInt(args[5]),
+        Integer.parseInt(args[6]),
+        Integer.parseInt(args[7]),
+        Integer.parseInt(args[8]),
+        Integer.parseInt(args[9]),
+        Integer.parseInt(args[10]),
+        args[11],
+        args[12]
+      );
+    } else {
+      usage();
+    }
+  }
+
+  private static void usage() {
+    System.err.println("Usage:");
+    System.err.println("  WsiToolsBioFormatsHelper version");
+    System.err.println("  WsiToolsBioFormatsHelper metadata <path>");
+    System.err.println("  WsiToolsBioFormatsHelper region <path> <series> <resolution> <z> <c> <t> <x> <y> <width> <height> <output> <format>");
+    System.exit(2);
+  }
+
+  private static void version() {
+    System.out.println("{\"bioformats_version\":\"" + escape(FormatTools.VERSION) + "\"}");
+  }
+
+  private static void metadata(String path) throws Exception {
+    ImageReader reader = new ImageReader();
+    setFlattenedResolutions(reader, false);
+    try {
+      reader.setId(path);
+      StringBuilder json = new StringBuilder();
+      json.append("{\"bioformats_version\":\"").append(escape(FormatTools.VERSION)).append("\",\"series\":[");
+      boolean first = true;
+      int seriesCount = reader.getSeriesCount();
+      for (int series = 0; series < seriesCount; series++) {
+        reader.setSeries(series);
+        int resolutionCount = getResolutionCount(reader);
+        for (int resolution = 0; resolution < resolutionCount; resolution++) {
+          setResolution(reader, resolution);
+          if (!first) json.append(",");
+          first = false;
+          json.append("{");
+          appendInt(json, "series", series, true);
+          appendInt(json, "resolution", resolution, false);
+          appendInt(json, "width", reader.getSizeX(), false);
+          appendInt(json, "height", reader.getSizeY(), false);
+          appendInt(json, "size_z", reader.getSizeZ(), false);
+          appendInt(json, "size_c", reader.getSizeC(), false);
+          appendInt(json, "size_t", reader.getSizeT(), false);
+          appendString(json, "pixel_type", FormatTools.getPixelTypeString(reader.getPixelType()), false);
+          appendString(json, "dimension_order", reader.getDimensionOrder(), false);
+          appendBoolean(json, "rgb", reader.isRGB(), false);
+          json.append("}");
+        }
+      }
+      json.append("]}");
+      System.out.println(json.toString());
+    } finally {
+      reader.close();
+    }
+  }
+
+  private static void region(String path, int series, int resolution, int z, int c,
+                             int t, int x, int y, int width, int height,
+                             String output, String format) throws Exception {
+    ImageReader base = new ImageReader();
+    setFlattenedResolutions(base, false);
+    BufferedImageReader reader = new BufferedImageReader(base);
+    try {
+      reader.setId(path);
+      reader.setSeries(series);
+      setResolution(reader, resolution);
+      int plane = reader.getIndex(z, c, t);
+      // BufferedImageReader delegates to the Bio-Formats byte-region APIs
+      // (`openBytes`) and avoids decoding the full source image.
+      BufferedImage image = reader.openImage(plane, x, y, width, height);
+      File out = new File(output);
+      File parent = out.getParentFile();
+      if (parent != null) parent.mkdirs();
+      if (!ImageIO.write(image, format, out)) {
+        throw new IllegalArgumentException("No Java ImageIO writer is available for format: " + format);
+      }
+    } finally {
+      reader.close();
+    }
+  }
+
+  private static void setFlattenedResolutions(Object reader, boolean value) {
+    try {
+      Method method = reader.getClass().getMethod("setFlattenedResolutions", boolean.class);
+      method.invoke(reader, value);
+    } catch (Throwable ignored) {
+      // Older Bio-Formats versions may not expose this method; the helper still
+      // works, but may report fewer pyramid/sub-resolution entries.
+    }
+  }
+
+  private static int getResolutionCount(Object reader) {
+    try {
+      Method method = reader.getClass().getMethod("getResolutionCount");
+      Object value = method.invoke(reader);
+      return Math.max(1, ((Number) value).intValue());
+    } catch (Throwable ignored) {
+      return 1;
+    }
+  }
+
+  private static void setResolution(Object reader, int resolution) {
+    try {
+      Method method = reader.getClass().getMethod("setResolution", int.class);
+      method.invoke(reader, resolution);
+    } catch (Throwable ignored) {
+      // See getResolutionCount().
+    }
+  }
+
+  private static void appendInt(StringBuilder json, String key, int value, boolean first) {
+    if (!first) json.append(",");
+    json.append("\"").append(key).append("\":").append(value);
+  }
+
+  private static void appendBoolean(StringBuilder json, String key, boolean value, boolean first) {
+    if (!first) json.append(",");
+    json.append("\"").append(key).append("\":").append(value ? "true" : "false");
+  }
+
+  private static void appendString(StringBuilder json, String key, String value, boolean first) {
+    if (!first) json.append(",");
+    json.append("\"").append(key).append("\":\"").append(escape(value)).append("\"");
+  }
+
+  private static String escape(String value) {
+    if (value == null) return "";
+    StringBuilder out = new StringBuilder();
+    for (int i = 0; i < value.length(); i++) {
+      char ch = value.charAt(i);
+      if (ch == '\\' || ch == '"') {
+        out.append('\\').append(ch);
+      } else if (ch == '\n') {
+        out.append("\\n");
+      } else if (ch == '\r') {
+        out.append("\\r");
+      } else if (ch == '\t') {
+        out.append("\\t");
+      } else {
+        out.append(ch);
+      }
+    }
+    return out.toString();
+  }
+}

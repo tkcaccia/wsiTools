@@ -1,11 +1,11 @@
 wsi_setup_supported_tools <- function() {
-  c("openslide", "libvips", "imagemagick", "bioformats", "stardist", "cellpose")
+  c("openslide", "libvips", "imagemagick", "bioformats", "native_czi", "stardist", "cellpose")
 }
 
 wsi_setup_default_tools <- function(include_optional = FALSE) {
   tools <- c("openslide", "libvips", "imagemagick")
   if (isTRUE(include_optional)) {
-    tools <- c(tools, "bioformats", "stardist", "cellpose")
+    tools <- c(tools, "bioformats", "native_czi", "stardist", "cellpose")
   }
   tools
 }
@@ -57,6 +57,7 @@ wsi_setup_tool_installed <- function(tool) {
     libvips = wsi_has_vips(),
     imagemagick = wsi_has_imagemagick(),
     bioformats = wsi_has_bioformats(),
+    native_czi = wsi_has_native_czi(),
     stardist = wsi_has_stardist(),
     cellpose = wsi_has_cellpose(),
     FALSE
@@ -146,6 +147,9 @@ wsi_setup_manual_note <- function(tool, method = "manual") {
   }
   if (tool == "bioformats" && method %in% c("homebrew", "apt", "dnf", "manual")) {
     return("Install OME Bio-Formats command-line tools (`bftools.zip`) manually, or run `conda install --override-channels -c ome -c conda-forge bftools` and ensure `showinf`/`bfconvert` are on PATH.")
+  }
+  if (tool == "native_czi") {
+    return("Use `wsi_install_native_czi()` to build ZEISS libCZI/libCZIAPI into the user cache after reviewing the LGPL notice, or install libCZIAPI manually and set `WSITOOLS_LIBCZIAPI`.")
   }
   if (tool == "openslide" && identical(method, "winget")) {
     return("No reliable winget OpenSlide package is configured. Use conda-forge, MSYS2/vcpkg, or official OpenSlide binaries and add the tools to PATH.")
@@ -324,6 +328,343 @@ wsi_check_stardist_free_space <- function(method,
     ))
   }
   invisible(TRUE)
+}
+
+wsi_native_czi_default_root <- function() {
+  file.path(tools::R_user_dir("wsiTools", "data"), "native-czi")
+}
+
+wsi_native_czi_license_notice <- function() {
+  paste(
+    "ZEISS libCZI/libCZIAPI is not part of wsiTools.",
+    "This helper downloads/builds it as an optional external runtime backend.",
+    "ZEISS libCZI is distributed under a dual license: LGPL v3 or a commercial/proprietary license from ZEISS.",
+    "If you use the LGPL option, you are responsible for complying with LGPL v3 and the third-party license notices distributed with libCZI.",
+    "wsiTools dynamically loads the resulting shared library through `WSITOOLS_LIBCZIAPI`; it does not statically link or bundle libCZI inside the R package.",
+    sep = "\n"
+  )
+}
+
+wsi_native_czi_accept_license <- function(accept_license = FALSE, ask = interactive()) {
+  if (isTRUE(accept_license)) {
+    return(invisible(TRUE))
+  }
+  notice <- wsi_native_czi_license_notice()
+  if (!isTRUE(ask)) {
+    wsi_abort(paste(
+      notice,
+      "Re-run with `accept_license = TRUE` after reviewing the license notice.",
+      sep = "\n\n"
+    ))
+  }
+  cat(notice, "\n\n")
+  if (!wsi_setup_confirm("Do you accept responsibility for installing and using ZEISS libCZI under its license terms?", ask = TRUE)) {
+    wsi_abort("Native CZI installation cancelled because the libCZI license terms were not accepted.")
+  }
+  invisible(TRUE)
+}
+
+wsi_native_czi_jobs <- function(jobs = NULL) {
+  if (!is.null(jobs)) {
+    jobs <- suppressWarnings(as.integer(jobs))
+    if (!is.na(jobs) && jobs > 0L) {
+      return(jobs)
+    }
+  }
+  cores <- tryCatch(parallel::detectCores(logical = FALSE), error = function(err) NA_integer_)
+  if (is.na(cores) || cores < 2L) 1L else max(1L, min(4L, cores - 1L))
+}
+
+wsi_native_czi_paths <- function(install_dir = wsi_native_czi_default_root()) {
+  install_dir <- normalizePath(install_dir, winslash = "/", mustWork = FALSE)
+  list(
+    root = install_dir,
+    source = file.path(install_dir, "libczi-src"),
+    build = file.path(install_dir, "libczi-build")
+  )
+}
+
+wsi_native_czi_plan_rows <- function(repo, ref, install_dir, jobs) {
+  paths <- wsi_native_czi_paths(install_dir)
+  configure_args <- c(
+    "-S", paths$source,
+    "-B", paths$build,
+    "-DCMAKE_BUILD_TYPE=Release",
+    "-DCMAKE_CXX_STANDARD=17",
+    "-DCMAKE_CXX_STANDARD_REQUIRED=ON",
+    "-DLIBCZI_BUILD_UNITTESTS=OFF",
+    "-DLIBCZI_BUILD_LIBCZIAPI=ON",
+    "-DLIBCZI_BUILD_PREFER_EXTERNALPACKAGE_RAPIDJSON=OFF",
+    "-DLIBCZI_ENABLE_INSTALL=OFF"
+  )
+  rows <- list(
+    list(
+      step = "download",
+      command = "git",
+      args = c("clone", "--depth", "1", "--branch", ref, repo, paths$source),
+      notes = "Downloads ZEISS libCZI source into the user wsiTools cache when it is not already present."
+    ),
+    list(
+      step = "configure",
+      command = "cmake",
+      args = configure_args,
+      notes = "Configures libCZIAPI as a shared library. CMake may fetch libCZI third-party build dependencies."
+    ),
+    list(
+      step = "build",
+      command = "cmake",
+      args = c("--build", paths$build, "--config", "Release", "--target", "libCZIAPI", "--parallel", as.character(jobs)),
+      notes = "Builds the libCZIAPI shared library used by wsiTools for native CZI reads."
+    )
+  )
+  out <- do.call(rbind, lapply(rows, function(row) {
+    data.frame(
+      step = row$step,
+      command = row$command,
+      command_line = wsi_setup_command_line(row$command, row$args),
+      notes = row$notes,
+      stringsAsFactors = FALSE
+    )
+  }))
+  out$args <- I(lapply(rows, `[[`, "args"))
+  out
+}
+
+wsi_native_czi_find_library <- function(install_dir = wsi_native_czi_default_root()) {
+  paths <- wsi_native_czi_paths(install_dir)
+  roots <- c(paths$build, paths$root)
+  roots <- roots[dir.exists(roots)]
+  if (!length(roots)) {
+    return(NA_character_)
+  }
+  files <- unique(unlist(lapply(roots, function(root) {
+    list.files(root, recursive = TRUE, full.names = TRUE, all.files = FALSE, no.. = TRUE)
+  }), use.names = FALSE))
+  if (!length(files)) {
+    return(NA_character_)
+  }
+  file_info <- file.info(files)
+  files <- files[is.na(file_info$isdir) | !file_info$isdir]
+  if (!length(files)) {
+    return(NA_character_)
+  }
+  ext <- if (.Platform$OS.type == "windows") {
+    "\\.dll$"
+  } else if (identical(Sys.info()[["sysname"]], "Darwin")) {
+    "\\.dylib$"
+  } else {
+    "\\.so(\\.[0-9.]+)?$"
+  }
+  base <- basename(files)
+  stripped <- gsub("[^[:alnum:]]", "", base)
+  keep <- grepl(ext, base, ignore.case = TRUE) &
+    grepl("cziapi|libcziapi|liblibcziapi", stripped, ignore.case = TRUE)
+  candidates <- files[keep]
+  if (!length(candidates)) {
+    keep <- grepl(ext, base, ignore.case = TRUE) & grepl("czi", base, ignore.case = TRUE)
+    candidates <- files[keep]
+  }
+  if (!length(candidates)) {
+    return(NA_character_)
+  }
+  candidates <- candidates[order(nchar(candidates))]
+  normalizePath(candidates[[1L]], winslash = "/", mustWork = TRUE)
+}
+
+wsi_native_czi_git_update <- function(repo, ref, source_dir, clean = FALSE) {
+  if (isTRUE(clean) && dir.exists(source_dir)) {
+    unlink(source_dir, recursive = TRUE, force = TRUE)
+  }
+  if (!dir.exists(file.path(source_dir, ".git"))) {
+    dir.create(dirname(source_dir), recursive = TRUE, showWarnings = FALSE)
+    return(wsi_run_command(
+      "git",
+      args = c("clone", "--depth", "1", "--branch", ref, repo, source_dir),
+      error_message = "Could not download ZEISS libCZI source with git."
+    ))
+  }
+  output <- wsi_run_command(
+    "git",
+    args = c("-C", source_dir, "fetch", "--depth", "1", "origin", ref),
+    error_message = "Could not update the local ZEISS libCZI source checkout."
+  )
+  c(output, wsi_run_command(
+    "git",
+    args = c("-C", source_dir, "checkout", "--detach", "FETCH_HEAD"),
+    error_message = "Could not switch the local ZEISS libCZI source checkout to the requested ref."
+  ))
+}
+
+wsi_native_czi_write_renviron <- function(library_path, ask = interactive()) {
+  library_path <- normalizePath(library_path, winslash = "/", mustWork = TRUE)
+  renviron <- path.expand("~/.Renviron")
+  lines <- if (file.exists(renviron)) readLines(renviron, warn = FALSE) else character()
+  replacement <- sprintf("WSITOOLS_LIBCZIAPI=%s", encodeString(library_path, quote = "\""))
+  exists <- grepl("^\\s*WSITOOLS_LIBCZIAPI\\s*=", lines)
+  new_lines <- if (any(exists)) {
+    lines[exists] <- replacement
+    lines
+  } else {
+    c(lines, "", "# wsiTools optional native CZI backend", replacement)
+  }
+  if (!wsi_setup_confirm(sprintf("Write WSITOOLS_LIBCZIAPI to %s?", renviron), ask = ask)) {
+    return(invisible(FALSE))
+  }
+  writeLines(new_lines, renviron, useBytes = TRUE)
+  invisible(TRUE)
+}
+
+#' Build and configure the optional native CZI backend
+#'
+#' `wsi_install_native_czi()` is an explicit, opt-in helper that downloads and
+#' builds ZEISS libCZI/libCZIAPI into the user's wsiTools cache. It keeps
+#' wsiTools CRAN-safe by treating libCZI as an external runtime library and
+#' dynamically loading it through `WSITOOLS_LIBCZIAPI`.
+#'
+#' ZEISS libCZI is not bundled with wsiTools. It is distributed by ZEISS under a
+#' dual license: LGPL v3 or a commercial/proprietary license from ZEISS. This
+#' helper prints a license notice and requires `accept_license = TRUE` before it
+#' runs build commands non-interactively.
+#'
+#' @param install Whether to run the download/configure/build commands. Use
+#'   `FALSE` to inspect the plan only.
+#' @param ask Whether to ask before running commands or writing `~/.Renviron`.
+#' @param accept_license Set to `TRUE` after reviewing the libCZI license notice.
+#' @param repo Git repository URL for ZEISS libCZI.
+#' @param ref Git branch or tag to build.
+#' @param install_dir Directory used for the source and build tree. Defaults to
+#'   the user wsiTools data cache.
+#' @param jobs Number of parallel build jobs. Defaults to a conservative value.
+#' @param set_env Whether to set `WSITOOLS_LIBCZIAPI` for the current R session.
+#' @param persist Whether to write `WSITOOLS_LIBCZIAPI` to `~/.Renviron` for
+#'   future R sessions.
+#' @param clean Whether to remove any existing source/build tree first.
+#'
+#' @return A `wsi_native_czi_installation` object.
+#' @export
+#'
+#' @examples
+#' plan <- wsi_install_native_czi(install = FALSE)
+#' plan
+wsi_install_native_czi <- function(install = TRUE,
+                                   ask = interactive(),
+                                   accept_license = FALSE,
+                                   repo = "https://github.com/ZEISS/libczi.git",
+                                   ref = "main",
+                                   install_dir = wsi_native_czi_default_root(),
+                                   jobs = NULL,
+                                   set_env = TRUE,
+                                   persist = FALSE,
+                                   clean = FALSE) {
+  repo <- as.character(repo %||% "")
+  ref <- as.character(ref %||% "")
+  if (length(repo) != 1L || is.na(repo) || !nzchar(repo)) {
+    wsi_abort("`repo` must be a single non-empty git repository URL.")
+  }
+  if (length(ref) != 1L || is.na(ref) || !nzchar(ref)) {
+    wsi_abort("`ref` must be a single non-empty branch or tag.")
+  }
+  jobs <- wsi_native_czi_jobs(jobs)
+  paths <- wsi_native_czi_paths(install_dir)
+  plan <- wsi_native_czi_plan_rows(repo = repo, ref = ref, install_dir = paths$root, jobs = jobs)
+  library_path <- wsi_native_czi_find_library(paths$root)
+
+  out <- structure(
+    list(
+      installed = wsi_has_native_czi(),
+      available_library = library_path,
+      install_dir = paths$root,
+      source_dir = paths$source,
+      build_dir = paths$build,
+      repo = repo,
+      ref = ref,
+      plan = plan,
+      license_notice = wsi_native_czi_license_notice(),
+      command_output = character()
+    ),
+    class = "wsi_native_czi_installation"
+  )
+
+  if (!isTRUE(install)) {
+    return(invisible(out))
+  }
+  if (!isTRUE(clean) && !is.na(library_path) && nzchar(library_path)) {
+    if (isTRUE(set_env)) {
+      Sys.setenv(WSITOOLS_LIBCZIAPI = library_path)
+    }
+    if (isTRUE(persist)) {
+      wsi_native_czi_write_renviron(library_path, ask = ask)
+    }
+    out$installed <- wsi_has_native_czi()
+    if (isTRUE(out$installed)) {
+      return(invisible(out))
+    }
+  }
+  if (!wsi_command_exists("git")) {
+    wsi_abort("Installing native CZI support from source requires `git` on PATH.")
+  }
+  if (!wsi_command_exists("cmake")) {
+    wsi_abort("Installing native CZI support from source requires `cmake` on PATH.")
+  }
+  wsi_native_czi_accept_license(accept_license = accept_license, ask = ask)
+  if (!wsi_setup_confirm("Download and build ZEISS libCZI/libCZIAPI now?", ask = ask)) {
+    return(invisible(out))
+  }
+
+  if (isTRUE(clean) && dir.exists(paths$build)) {
+    unlink(paths$build, recursive = TRUE, force = TRUE)
+  }
+  dir.create(paths$root, recursive = TRUE, showWarnings = FALSE)
+  output <- wsi_native_czi_git_update(repo = repo, ref = ref, source_dir = paths$source, clean = clean)
+  configure_step <- which(plan$step == "configure")[[1L]]
+  build_step <- which(plan$step == "build")[[1L]]
+  output <- c(output, wsi_run_command(
+    "cmake",
+    args = plan$args[[configure_step]],
+    error_message = "Configuring ZEISS libCZI/libCZIAPI failed."
+  ))
+  output <- c(output, wsi_run_command(
+    "cmake",
+    args = plan$args[[build_step]],
+    error_message = "Building ZEISS libCZI/libCZIAPI failed."
+  ))
+
+  library_path <- wsi_native_czi_find_library(paths$root)
+  if (is.na(library_path) || !nzchar(library_path)) {
+    wsi_abort("The libCZIAPI build completed, but wsiTools could not find the generated shared library.")
+  }
+  if (isTRUE(set_env)) {
+    Sys.setenv(WSITOOLS_LIBCZIAPI = library_path)
+  }
+  if (isTRUE(persist)) {
+    wsi_native_czi_write_renviron(library_path, ask = ask)
+  }
+  out$available_library <- library_path
+  out$installed <- wsi_has_native_czi()
+  out$command_output <- output
+  invisible(out)
+}
+
+#' @export
+print.wsi_native_czi_installation <- function(x, ...) {
+  cat("<wsi_native_czi_installation>\n")
+  cat(sprintf("  installed:   %s\n", if (isTRUE(x$installed)) "TRUE" else "FALSE"))
+  cat(sprintf("  install_dir: %s\n", x$install_dir))
+  if (!is.na(x$available_library) && nzchar(x$available_library)) {
+    cat(sprintf("  library:     %s\n", x$available_library))
+  }
+  cat(sprintf("  repo:        %s\n", x$repo))
+  cat(sprintf("  ref:         %s\n", x$ref))
+  if (nrow(x$plan)) {
+    cat("\nCommands:\n")
+    print(x$plan[, c("step", "command_line", "notes"), drop = FALSE], row.names = FALSE)
+  }
+  cat("\nLicense notice:\n")
+  cat(x$license_notice, "\n")
+  if (!isTRUE(x$installed)) {
+    cat("\nRun `wsi_install_native_czi(accept_license = TRUE)` to build and activate the native CZI backend.\n")
+  }
+  invisible(x)
 }
 
 wsi_stardist_write_wrapper <- function(method,
