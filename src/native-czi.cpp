@@ -12,27 +12,17 @@
 #include <vector>
 
 #ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
+// Avoid including windows.h here. R defines macros such as Realloc and Free,
+// while Windows headers pull in COM interfaces with methods of the same names.
+// The native CZI bridge only needs the three dynamic-loader calls below.
+#ifndef WSITOOLS_WINAPI
+#define WSITOOLS_WINAPI __stdcall
 #endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-// R defines Realloc/Free macros that collide with COM method names pulled in by
-// Windows headers. The native CZI bridge does not use those R allocation macros.
-#ifdef Realloc
-#undef Realloc
-#endif
-#ifdef Free
-#undef Free
-#endif
-#include <windows.h>
-#ifdef TRUE
-#undef TRUE
-#endif
-#ifdef FALSE
-#undef FALSE
-#endif
+extern "C" {
+__declspec(dllimport) void* WSITOOLS_WINAPI LoadLibraryA(const char* path);
+__declspec(dllimport) int WSITOOLS_WINAPI FreeLibrary(void* handle);
+__declspec(dllimport) void* WSITOOLS_WINAPI GetProcAddress(void* handle, const char* name);
+}
 #else
 #include <dlfcn.h>
 #endif
@@ -146,7 +136,7 @@ class DynamicLibrary {
   bool open(const std::string& path) {
     close();
 #ifdef _WIN32
-    handle_ = reinterpret_cast<void*>(LoadLibraryA(path.c_str()));
+    handle_ = LoadLibraryA(path.c_str());
 #else
     handle_ = dlopen(path.c_str(), RTLD_LAZY | RTLD_LOCAL);
 #endif
@@ -157,7 +147,7 @@ class DynamicLibrary {
   void close() {
     if (!handle_) return;
 #ifdef _WIN32
-    FreeLibrary(reinterpret_cast<HMODULE>(handle_));
+    FreeLibrary(handle_);
 #else
     dlclose(handle_);
 #endif
@@ -167,7 +157,7 @@ class DynamicLibrary {
   void* symbol(const char* name) const {
     if (!handle_) return nullptr;
 #ifdef _WIN32
-    return reinterpret_cast<void*>(GetProcAddress(reinterpret_cast<HMODULE>(handle_), name));
+    return GetProcAddress(handle_, name);
 #else
     return dlsym(handle_, name);
 #endif

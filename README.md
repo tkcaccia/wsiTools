@@ -31,7 +31,7 @@ packageVersion("wsiTools")
 wsi_backends()
 ```
 
-The current GitHub package version is `0.1.1`. Avoid installing old commit
+The current GitHub package version is `0.1.2`. Avoid installing old commit
 references unless you are deliberately debugging a previous build; the command
 above always reinstalls the current GitHub version.
 
@@ -71,7 +71,7 @@ want to update your local package library. This avoids accidental long updates
 on managed Windows workstations.
 
 After installation, check `packageVersion("wsiTools")`. It should report
-`0.1.1` or newer. If a Windows compiler error still mentions `Realloc` or
+`0.1.2` or newer. If a Windows compiler error still mentions `Realloc` or
 `Free`, R is building an older cached copy; remove `00LOCK-wsiTools`, remove
 the old `wsiTools` folder, and rerun the clean reinstall command above.
 
