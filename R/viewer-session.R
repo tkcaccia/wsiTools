@@ -141,7 +141,7 @@ wsi_viewer_allowed_events <- function() {
     "annotations_dirty", "annotations_saved",
     "annotation_history_updated", "annotation_history_cleared",
     "measurement_added", "measurements_cleared",
-    "trajectory_added", "trajectories_cleared",
+    "trajectory_added", "trajectory_area_created", "trajectories_cleared",
     "stain_updated", "image_transform_updated",
     "layer_added", "layer_removed", "layer_updated", "layer_visibility_updated",
     "layer_opacity_updated", "tile_grid_toggled",
@@ -502,6 +502,8 @@ wsi_empty_trajectories <- function() {
     control_count = integer(),
     point_count = integer(),
     length_px = numeric(),
+    area_width_px = numeric(),
+    area_roi_id = character(),
     created = character(),
     stringsAsFactors = FALSE
   )
@@ -559,6 +561,14 @@ wsi_trajectories_from_payload <- function(trajectories) {
       out$length_px <- NA_real_
     }
     out$length_px <- suppressWarnings(as.numeric(out$length_px))
+    if (!"area_width_px" %in% names(out)) {
+      out$area_width_px <- NA_real_
+    }
+    out$area_width_px <- suppressWarnings(as.numeric(out$area_width_px))
+    if (!"area_roi_id" %in% names(out)) {
+      out$area_roi_id <- NA_character_
+    }
+    out$area_roi_id <- as.character(out$area_roi_id)
     if (!"created" %in% names(out)) {
       out$created <- NA_character_
     }
@@ -572,7 +582,7 @@ wsi_trajectories_from_payload <- function(trajectories) {
     } else if (!inherits(out$points, "AsIs")) {
       out$points <- I(as.list(out$points))
     }
-    out <- out[, c("id", "name", "n", "control_count", "point_count", "length_px", "created", "control_points", "points"), drop = FALSE]
+    out <- out[, c("id", "name", "n", "control_count", "point_count", "length_px", "area_width_px", "area_roi_id", "created", "control_points", "points"), drop = FALSE]
     class(out) <- c("wsi_trajectories", setdiff(class(out), "wsi_trajectories"))
     return(out)
   }
@@ -595,6 +605,8 @@ wsi_trajectories_from_payload <- function(trajectories) {
       control_count = nrow(control),
       point_count = nrow(sampled),
       length_px = suppressWarnings(as.numeric(entry$length_px %||% NA_real_)),
+      area_width_px = suppressWarnings(as.numeric(entry$area_width_px %||% NA_real_)),
+      area_roi_id = as.character(entry$area_roi_id %||% NA_character_),
       created = as.character(entry$created %||% NA_character_),
       stringsAsFactors = FALSE
     )

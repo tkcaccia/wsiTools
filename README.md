@@ -31,7 +31,7 @@ packageVersion("wsiTools")
 wsi_backends()
 ```
 
-The current GitHub package version is `0.1.10`. Avoid installing old commit
+The current GitHub package version is `0.1.11`. Avoid installing old commit
 references unless you are deliberately debugging a previous build; the command
 above always reinstalls the current GitHub version.
 
@@ -71,7 +71,7 @@ want to update your local package library. This avoids accidental long updates
 on managed Windows workstations.
 
 After installation, check `packageVersion("wsiTools")`. It should report
-`0.1.10` or newer. On Windows, the native CZI bridge is compiled by default.
+`0.1.11` or newer. On Windows, the native CZI bridge is compiled by default.
 If you need to install only the core package on a machine where that native
 bridge cannot compile, set `WSITOOLS_DISABLE_NATIVE_CZI=1` before installation
 to use the fallback stub.
@@ -709,7 +709,10 @@ annotation before GeoJSON export. Annotation colors
 are category-driven: all ROIs with the same class label share the same class
 color, including imported GeoJSON and newly painted annotations. `Ctrl+Z` undoes
 annotation edits and `Ctrl+Shift+Z`/`Ctrl+Y` redoes them, with the last 10
-committed states retained in each direction. In a static browser viewer this opens the
+committed states retained in each direction. The `Trajectories` menu can draw a
+smoothed backbone, preview an adjustable-width corridor around it, and create a
+GeoJSON annotation area from that corridor while preserving the same class
+merge and different-class clipping rules used by brush annotations. In a static browser viewer this opens the
 browser's normal save/download flow rather than silently writing to a server
 path.
 

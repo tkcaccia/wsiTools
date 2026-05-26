@@ -52,7 +52,7 @@ packageVersion("wsiTools")
 wsi_backends()
 ```
 
-The current GitHub package version is `0.1.10`. If R reports an older version
+The current GitHub package version is `0.1.11`. If R reports an older version
 after installation, remove the old package directory and reinstall from
 `tkcaccia/wsiTools` without pinning an old commit.
 
@@ -314,7 +314,9 @@ an existing annotation before GeoJSON export.
 Annotation colors are category-driven, so imported, drawn, and painted ROIs
 with the same class label share the same class color. `Ctrl+Z` undoes
 annotation edits in the viewer, with the last 10 committed
-annotation states retained.
+annotation states retained. The `Trajectories` menu can draw a smoothed
+backbone, preview an adjustable-width corridor around it, and convert that
+corridor into an annotation area using the active pathology class.
 
 For full-resolution zooming, use tiled mode. OpenSeadragon is a browser tile
 viewer: it needs browser-readable tiles, not raw SVS, BTF, or OME-TIFF pixels.

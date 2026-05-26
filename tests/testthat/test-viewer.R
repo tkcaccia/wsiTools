@@ -360,6 +360,10 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "toolTrajectory", fixed = TRUE)
   expect_match(html, "finishTrajectory", fixed = TRUE)
   expect_match(html, "trajectoryResolution", fixed = TRUE)
+  expect_match(html, "trajectoryAreaWidth", fixed = TRUE)
+  expect_match(html, "trajectoryAreaRoi", fixed = TRUE)
+  expect_match(html, "createTrajectoryAreaRoi", fixed = TRUE)
+  expect_match(html, "trajectoryAreaGeometry", fixed = TRUE)
   expect_match(html, "trajectoryPayload", fixed = TRUE)
   expect_match(html, "drawTrajectories", fixed = TRUE)
   expect_match(html, "bindTrajectoryControls", fixed = TRUE)
@@ -1015,6 +1019,8 @@ test_that("live viewer state payloads update R objects", {
       name = "Trajectory 1",
       n = 5,
       length_px = 10,
+      area_width_px = 256,
+      area_roi_id = "trajectory_roi_1",
       control_points = list(
         list(x = 0, y = 0),
         list(x = 10, y = 0)
@@ -1050,6 +1056,8 @@ test_that("live viewer state payloads update R objects", {
   expect_s3_class(snapshot$trajectories, "wsi_trajectories")
   expect_equal(snapshot$trajectories$id, "trajectory_1")
   expect_equal(snapshot$trajectories$point_count, 5)
+  expect_equal(snapshot$trajectories$area_width_px, 256)
+  expect_equal(snapshot$trajectories$area_roi_id, "trajectory_roi_1")
   expect_equal(nrow(snapshot$trajectories$points[[1]]), 5)
   expect_true(snapshot$annotations$dirty)
   expect_equal(snapshot$annotations$dirty_reason, "roi_updated")
@@ -1407,6 +1415,7 @@ test_that("viewer event validation allowlists live WebSocket events", {
   expected <- c(
     "roi_created", "roi_updated", "roi_deleted", "roi_selected",
     "brush_committed", "viewport_changed", "layer_updated",
+    "trajectory_area_created",
     "segmentation_started", "segmentation_progress",
     "segmentation_finished", "job_status"
   )
