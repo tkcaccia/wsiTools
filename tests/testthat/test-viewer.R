@@ -1779,6 +1779,9 @@ test_that("interactive H&E viewer writes hematoxylin, eosin, and residual contro
   expect_match(html, "stainContrastMax_residual", fixed = TRUE)
   expect_match(html, "Residual", fixed = TRUE)
   expect_match(html, '"visible":false', fixed = TRUE)
+  expect_match(html, "stainConcentrations", fixed = TRUE)
+  expect_match(html, "heGramInv", fixed = TRUE)
+  expect_match(html, "sourceCanvas", fixed = TRUE)
 })
 
 test_that("interactive multi-IHC viewer writes selectable channel controls", {

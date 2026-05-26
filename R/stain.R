@@ -757,6 +757,69 @@ wsi_deconvolve_array <- function(image, channels, epsilon) {
   )
 }
 
+wsi_deconvolve_two_stain_array <- function(image, channels, epsilon,
+                                           include_residual = TRUE) {
+  arr <- wsi_image_to_array(image)
+  dims <- dim(arr)
+  rgb <- pmax(arr[, , seq_len(3L), drop = FALSE], epsilon)
+  od <- -log(rgb)
+  od_mat <- cbind(as.vector(od[, , 1L]), as.vector(od[, , 2L]), as.vector(od[, , 3L]))
+  if (length(channels) < 2L) {
+    wsi_abort("Two-stain deconvolution requires at least two stain vectors.")
+  }
+  vectors <- do.call(cbind, lapply(channels[seq_len(2L)], `[[`, "vector"))
+  gram <- crossprod(vectors)
+  inverse <- tryCatch(
+    solve(gram),
+    error = function(err) {
+      wsi_abort("The supplied H&E stain vectors are not linearly independent.")
+    }
+  )
+  concentration <- od_mat %*% vectors %*% inverse
+  concentration[concentration < 0] <- 0
+  ids <- vapply(channels[seq_len(2L)], `[[`, character(1), "id")
+
+  channel_values <- lapply(seq_along(ids), function(i) {
+    matrix(concentration[, i], nrow = dims[[1L]], ncol = dims[[2L]])
+  })
+  names(channel_values) <- ids
+
+  metadata <- unclass(channels)[seq_len(2L)]
+  if (isTRUE(include_residual)) {
+    reconstructed <- concentration %*% t(vectors)
+    residual <- sqrt(rowSums((od_mat - reconstructed)^2))
+    residual_id <- if (length(channels) >= 3L) channels[[3L]]$id else "residual"
+    channel_values[[residual_id]] <- matrix(pmax(0, residual), nrow = dims[[1L]], ncol = dims[[2L]])
+    if (length(channels) >= 3L) {
+      metadata <- c(metadata, unclass(channels)[3L])
+    } else {
+      metadata <- c(metadata, list(list(
+        id = residual_id,
+        name = "Residual",
+        vector = wsi_residual_stain_vector(vectors[, 1L], vectors[, 2L]),
+        colour = "#6b7280",
+        strength = 1,
+        visible = FALSE,
+        opacity = 1,
+        contrast_min = 0,
+        contrast_max = 1
+      )))
+    }
+  }
+
+  structure(
+    c(
+      channel_values,
+      list(
+        alpha = if (dims[[3L]] >= 4L) arr[, , 4L] else NULL,
+        stain_matrix = wsi_complete_stain_basis(channels[seq_len(2L)])$matrix,
+        channel_metadata = metadata
+      )
+    ),
+    class = "wsi_ihc_channels"
+  )
+}
+
 #' Deconvolve hematoxylin and HRP/DAB stains from an IHC image
 #'
 #' Performs color deconvolution on an already-small image object such as a
@@ -826,8 +889,9 @@ wsi_deconvolve_ihc <- function(image,
 #'   matrices for `hematoxylin`, `eosin`, and, when `include_residual = TRUE`,
 #'   `residual`; image formats return a recoloured visualisation.
 #' @param stain_matrix Optional 3 x 3 stain matrix. When supplied, the first two
-#'   columns are used as hematoxylin and eosin and the third column is used as
-#'   residual when `include_residual = TRUE`.
+#'   columns are used as hematoxylin and eosin. The residual channel reports the
+#'   optical-density norm left after fitting hematoxylin/eosin rather than
+#'   repeatedly deconvolving through an arbitrary third stain.
 #' @param hematoxylin,eosin RGB optical-density vectors used when
 #'   `stain_matrix` is not supplied.
 #' @param include_residual Include residual staining as an explicit output
@@ -898,7 +962,12 @@ wsi_deconvolve_he <- function(image,
       visible = visible
     )
   }
-  channels <- wsi_deconvolve_array(image, channel_definitions, epsilon = epsilon)
+  channels <- wsi_deconvolve_two_stain_array(
+    image,
+    channel_definitions,
+    epsilon = epsilon,
+    include_residual = include_residual
+  )
   wsi_format_ihc_output(
     channels,
     format = format,

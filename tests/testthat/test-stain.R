@@ -36,6 +36,19 @@ test_that("H&E deconvolution returns hematoxylin, eosin, and residual channels",
   expect_false(channels$channel_metadata[[3]]$visible)
 })
 
+test_that("H&E deconvolution recovers hematoxylin and eosin without forced residual", {
+  image <- make_he_patch(width = 9, height = 7)
+  expected_h <- matrix(seq(0.05, 1.1, length.out = 9 * 7), nrow = 7, ncol = 9)
+  expected_e <- matrix(seq(0.9, 0.05, length.out = 9 * 7), nrow = 7, ncol = 9)
+
+  channels <- wsi_deconvolve_he(image, include_residual = FALSE)
+
+  expect_equal(wsiTools:::wsi_channel_ids_from_output(channels), c("hematoxylin", "eosin"))
+  expect_true(max(abs(channels$hematoxylin - expected_h)) < 1e-6)
+  expect_true(max(abs(channels$eosin - expected_e)) < 1e-6)
+  expect_null(channels$residual)
+})
+
 test_that("H&E residual channel can be visualized in recoloured output", {
   image <- make_he_patch(width = 6, height = 5)
 
