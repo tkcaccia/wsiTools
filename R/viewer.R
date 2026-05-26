@@ -836,7 +836,7 @@ wsi_viewer_chrome <- function(config, loading_message, tiled = FALSE) {
     ),
     wsi_viewer_menu(
       "Annotations",
-      "Draw, select, import, export, and manage annotations",
+      "Draw, select, import, export, segment, and manage annotations",
       paste0(
         "<div class=\"menuGrid\">",
         "<button id=\"toolSelect\" title=\"Select ROI mode\">Select</button>",
@@ -857,6 +857,19 @@ wsi_viewer_chrome <- function(config, loading_message, tiled = FALSE) {
         "<button id=\"saveGeojson\" title=\"Save annotations as GeoJSON\">Save GeoJSON</button>",
         "<button id=\"layersToggle\" title=\"Show GeoJSON geometry list\">Geometry list</button>",
         "</div>",
+        "<div class=\"menuTitle\">StarDist segmentation</div>",
+        "<div class=\"menuGrid\">",
+        "<button id=\"exportSelectedRoi\" title=\"Export selected ROI as GeoJSON for StarDist crop analysis\">Export ROI</button>",
+        "<button id=\"startSegmentation\" title=\"Crop the selected ROI, run the configured StarDist service, and import returned cells\">Run segmentation</button>",
+        "<button id=\"loadSegmentation\" title=\"Import StarDist GeoJSON polygons as cell overlays\">Load GeoJSON</button>",
+        "<button id=\"loadSegmentationCsv\" title=\"Import StarDist CSV/TSV centroid table as cell markers\">Load CSV</button>",
+        "<button id=\"clearSegmentation\" title=\"Remove imported StarDist overlays\">Clear cells</button>",
+        "</div>",
+        "<label class=\"control\" title=\"Treat imported coordinates as crop-local and offset by the selected ROI bounding box\"><input id=\"segLocalCoords\" type=\"checkbox\" checked>crop coords</label>",
+        "<label class=\"control\" title=\"Cell marker radius for CSV/TSV centroid imports\">cell radius <input id=\"segCellRadius\" type=\"range\" min=\"2\" max=\"80\" step=\"1\" value=\"8\"><span id=\"segCellRadiusValue\">8 px</span></label>",
+        "<input id=\"segmentationFile\" type=\"file\" accept=\".geojson,.json,application/geo+json,application/json\" style=\"display:none\">",
+        "<input id=\"segmentationTableFile\" type=\"file\" accept=\".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain\" style=\"display:none\">",
+        "<div id=\"segmentationSummary\" class=\"menuHint\"></div>",
         "<label class=\"control\" title=\"ROI opacity\">Opacity <input id=\"roiOpacity\" type=\"range\" min=\"0\" max=\"1\" step=\"0.05\" value=\"1\"></label>",
         "<input id=\"geojsonImportFile\" type=\"file\" accept=\".geojson,.json,application/geo+json,application/json\" style=\"display:none\">",
         "<div id=\"geojsonImportSummary\" class=\"menuHint\"></div>",
@@ -883,25 +896,6 @@ wsi_viewer_chrome <- function(config, loading_message, tiled = FALSE) {
         "<button id=\"applyRoiClass\" title=\"Use this name and class for the next drawn or painted annotation\">Set next class</button>",
         "<button id=\"selectionCardToggle\" title=\"Show or hide the selected ROI summary\">ROI summary</button>",
         "<button id=\"deleteRoi\" title=\"Delete the selected ROI\">Delete selected</button>"
-      )
-    ),
-    wsi_viewer_menu(
-      "Segmentation",
-      "StarDist segmentation import for selected ROIs",
-      paste0(
-        "<div class=\"menuTitle\">StarDist</div>",
-        "<div class=\"menuGrid\">",
-        "<button id=\"exportSelectedRoi\" title=\"Export selected ROI as GeoJSON for StarDist crop analysis\">Export ROI</button>",
-        "<button id=\"startSegmentation\" title=\"Crop the selected ROI, run the configured StarDist service, and import returned cells\">Run segmentation</button>",
-        "<button id=\"loadSegmentation\" title=\"Import StarDist GeoJSON polygons as cell overlays\">Load GeoJSON</button>",
-        "<button id=\"loadSegmentationCsv\" title=\"Import StarDist CSV/TSV centroid table as cell markers\">Load CSV</button>",
-        "<button id=\"clearSegmentation\" title=\"Remove imported StarDist overlays\">Clear cells</button>",
-        "</div>",
-        "<label class=\"control\" title=\"Treat imported coordinates as crop-local and offset by the selected ROI bounding box\"><input id=\"segLocalCoords\" type=\"checkbox\" checked>crop coords</label>",
-        "<label class=\"control\" title=\"Cell marker radius for CSV/TSV centroid imports\">cell radius <input id=\"segCellRadius\" type=\"range\" min=\"2\" max=\"80\" step=\"1\" value=\"8\"><span id=\"segCellRadiusValue\">8 px</span></label>",
-        "<input id=\"segmentationFile\" type=\"file\" accept=\".geojson,.json,application/geo+json,application/json\" style=\"display:none\">",
-        "<input id=\"segmentationTableFile\" type=\"file\" accept=\".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain\" style=\"display:none\">",
-        "<div id=\"segmentationSummary\" class=\"menuHint\"></div>"
       )
     ),
     wsi_viewer_menu(

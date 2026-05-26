@@ -31,7 +31,7 @@ packageVersion("wsiTools")
 wsi_backends()
 ```
 
-The current GitHub package version is `0.1.16`. Avoid installing old commit
+The current GitHub package version is `0.1.17`. Avoid installing old commit
 references unless you are deliberately debugging a previous build; the command
 above always reinstalls the current GitHub version.
 
@@ -71,7 +71,7 @@ want to update your local package library. This avoids accidental long updates
 on managed Windows workstations.
 
 After installation, check `packageVersion("wsiTools")`. It should report
-`0.1.16` or newer. On Windows, the native CZI bridge is compiled by default.
+`0.1.17` or newer. On Windows, the native CZI bridge is compiled by default.
 If you need to install only the core package on a machine where that native
 bridge cannot compile, set `WSITOOLS_DISABLE_NATIVE_CZI=1` before installation
 to use the fallback stub.
@@ -679,9 +679,10 @@ thumbnail. It supports pan, zoom, and level-0 coordinate readout without loading
 the full slide into R memory.
 
 The interactive toolbar is organized into menus such as `Project`,
-`Annotations`, `Segmentation`, `Artifacts`, `Measure`, `Trajectories`, `Image`,
-`View`, `Help`, and, when enabled, `Stains`. Use `Project` to reopen the
-left-side project panel or add ordinary browser-readable images as project
+`Annotations`, `Artifacts`, `Measure`, `Trajectories`, `Image`, `View`,
+`Stains`, and `Help`. Segmentation import and selected-ROI StarDist controls
+now live inside `Annotations` beside the GeoJSON tools. Use `Project` to reopen
+the left-side project panel or add ordinary browser-readable images as project
 items. Large WSI, CZI, SVS, OME-TIFF, and pyramidal images should still be
 opened from R or prepared as tiled project sources so the viewer can avoid
 loading full images into memory. These menus group pan/select modes, fit and
@@ -1176,7 +1177,7 @@ wsi_install_stardist(method = "conda")
 
 After that, `wsi_viewer_live(..., stardist = TRUE)` can wire the viewer's
 `Run segmentation` button automatically. In the interactive viewer, select or
-brush an ROI, open the Segmentation menu, run StarDist on the ROI crop, then
+brush an ROI, open the `Annotations` menu, run StarDist on the ROI crop, then
 load or receive the result GeoJSON or CSV/TSV centroids back into the viewer.
 From R, the same workflow can be scripted with a user-supplied StarDist command:
 
@@ -1211,7 +1212,7 @@ session <- wsi_viewer_live(
 )
 ```
 
-In the viewer, select or brush an ROI, open `Segmentation`, and press
+In the viewer, select or brush an ROI, open `Annotations`, and press
 `Run segmentation`. The selected ROI is sent to the local endpoint, StarDist
 runs on only that ROI crop, and returned cell polygons or centroids are added
 as overlays. The selected ROI and imported cells are also written directly into
@@ -1229,8 +1230,8 @@ The last run metadata, including crop/output paths, is available in
 `wsi_viewer_state(session)$last_segmentation` and the companion object
 `wsi_viewer_live_state_last_segmentation`. If `stardist-predict2d` is already
 on `PATH`, you can omit `stardist_command` and `stardist_args`. If no StarDist
-command is available, the viewer still opens and the Segmentation menu remains
-usable for selected-ROI export and result import.
+command is available, the viewer still opens and the segmentation controls in
+`Annotations` remain usable for selected-ROI export and result import.
 
 Long-running work can also run as a non-blocking background job when the
 optional `callr` package is installed:

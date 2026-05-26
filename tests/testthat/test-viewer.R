@@ -46,6 +46,12 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "New ROI", fixed = TRUE)
   expect_match(html, "toolEdit", fixed = TRUE)
   expect_match(html, "Stains", fixed = TRUE)
+  pos_annotations_menu <- regexpr("<summary title=\"Draw, select, import, export, segment, and manage annotations\">Annotations</summary>", html, fixed = TRUE)[[1]]
+  pos_segmentation_section <- regexpr("StarDist segmentation", html, fixed = TRUE)[[1]]
+  pos_separate_segmentation_menu <- regexpr("<summary title=\"StarDist segmentation import for selected ROIs\">Segmentation</summary>", html, fixed = TRUE)[[1]]
+  expect_gt(pos_annotations_menu, 0)
+  expect_gt(pos_segmentation_section, pos_annotations_menu)
+  expect_identical(pos_separate_segmentation_menu, -1L)
   pos_stains_menu <- regexpr("<summary title=\"Stain deconvolution display options\">Stains</summary>", html, fixed = TRUE)[[1]]
   pos_help_menu <- regexpr("<summary title=\"Keyboard shortcuts\">Help</summary>", html, fixed = TRUE)[[1]]
   expect_true(all(c(pos_stains_menu, pos_help_menu) > 0))
@@ -506,8 +512,10 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "navDock", fixed = TRUE)
   expect_match(html, "navPanButton", fixed = TRUE)
   expect_match(html, "Annotations", fixed = TRUE)
-  expect_match(html, "Draw, select, import, export, and manage annotations", fixed = TRUE)
+  expect_match(html, "Draw, select, import, export, segment, and manage annotations", fixed = TRUE)
   expect_match(html, "GeoJSON and display", fixed = TRUE)
+  expect_match(html, "StarDist segmentation", fixed = TRUE)
+  expect_false(grepl("<summary title=\"StarDist segmentation import for selected ROIs\">Segmentation</summary>", html, fixed = TRUE))
   expect_false(grepl("<summary title=\"ROI overlay and GeoJSON geometry list\">GeoJSON</summary>", html, fixed = TRUE))
   expect_match(html, "Geometry list", fixed = TRUE)
   expect_match(html, "Import GeoJSON", fixed = TRUE)
