@@ -43,12 +43,18 @@ install.packages("remotes", repos = "https://cloud.r-project.org")
 remotes::install_github(
   "tkcaccia/wsiTools",
   upgrade = "never",
-  build_vignettes = FALSE
+  build_vignettes = FALSE,
+  force = TRUE
 )
 
 library(wsiTools)
+packageVersion("wsiTools")
 wsi_backends()
 ```
+
+The current GitHub package version is `0.1.1`. If R reports an older version
+after installation, remove the old package directory and reinstall from
+`tkcaccia/wsiTools` without pinning an old commit.
 
 OpenSlide, libvips, StarDist, Cellpose, Bio-Formats, and live web services are
 runtime capabilities rather than mandatory installation dependencies. Use
@@ -158,6 +164,14 @@ directories before retrying:
 lib <- Sys.getenv("R_LIBS_USER")
 unlink(file.path(lib, "00LOCK-wsiTools"), recursive = TRUE, force = TRUE)
 unlink(file.path(lib, "wsiTools"), recursive = TRUE, force = TRUE)
+
+remotes::install_github(
+  "tkcaccia/wsiTools",
+  upgrade = "never",
+  build_vignettes = FALSE,
+  force = TRUE,
+  INSTALL_opts = "--no-multiarch"
+)
 ```
 
 ## Opening slides

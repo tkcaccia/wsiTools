@@ -22,13 +22,18 @@ install.packages("remotes", repos = "https://cloud.r-project.org")
 remotes::install_github(
   "tkcaccia/wsiTools",
   upgrade = "never",
-  build_vignettes = FALSE
+  build_vignettes = FALSE,
+  force = TRUE
 )
 
 library(wsiTools)
 packageVersion("wsiTools")
 wsi_backends()
 ```
+
+The current GitHub package version is `0.1.1`. Avoid installing old commit
+references unless you are deliberately debugging a previous build; the command
+above always reinstalls the current GitHub version.
 
 From a local checkout:
 
@@ -55,13 +60,20 @@ unlink(file.path(lib, "wsiTools"), recursive = TRUE, force = TRUE)
 remotes::install_github(
   "tkcaccia/wsiTools",
   upgrade = "never",
-  build_vignettes = FALSE
+  build_vignettes = FALSE,
+  force = TRUE,
+  INSTALL_opts = "--no-multiarch"
 )
 ```
 
 If R asks whether to update packages, choose `3: None` unless you deliberately
 want to update your local package library. This avoids accidental long updates
 on managed Windows workstations.
+
+After installation, check `packageVersion("wsiTools")`. It should report
+`0.1.1` or newer. If a Windows compiler error still mentions `Realloc` or
+`Free`, R is building an older cached copy; remove `00LOCK-wsiTools`, remove
+the old `wsiTools` folder, and rerun the clean reinstall command above.
 
 ### Optional viewer packages
 
