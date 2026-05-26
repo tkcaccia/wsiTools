@@ -31,7 +31,7 @@ packageVersion("wsiTools")
 wsi_backends()
 ```
 
-The current GitHub package version is `0.1.3`. Avoid installing old commit
+The current GitHub package version is `0.1.4`. Avoid installing old commit
 references unless you are deliberately debugging a previous build; the command
 above always reinstalls the current GitHub version.
 
@@ -71,11 +71,10 @@ want to update your local package library. This avoids accidental long updates
 on managed Windows workstations.
 
 After installation, check `packageVersion("wsiTools")`. It should report
-`0.1.3` or newer. On Windows, the experimental native CZI bridge is disabled
-at compile time by default so the core package installs reliably with Rtools.
-Use Bio-Formats/libvips/OpenSlide where available for image access, or set
-`WSITOOLS_ENABLE_NATIVE_CZI=1` before installation only if you deliberately
-want to test the experimental native CZI bridge.
+`0.1.4` or newer. On Windows, the native CZI bridge is compiled by default.
+If you need to install only the core package on a machine where that native
+bridge cannot compile, set `WSITOOLS_DISABLE_NATIVE_CZI=1` before installation
+to use the fallback stub.
 
 ### Optional viewer packages
 

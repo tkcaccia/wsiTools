@@ -1,8 +1,8 @@
-# Use a small native stub on Windows by default so the core package installs
-# reliably on Rtools systems. Advanced users can opt in to the experimental
-# native CZI bridge with WSITOOLS_ENABLE_NATIVE_CZI=1.
-ifeq ($(WSITOOLS_ENABLE_NATIVE_CZI),1)
-OBJECTS = native-czi.o
-else
+# Build the native CZI bridge on Windows by default. The small native stub is
+# retained as an explicit emergency fallback for systems where native-czi.cpp
+# cannot be compiled.
+ifeq ($(WSITOOLS_DISABLE_NATIVE_CZI),1)
 OBJECTS = native-stubs.o
+else
+OBJECTS = native-czi.o
 endif
