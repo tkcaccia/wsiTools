@@ -734,10 +734,6 @@ wsi_viewer_stain_controls <- function(config) {
   channel_controls <- vapply(channels, function(channel) {
     id <- wsi_html_escape(channel$id)
     name <- wsi_html_escape(channel$name)
-    strength <- format(channel$strength, trim = TRUE, scientific = FALSE)
-    opacity <- format(channel$opacity %||% 1, trim = TRUE, scientific = FALSE)
-    contrast_min <- format(channel$contrast_min %||% 0, trim = TRUE, scientific = FALSE)
-    contrast_max <- format(channel$contrast_max %||% 1, trim = TRUE, scientific = FALSE)
     paste0(
       "<label class=\"control stainChannel\" title=\"Show ", name, " channel\"><input id=\"stainVisible_",
       id,
@@ -750,26 +746,6 @@ wsi_viewer_stain_controls <- function(config) {
       id,
       "\" type=\"color\" value=\"",
       wsi_html_escape(channel$colour),
-      "\"></label>",
-      "<label class=\"control\" title=\"", name, " display gain\">gain <input id=\"stainStrength_",
-      id,
-      "\" type=\"range\" min=\"0\" max=\"3\" step=\"0.05\" value=\"",
-      wsi_html_escape(strength),
-      "\"></label>",
-      "<label class=\"control\" title=\"", name, " display opacity\">opacity <input id=\"stainOpacity_",
-      id,
-      "\" type=\"range\" min=\"0\" max=\"1\" step=\"0.05\" value=\"",
-      wsi_html_escape(opacity),
-      "\"></label>",
-      "<label class=\"control\" title=\"", name, " contrast minimum\">min <input id=\"stainContrastMin_",
-      id,
-      "\" type=\"range\" min=\"0\" max=\"2\" step=\"0.02\" value=\"",
-      wsi_html_escape(contrast_min),
-      "\"></label>",
-      "<label class=\"control\" title=\"", name, " contrast maximum\">max <input id=\"stainContrastMax_",
-      id,
-      "\" type=\"range\" min=\"0.05\" max=\"4\" step=\"0.02\" value=\"",
-      wsi_html_escape(contrast_max),
       "\"></label>"
     )
   }, character(1))
@@ -2093,8 +2069,9 @@ wsi_tiled_viewer_html <- function(config) {
 #' from a live R session. A `?` shortcut and Help menu show the keyboard map for
 #' pan, draw, brush, edit, measure, undo, redo, save, import, and export.
 #' Optional `stain = "ihc"` adds an RGB optical-density deconvolution display
-#' with selectable stain channels, colours, and gains. `stain = "he"` uses
-#' hematoxylin, eosin, and residual H&E channels. Use `channels` to provide
+#' with simple channel visibility, show-only, and colour controls.
+#' `stain = "he"` uses hematoxylin, eosin, and residual H&E channels. Use
+#' `channels` to provide
 #' multi-IHC or custom H&E channel definitions. `project_images` adds a
 #' left-side Project section for related images or multi-scene microscopy files,
 #' including CZI entries that can be activated through optional Bio-Formats
