@@ -47,6 +47,8 @@ wsi_new_viewer_state <- function(name = "wsi_viewer_live_state", envir = parent.
   state$ihc_summary <- wsi_empty_ihc_intensity_summary("roi")
   state$ihc_class_summary <- wsi_empty_ihc_intensity_summary("class")
   state$layers <- list()
+  state$project <- list()
+  state$project_snapshot <- NULL
   state$tile_preview <- wsi_empty_tile_preview()
   state$selected_roi <- NULL
   state$selected_rois <- wsi_empty_roi()
@@ -128,8 +130,8 @@ wsi_viewer_autosave_status <- function(state) {
 wsi_viewer_allowed_events <- function() {
   c(
     "viewer_state", "viewer_loaded", "autosave_tick", "autosave_unload",
-    "project_save_requested", "project_saved",
-    "project_image_selected", "project_section_selected",
+    "project_save_requested", "project_saved", "project_opened",
+    "project_image_added", "project_image_selected", "project_section_selected",
     "roi_added", "roi_created", "roi_selected", "roi_deselected",
     "roi_updated", "roi_edited", "roi_brush_edited", "roi_deleted",
     "roi_duplicated", "roi_exported", "roi_export_selection_updated",
@@ -622,6 +624,42 @@ wsi_trajectories_from_payload <- function(trajectories) {
   out$points <- I(points[keep])
   class(out) <- c("wsi_trajectories", class(out))
   out
+}
+
+wsi_trajectory_points_payload <- function(points) {
+  if (is.null(points)) {
+    return(list())
+  }
+  points <- as.data.frame(points, stringsAsFactors = FALSE)
+  if (!all(c("x", "y") %in% names(points)) || !nrow(points)) {
+    return(list())
+  }
+  lapply(seq_len(nrow(points)), function(i) {
+    list(
+      x = unname(as.numeric(points$x[[i]])),
+      y = unname(as.numeric(points$y[[i]]))
+    )
+  })
+}
+
+wsi_trajectories_to_payload <- function(trajectories) {
+  trajectories <- wsi_trajectories_from_payload(trajectories)
+  if (!nrow(trajectories)) {
+    return(list())
+  }
+  lapply(seq_len(nrow(trajectories)), function(i) {
+    list(
+      id = trajectories$id[[i]],
+      name = trajectories$name[[i]],
+      n = trajectories$n[[i]],
+      length_px = trajectories$length_px[[i]],
+      area_width_px = trajectories$area_width_px[[i]],
+      area_roi_id = trajectories$area_roi_id[[i]],
+      created = trajectories$created[[i]],
+      control_points = wsi_trajectory_points_payload(trajectories$control_points[[i]]),
+      points = wsi_trajectory_points_payload(trajectories$points[[i]])
+    )
+  })
 }
 
 wsi_empty_roi_summary <- function() {
@@ -1152,6 +1190,8 @@ wsi_assign_viewer_state <- function(state) {
   assign(paste0(name, "_ihc_class_summary"), state$ihc_class_summary %||% wsi_empty_ihc_intensity_summary("class"), envir = envir)
   assign(paste0(name, "_segmentation"), state$segmentation, envir = envir)
   assign(paste0(name, "_layers"), state$layers, envir = envir)
+  assign(paste0(name, "_project"), state$project %||% list(), envir = envir)
+  assign(paste0(name, "_project_snapshot"), state$project_snapshot %||% NULL, envir = envir)
   assign(paste0(name, "_channel_sources"), state$channel_sources %||% list(), envir = envir)
   assign(paste0(name, "_channel_settings"), state$channel_settings %||% wsi_empty_channel_settings(), envir = envir)
   assign(paste0(name, "_tile_sources"), state$tile_sources %||% list(), envir = envir)
@@ -1181,6 +1221,11 @@ wsi_viewer_state_apply <- function(state, payload) {
   state$trajectories <- wsi_trajectories_from_payload(payload[["trajectories", exact = TRUE]])
   state$segmentation <- wsi_rois_from_payload(payload[["segmentation", exact = TRUE]])
   state$layers <- wsi_viewer_update_layers_from_payload(state$layers, payload[["layers", exact = TRUE]])
+  state$project <- payload[["project", exact = TRUE]] %||% state$project %||% list()
+  detail <- payload[["detail", exact = TRUE]]
+  if (is.list(detail) && !is.null(detail$project_snapshot)) {
+    state$project_snapshot <- detail$project_snapshot
+  }
   state$selected_roi <- wsi_selected_roi_from_payload(payload[["selected_roi", exact = TRUE]])
   state$selected_rois <- wsi_selected_rois_from_payload(
     payload[["selected_rois", exact = TRUE]],
@@ -3573,6 +3618,8 @@ wsi_viewer_state <- function(x) {
     ihc_class_summary = state$ihc_class_summary %||% wsi_empty_ihc_intensity_summary("class"),
     segmentation = state$segmentation,
     layers = state$layers %||% list(),
+    project = state$project %||% list(),
+    project_snapshot = state$project_snapshot %||% NULL,
     channel_sources = state$channel_sources %||% list(),
     channel_settings = state$channel_settings %||% wsi_empty_channel_settings(),
     tile_sources = state$tile_sources %||% list(),

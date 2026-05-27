@@ -243,9 +243,11 @@ wsi_project_viewer_summary <- function(viewer) {
   }
   list(
     view = viewer$view %||% list(),
+    project = viewer$project_snapshot %||% viewer$project %||% NULL,
     stain = viewer$stain %||% NULL,
     selected_roi = viewer$selected_roi %||% NULL,
     selected_rois = viewer$selected_rois %||% NULL,
+    trajectories = viewer$trajectories %||% wsi_empty_trajectories(),
     tile_preview = viewer$tile_preview %||% wsi_empty_tile_preview(),
     layers = wsi_viewer_layer_summary(viewer$layers %||% list()),
     layers_full = viewer$layers %||% list(),
@@ -652,6 +654,9 @@ restore_project_state <- function(viewer, project, service = TRUE) {
   }
   state$selected_roi <- saved$selected_roi %||% NULL
   state$selected_rois <- saved$selected_rois %||% wsi_empty_roi()
+  state$trajectories <- wsi_trajectories_from_payload(saved$trajectories %||% NULL)
+  state$project <- saved$project %||% state$project %||% list()
+  state$project_snapshot <- saved$project %||% state$project_snapshot %||% NULL
   state$layers <- saved$layers_full %||% state$layers %||% list()
   state$tile_preview <- saved$tile_preview %||% state$tile_preview %||% wsi_empty_tile_preview()
   state$view <- saved$view %||% list()
@@ -676,6 +681,7 @@ restore_project_state <- function(viewer, project, service = TRUE) {
     "restore_project_state",
     list(
       rois = if (inherits(state$rois, "wsi_roi") && nrow(state$rois)) wsi_viewer_rois_to_geojson(state$rois) else NULL,
+      trajectories = wsi_trajectories_to_payload(state$trajectories),
       segmentation = if (inherits(state$segmentation, "wsi_roi") && nrow(state$segmentation)) wsi_viewer_rois_to_geojson(state$segmentation) else NULL,
       channel_sources = state$channel_sources,
       channel_settings = state$channel_settings,

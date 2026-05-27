@@ -37,6 +37,16 @@ test_that("wsi_project saves and reopens reproducible analysis state", {
       distance_um = 5
     ),
     segmentation = rois,
+    trajectories = list(list(
+      id = "trajectory_1",
+      name = "Tumour axis",
+      n = 3,
+      length_px = 100,
+      area_width_px = 256,
+      area_roi_id = "tumour-1",
+      control_points = list(list(x = 0, y = 0), list(x = 100, y = 0)),
+      points = list(list(x = 0, y = 0), list(x = 50, y = 0), list(x = 100, y = 0))
+    )),
     events = list(list(event = "roi_created")),
     last_event = "roi_created"
   )
@@ -68,6 +78,8 @@ test_that("wsi_project saves and reopens reproducible analysis state", {
   expect_s3_class(reopened$tile_manifest, "wsi_tile_manifest")
   expect_equal(reopened$metadata$case_id, "case-001")
   expect_equal(reopened$viewer_state$view$zoom, 2)
+  expect_equal(reopened$viewer_state$trajectories[[1]]$id, "trajectory_1")
+  expect_equal(reopened$viewer_state$trajectories[[1]]$area_width_px, 256)
   expect_equal(nrow(reopened$rois), 1)
   expect_equal(nrow(reopened$tile_manifest), nrow(tiles))
 
@@ -93,6 +105,15 @@ test_that("wsi_project can infer state from a live viewer-state object", {
         distance_um = 2.5
       )
     ),
+    trajectories = list(list(
+      id = "trajectory_1",
+      name = "Trajectory 1",
+      n = 2,
+      length_px = 10,
+      area_width_px = 128,
+      control_points = list(list(x = 0, y = 0), list(x = 10, y = 0)),
+      points = list(list(x = 0, y = 0), list(x = 10, y = 0))
+    )),
     view = list(zoom = 4),
     stain = list(enabled = FALSE)
   )
@@ -104,6 +125,7 @@ test_that("wsi_project can infer state from a live viewer-state object", {
 
   expect_s3_class(project, "wsi_project")
   expect_equal(nrow(reopened$measurements), 1)
+  expect_equal(reopened$viewer_state$trajectories[[1]]$id, "trajectory_1")
   expect_equal(reopened$measurements$distance_px, 5)
   expect_false(reopened$stain_settings$enabled)
 
