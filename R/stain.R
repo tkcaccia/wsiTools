@@ -404,6 +404,95 @@ wsi_he_stain_channels <- function(hematoxylin = c(0.644, 0.717, 0.267),
   )
 }
 
+#' Estimate H&E stain channel definitions from a slide or thumbnail
+#'
+#' Estimates slide-specific hematoxylin/eosin optical-density vectors from a
+#' low-resolution thumbnail or already-small H&E image, then returns channel
+#' definitions suitable for [wsi_deconvolve_he()], [wsi_viewer_he()], and live
+#' tiled stain-channel viewing. When `x` is a `wsi_slide`, only a thumbnail is
+#' read; the level-0 whole-slide image is never loaded into R memory.
+#'
+#' @param x A `wsi_slide`, slide path, RGB/RGBA array, raster object, or magick
+#'   image. Slide inputs are sampled through [wsi_thumbnail()].
+#' @param method Stain-vector estimation method. `"macenko"` is usually a good
+#'   first choice for H&E. `"vahadane"` is an experimental dependency-free NMF
+#'   estimate. `"fixed"` uses the standard H&E vectors without reading a
+#'   thumbnail.
+#' @param thumbnail_width Width of the low-resolution thumbnail used when `x` is
+#'   a slide or path.
+#' @param include_residual Include a residual optical-density channel.
+#' @param ... Additional arguments passed to [wsi_estimate_stain_matrix()], such
+#'   as `luminosity_threshold`, `od_threshold`, or `max_pixels`.
+#' @inheritParams wsi_he_stain_channels
+#'
+#' @return A `wsi_stain_channels` object with slide-specific hematoxylin, eosin,
+#'   and optionally residual channel definitions.
+#' @export
+#' @examples
+#' \dontrun{
+#' slide <- wsi_open("he_sample.svs")
+#' channels <- wsi_estimate_he_stain_channels(slide, method = "macenko")
+#' html <- wsi_viewer_he(slide, channels = channels, open = FALSE)
+#' wsi_close(slide)
+#' }
+wsi_estimate_he_stain_channels <- function(x,
+                                           method = c("macenko", "vahadane", "fixed"),
+                                           thumbnail_width = 2048,
+                                           include_residual = TRUE,
+                                           hematoxylin_colour = "#4b3f99",
+                                           eosin_colour = "#e85b90",
+                                           residual_colour = "#6b7280",
+                                           hematoxylin_strength = 1,
+                                           eosin_strength = 1,
+                                           residual_strength = 1,
+                                           residual_visible = FALSE,
+                                           ...) {
+  method <- match.arg(method)
+  include_residual <- isTRUE(include_residual)
+  if (identical(method, "fixed")) {
+    return(wsi_he_stain_channels(
+      include_residual = include_residual,
+      hematoxylin_colour = hematoxylin_colour,
+      eosin_colour = eosin_colour,
+      residual_colour = residual_colour,
+      hematoxylin_strength = hematoxylin_strength,
+      eosin_strength = eosin_strength,
+      residual_strength = residual_strength,
+      residual_visible = residual_visible
+    ))
+  }
+
+  opened <- NULL
+  on.exit(if (!is.null(opened)) wsi_close(opened), add = TRUE)
+  image <- x
+  if (is.character(x) && length(x) == 1L) {
+    opened <- wsi_open(x, backend = "auto")
+    image <- opened
+  }
+  if (inherits(image, "wsi_slide")) {
+    thumbnail_width <- as.integer(wsi_check_scalar_number(
+      thumbnail_width,
+      "thumbnail_width",
+      allow_zero = FALSE
+    ))
+    image <- wsi_thumbnail(image, width = thumbnail_width, format = "array")
+  }
+
+  matrix <- wsi_estimate_stain_matrix(image, method = method, ...)
+  wsi_he_stain_channels(
+    hematoxylin = matrix[, "hematoxylin"],
+    eosin = matrix[, "eosin"],
+    include_residual = include_residual,
+    hematoxylin_colour = hematoxylin_colour,
+    eosin_colour = eosin_colour,
+    residual_colour = residual_colour,
+    hematoxylin_strength = hematoxylin_strength,
+    eosin_strength = eosin_strength,
+    residual_strength = residual_strength,
+    residual_visible = residual_visible
+  )
+}
+
 #' @rdname wsi_he_stain_channels
 #' @return `wsi_he_stain_matrix()` returns a 3 x 3 matrix with hematoxylin,
 #'   eosin, and residual optical-density vectors.
@@ -1482,7 +1571,14 @@ wsi_viewer_ihc <- function(slide, mode = c("tiles", "thumbnail"),
 #' only visible tiles, so the full WSI is not loaded into R memory.
 #'
 #' @inheritParams wsi_viewer_ihc
-#' @param hematoxylin,eosin RGB optical-density vectors.
+#' @param method Stain-vector method used when `channels = NULL`.
+#'   `"fixed"` uses standard H&E vectors. `"macenko"` or `"vahadane"` estimate
+#'   vectors from a low-resolution thumbnail, which is often better for a
+#'   specific laboratory or scanner.
+#' @param thumbnail_width Width of the thumbnail used for stain-vector
+#'   estimation when `method` is not `"fixed"`.
+#' @param hematoxylin,eosin RGB optical-density vectors used for
+#'   `method = "fixed"`.
 #' @param hematoxylin_colour,eosin_colour,residual_colour Initial display
 #'   colours.
 #' @param hematoxylin_strength,eosin_strength,residual_strength Initial display
@@ -1499,6 +1595,8 @@ wsi_viewer_ihc <- function(slide, mode = c("tiles", "thumbnail"),
 #' }
 wsi_viewer_he <- function(slide, mode = c("tiles", "thumbnail"),
                           channels = NULL,
+                          method = c("fixed", "macenko", "vahadane"),
+                          thumbnail_width = 2048,
                           hematoxylin = c(0.644, 0.717, 0.267),
                           eosin = c(0.093, 0.954, 0.283),
                           hematoxylin_colour = "#4b3f99",
@@ -1510,6 +1608,7 @@ wsi_viewer_he <- function(slide, mode = c("tiles", "thumbnail"),
                           residual_visible = FALSE,
                           ...) {
   mode <- match.arg(mode)
+  method <- match.arg(method)
   opened <- NULL
   on.exit(if (!is.null(opened)) wsi_close(opened), add = TRUE)
   if (is.character(slide) && length(slide) == 1L) {
@@ -1519,18 +1618,34 @@ wsi_viewer_he <- function(slide, mode = c("tiles", "thumbnail"),
     wsi_check_slide(slide)
   }
   if (is.null(channels)) {
-    channels <- wsi_he_stain_channels(
-      hematoxylin = hematoxylin,
-      eosin = eosin,
-      include_residual = TRUE,
-      hematoxylin_colour = hematoxylin_colour,
-      eosin_colour = eosin_colour,
-      residual_colour = residual_colour,
-      hematoxylin_strength = hematoxylin_strength,
-      eosin_strength = eosin_strength,
-      residual_strength = residual_strength,
-      residual_visible = residual_visible
-    )
+    channels <- if (identical(method, "fixed")) {
+      wsi_he_stain_channels(
+        hematoxylin = hematoxylin,
+        eosin = eosin,
+        include_residual = TRUE,
+        hematoxylin_colour = hematoxylin_colour,
+        eosin_colour = eosin_colour,
+        residual_colour = residual_colour,
+        hematoxylin_strength = hematoxylin_strength,
+        eosin_strength = eosin_strength,
+        residual_strength = residual_strength,
+        residual_visible = residual_visible
+      )
+    } else {
+      wsi_estimate_he_stain_channels(
+        slide,
+        method = method,
+        thumbnail_width = thumbnail_width,
+        include_residual = TRUE,
+        hematoxylin_colour = hematoxylin_colour,
+        eosin_colour = eosin_colour,
+        residual_colour = residual_colour,
+        hematoxylin_strength = hematoxylin_strength,
+        eosin_strength = eosin_strength,
+        residual_strength = residual_strength,
+        residual_visible = residual_visible
+      )
+    }
   }
 
   wsi_viewer(

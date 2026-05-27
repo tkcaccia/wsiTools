@@ -8,6 +8,8 @@ wsi_viewer_he(
   slide,
   mode = c("tiles", "thumbnail"),
   channels = NULL,
+  method = c("fixed", "macenko", "vahadane"),
+  thumbnail_width = 2048,
   hematoxylin = c(0.644, 0.717, 0.267),
   eosin = c(0.093, 0.954, 0.283),
   hematoxylin_colour = "#4b3f99",
@@ -29,7 +31,16 @@ for full-resolution inspection.}
 \item{channels}{Optional stain channels created by \code{\link[=wsi_stain_channels]{wsi_stain_channels()}}.
 If supplied, these replace the default hematoxylin and HRP/DAB channels.}
 
-\item{hematoxylin, eosin}{RGB optical-density vectors.}
+\item{method}{Stain-vector method used when \code{channels = NULL}.
+\code{"fixed"} uses standard H&E vectors. \code{"macenko"} or \code{"vahadane"} estimate
+vectors from a low-resolution thumbnail, which is often better for a
+specific laboratory or scanner.}
+
+\item{thumbnail_width}{Width of the thumbnail used for stain-vector
+estimation when \code{method} is not \code{"fixed"}.}
+
+\item{hematoxylin, eosin}{RGB optical-density vectors used for
+\code{method = "fixed"}.}
 
 \item{hematoxylin_colour, eosin_colour, residual_colour}{Initial display
 colours.}

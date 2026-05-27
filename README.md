@@ -961,15 +961,28 @@ normalized <- wsi_normalize_stains(
 For interactive H&E inspection, open the H&E stain viewer. The `Stains` menu
 contains simple `Original`, `All stains`, and show-only buttons for
 hematoxylin, eosin, and residual. The show-only buttons render auto-contrasted
-deconvolution channel maps:
+deconvolution channel maps. For better separation on real slides, estimate
+slide-specific H&E vectors from a thumbnail first:
 
 ```r
+he_channels <- wsi_estimate_he_stain_channels(
+  slide,
+  method = "macenko",
+  thumbnail_width = 2048
+)
+
 he_viewer <- wsi_viewer_he(
   slide,
   mode = "tiles",
+  channels = he_channels,
   output = "he_stain_viewer.html"
 )
 ```
+
+Live dynamic stain tiles are convenient but slower because each tile is read and
+deconvolved on demand. For the smoothest viewing, precompute/reuse Deep Zoom
+tiles with `wsi_viewer_he(..., mode = "tiles", rebuild = FALSE)` and serve the
+HTML/tile directory through localhost so the browser can read canvas pixels.
 
 For WSI workflows, normalise only the requested region or apply the function
 inside a tile loop:

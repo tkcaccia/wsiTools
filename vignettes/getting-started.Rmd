@@ -484,15 +484,31 @@ normalized <- wsi_normalize_stains(
 )
 ```
 
-The same three-channel H&E separation is available in the interactive viewer:
+The same three-channel H&E separation is available in the interactive viewer.
+For real slides, estimate H&E vectors from a low-resolution thumbnail before
+opening the viewer; this avoids loading the full WSI while usually improving
+hematoxylin/eosin separation compared with fixed textbook vectors:
 
 ```{r, eval=FALSE, purl=FALSE}
+he_channels <- wsi_estimate_he_stain_channels(
+  slide,
+  method = "macenko",
+  thumbnail_width = 2048
+)
+
 he_viewer <- wsi_viewer_he(
   slide,
   mode = "tiles",
+  channels = he_channels,
   output = "he_stain_viewer.html"
 )
 ```
+
+Live dynamic stain tiles are useful for quick first inspection, but they are
+slower than precomputed Deep Zoom tiles because every visible tile is read and
+deconvolved on demand. For smoother pan/zoom, precompute the tile pyramid once
+and reuse it with `rebuild = FALSE`; serve the HTML/tile directory through
+localhost when browser-side stain controls need canvas pixel access.
 
 There is also a region wrapper for WSI preprocessing pipelines:
 

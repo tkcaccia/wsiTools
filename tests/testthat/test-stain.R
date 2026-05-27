@@ -89,6 +89,23 @@ test_that("H&E stain matrices can be estimated and reconstructed", {
   expect_true(max(abs(reconstructed - image)) < 1e-6)
 })
 
+test_that("H&E stain channel definitions can be estimated from small image inputs", {
+  image <- make_he_patch(width = 24, height = 20)
+
+  channels <- wsi_estimate_he_stain_channels(
+    image,
+    method = "macenko",
+    max_pixels = 500
+  )
+
+  expect_s3_class(channels, "wsi_stain_channels")
+  expect_equal(vapply(channels, `[[`, character(1), "id"), c("hematoxylin", "eosin", "residual"))
+  expect_equal(channels[[1]]$name, "Hematoxylin")
+  expect_equal(channels[[2]]$name, "Eosin")
+  expect_true(all(is.finite(channels[[1]]$vector)))
+  expect_true(all(is.finite(channels[[2]]$vector)))
+})
+
 test_that("H&E stain normalization works on patches and regions", {
   image <- make_he_patch(width = 16, height = 12)
   target_matrix <- wsi_he_stain_matrix(
