@@ -759,7 +759,9 @@ annotation edits and `Ctrl+Shift+Z`/`Ctrl+Y` redoes them, with the last 10
 committed states retained in each direction. The `Trajectories` menu can draw a
 smoothed backbone, preview an adjustable-width corridor around it, and create a
 GeoJSON annotation area from that corridor while preserving the same class
-merge and different-class clipping rules used by brush annotations. In a static browser viewer this opens the
+merge and different-class clipping rules used by brush annotations. Double-click,
+press Enter, or click `Finish` to save a trajectory and automatically return to
+pan mode. In a static browser viewer this opens the
 browser's normal save/download flow rather than silently writing to a server
 path.
 
