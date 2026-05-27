@@ -683,11 +683,12 @@ The interactive toolbar is organized into menus such as `Project`,
 `Stains`, and `Help`. Segmentation import and selected-ROI StarDist controls
 now live inside `Annotations` beside the GeoJSON tools. Use `Project` to reopen
 the left-side project panel, use `Add image` to append one or more ordinary
-browser-readable images, or save/open a browser project JSON containing the
-visible project images, section-specific annotations, and trajectories. Large
-WSI, CZI, SVS, OME-TIFF, and pyramidal images should still be opened from R or
-prepared as tiled project sources; the project file preserves their paths/tile
-metadata rather than copying full pixel data into R memory. These menus group pan/select modes, fit and
+browser-readable images, drag images in the left Project panel to reorder them,
+or save/open a browser project JSON containing the visible project images,
+section-specific annotations, and trajectories. Large WSI, CZI, SVS, OME-TIFF,
+and pyramidal images should still be opened from R or prepared as tiled project
+sources; the project file preserves their paths/tile metadata rather than
+copying full pixel data into R memory. These menus group pan/select modes, fit and
 1:1 zoom, ROI and label toggles, ROI opacity, previous/next ROI navigation, a
 side window listing all GeoJSON geometries, crosshair display, polygon drawing,
 and GeoJSON export. Use the annotation/GeoJSON tools
