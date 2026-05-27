@@ -635,7 +635,7 @@ wsi_viewer_project_item_from_slide <- function(slide, width = 768, height = NULL
     message = if (is.null(preview) && !isTRUE(active)) "Preview could not be generated with the available backends." else "",
     image_data_uri = preview,
     navigator_image_data_uri = preview,
-    sections = wsi_viewer_project_sections_from_slide(slide),
+    sections = list(),
     active = isTRUE(active)
   )
 }
@@ -882,20 +882,8 @@ wsi_czi_python_preview_script <- function() {
 }
 
 wsi_viewer_project_sections_from_slide <- function(slide) {
-  levels <- wsi_levels(slide)
-  lapply(seq_len(nrow(levels)), function(i) {
-    row <- levels[i, , drop = FALSE]
-    list(
-      id = sprintf("level_%s", row$level[[1L]]),
-      label = sprintf("Level %s: %s x %s px, %.3gx downsample",
-                      row$level[[1L]], row$width[[1L]], row$height[[1L]], row$downsample[[1L]]),
-      level = row$level[[1L]],
-      width = row$width[[1L]],
-      height = row$height[[1L]],
-      downsample = row$downsample[[1L]],
-      status = "pyramid level"
-    )
-  })
+  wsi_check_slide(slide)
+  list()
 }
 
 wsi_project_id <- function(x) {

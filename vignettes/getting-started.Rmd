@@ -293,13 +293,16 @@ Segmentation import and selected-ROI StarDist controls live inside
 project panel or add ordinary browser-readable images as project items. Large
 WSI, CZI, SVS, OME-TIFF, and pyramidal images should still be opened from R or
 prepared as tiled project sources so the viewer can avoid loading full images
-into memory. These menus group pan/select modes, fit and 1:1 zoom, ROI and
+into memory. Pyramid levels are used internally for zooming and are not listed
+as project sections. The left-side panel stack can be resized by dragging its right
+edge, and each Project, Annotations, or History panel can be resized vertically
+from its lower grip. These menus group pan and annotation modes, fit and 1:1 zoom, ROI and
 label toggles, ROI opacity, previous/next ROI navigation, a side window listing
 all GeoJSON geometries, crosshair display, polygon drawing, and GeoJSON export.
 Use the annotation/GeoJSON tools to open the geometry list;
 each row shows the geometry type, bounds, point count, source, and id. Use
 `Draw ROI`, click polygon vertices, double-click or press
-`Finish`, then use `Save GeoJSON`. In `Brush` mode, each normal stroke creates
+Enter, then use `Save GeoJSON`. In `Brush` mode, each normal stroke creates
 a new automatically named annotation. If the painted area touches an existing
 annotation with the same label, the regions merge; holding `Alt` on
 Windows/Linux or `Command` on macOS while brushing removes from the selected
@@ -310,9 +313,9 @@ to move vertices, double-click an edge to insert a vertex, and Backspace/Delete
 to remove the active vertex. Drawn, painted, and edited annotation regions are
 kept class-exclusive: annotations with the same class label merge into one
 multi-part annotation, while areas already occupied by a different class label
-are clipped from the new or refined annotation. The Class Presets and History sections in the
-annotation panel can be maximized with their `Maximize` buttons and restored
-with `Esc` or `Restore`. The toolbar `Class`, `Custom class`, and `Set next
+are clipped from the new or refined annotation. The History panel can be
+maximized with its `Maximize` button and restored with `Esc` or `Restore`.
+The toolbar `Class`, `Custom class`, and `Set next
 class` controls set the class for the next drawn or painted annotation;
 selecting an ROI does not overwrite these controls, and changing them does not
 relabel the selected annotation. Use the annotation manager controls to change
@@ -370,7 +373,9 @@ when the live session is stopped.
 The same live tiled architecture can overlay mIHC or probability-map OME-TIFF
 pages on a registered H&E slide. The H&E slide remains the base image; each
 mIHC page becomes an independent OpenSeadragon channel layer with visibility,
-opacity, colour, gain, and contrast controls.
+opacity, colour, gain, and contrast controls. In a multi-image project, those
+layers are bound to their H&E base slide and are removed automatically when a
+different tissue section or sample is selected.
 
 ```{r, eval=FALSE, purl=FALSE}
 viewer <- wsi_viewer_he_mihc(
@@ -392,10 +397,10 @@ available; in that fallback mode `wsi_viewer_he_mihc()` uses JPEG base tiles by
 default.
 
 When live dynamic tiles are active, H&E deconvolution is represented as normal
-tiled channel layers too. Choosing `Hematoxylin`, `Eosin`, `Residual`, or
-`All stains` in the `Stains` menu asks R to deconvolve only the requested tile
-regions and display them as OpenSeadragon overlays, so it works even when the
-browser cannot read pixels from the rendered slide canvas.
+tiled channel layers too. Choosing `Hematoxylin`, `Eosin`, or `Residual` asks R
+to deconvolve only that requested tile channel and display it as a synchronized
+OpenSeadragon layer. `All stains` returns to the original RGB view for H&E,
+which avoids slow and visually misleading hematoxylin/eosin overlay stacks.
 
 To compare H&E/IHC, original/processed images, serial sections, or WSI/mask
 views, use the side-by-side viewer. Zoom, pan, and cursor position are linked

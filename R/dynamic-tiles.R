@@ -526,6 +526,9 @@ wsi_stain_channel_sources <- function(slide, stain = c("he", "ihc"),
       metadata = utils::modifyList(
         metadata %||% list(),
         list(
+          source_path = slide$path %||% NULL,
+          target_path = slide$path %||% NULL,
+          slide_path = slide$path %||% NULL,
           source_type = "stain_deconvolution",
           kind = "stain_channel",
           stain_type = stain,

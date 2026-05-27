@@ -566,6 +566,25 @@ wsi_viewer_he_mihc <- function(he, mihc, pages = NULL, channel_names = NULL,
     registration = registration,
     extent = extent
   )
+  base_path <- slide$path %||% if (inherits(he, "wsi_slide")) "" else as.character(he %||% "")
+  base_path <- as.character(base_path %||% "")
+  base_project_id <- paste0("project_slide_", wsi_project_id(basename(base_path)))
+  channels$dynamic_sources <- lapply(channels$dynamic_sources, function(source) {
+    source$metadata <- utils::modifyList(
+      source$metadata %||% list(),
+      list(
+        target_path = base_path,
+        base_path = base_path,
+        base_slide_path = base_path,
+        slide_path = base_path,
+        project_item_id = base_project_id,
+        target_project_item_id = base_project_id,
+        target_role = "base"
+      ),
+      keep.null = TRUE
+    )
+    source
+  })
   dots <- list(...)
   if (!is.null(dots$channel_sources)) {
     dots$channel_sources <- if (is.list(dots$channel_sources) &&
