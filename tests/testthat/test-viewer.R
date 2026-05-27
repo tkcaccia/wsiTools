@@ -412,6 +412,7 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_false(grepl("copyCoord", html, fixed = TRUE))
   expect_match(html, "GeoJSON Geometries", fixed = TRUE)
   expect_match(html, "#workspacePanel{position:fixed;left:12px;top:72px", fixed = TRUE)
+  expect_match(html, ".projectPanel{margin:0;padding:8px 10px;border:1px solid rgba(255,255,255,.16);border-radius:6px;background:rgba(18,18,18,.86);}", fixed = TRUE)
   expect_match(html, "#roiPanel{position:static;width:auto", fixed = TRUE)
   expect_match(html, "roiPanelHeader", fixed = TRUE)
   expect_match(html, "roiPanelBody", fixed = TRUE)

@@ -558,7 +558,7 @@ wsi_viewer_styles <- function(background = "#101010") {
     ".selectionCardActions button{padding:6px 5px;font-size:12px;}\n",
     ".sideTitle{font-weight:600;margin-bottom:3px;}\n",
     ".sideMeta{font-size:11px;color:#b8b8b8;margin-bottom:8px;line-height:1.35;}\n",
-    ".projectPanel{margin:0;padding:8px;border:1px solid rgba(255,255,255,.12);border-radius:5px;background:rgba(255,255,255,.03);}\n",
+    ".projectPanel{margin:0;padding:8px 10px;border:1px solid rgba(255,255,255,.16);border-radius:6px;background:rgba(18,18,18,.86);}\n",
     ".projectPanelHeader{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;cursor:pointer;user-select:none;}\n",
     ".projectPanelHeader:focus-visible{outline:2px solid #5eead4;outline-offset:3px;border-radius:4px;}\n",
     ".projectPanelMinimizeState{font-size:10.5px;color:#9fded8;text-align:right;line-height:1.2;max-width:92px;}\n",
