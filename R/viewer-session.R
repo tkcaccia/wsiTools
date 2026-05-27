@@ -131,7 +131,8 @@ wsi_viewer_allowed_events <- function() {
   c(
     "viewer_state", "viewer_loaded", "autosave_tick", "autosave_unload",
     "project_save_requested", "project_saved", "project_opened",
-    "project_image_added", "project_image_reordered", "project_image_selected", "project_section_selected",
+    "project_image_added", "project_image_reordered", "project_image_closed",
+    "project_image_selected", "project_section_selected",
     "roi_added", "roi_created", "roi_selected", "roi_deselected",
     "roi_updated", "roi_edited", "roi_brush_edited", "roi_deleted",
     "roi_duplicated", "roi_exported", "roi_export_selection_updated",

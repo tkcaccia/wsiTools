@@ -22,6 +22,8 @@ test_that("wsi_viewer adds a left-side project section", {
   expect_match(html, "projectAnnotationStore", fixed = TRUE)
   expect_match(html, "projectAnnotationKey", fixed = TRUE)
   expect_match(html, "projectItemCanTile", fixed = TRUE)
+  expect_match(html, "projectItemClose", fixed = TRUE)
+  expect_match(html, "removeProjectItem", fixed = TRUE)
   expect_match(html, "initialProjectSource", fixed = TRUE)
   expect_match(html, "projectInitialSource", fixed = TRUE)
   expect_match(html, "projectDisplaySource", fixed = TRUE)

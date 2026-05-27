@@ -684,7 +684,8 @@ The interactive toolbar is organized into menus such as `Project`,
 now live inside `Annotations` beside the GeoJSON tools. Use `Project` to reopen
 the left-side project panel, use `Add image` to append one or more ordinary
 browser-readable images, drag images in the left Project panel to reorder them,
-or save/open a browser project JSON containing the visible project images,
+close an image with the row `X`, or save/open a browser project JSON containing
+the visible project images,
 section-specific annotations, and trajectories. Large WSI, CZI, SVS, OME-TIFF,
 and pyramidal images should still be opened from R or prepared as tiled project
 sources; the project file preserves their paths/tile metadata rather than

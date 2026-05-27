@@ -400,6 +400,10 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "projectDragIndex", fixed = TRUE)
   expect_match(html, "project_image_reordered", fixed = TRUE)
   expect_match(html, "Drag images to reorder", fixed = TRUE)
+  expect_match(html, "projectItemClose", fixed = TRUE)
+  expect_match(html, "removeProjectItem", fixed = TRUE)
+  expect_match(html, "project_image_closed", fixed = TRUE)
+  expect_match(html, "Close this project image", fixed = TRUE)
   expect_match(html, "saveProjectFile", fixed = TRUE)
   expect_match(html, "openProjectFile", fixed = TRUE)
   expect_match(html, "projectBrowserSnapshot", fixed = TRUE)
@@ -1535,7 +1539,8 @@ test_that("viewer event validation allowlists live WebSocket events", {
     "brush_committed", "viewport_changed", "layer_updated",
     "trajectory_area_created",
     "segmentation_started", "segmentation_progress",
-    "segmentation_finished", "job_status", "project_image_reordered"
+    "segmentation_finished", "job_status", "project_image_reordered",
+    "project_image_closed"
   )
 
   expect_true(all(expected %in% wsiTools:::wsi_viewer_allowed_events()))
