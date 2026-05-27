@@ -1414,10 +1414,10 @@ wsi_ihc_stain_config <- function(stain = c("none", "ihc", "he"),
 #'
 #' Writes an HTML viewer with browser-side color deconvolution controls. By
 #' default this uses H-DAB hematoxylin plus HRP/DAB channels. Supply `channels`
-#' to inspect one to three brightfield immunohistochemistry channels, each with
-#' its own visibility checkbox, display colour, and gain slider. In tiled mode,
-#' the browser recolors only the visible Deep Zoom tiles, so the full WSI is not
-#' loaded into R memory.
+#' to inspect one to three brightfield immunohistochemistry channels with simple
+#' `Original`, `All stains`, and show-only display buttons. Show-only views are
+#' auto-contrasted from visible pixels. In tiled mode, the browser recolors only
+#' the visible Deep Zoom tiles, so the full WSI is not loaded into R memory.
 #'
 #' @param slide A `wsi_slide` object.
 #' @param mode Viewer mode passed to [wsi_viewer()]. `"tiles"` is recommended
@@ -1476,10 +1476,10 @@ wsi_viewer_ihc <- function(slide, mode = c("tiles", "thumbnail"),
 #' View an H&E slide with interactive hematoxylin/eosin/residual deconvolution
 #'
 #' Convenience wrapper around [wsi_viewer()] for H&E brightfield images. The
-#' `Stains` menu exposes hematoxylin, eosin, and residual channels with
-#' visibility, colour, opacity, gain, and contrast controls. In tiled mode, the
-#' browser recolours only visible tiles, so the full WSI is not loaded into R
-#' memory.
+#' `Stains` menu exposes `Original`, `All stains`, and show-only buttons for
+#' hematoxylin, eosin, and residual channels. Show-only views are
+#' auto-contrasted from visible pixels. In tiled mode, the browser recolours
+#' only visible tiles, so the full WSI is not loaded into R memory.
 #'
 #' @inheritParams wsi_viewer_ihc
 #' @param hematoxylin,eosin RGB optical-density vectors.
@@ -1545,10 +1545,10 @@ wsi_viewer_he <- function(slide, mode = c("tiles", "thumbnail"),
 #' View a multi-IHC slide with selectable stain channels
 #'
 #' Convenience wrapper around [wsi_viewer()] for brightfield multiplex IHC.
-#' The `Stains` menu includes a master `mIHC` toggle plus per-channel
-#' checkboxes, colours, and gain sliders. The default channels are starting
-#' values for hematoxylin, HRP/DAB, and a red chromogen; pass assay-specific
-#' vectors with [wsi_stain_channels()] for real analysis.
+#' The `Stains` menu includes a master `mIHC` toggle plus `Original`,
+#' `All stains`, and show-only buttons. The default channels are starting values
+#' for hematoxylin, HRP/DAB, and a red chromogen; pass assay-specific vectors
+#' with [wsi_stain_channels()] for real analysis.
 #'
 #' @inheritParams wsi_viewer_ihc
 #' @param channels Stain channels created by [wsi_stain_channels()]. Up to

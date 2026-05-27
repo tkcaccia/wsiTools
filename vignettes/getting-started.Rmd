@@ -52,7 +52,7 @@ packageVersion("wsiTools")
 wsi_backends()
 ```
 
-The current GitHub package version is `0.1.21`. If R reports an older version
+The current GitHub package version is `0.1.22`. If R reports an older version
 after installation, remove the old package directory and reinstall from
 `tkcaccia/wsiTools` without pinning an old commit.
 
@@ -447,8 +447,9 @@ ihc_viewer <- wsi_viewer_ihc(
 ```
 
 The `Stains` menu provides an `IHC` toggle plus simple `Original`,
-`All stains`, and show-only buttons for hematoxylin and HRP/DAB. These display
-settings are synced back to R in live sessions through
+`All stains`, and show-only buttons for hematoxylin and HRP/DAB. Show-only
+views are auto-contrasted from the visible pixels so the selected stain channel
+is clear. These display settings are synced back to R in live sessions through
 `viewer$get_channel_settings()`.
 
 For H&E images, use the H&E stain helpers on a patch, tile, or thumbnail. The
@@ -537,8 +538,9 @@ multi_viewer <- wsi_viewer_multi_ihc(
 
 The `Stains` menu adds the `mIHC` toggle plus simple `Original`, `All stains`,
 and show-only buttons for every deconvolved channel. RGB brightfield
-deconvolution can separate up to three independent stain vectors at once, so use
-assay-specific vectors for the markers you want to inspect.
+deconvolution can separate up to three independent stain vectors at once, and
+show-only views are auto-contrasted for visibility. Use assay-specific vectors
+for the markers you want to inspect.
 
 ## Generating tile grids
 

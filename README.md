@@ -31,7 +31,7 @@ packageVersion("wsiTools")
 wsi_backends()
 ```
 
-The current GitHub package version is `0.1.21`. Avoid installing old commit
+The current GitHub package version is `0.1.22`. Avoid installing old commit
 references unless you are deliberately debugging a previous build; the command
 above always reinstalls the current GitHub version.
 
@@ -71,7 +71,7 @@ want to update your local package library. This avoids accidental long updates
 on managed Windows workstations.
 
 After installation, check `packageVersion("wsiTools")`. It should report
-`0.1.21` or newer. On Windows, the native CZI bridge is compiled by default.
+`0.1.22` or newer. On Windows, the native CZI bridge is compiled by default.
 If you need to install only the core package on a machine where that native
 bridge cannot compile, set `WSITOOLS_DISABLE_NATIVE_CZI=1` before installation
 to use the fallback stub.
@@ -920,9 +920,10 @@ ihc_viewer <- wsi_viewer_ihc(
 ```
 
 The `Stains` menu adds an `IHC` toggle plus simple `Original`, `All stains`,
-and show-only buttons for hematoxylin and HRP/DAB. In tiled mode the browser
-recolors only the visible OpenSeadragon tiles, so the full WSI is not loaded
-into R memory.
+and show-only buttons for hematoxylin and HRP/DAB. Show-only views are
+auto-contrasted from the visible pixels so the selected stain channel is clear.
+In tiled mode the browser recolors only the visible OpenSeadragon tiles, so the
+full WSI is not loaded into R memory.
 
 For H&E patches, `wsiTools` can separate hematoxylin, eosin, and residual
 staining channels and perform lightweight stain normalisation. Macenko-style
@@ -953,7 +954,8 @@ normalized <- wsi_normalize_stains(
 
 For interactive H&E inspection, open the H&E stain viewer. The `Stains` menu
 contains simple `Original`, `All stains`, and show-only buttons for
-hematoxylin, eosin, and residual:
+hematoxylin, eosin, and residual. The show-only buttons render auto-contrasted
+deconvolution channel maps:
 
 ```r
 he_viewer <- wsi_viewer_he(
