@@ -1815,6 +1815,9 @@ test_that("tiled viewer HTML writes mIHC channel overlay controls", {
   expect_match(html, "contrast_min", fixed = TRUE)
   expect_match(html, "Marker A", fixed = TRUE)
   expect_match(html, "baseImageVisible", fixed = TRUE)
+  expect_match(html, "withTileCors", fixed = TRUE)
+  expect_match(html, "crossOriginPolicy='Anonymous'", fixed = TRUE)
+  expect_match(html, "crossOrigin='anonymous'", fixed = TRUE)
 })
 
 test_that("interactive IHC viewer writes stain deconvolution controls", {
@@ -1862,6 +1865,9 @@ test_that("interactive IHC viewer writes stain deconvolution controls", {
   expect_match(html, "addEventListener('change',redraw)", fixed = TRUE)
   expect_match(html, "applyStainToCanvas", fixed = TRUE)
   expect_match(html, "open the viewer through localhost/http", fixed = TRUE)
+  expect_match(html, "Stain selection needs readable canvas pixels", fixed = TRUE)
+  expect_match(html, "wsi_viewer_live(..., dynamic_tiles = TRUE)", fixed = TRUE)
+  expect_false(grepl("http://127.0.0.1/localhost", html, fixed = TRUE))
   expect_match(html, "IHC H-DAB", fixed = TRUE)
 })
 
