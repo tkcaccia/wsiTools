@@ -3315,7 +3315,6 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
 
   dots <- list(...)
   requested_channel_sources <- dots$channel_sources %||% NULL
-  dynamic_channel_sources <- wsi_dynamic_channel_sources(requested_channel_sources)
   dynamic_project_sources <- wsi_dynamic_channel_sources(project_tile_sources)
   dynamic_source <- NULL
   if (isTRUE(dynamic_tiles)) {
@@ -3327,6 +3326,38 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
       route = dynamic_tile_path
     )
   }
+  requested_stain <- dots$stain %||% "none"
+  dynamic_stain_sources <- NULL
+  if (isTRUE(dynamic_tiles) && requested_stain %in% c("he", "ihc")) {
+    dynamic_stain_sources <- tryCatch(
+      wsi_stain_channel_sources(
+        slide = slide,
+        stain = requested_stain,
+        channels = dots$channels %||% NULL,
+        source_prefix = wsi_safe_id(name, "slide"),
+        tile_size = if (!is.null(dynamic_source)) dynamic_source$tile_size else dots$tile_size %||% 512,
+        tile_overlap = if (!is.null(dynamic_source)) dynamic_source$tile_overlap else 1,
+        format = "png",
+        cache_dir = if (!is.null(dynamic_source)) dynamic_source$cache_dir else dynamic_tile_cache_dir,
+        route = dynamic_tile_path
+      ),
+      error = function(err) {
+        wsi_warn(paste0(
+          "Could not start tiled stain-channel sources: ",
+          conditionMessage(err),
+          ". Browser-side stain controls will remain available as a fallback."
+        ))
+        NULL
+      }
+    )
+    if (!is.null(dynamic_stain_sources)) {
+      requested_channel_sources <- wsi_channel_sources_combine(
+        requested_channel_sources,
+        dynamic_stain_sources
+      )
+    }
+  }
+  dynamic_channel_sources <- wsi_dynamic_channel_sources(requested_channel_sources)
   all_dynamic_sources <- c(
     if (is.null(dynamic_source)) list() else list(dynamic_source),
     dynamic_channel_sources,
@@ -3373,7 +3404,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
     dots$tile_sources <- state$tile_sources
     dots$tile_source_label <- "dynamic tile server"
   }
-  if (!is.null(requested_channel_sources)) {
+  if (length(requested_channel_sources)) {
     dots$channel_sources <- wsi_live_channel_sources(requested_channel_sources, base_url = base_url)
   }
   if (isTRUE(stardist) && is.null(dots$segmentation_run_url)) {

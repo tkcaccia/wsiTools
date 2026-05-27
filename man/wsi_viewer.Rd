@@ -179,8 +179,8 @@ pan/select modes, fit and 1:1 zoom, ROI visibility and label toggles, ROI
 opacity, ROI previous/next navigation, a left-side annotation manager with
 GeoJSON geometry listing, visibility toggles, lock/unlock, colour editing,
 name/class editing, duplicate/delete, zoom-to-ROI, selected-ROI export,
-browser-side GeoJSON import, crosshair display, coordinate copying, polygon
-drawing, brush-style annotation painting with a brush-size slider,
+browser-side GeoJSON import, crosshair display, polygon drawing,
+brush-style annotation painting with a brush-size slider,
 selected-ROI extension, platform-aware brush removal (\code{Alt} on Windows/Linux
 and \code{Command} on macOS), smoothing, simplification, hole
 filling, checked-ROI merge, multi-part split, selected-ROI vertex editing,
@@ -194,8 +194,9 @@ StarDist, showing a coordinate-only tile grid, and requesting a project save
 from a live R session. A \verb{?} shortcut and Help menu show the keyboard map for
 pan, draw, brush, edit, measure, undo, redo, save, import, and export.
 Optional \code{stain = "ihc"} adds an RGB optical-density deconvolution display
-with selectable stain channels, colours, and gains. \code{stain = "he"} uses
-hematoxylin, eosin, and residual H&E channels. Use \code{channels} to provide
+with simple original/all/show-only controls.
+\code{stain = "he"} uses hematoxylin, eosin, and residual H&E channels. Use
+\code{channels} to provide
 multi-IHC or custom H&E channel definitions. \code{project_images} adds a
 left-side Project section for related images or multi-scene microscopy files,
 including CZI entries that can be activated through optional Bio-Formats

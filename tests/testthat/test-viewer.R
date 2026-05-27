@@ -1377,6 +1377,40 @@ test_that("dynamic mIHC channel tiles are colourized with alpha", {
   expect_equal(round(band_avg(3)), 180)
 })
 
+test_that("H&E stain deconvolution can be served as dynamic channel tiles", {
+  slide <- wsiTools:::wsi_mock_slide(width = 512, height = 384, levels = c(1, 4))
+  sources <- wsi_stain_channel_sources(slide, tile_size = 128)
+  on.exit(lapply(sources$dynamic_sources, wsiTools:::wsi_dynamic_tile_cleanup), add = TRUE)
+
+  metadata <- lapply(
+    sources$dynamic_sources,
+    wsiTools:::wsi_dynamic_tile_metadata,
+    base_url = "http://127.0.0.1:8788"
+  )
+  channels <- lapply(
+    sources$dynamic_sources,
+    wsiTools:::wsi_channel_source_from_dynamic,
+    base_url = "http://127.0.0.1:8788"
+  )
+  file <- wsiTools:::wsi_dynamic_tile_file(
+    sources$dynamic_sources[[1L]],
+    level = sources$dynamic_sources[[1L]]$max_level,
+    col = 0,
+    row = 0,
+    format = "png",
+    settings = list(colour = "#4b3f99")
+  )
+
+  expect_s3_class(sources, "wsi_stain_channel_sources")
+  expect_equal(length(sources$dynamic_sources), 3L)
+  expect_equal(vapply(sources$dynamic_sources, `[[`, character(1), "kind"), rep("stain_channel", 3))
+  expect_equal(vapply(metadata, function(x) x$metadata$stain_channel_id, character(1)), c("hematoxylin", "eosin", "residual"))
+  expect_true(all(vapply(channels, function(x) identical(x$type, "dynamic"), logical(1))))
+  expect_true(all(vapply(channels, function(x) isTRUE(x$metadata$server_colourized), logical(1))))
+  expect_true(file.exists(file))
+  expect_gt(file.info(file)$size, 0)
+})
+
 test_that("H&E mIHC live wrapper defaults the dynamic base image to JPEG tiles", {
   wsi_skip_if_no_httpuv_server()
   skip_if_not(wsi_has_vips())
@@ -1410,6 +1444,8 @@ test_that("H&E mIHC live wrapper defaults the dynamic base image to JPEG tiles",
   expect_false(grepl("<input id=\"stainVisible_residual\"", html, fixed = TRUE))
   expect_match(html, "stainShowOriginal", fixed = TRUE)
   expect_match(html, "baseImageVisible", fixed = TRUE)
+  settings <- session$get_channel_settings(service = FALSE)$id
+  expect_true(any(grepl("stain_hematoxylin", settings, fixed = TRUE)))
 })
 
 test_that("live viewer can use dynamic tiles with polling transport", {
@@ -1436,6 +1472,30 @@ test_that("live viewer can use dynamic tiles with polling transport", {
 
   wsi_viewer_stop(session)
   expect_false(dir.exists(cache_dir))
+})
+
+test_that("live H&E viewer wires deconvolution as tiled channel layers", {
+  wsi_skip_if_no_httpuv_server()
+  slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 500, levels = c(1, 4))
+  session <- wsi_viewer_live(
+    slide,
+    mode = "tiles",
+    dynamic_tiles = TRUE,
+    stain = "he",
+    transport = "polling",
+    open = FALSE,
+    wait = FALSE,
+    name = "he_tiled_stains"
+  )
+  on.exit(if (inherits(session, "wsi_viewer_session")) wsi_viewer_stop(session), add = TRUE)
+  html <- paste(readLines(session$html, warn = FALSE), collapse = "\n")
+  settings <- session$get_channel_settings(service = FALSE)
+
+  expect_true(any(grepl("stain_hematoxylin", settings$id, fixed = TRUE)))
+  expect_true(any(grepl("stain_eosin", settings$id, fixed = TRUE)))
+  expect_true(any(grepl("stain_residual", settings$id, fixed = TRUE)))
+  expect_match(html, "syncTiledStainChannels", fixed = TRUE)
+  expect_match(html, "stain_channel", fixed = TRUE)
 })
 
 test_that("viewer event validation allowlists live WebSocket events", {

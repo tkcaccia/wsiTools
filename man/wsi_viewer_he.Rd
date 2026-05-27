@@ -47,10 +47,10 @@ The HTML viewer path, invisibly.
 }
 \description{
 Convenience wrapper around \code{\link[=wsi_viewer]{wsi_viewer()}} for H&E brightfield images. The
-\code{Stains} menu exposes hematoxylin, eosin, and residual channels with
-visibility, colour, opacity, gain, and contrast controls. In tiled mode, the
-browser recolours only visible tiles, so the full WSI is not loaded into R
-memory.
+\code{Stains} menu exposes \code{Original}, \verb{All stains}, and show-only buttons for
+hematoxylin, eosin, and residual channels. Show-only views are
+auto-contrasted from visible pixels. In tiled mode, the browser recolours
+only visible tiles, so the full WSI is not loaded into R memory.
 }
 \examples{
 \dontrun{

@@ -29,8 +29,9 @@ matrices for \code{hematoxylin}, \code{eosin}, and, when \code{include_residual 
 \code{residual}; image formats return a recoloured visualisation.}
 
 \item{stain_matrix}{Optional 3 x 3 stain matrix. When supplied, the first two
-columns are used as hematoxylin and eosin and the third column is used as
-residual when \code{include_residual = TRUE}.}
+columns are used as hematoxylin and eosin. The residual channel reports the
+optical-density norm left after fitting hematoxylin/eosin rather than
+repeatedly deconvolving through an arbitrary third stain.}
 
 \item{hematoxylin, eosin}{RGB optical-density vectors used when
 \code{stain_matrix} is not supplied.}

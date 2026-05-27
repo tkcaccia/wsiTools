@@ -133,7 +133,7 @@ wsi_channel_source <- function(name = NULL, id = NULL,
 }
 
 wsi_channel_source_payload <- function(source) {
-  if (inherits(source, "wsi_dynamic_image_tile_source")) {
+  if (inherits(source, "wsi_dynamic_tile_source")) {
     source <- wsi_channel_source_from_dynamic(source)
   }
   if (inherits(source, "wsi_channel_source")) {
@@ -158,6 +158,9 @@ wsi_channel_source_payload <- function(source) {
 wsi_channel_sources_payload <- function(channel_sources = NULL) {
   if (is.null(channel_sources)) {
     return(list())
+  }
+  if (inherits(channel_sources, "wsi_stain_channel_sources")) {
+    channel_sources <- channel_sources$dynamic_sources %||% list()
   }
   if (inherits(channel_sources, "wsi_channel_source")) {
     channel_sources <- list(channel_sources)
@@ -198,18 +201,57 @@ wsi_channel_source_from_dynamic <- function(source, base_url = NULL) {
         page = metadata$page %||% NULL,
         extent = metadata$extent %||% NULL,
         cache_key = metadata$cache_key %||% NULL,
-        server_colourized = inherits(source, "wsi_dynamic_image_tile_source")
+        server_colourized = inherits(source, "wsi_dynamic_image_tile_source") ||
+          inherits(source, "wsi_dynamic_stain_channel_tile_source")
       ),
       keep.null = TRUE
     )
   )
 }
 
+wsi_channel_sources_combine <- function(...) {
+  inputs <- list(...)
+  out <- list()
+  source_classes <- c(
+    "wsi_channel_source",
+    "wsi_dynamic_tile_source",
+    "wsi_mihc_channel_sources",
+    "wsi_stain_channel_sources"
+  )
+  is_single_source <- function(x) {
+    inherits(x, source_classes) ||
+      (is.list(x) && !is.null(names(x)) &&
+         any(c("id", "type", "tile_url_base", "tile_url_template", "dynamic_sources") %in% names(x)))
+  }
+  append_one <- function(x) {
+    if (is.null(x)) {
+      return(invisible(NULL))
+    }
+    if (is_single_source(x)) {
+      out[[length(out) + 1L]] <<- x
+      return(invisible(NULL))
+    }
+    if (is.list(x)) {
+      for (item in x) {
+        append_one(item)
+      }
+      return(invisible(NULL))
+    }
+    out[[length(out) + 1L]] <<- x
+    invisible(NULL)
+  }
+  for (input in inputs) {
+    append_one(input)
+  }
+  out
+}
+
 wsi_dynamic_channel_sources <- function(channel_sources = NULL) {
   if (is.null(channel_sources)) {
     return(list())
   }
-  if (inherits(channel_sources, "wsi_mihc_channel_sources")) {
+  if (inherits(channel_sources, "wsi_mihc_channel_sources") ||
+      inherits(channel_sources, "wsi_stain_channel_sources")) {
     return(channel_sources$dynamic_sources %||% list())
   }
   if (inherits(channel_sources, "wsi_dynamic_tile_source")) {
@@ -220,17 +262,22 @@ wsi_dynamic_channel_sources <- function(channel_sources = NULL) {
   }
   out <- list()
   for (source in channel_sources) {
-    if (inherits(source, "wsi_mihc_channel_sources")) {
+    if (inherits(source, "wsi_mihc_channel_sources") ||
+        inherits(source, "wsi_stain_channel_sources")) {
       out <- c(out, source$dynamic_sources %||% list())
     } else if (inherits(source, "wsi_dynamic_tile_source")) {
       out[[length(out) + 1L]] <- source
+    } else if (is.list(source) && !is.null(source$dynamic_sources)) {
+      out <- c(out, wsi_dynamic_channel_sources(source))
     }
   }
   out
 }
 
 wsi_static_channel_sources <- function(channel_sources = NULL) {
-  if (is.null(channel_sources) || inherits(channel_sources, "wsi_mihc_channel_sources") ||
+  if (is.null(channel_sources) ||
+      inherits(channel_sources, "wsi_mihc_channel_sources") ||
+      inherits(channel_sources, "wsi_stain_channel_sources") ||
       inherits(channel_sources, "wsi_dynamic_tile_source")) {
     return(list())
   }
@@ -242,9 +289,15 @@ wsi_static_channel_sources <- function(channel_sources = NULL) {
   }
   out <- list()
   for (source in channel_sources) {
+    if (inherits(source, "wsi_mihc_channel_sources") ||
+        inherits(source, "wsi_stain_channel_sources") ||
+        inherits(source, "wsi_dynamic_tile_source")) {
+      next
+    }
     if (inherits(source, "wsi_channel_source") ||
         (is.list(source) && !inherits(source, "wsi_dynamic_tile_source") &&
-         !inherits(source, "wsi_mihc_channel_sources"))) {
+         !inherits(source, "wsi_mihc_channel_sources") &&
+         !inherits(source, "wsi_stain_channel_sources"))) {
       out[[length(out) + 1L]] <- source
     }
   }

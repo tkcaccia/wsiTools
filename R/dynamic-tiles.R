@@ -434,6 +434,123 @@ wsi_dynamic_czi_section_tile_source <- function(path, section, source_id = NULL,
   source
 }
 
+#' Create tiled stain-deconvolution channel sources
+#'
+#' `wsi_stain_channel_sources()` exposes brightfield deconvolution channels as
+#' live tiled OpenSeadragon layers. Each tile is read as a small region,
+#' deconvolved, colourised, cached, and served back to the viewer. The full
+#' whole-slide image is never loaded into R memory.
+#'
+#' @param slide A `wsi_slide` object.
+#' @param stain Stain model, `"he"` for hematoxylin/eosin/residual or `"ihc"`
+#'   for hematoxylin plus HRP/DAB-style channels.
+#' @param channels Optional custom stain channels created by
+#'   [wsi_stain_channels()] or [wsi_he_stain_channels()].
+#' @param source_prefix Prefix used for generated tile-source IDs.
+#' @param tile_size,tile_overlap Tile size and overlap in pixels.
+#' @param format Tile image format. PNG is recommended because stain overlays
+#'   use alpha.
+#' @param cache_dir Tile cache directory.
+#' @param route HTTP route prefix.
+#' @param opacity Initial overlay opacity.
+#' @param metadata Optional metadata added to each channel source.
+#'
+#' @return A `wsi_stain_channel_sources` object for `channel_sources`.
+#' @export
+wsi_stain_channel_sources <- function(slide, stain = c("he", "ihc"),
+                                      channels = NULL,
+                                      source_prefix = NULL,
+                                      tile_size = 512,
+                                      tile_overlap = 1,
+                                      format = c("png", "jpg", "jpeg"),
+                                      cache_dir = NULL,
+                                      route = "/tiles",
+                                      opacity = 0.9,
+                                      metadata = list()) {
+  wsi_check_slide(slide)
+  stain <- match.arg(stain)
+  format <- wsi_dynamic_tile_format(format)
+  tile_size <- as.integer(wsi_check_scalar_number(tile_size, "tile_size", allow_zero = FALSE))
+  tile_overlap <- as.integer(wsi_check_scalar_number(tile_overlap, "tile_overlap"))
+  if (tile_overlap >= tile_size) {
+    wsi_abort("`tile_overlap` must be smaller than `tile_size`.")
+  }
+  route <- wsi_dynamic_tile_route(route)
+  opacity <- wsi_channel_opacity(opacity)
+  channel_definitions <- if (is.null(channels)) {
+    if (identical(stain, "he")) {
+      wsi_he_stain_channels()
+    } else {
+      wsi_stain_channels()
+    }
+  } else {
+    wsi_as_stain_channels(channels)
+  }
+  if (!length(channel_definitions)) {
+    wsi_abort("At least one stain channel is required.")
+  }
+  cache_dir <- wsi_dynamic_tile_cache_dir(cache_dir)
+  slide_id <- wsi_safe_id(source_prefix %||% wsi_slide_id(slide), "slide")
+  max_level <- wsi_dz_max_level(slide$dimensions[["width"]], slide$dimensions[["height"]])
+  width <- unname(as.numeric(slide$dimensions[["width"]]))
+  height <- unname(as.numeric(slide$dimensions[["height"]]))
+
+  dynamic_sources <- lapply(seq_along(channel_definitions), function(i) {
+    channel <- channel_definitions[[i]]
+    channel_id <- wsi_channel_source_id(channel$id %||% NULL, channel$name %||% NULL)
+    id <- wsi_safe_id(paste(slide_id, "stain", channel_id, sep = "_"), "stain")
+    source <- list(
+      id = id,
+      kind = "stain_channel",
+      slide = slide,
+      stain_type = stain,
+      channels = channel_definitions,
+      channel_index = as.integer(i),
+      channel_id = channel_id,
+      name = channel$name %||% channel_id,
+      width = width,
+      height = height,
+      tile_size = tile_size,
+      tile_format = format,
+      max_level = as.integer(max_level),
+      min_level = 0L,
+      tile_overlap = tile_overlap,
+      route = route,
+      cache_dir = cache_dir,
+      colour = channel$colour %||% "#ffffff",
+      gain = channel$strength %||% channel$gain %||% 1,
+      contrast_min = channel$contrast_min %||% 0,
+      contrast_max = channel$contrast_max %||% 1,
+      visible = FALSE,
+      opacity = opacity,
+      metadata = utils::modifyList(
+        metadata %||% list(),
+        list(
+          source_type = "stain_deconvolution",
+          kind = "stain_channel",
+          stain_type = stain,
+          stain_channel_id = channel_id,
+          stain_channel_index = as.integer(i),
+          server_colourized = TRUE
+        ),
+        keep.null = TRUE
+      ),
+      created = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS%z")
+    )
+    class(source) <- c("wsi_dynamic_stain_channel_tile_source", "wsi_dynamic_tile_source", "list")
+    source
+  })
+
+  out <- list(
+    stain = stain,
+    channels = channel_definitions,
+    dynamic_sources = dynamic_sources,
+    cache_dir = cache_dir
+  )
+  class(out) <- c("wsi_stain_channel_sources", "list")
+  out
+}
+
 wsi_dynamic_tile_metadata <- function(source, base_url = NULL) {
   if (!inherits(source, "wsi_dynamic_tile_source")) {
     wsi_abort("`source` must be a `wsi_dynamic_tile_source` object.")
@@ -598,14 +715,15 @@ wsi_dynamic_tile_cache_file <- function(source, level, col, row, format = NULL,
   if (!dir.exists(dir) && !dir.create(dir, recursive = TRUE, showWarnings = FALSE)) {
     wsi_abort(sprintf("Could not create dynamic tile cache subdirectory: %s", dir))
   }
-  key <- if (identical(source$kind %||% "slide", "image")) {
+  kind <- source$kind %||% "slide"
+  key <- if (kind %in% c("image", "stain_channel")) {
     wsi_dynamic_tile_settings_key(settings)
   } else {
     ""
   }
-  if (identical(source$kind %||% "slide", "image") ||
-      identical(source$kind %||% "slide", "czi_section")) {
-    key <- paste(c("r2", key[nzchar(key)]), collapse = "_")
+  if (kind %in% c("image", "czi_section", "stain_channel")) {
+    prefix <- if (identical(kind, "stain_channel")) "stain_v1" else "r2"
+    key <- paste(c(prefix, key[nzchar(key)]), collapse = "_")
   }
   suffix <- if (nzchar(key)) paste0("_", key) else ""
   file.path(dir, sprintf("%s%s.%s", row, suffix, format))
@@ -850,6 +968,25 @@ wsi_dynamic_array_to_file <- function(array, output, format = "png") {
   invisible(output)
 }
 
+wsi_dynamic_rgba_to_file <- function(array, output, format = "png") {
+  format <- wsi_dynamic_tile_format(format)
+  dims <- dim(array)
+  if (length(dims) != 3L || dims[[1L]] <= 0L || dims[[2L]] <= 0L || dims[[3L]] < 4L) {
+    wsi_abort("Dynamic stain channel tiles require an RGBA array.")
+  }
+  if (identical(format, "jpg")) {
+    grDevices::jpeg(output, width = dims[[2L]], height = dims[[1L]], units = "px", bg = "white", quality = 92)
+  } else {
+    grDevices::png(output, width = dims[[2L]], height = dims[[1L]], units = "px", bg = "transparent")
+  }
+  on.exit(grDevices::dev.off(), add = TRUE)
+  graphics::par(mar = c(0, 0, 0, 0), xaxs = "i", yaxs = "i")
+  graphics::plot.new()
+  graphics::plot.window(xlim = c(0, dims[[2L]]), ylim = c(0, dims[[1L]]), asp = NA)
+  graphics::rasterImage(wsi_array_to_raster(array), 0, 0, dims[[2L]], dims[[1L]], interpolate = FALSE)
+  invisible(output)
+}
+
 wsi_dynamic_czi_section_region_to_file <- function(source, region, output, format = "png") {
   full_width <- max(1L, as.integer(ceiling(region$width * region$downsample)))
   full_height <- max(1L, as.integer(ceiling(region$height * region$downsample)))
@@ -879,6 +1016,77 @@ wsi_dynamic_czi_section_region_to_file <- function(source, region, output, forma
   invisible(output)
 }
 
+wsi_dynamic_stain_channel_matrix <- function(source, image) {
+  channels <- source$channels
+  if (!inherits(channels, "wsi_stain_channels")) {
+    class(channels) <- "wsi_stain_channels"
+  }
+  values <- if (identical(source$stain_type %||% "he", "he")) {
+    wsi_deconvolve_two_stain_array(image, channels, epsilon = 1 / 255, include_residual = TRUE)
+  } else {
+    wsi_deconvolve_array(image, channels, epsilon = 1 / 255)
+  }
+  channel_id <- source$channel_id %||% NULL
+  channel <- values[[channel_id]]
+  if (is.null(channel)) {
+    ids <- wsi_channel_ids_from_output(values)
+    idx <- as.integer(source$channel_index %||% 1L)
+    channel <- values[[ids[[idx]]]]
+  }
+  if (is.null(channel)) {
+    wsi_abort("Requested stain channel was not produced by the deconvolution.")
+  }
+  channel
+}
+
+wsi_dynamic_stain_channel_rgba <- function(channel, source, settings = list()) {
+  settings <- wsi_dynamic_image_tile_settings(source, settings)
+  rgb <- grDevices::col2rgb(settings$colour)[, 1L] / 255
+  lo <- settings$contrast_min
+  hi <- settings$contrast_max
+  values <- pmax(0, channel)
+  values[!is.finite(values)] <- 0
+  scaled <- pmin(1, pmax(0, (values - lo) / max(hi - lo, 1e-6)))
+  intensity <- pmin(1, pmax(0, 1 - exp(-scaled * max(settings$gain, 0) * 2.4)))
+  dims <- dim(channel)
+  out <- array(0, dim = c(dims[[1L]], dims[[2L]], 4L))
+  for (i in seq_len(3L)) {
+    out[, , i] <- rgb[[i]]
+  }
+  out[, , 4L] <- intensity
+  out
+}
+
+wsi_dynamic_stain_channel_region_to_file <- function(source, region, output,
+                                                     format = "png",
+                                                     settings = list()) {
+  image <- wsi_read_region(
+    source$slide,
+    x = region$x,
+    y = region$y,
+    width = region$width,
+    height = region$height,
+    level = region$level,
+    format = "array"
+  )
+  channel <- wsi_dynamic_stain_channel_matrix(source, image)
+  rgba <- wsi_dynamic_stain_channel_rgba(channel, source, settings = settings)
+  tmp <- tempfile(fileext = paste0(".", format), tmpdir = dirname(output))
+  on.exit(unlink(tmp), add = TRUE)
+  wsi_dynamic_rgba_to_file(rgba, tmp, format = format)
+  current_width <- dim(rgba)[[2L]]
+  current_height <- dim(rgba)[[1L]]
+  needs_resize <- !is.finite(current_width) || !is.finite(current_height) ||
+    as.integer(round(current_width)) != region$desired_width ||
+    as.integer(round(current_height)) != region$desired_height
+  if (isTRUE(needs_resize)) {
+    wsi_dynamic_resize_tile(tmp, output, region$desired_width, region$desired_height, format)
+  } else if (!file.copy(tmp, output, overwrite = TRUE)) {
+    wsi_abort(sprintf("Could not write dynamic stain channel tile cache file: %s", output))
+  }
+  invisible(output)
+}
+
 wsi_dynamic_tile_file <- function(source, level, col, row, format = NULL,
                                   settings = list()) {
   format <- wsi_dynamic_tile_format(format %||% source$tile_format)
@@ -896,6 +1104,10 @@ wsi_dynamic_tile_file <- function(source, level, col, row, format = NULL,
   }
   if (identical(source$kind %||% "slide", "czi_section")) {
     wsi_dynamic_czi_section_region_to_file(source, region, output, format = format)
+    return(output)
+  }
+  if (identical(source$kind %||% "slide", "stain_channel")) {
+    wsi_dynamic_stain_channel_region_to_file(source, region, output, format = format, settings = settings)
     return(output)
   }
 

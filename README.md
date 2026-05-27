@@ -869,6 +869,12 @@ shown above. If no tile pyramid is available, set `dynamic_tiles = TRUE`;
 The optional `registration` JSON is used to place the mIHC crop in H&E
 level-0 coordinates.
 
+In live dynamic mode, H&E deconvolution is also exposed as tiled channel
+layers. Selecting `Hematoxylin`, `Eosin`, `Residual`, or `All stains` in the
+`Stains` menu requests only the visible tiles, deconvolves those regions on the
+R side, and displays them like mIHC channel overlays. This avoids browser
+canvas readback problems and does not load the whole slide into memory.
+
 ### H&E BTF interactive viewer and conversion
 
 For an H&E image saved as BigTIFF/BTF, the repository includes a runnable

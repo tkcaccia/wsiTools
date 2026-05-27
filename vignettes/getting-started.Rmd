@@ -391,6 +391,12 @@ fluid pan/zoom. Use `dynamic_tiles = TRUE` only when a tile pyramid is not
 available; in that fallback mode `wsi_viewer_he_mihc()` uses JPEG base tiles by
 default.
 
+When live dynamic tiles are active, H&E deconvolution is represented as normal
+tiled channel layers too. Choosing `Hematoxylin`, `Eosin`, `Residual`, or
+`All stains` in the `Stains` menu asks R to deconvolve only the requested tile
+regions and display them as OpenSeadragon overlays, so it works even when the
+browser cannot read pixels from the rendered slide canvas.
+
 To compare H&E/IHC, original/processed images, serial sections, or WSI/mask
 views, use the side-by-side viewer. Zoom, pan, and cursor position are linked
 when `sync = TRUE`.

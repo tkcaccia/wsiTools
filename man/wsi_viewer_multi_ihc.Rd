@@ -28,10 +28,10 @@ The HTML viewer path, invisibly.
 }
 \description{
 Convenience wrapper around \code{\link[=wsi_viewer]{wsi_viewer()}} for brightfield multiplex IHC.
-The \code{Stains} menu includes a master \code{mIHC} toggle plus per-channel
-checkboxes, colours, and gain sliders. The default channels are starting
-values for hematoxylin, HRP/DAB, and a red chromogen; pass assay-specific
-vectors with \code{\link[=wsi_stain_channels]{wsi_stain_channels()}} for real analysis.
+The \code{Stains} menu includes a master \code{mIHC} toggle plus \code{Original},
+\verb{All stains}, and show-only buttons. The default channels are starting values
+for hematoxylin, HRP/DAB, and a red chromogen; pass assay-specific vectors
+with \code{\link[=wsi_stain_channels]{wsi_stain_channels()}} for real analysis.
 }
 \examples{
 \dontrun{

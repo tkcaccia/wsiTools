@@ -42,10 +42,10 @@ The HTML viewer path, invisibly.
 \description{
 Writes an HTML viewer with browser-side color deconvolution controls. By
 default this uses H-DAB hematoxylin plus HRP/DAB channels. Supply \code{channels}
-to inspect one to three brightfield immunohistochemistry channels, each with
-its own visibility checkbox, display colour, and gain slider. In tiled mode,
-the browser recolors only the visible Deep Zoom tiles, so the full WSI is not
-loaded into R memory.
+to inspect one to three brightfield immunohistochemistry channels with simple
+\code{Original}, \verb{All stains}, and show-only display buttons. Show-only views are
+auto-contrasted from visible pixels. In tiled mode, the browser recolors only
+the visible Deep Zoom tiles, so the full WSI is not loaded into R memory.
 }
 \examples{
 \dontrun{
