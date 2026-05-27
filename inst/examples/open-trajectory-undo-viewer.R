@@ -1,5 +1,8 @@
 # Open an updated live wsiTools viewer and test trajectory undo.
 #
+# When the AP-GY H&E, mIHC OME-TIFF, and registration JSON are present, this
+# opens the mIHC as coloured channel overlays registered on top of its H&E.
+#
 # From this source checkout:
 # source("/Users/stefano/Documents/wsitools/inst/examples/open-trajectory-undo-viewer.R")
 #
@@ -51,9 +54,22 @@ viewer_dir <- Sys.getenv(
 )
 dir.create(viewer_dir, recursive = TRUE, showWarnings = FALSE)
 
+he_path <- Sys.getenv(
+  "WSITOOLS_HE_SLIDE",
+  "/Users/stefano/Downloads/AP-GY-26-04_HE.svs"
+)
+mihc_path <- Sys.getenv(
+  "WSITOOLS_MIHC_IMAGE",
+  "/Users/stefano/Documents/CellPhenotyper/remote_previews/apgy2604_ometiff_jpeg_pyramid/gigatime_probs.ome.tif"
+)
+registration_path <- Sys.getenv(
+  "WSITOOLS_MIHC_REGISTRATION",
+  "/Users/stefano/Documents/CellPhenotyper/remote_previews/apgy2604_registration/shift.json"
+)
+
 slide_path <- first_existing(c(
   Sys.getenv("WSITOOLS_VIEWER_IMAGE", unset = ""),
-  "/Users/stefano/Downloads/AP-GY-26-04_HE.svs",
+  he_path,
   "/Users/stefano/Documents/viewer/Visium_FFPE_Human_Prostate_Cancer_image.tif"
 ))
 
@@ -66,16 +82,21 @@ if (is.na(slide_path)) {
 
 project_images <- c(
   "/Users/stefano/Downloads/2025_10_24__1328.czi",
-  "/Users/stefano/Downloads/2025_10_24__1329.czi",
-  "/Users/stefano/Documents/CellPhenotyper/remote_previews/apgy2604_ometiff_jpeg_pyramid/gigatime_probs.ome.tif"
+  "/Users/stefano/Downloads/2025_10_24__1329.czi"
 )
 project_images <- project_images[file.exists(project_images)]
 
 message("Opening: ", slide_path)
 slide <- wsi_open(slide_path)
 
-viewer <- wsi_viewer_live(
-  slide,
+same_path <- function(a, b) {
+  isTRUE(file.exists(a)) &&
+    isTRUE(file.exists(b)) &&
+    identical(normalizePath(a, mustWork = TRUE), normalizePath(b, mustWork = TRUE))
+}
+use_mihc_overlay <- same_path(slide_path, he_path) && file.exists(mihc_path)
+
+common_viewer_args <- list(
   mode = "tiles",
   dynamic_tiles = TRUE,
   dynamic_tile_format = "jpg",
@@ -83,7 +104,11 @@ viewer <- wsi_viewer_live(
   output = file.path(viewer_dir, "trajectory_undo_viewer.html"),
   overwrite = TRUE,
   project_images = project_images,
-  title = "wsiTools trajectory undo test",
+  title = if (use_mihc_overlay) {
+    "wsiTools trajectory undo test: H&E with registered mIHC overlay"
+  } else {
+    "wsiTools trajectory undo test"
+  },
   name = "trajectory_undo_viewer",
   autosave_path = file.path(viewer_dir, "trajectory_undo_autosave.wsiproject"),
   autosave_interval = 5,
@@ -91,6 +116,34 @@ viewer <- wsi_viewer_live(
   open = interactive(),
   wait = FALSE
 )
+
+if (use_mihc_overlay) {
+  message("Overlaying registered mIHC on H&E: ", mihc_path)
+  if (file.exists(registration_path)) {
+    message("Using registration: ", registration_path)
+  } else {
+    message("Registration JSON not found; mIHC overlay will use its native extent.")
+    registration_path <- NULL
+  }
+  viewer <- do.call(
+    wsi_viewer_he_mihc,
+    c(
+      list(
+        he = slide,
+        mihc = mihc_path,
+        registration = registration_path,
+        opacity = 0.55
+      ),
+      common_viewer_args
+    )
+  )
+} else {
+  message("mIHC overlay not activated; opening a standard live viewer.")
+  viewer <- do.call(
+    wsi_viewer_live,
+    c(list(slide = slide), common_viewer_args)
+  )
+}
 
 assign("trajectory_undo_slide", slide, envir = .GlobalEnv)
 assign("trajectory_undo_viewer", viewer, envir = .GlobalEnv)
@@ -107,6 +160,7 @@ cat("6. Press Ctrl+Shift+Z or Ctrl+Y to redo it.\n\n")
 cat("Objects in R:\n")
 cat("  trajectory_undo_viewer$get_state()\n")
 cat("  trajectory_undo_viewer$get_history()\n")
+cat("  trajectory_undo_viewer$get_channel_settings(service = FALSE)\n")
 cat("  wsi_viewer_stop(trajectory_undo_viewer)\n\n")
 
 if (interactive()) {
