@@ -2425,6 +2425,94 @@ wsi_viewer <- function(slide, width = 1600, height = NULL, output = NULL,
   invisible(output)
 }
 
+#' Create a viewer from non-interactive R scripts
+#'
+#' `wsi_viewer_noninteractive()` is a script-friendly wrapper around
+#' [wsi_open()] and [wsi_viewer()]. It never opens a browser, returns the HTML
+#' path visibly, and prints the path unless `quiet = TRUE`. This is useful from
+#' `Rscript`, batch jobs, Quarto/knitr setup chunks, or remote sessions where
+#' `utils::browseURL()` is not available.
+#'
+#' The function creates a static HTML viewer. For a live dynamic-tile viewer
+#' from `Rscript`, call [wsi_viewer_live()] directly with `open = FALSE` and
+#' `wait = TRUE` so the local tile/sync server remains alive.
+#'
+#' @param input A path to an image/slide or an existing `wsi_slide` object.
+#' @param output HTML output path. If `NULL` and `input` is a path, a
+#'   `*_wsiTools_viewer.html` file is created in the current working directory.
+#'   If `input` is a slide object and `output = NULL`, a temporary file is used.
+#' @param ... Additional arguments passed to [wsi_viewer()], such as `mode`,
+#'   `width`, `stain`, `roi`, `project_images`, or `channel_sources`.
+#' @param backend Backend passed to [wsi_open()] when `input` is a path.
+#' @param overwrite Whether to overwrite `output` if it already exists.
+#' @param close_slide Close the slide after writing the viewer when this
+#'   function opened it from a path.
+#' @param quiet If `FALSE`, print the generated HTML path.
+#'
+#' @return The normalized HTML path, visibly.
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' html <- wsi_viewer_noninteractive(
+#'   "sample.svs",
+#'   output = "sample_viewer.html",
+#'   mode = "tiles"
+#' )
+#'
+#' # Equivalent command-line use:
+#' # Rscript -e 'library(wsiTools); wsi_viewer_noninteractive("sample.svs")'
+#' }
+wsi_viewer_noninteractive <- function(input, output = NULL, ...,
+                                      backend = c("auto", "openslide", "vips"),
+                                      overwrite = FALSE,
+                                      close_slide = TRUE,
+                                      quiet = FALSE) {
+  backend <- match.arg(backend)
+  if (!is.logical(close_slide) || length(close_slide) != 1L || is.na(close_slide)) {
+    wsi_abort("`close_slide` must be `TRUE` or `FALSE`.")
+  }
+  if (!is.logical(quiet) || length(quiet) != 1L || is.na(quiet)) {
+    wsi_abort("`quiet` must be `TRUE` or `FALSE`.")
+  }
+
+  slide <- input
+  if (!inherits(slide, "wsi_slide")) {
+    if (!is.character(input) || length(input) != 1L || is.na(input) || !nzchar(input)) {
+      wsi_abort("`input` must be a single image path or a `wsi_slide` object.")
+    }
+    if (is.null(output)) {
+      output <- paste0(tools::file_path_sans_ext(basename(input)), "_wsiTools_viewer.html")
+    }
+    slide <- wsi_open(input, backend = backend)
+    if (isTRUE(close_slide)) {
+      on.exit(wsi_close(slide), add = TRUE)
+    }
+  }
+
+  dots <- list(...)
+  if (!is.null(dots$open)) {
+    wsi_warn("`open` is ignored by `wsi_viewer_noninteractive()`; the viewer is always written without opening a browser.")
+  }
+  if (!is.null(dots$output) && is.null(output)) {
+    output <- dots$output
+  }
+  if (!is.null(dots$overwrite)) {
+    overwrite <- isTRUE(dots$overwrite)
+  }
+  dots$open <- FALSE
+  dots$output <- output
+  dots$overwrite <- overwrite
+  dots$slide <- slide
+
+  html <- do.call(wsi_viewer, dots)
+  html <- normalizePath(html, winslash = "/", mustWork = FALSE)
+  if (!isTRUE(quiet)) {
+    message("wsiTools viewer written to: ", html)
+  }
+  html
+}
+
 #' View GeoJSON ROI annotations on a slide
 #'
 #' Convenience wrapper around [wsi_read_geojson()] and [wsi_viewer()]. The

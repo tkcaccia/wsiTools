@@ -3537,6 +3537,10 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   }
   session_ready <- TRUE
 
+  message("wsiTools live viewer written to ", html)
+  if (!isTRUE(open)) {
+    message("Open the viewer manually from Rscript/batch sessions: ", wsi_file_url(html))
+  }
   message("wsiTools live viewer sync listening at ", bridge$url)
   if (identical(transport, "polling")) {
     message("WebSocket sync disabled; HTTP polling is active.")

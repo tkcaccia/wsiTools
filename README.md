@@ -678,6 +678,43 @@ viewer <- wsi_viewer(slide, width = 1600)
 thumbnail. It supports pan, zoom, and level-0 coordinate readout without loading
 the full slide into R memory.
 
+For non-interactive R sessions, batch jobs, or `Rscript`, use
+`wsi_viewer_noninteractive()`. It writes the HTML file, never calls
+`browseURL()`, and returns the generated path visibly:
+
+```r
+library(wsiTools)
+
+html <- wsi_viewer_noninteractive(
+  "sample.svs",
+  output = "sample_wsiTools_viewer.html",
+  mode = "tiles",
+  overwrite = TRUE
+)
+cat("Viewer:", html, "\n")
+```
+
+The same pattern works from a shell:
+
+```sh
+Rscript -e 'library(wsiTools); wsi_viewer_noninteractive("sample.svs", output = "sample_wsiTools_viewer.html", mode = "tiles", overwrite = TRUE)'
+```
+
+For a live dynamic-tile viewer from `Rscript`, keep the local server alive with
+`wait = TRUE` and open the printed HTML path manually:
+
+```r
+slide <- wsi_open("sample.svs")
+session <- wsi_viewer_live(
+  slide,
+  output = "sample_live_viewer.html",
+  mode = "tiles",
+  dynamic_tiles = TRUE,
+  open = FALSE,
+  wait = TRUE
+)
+```
+
 The interactive toolbar is organized into menus such as `Project`,
 `Annotations`, `Artifacts`, `Measure`, `Trajectories`, `Image`, `View`,
 `Stains`, and `Help`. Segmentation import and selected-ROI StarDist controls

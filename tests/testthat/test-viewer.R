@@ -599,6 +599,24 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "label:name", fixed = TRUE)
 })
 
+test_that("non-interactive viewer wrapper writes HTML without opening a browser", {
+  slide <- wsiTools:::wsi_mock_slide(width = 800, height = 400, levels = c(1, 4))
+  output <- tempfile(fileext = ".html")
+
+  result <- wsi_viewer_noninteractive(
+    slide,
+    output = output,
+    width = 256,
+    quiet = TRUE
+  )
+
+  expect_identical(result, normalizePath(output, winslash = "/", mustWork = FALSE))
+  expect_true(file.exists(output))
+  html <- paste(readLines(output, warn = FALSE), collapse = "\n")
+  expect_match(html, "wsiTools viewer", fixed = TRUE)
+  expect_match(html, "thumbnail preview, full slide not loaded into R", fixed = TRUE)
+})
+
 test_that("viewer ROI colours are consistent within label categories", {
   geojson <- list(
     type = "FeatureCollection",
