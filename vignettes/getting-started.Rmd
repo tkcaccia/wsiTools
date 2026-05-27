@@ -52,7 +52,7 @@ packageVersion("wsiTools")
 wsi_backends()
 ```
 
-The current GitHub package version is `0.1.18`. If R reports an older version
+The current GitHub package version is `0.1.19`. If R reports an older version
 after installation, remove the old package directory and reinstall from
 `tkcaccia/wsiTools` without pinning an old commit.
 
@@ -295,8 +295,8 @@ WSI, CZI, SVS, OME-TIFF, and pyramidal images should still be opened from R or
 prepared as tiled project sources so the viewer can avoid loading full images
 into memory. These menus group pan/select modes, fit and 1:1 zoom, ROI and
 label toggles, ROI opacity, previous/next ROI navigation, a side window listing
-all GeoJSON geometries, crosshair display, coordinate copying, polygon drawing,
-and GeoJSON export. Use the annotation/GeoJSON tools to open the geometry list;
+all GeoJSON geometries, crosshair display, polygon drawing, and GeoJSON export.
+Use the annotation/GeoJSON tools to open the geometry list;
 each row shows the geometry type, bounds, point count, source, and id. Use
 `Draw ROI`, click polygon vertices, double-click or press
 `Finish`, then use `Save GeoJSON`. In `Brush` mode, each normal stroke creates
