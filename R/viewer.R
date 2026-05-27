@@ -480,7 +480,6 @@ wsi_viewer_styles <- function(background = "#101010") {
     ".menuGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;}\n",
     ".menuBody button{width:100%;text-align:center;}\n",
     ".menuBody label.control{justify-content:space-between;gap:10px;min-height:28px;}\n",
-    "#stainChannelControls{display:flex;flex-direction:column;gap:6px;}\n",
     ".menuTitle{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#a8a8a8;margin:2px 2px 0;}\n",
     ".menuHint{font-size:11px;color:#aaa;line-height:1.3;margin:0 2px 2px;}\n",
     "label.control{display:flex;gap:6px;align-items:center;color:#d7d7d7;font-size:12px;}\n",
@@ -709,8 +708,6 @@ wsi_viewer_stain_controls <- function(config) {
         "<button id=\"stainToggle\" type=\"button\" disabled title=\"Open the viewer with stain = 'ihc' or channel data to enable stain controls\">Stains</button>",
         "<button id=\"stainShowOriginal\" type=\"button\" disabled title=\"Original RGB is already shown\">Original</button>",
         "</div>",
-        "<div class=\"menuTitle\">Channels</div>",
-        "<span id=\"stainChannelControls\"></span>",
         "<div id=\"stainMessage\" class=\"menuHint\">No stain channels are configured for this viewer.</div>",
         "<div class=\"menuTitle\">Image channels</div>",
         "<div id=\"channelMenuSummary\" class=\"menuHint\"></div>",
@@ -729,24 +726,6 @@ wsi_viewer_stain_controls <- function(config) {
       "\">",
       name,
       "</button>"
-    )
-  }, character(1))
-  channel_controls <- vapply(channels, function(channel) {
-    id <- wsi_html_escape(channel$id)
-    name <- wsi_html_escape(channel$name)
-    paste0(
-      "<label class=\"control stainChannel\" title=\"Show ", name, " channel\"><input id=\"stainVisible_",
-      id,
-      "\" type=\"checkbox\"",
-      if (isTRUE(channel$visible)) " checked" else "",
-      ">",
-      name,
-      "</label>",
-      "<label class=\"control\" title=\"", name, " display colour\"><input id=\"stainColor_",
-      id,
-      "\" type=\"color\" value=\"",
-      wsi_html_escape(channel$colour),
-      "\"></label>"
     )
   }, character(1))
   wsi_viewer_menu(
@@ -769,10 +748,6 @@ wsi_viewer_stain_controls <- function(config) {
       "<div class=\"menuGrid\">",
       paste(only_controls, collapse = ""),
       "</div>",
-      "<div class=\"menuTitle\">Channels</div>",
-      "<span id=\"stainChannelControls\">",
-      paste(channel_controls, collapse = ""),
-      "</span>",
       "<div id=\"stainMessage\" class=\"menuHint\"></div>",
       "<div class=\"menuTitle\">Image channels</div>",
       "<div id=\"channelMenuSummary\" class=\"menuHint\"></div>",
@@ -2066,7 +2041,7 @@ wsi_tiled_viewer_html <- function(config) {
 #' from a live R session. A `?` shortcut and Help menu show the keyboard map for
 #' pan, draw, brush, edit, measure, undo, redo, save, import, and export.
 #' Optional `stain = "ihc"` adds an RGB optical-density deconvolution display
-#' with simple channel visibility, show-only, and colour controls.
+#' with simple original/all/show-only controls.
 #' `stain = "he"` uses hematoxylin, eosin, and residual H&E channels. Use
 #' `channels` to provide
 #' multi-IHC or custom H&E channel definitions. `project_images` adds a

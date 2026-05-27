@@ -31,7 +31,7 @@ packageVersion("wsiTools")
 wsi_backends()
 ```
 
-The current GitHub package version is `0.1.19`. Avoid installing old commit
+The current GitHub package version is `0.1.20`. Avoid installing old commit
 references unless you are deliberately debugging a previous build; the command
 above always reinstalls the current GitHub version.
 
@@ -71,7 +71,7 @@ want to update your local package library. This avoids accidental long updates
 on managed Windows workstations.
 
 After installation, check `packageVersion("wsiTools")`. It should report
-`0.1.19` or newer. On Windows, the native CZI bridge is compiled by default.
+`0.1.20` or newer. On Windows, the native CZI bridge is compiled by default.
 If you need to install only the core package on a machine where that native
 bridge cannot compile, set `WSITOOLS_DISABLE_NATIVE_CZI=1` before installation
 to use the fallback stub.
@@ -919,10 +919,10 @@ ihc_viewer <- wsi_viewer_ihc(
 )
 ```
 
-The `Stains` menu adds an `IHC` toggle plus simple hematoxylin and HRP/DAB
-controls: show/hide, show only one channel, and channel colour. In tiled mode
-the browser recolors only the visible OpenSeadragon tiles, so the full WSI is
-not loaded into R memory.
+The `Stains` menu adds an `IHC` toggle plus simple `Original`, `All stains`,
+and show-only buttons for hematoxylin and HRP/DAB. In tiled mode the browser
+recolors only the visible OpenSeadragon tiles, so the full WSI is not loaded
+into R memory.
 
 For H&E patches, `wsiTools` can separate hematoxylin, eosin, and residual
 staining channels and perform lightweight stain normalisation. Macenko-style
@@ -952,8 +952,8 @@ normalized <- wsi_normalize_stains(
 ```
 
 For interactive H&E inspection, open the H&E stain viewer. The `Stains` menu
-contains hematoxylin, eosin, and residual channels with simple visibility,
-show-only, and colour controls:
+contains simple `Original`, `All stains`, and show-only buttons for
+hematoxylin, eosin, and residual:
 
 ```r
 he_viewer <- wsi_viewer_he(
@@ -1008,9 +1008,10 @@ multi_viewer <- wsi_viewer_multi_ihc(
 )
 ```
 
-The `Stains` menu exposes the `mIHC` toggle plus simple visibility, show-only,
-and colour controls for each deconvolved channel. The default vectors are only
-starting values; use assay-specific stain vectors for quantitative work.
+The `Stains` menu exposes the `mIHC` toggle plus simple `Original`,
+`All stains`, and show-only buttons for each deconvolved channel. The default
+vectors are only starting values; use assay-specific stain vectors for
+quantitative work.
 
 ## Conversion example
 
