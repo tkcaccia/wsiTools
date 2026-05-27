@@ -720,9 +720,13 @@ The interactive toolbar is organized into menus such as `Project`,
 `Stains`, and `Help`. Segmentation import and selected-ROI StarDist controls
 now live inside `Annotations` beside the GeoJSON tools. Use `Project` to reopen
 the left-side project panel, use `Add image` to append one or more ordinary
-browser-readable images, drag images in the left Project panel to reorder them,
-close an image with the row `X`, or save/open a browser project JSON containing
-the visible project images,
+browser-readable images or file references in formats such as CZI, SVS, NDPI,
+BTF, OME-TIFF, QPTIFF, MRXS, SCN, BIF, DICOM, PNG, JPEG and TIFF.
+Browser-readable images preview immediately; raw WSI/microscopy files are
+listed as project references without loading the whole file into browser memory
+and should be opened from R/backends for full-resolution viewing.
+Drag images in the left Project panel to reorder them, close an image with the
+row `X`, or save/open a browser project JSON containing the visible project images,
 section-specific annotations, and trajectories. Large WSI, CZI, SVS, OME-TIFF,
 and pyramidal images should still be opened from R or prepared as tiled project
 sources; the project file preserves their paths/tile metadata rather than
