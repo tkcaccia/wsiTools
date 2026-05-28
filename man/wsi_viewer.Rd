@@ -191,8 +191,11 @@ distance measurement in pixels and micrometres when MPP metadata is
 available, browser-based GeoJSON export, and a \code{Ctrl+K} command palette for
 common actions such as importing GeoJSON, exporting selected ROIs, running
 StarDist, showing a coordinate-only tile grid, and requesting a project save
-from a live R session. A \verb{?} shortcut and Help menu show the keyboard map for
-pan, draw, brush, edit, measure, undo, redo, save, import, and export.
+from a live R session. A \verb{?} shortcut and Help menu show a compact viewer
+guide plus the keyboard map for pan, draw, brush, edit, measure, undo, redo,
+save, import, and export. The View menu can split tiled slides into 2, 4, or
+6 OpenSeadragon panes with linked or independent zoom/pan for comparing
+separate tissue regions.
 Optional \code{stain = "ihc"} adds an RGB optical-density deconvolution display
 with simple original/all/show-only controls.
 \code{stain = "he"} uses hematoxylin, eosin, and residual H&E channels. Use

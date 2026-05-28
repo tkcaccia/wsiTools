@@ -731,9 +731,15 @@ section-specific annotations, and trajectories. Large WSI, CZI, SVS, OME-TIFF,
 and pyramidal images should still be opened from R or prepared as tiled project
 sources; the project file preserves their paths/tile metadata rather than
 copying full pixel data into R memory. Pyramid levels are used internally for
-zooming and are not listed as project sections. The left-side panel stack can be resized
-by dragging its right edge, and each Project, Annotations, or History panel can
-be resized vertically from its lower grip. These menus group pan and annotation modes, fit and
+zooming and are not listed as project sections. The `Help` menu opens an
+in-viewer guide with image loading, navigation, project, ROI, stain/channel,
+analysis, saved-output, troubleshooting, and keyboard-shortcut notes for new
+users. The left-side panel stack can be resized by dragging its right edge, and
+each Project, Annotations, or History panel can be resized vertically from its
+lower grip. The `View` menu also provides a multi-view tissue display for tiled
+slides, with 2, 4, or 6 OpenSeadragon panes that can be linked for synchronized
+zoom/pan or left independent to compare separate ROIs, tumour and non-tumour
+regions, or different zoom levels. These menus group pan and annotation modes, fit and
 1:1 zoom, ROI and label toggles, ROI opacity, previous/next ROI navigation, a
 side window listing all GeoJSON geometries, crosshair display, polygon drawing,
 and GeoJSON export. Use the annotation/GeoJSON tools
