@@ -31,7 +31,7 @@ packageVersion("wsiTools")
 wsi_backends()
 ```
 
-The current GitHub package version is `0.1.22`. Avoid installing old commit
+The current GitHub package version is `0.1.23`. Avoid installing old commit
 references unless you are deliberately debugging a previous build; the command
 above always reinstalls the current GitHub version.
 
@@ -71,7 +71,7 @@ want to update your local package library. This avoids accidental long updates
 on managed Windows workstations.
 
 After installation, check `packageVersion("wsiTools")`. It should report
-`0.1.22` or newer. On Windows, the native CZI bridge is compiled by default.
+`0.1.23` or newer. On Windows, the native CZI bridge is compiled by default.
 If you need to install only the core package on a machine where that native
 bridge cannot compile, set `WSITOOLS_DISABLE_NATIVE_CZI=1` before installation
 to use the fallback stub.
@@ -716,9 +716,11 @@ session <- wsi_viewer_live(
 ```
 
 The interactive toolbar is organized into menus such as `Project`,
-`Annotations`, `Artifacts`, `Measure`, `Trajectories`, `Image`, `View`,
+`Annotations`, `Cells`, `Artifacts`, `Measure`, `Trajectories`, `Image`, `View`,
 `Stains`, and `Help`. Segmentation import and selected-ROI StarDist controls
-now live inside `Annotations` beside the GeoJSON tools. Use `Project` to reopen
+live inside `Annotations` beside the GeoJSON tools. Use the `Cells` menu for
+project-level CellPhenotyper/StarDist cell overlays loaded from an existing
+CellPhenotyper output directory. Use `Project` to reopen
 the left-side project panel, use `Add image` to append one or more ordinary
 browser-readable images or file references in formats such as CZI, SVS, NDPI,
 BTF, OME-TIFF, QPTIFF, MRXS, SCN, BIF, DICOM, PNG, JPEG and TIFF.
@@ -776,6 +778,35 @@ press Enter, or click `Finish` to save a trajectory and automatically return to
 pan mode. In a static browser viewer this opens the
 browser's normal save/download flow rather than silently writing to a server
 path.
+
+### CellPhenotyper project viewer
+
+CellPhenotyper output folders can be opened directly from their
+`00_execution/project_outputs.tsv` manifest. wsiTools resolves the local input
+image, reads the StarDist/cell-assignment centroid table when present, and adds
+the cells as a viewer layer. The large StarDist label mask remains on disk.
+
+```r
+library(wsiTools)
+
+project <- wsi_read_cellphenotyper_project(
+  "/Users/stefano/Documents/CellPhenotyper_1927zoom_full_20260527_215129_outputs"
+)
+project
+
+html <- wsi_viewer_cellphenotyper(
+  project,
+  output = "/Users/stefano/Documents/viewer/cellphenotyper_project_viewer.html",
+  mode = "tiles",
+  overwrite = TRUE,
+  open = TRUE
+)
+```
+
+In the viewer, open the top `Cells` menu and click `StarDist cells` to show or
+hide the CellPhenotyper segmentation. `Zoom cells` moves the viewport to the
+cell extent, while `Opacity` and `Cell size` adjust the overlay only; the input
+image is still viewed through the normal thumbnail or tiled WSI backend.
 
 For a live R workflow, use `wsi_viewer_live()`. The ordinary static
 `wsi_viewer()` writes an HTML file; it can export GeoJSON from the browser, but
@@ -918,6 +949,9 @@ viewer <- wsi_viewer_he_mihc(
 
 viewer$get_channel_settings()
 ```
+
+The same workflow is available as an installed example script at
+`inst/examples/he-gigatime-overlay-viewer.R`.
 
 For the smoothest interaction, precompute/reuse the H&E Deep Zoom tiles as
 shown above. If no tile pyramid is available, set `dynamic_tiles = TRUE`;

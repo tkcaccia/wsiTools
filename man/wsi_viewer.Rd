@@ -45,6 +45,8 @@ wsi_viewer(
   autosave_path = NULL,
   project_images = NULL,
   channel_sources = NULL,
+  layers = NULL,
+  cellphenotyper = NULL,
   viewer_transport = c("auto", "websocket", "polling")
 )
 }
@@ -157,6 +159,12 @@ bridge, or an explicitly enabled legacy Python bridge.}
 
 \item{channel_sources}{Optional tiled channel sources created with
 \code{\link[=wsi_channel_source]{wsi_channel_source()}}.}
+
+\item{layers}{Optional viewer overlay layers, for example point layers from
+CellPhenotyper/StarDist outputs.}
+
+\item{cellphenotyper}{Optional CellPhenotyper project metadata used to enable
+the top \strong{Cells} menu.}
 
 \item{viewer_transport}{Browser-to-R live transport advertised to the
 viewer: \code{"auto"}, \code{"websocket"}, or \code{"polling"}. Static viewers ignore
