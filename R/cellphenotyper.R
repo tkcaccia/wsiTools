@@ -382,6 +382,70 @@ wsi_cellphenotyper_geojson_feature_count <- function(geojson) {
   if (is.list(features)) length(features) else 0L
 }
 
+wsi_cellphenotyper_shift_bbox <- function(bbox, dx = 0, dy = 0) {
+  if (!is.numeric(bbox) || length(bbox) < 4L) {
+    return(bbox)
+  }
+  out <- bbox
+  out[[1L]] <- out[[1L]] + dx
+  out[[2L]] <- out[[2L]] + dy
+  out[[3L]] <- out[[3L]] + dx
+  out[[4L]] <- out[[4L]] + dy
+  out
+}
+
+wsi_cellphenotyper_shift_geojson <- function(geojson, dx = 0, dy = 0) {
+  dx <- suppressWarnings(as.numeric(dx %||% 0))
+  dy <- suppressWarnings(as.numeric(dy %||% 0))
+  if (!is.list(geojson) || !is.finite(dx) || !is.finite(dy) || (dx == 0 && dy == 0)) {
+    return(geojson)
+  }
+  out <- geojson
+  if (!is.null(out$bbox)) {
+    out$bbox <- wsi_cellphenotyper_shift_bbox(out$bbox, dx = dx, dy = dy)
+  }
+  features <- out$features %||% list()
+  if (is.list(features) && length(features)) {
+    out$features <- lapply(features, function(feature) {
+      if (is.list(feature$geometry) && !is.null(feature$geometry$coordinates)) {
+        feature$geometry$coordinates <- wsi_offset_coordinates(feature$geometry$coordinates, dx = dx, dy = dy)
+      }
+      if (!is.null(feature$bbox)) {
+        feature$bbox <- wsi_cellphenotyper_shift_bbox(feature$bbox, dx = dx, dy = dy)
+      }
+      props <- feature$properties %||% list()
+      wsi_tools_meta <- props$wsiTools %||% list()
+      if (!is.list(wsi_tools_meta) || is.data.frame(wsi_tools_meta)) {
+        wsi_tools_meta <- list()
+      }
+      props$wsiTools <- utils::modifyList(
+        wsi_tools_meta,
+        list(
+          coordinate_space = "slide",
+          source_coordinate_space = "cellphenotyper_crop",
+          shift_dx = dx,
+          shift_dy = dy
+        ),
+        keep.null = TRUE
+      )
+      feature$properties <- props
+      feature
+    })
+  }
+  out
+}
+
+wsi_cellphenotyper_kodama_shift <- function(project) {
+  extent <- wsi_cellphenotyper_gigatime_extent(project)
+  if (is.numeric(extent) && length(extent) >= 2L &&
+      all(is.finite(extent[c("x", "y")]))) {
+    return(c(dx = unname(extent[["x"]]), dy = unname(extent[["y"]])))
+  }
+  shift_path <- project$files$shift %||% NA_character_
+  shift <- wsi_cellphenotyper_read_shift(shift_path)
+  c(dx = as.numeric(shift$dx %||% 0), dy = as.numeric(shift$dy %||% 0))
+}
+
 wsi_cellphenotyper_gigatime_channel_names <- function(project) {
   channels_path <- project$files$gigatime_channels %||% NA_character_
   channels <- wsi_cellphenotyper_read_json(channels_path)
@@ -508,11 +572,13 @@ wsi_cellphenotyper_kodama_config <- function(project) {
   if (!is.data.frame(files) || !nrow(files)) {
     return(list(enabled = FALSE, geojsons = list()))
   }
+  shift <- wsi_cellphenotyper_kodama_shift(project)
   geojsons <- lapply(seq_len(nrow(files)), function(i) {
     geojson <- wsi_cellphenotyper_read_geojson(files$path[[i]])
     if (is.null(geojson)) {
       return(NULL)
     }
+    geojson <- wsi_cellphenotyper_shift_geojson(geojson, dx = shift[["dx"]], dy = shift[["dy"]])
     id <- wsi_safe_id(paste("kodama", files$profile[[i]], tools::file_path_sans_ext(basename(files$path[[i]])), sep = "_"), "kodama")
     list(
       id = id,
@@ -521,6 +587,9 @@ wsi_cellphenotyper_kodama_config <- function(project) {
       path = files$path[[i]],
       output_id = files$output_id[[i]],
       stage_id = files$stage_id[[i]],
+      shift_dx = unname(shift[["dx"]]),
+      shift_dy = unname(shift[["dy"]]),
+      coordinate_space = "slide",
       feature_count = wsi_cellphenotyper_geojson_feature_count(geojson),
       geojson = geojson
     )

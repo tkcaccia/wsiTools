@@ -139,10 +139,24 @@ test_that("CellPhenotyper KODAMA MedSAM GeoJSON is exposed in the viewer", {
   unlink(root, recursive = TRUE, force = TRUE)
   dir.create(file.path(root, "00_execution"), recursive = TRUE)
   dir.create(file.path(root, "01_input", "sample"), recursive = TRUE)
+  dir.create(file.path(root, "02_stardist", "sample", "stardist_out"), recursive = TRUE)
   dir.create(file.path(root, "18_cluster_geojson", "sample"), recursive = TRUE)
 
   input <- file.path(root, "01_input", "sample", "sample.ome.tif")
   file.create(input)
+  shift <- file.path(root, "02_stardist", "sample", "stardist_out", "shift.json")
+  writeLines(
+    paste(
+      "{",
+      '  "crop_bbox_xyxy": {"x0": 100, "y0": 200, "x1": 900, "y1": 800},',
+      '  "offset_crop_to_original": {"dx": 100, "dy": 200},',
+      '  "crop_size": {"width": 800, "height": 600}',
+      "}",
+      sep = "\n"
+    ),
+    shift,
+    useBytes = TRUE
+  )
   fine <- file.path(root, "18_cluster_geojson", "sample", "sample_fine_grown_mask_smooth_class.geojson")
   standard <- file.path(root, "18_cluster_geojson", "sample", "sample_standard_grown_mask_smooth_class.geojson")
   write_cellphenotyper_test_geojson(fine, class = "tumour")
@@ -177,6 +191,14 @@ test_that("CellPhenotyper KODAMA MedSAM GeoJSON is exposed in the viewer", {
   expect_true(config$kodama$enabled)
   expect_length(config$kodama$geojsons, 2L)
   expect_equal(config$kodama$geojsons[[1L]]$feature_count, 1L)
+  expect_equal(config$kodama$geojsons[[1L]]$shift_dx, 100)
+  expect_equal(config$kodama$geojsons[[1L]]$shift_dy, 200)
+  shifted_point <- config$kodama$geojsons[[1L]]$geojson$features[[1L]]$geometry$coordinates[[1L]][[1L]]
+  expect_equal(unlist(shifted_point, use.names = FALSE), c(110, 210))
+  expect_equal(
+    config$kodama$geojsons[[1L]]$geojson$features[[1L]]$properties$wsiTools$source_coordinate_space,
+    "cellphenotyper_crop"
+  )
 
   slide <- wsi_mock_slide(width = 1000, height = 800, levels = c(1, 4))
   html <- tempfile(fileext = ".html")
