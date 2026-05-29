@@ -312,6 +312,16 @@ wsi_cellphenotyper_empty_kodama_geojson <- function() {
   )
 }
 
+wsi_cellphenotyper_empty_grandqc_geojson <- function() {
+  data.frame(
+    label = character(),
+    path = character(),
+    output_id = character(),
+    stage_id = character(),
+    stringsAsFactors = FALSE
+  )
+}
+
 wsi_cellphenotyper_kodama_label <- function(path, output_id = "", stage_id = "") {
   text <- paste(basename(path), output_id %||% "", stage_id %||% "")
   profile <- if (grepl("fine", text, ignore.case = TRUE)) {
@@ -361,6 +371,46 @@ wsi_cellphenotyper_find_kodama_geojson <- function(manifest) {
     stage_id = rows$stage_id,
     stringsAsFactors = FALSE
   )
+}
+
+wsi_cellphenotyper_find_grandqc_geojson <- function(manifest, root) {
+  manifest_candidates <- character()
+  if (nrow(manifest)) {
+    manifest_text <- paste(
+      manifest$output_id %||% "",
+      manifest$stage_id %||% "",
+      manifest$stage_folder %||% "",
+      manifest$resolved_path %||% ""
+    )
+    grandqc_hit <- manifest$file_exists &
+      grepl("\\.geojson$", manifest$resolved_path, ignore.case = TRUE) &
+      grepl("grandqc", manifest_text, ignore.case = TRUE)
+    manifest_candidates <- manifest$resolved_path[grandqc_hit]
+  }
+  fallback <- c(
+    Sys.glob(file.path(root, "01a_grandqc", "*", "*", "*grandqc*.geojson")),
+    Sys.glob(file.path(root, "01a_grandqc", "*", "*grandqc*.geojson")),
+    Sys.glob(file.path(root, "01a_grandqc", "*grandqc*.geojson"))
+  )
+  paths <- unique(c(manifest_candidates, fallback))
+  paths <- paths[file.exists(paths)]
+  if (!length(paths)) {
+    return(wsi_cellphenotyper_empty_grandqc_geojson())
+  }
+  rows <- data.frame(
+    label = paste0("GrandQC ", tools::file_path_sans_ext(basename(paths))),
+    path = normalizePath(paths, mustWork = TRUE),
+    output_id = NA_character_,
+    stage_id = NA_character_,
+    stringsAsFactors = FALSE
+  )
+  if (nrow(manifest)) {
+    idx <- match(rows$path, normalizePath(manifest$resolved_path, mustWork = FALSE))
+    hit <- !is.na(idx)
+    rows$output_id[hit] <- manifest$output_id[idx[hit]]
+    rows$stage_id[hit] <- manifest$stage_id[idx[hit]]
+  }
+  rows
 }
 
 wsi_cellphenotyper_read_json <- function(path) {
@@ -601,6 +651,38 @@ wsi_cellphenotyper_kodama_config <- function(project) {
   )
 }
 
+wsi_cellphenotyper_grandqc_config <- function(project) {
+  files <- project$files$grandqc_geojson %||% wsi_cellphenotyper_empty_grandqc_geojson()
+  if (!is.data.frame(files) || !nrow(files)) {
+    return(list(enabled = FALSE, geojsons = list()))
+  }
+  geojsons <- lapply(seq_len(nrow(files)), function(i) {
+    geojson <- wsi_cellphenotyper_read_geojson(files$path[[i]])
+    if (is.null(geojson)) {
+      return(NULL)
+    }
+    id <- wsi_safe_id(
+      paste("grandqc", tools::file_path_sans_ext(basename(files$path[[i]])), sep = "_"),
+      "grandqc"
+    )
+    list(
+      id = id,
+      label = files$label[[i]],
+      path = files$path[[i]],
+      output_id = files$output_id[[i]],
+      stage_id = files$stage_id[[i]],
+      coordinate_space = "slide",
+      feature_count = wsi_cellphenotyper_geojson_feature_count(geojson),
+      geojson = geojson
+    )
+  })
+  geojsons <- Filter(Negate(is.null), geojsons)
+  list(
+    enabled = length(geojsons) > 0L,
+    geojsons = geojsons
+  )
+}
+
 wsi_cellphenotyper_viewer_config <- function(project, layer_id = "cellphenotyper_stardist_cells") {
   list(
     enabled = TRUE,
@@ -615,6 +697,7 @@ wsi_cellphenotyper_viewer_config <- function(project, layer_id = "cellphenotyper
     stardist_cells = project$files$cell_table %||% NA_character_,
     stardist_roi = project$files$stardist_roi %||% NA_character_,
     kodama = wsi_cellphenotyper_kodama_config(project),
+    grandqc = wsi_cellphenotyper_grandqc_config(project),
     cell_count = as.integer(project$cell_count %||% 0L)
   )
 }
@@ -674,7 +757,9 @@ wsi_viewer_cellphenotyper_config <- function(cellphenotyper = NULL) {
 #' `gigatime_probs.ome.tif` is available, it is shown as live tiled mIHC
 #' channel overlays on top of the H&E image and controlled from the top
 #' **Stains** menu. When refined KODAMA GeoJSON is available, the top
-#' **KODAMA** menu can import it as editable viewer annotations.
+#' **KODAMA** menu can import it as editable viewer annotations. When GrandQC
+#' GeoJSON is available, the top **Artifacts** menu imports those QC regions
+#' instead of running browser-side artifact detection.
 #'
 #' @param path CellPhenotyper output directory or path to
 #'   `00_execution/project_outputs.tsv`.
@@ -740,7 +825,8 @@ wsi_read_cellphenotyper_project <- function(path, load_cells = TRUE) {
       gigatime_probs = wsi_cellphenotyper_find_gigatime_probs(manifest),
       gigatime_channels = wsi_cellphenotyper_find_gigatime_channels(manifest),
       gigatime_metadata = wsi_cellphenotyper_find_gigatime_metadata(manifest),
-      kodama_geojson = wsi_cellphenotyper_find_kodama_geojson(manifest)
+      kodama_geojson = wsi_cellphenotyper_find_kodama_geojson(manifest),
+      grandqc_geojson = wsi_cellphenotyper_find_grandqc_geojson(manifest, root)
     )
   )
   class(project) <- "wsi_cellphenotyper_project"
@@ -892,6 +978,10 @@ print.wsi_cellphenotyper_project <- function(x, ...) {
   kodama <- x$files$kodama_geojson %||% wsi_cellphenotyper_empty_kodama_geojson()
   if (is.data.frame(kodama) && nrow(kodama)) {
     cat("  KODAMA GeoJSON: ", nrow(kodama), " file", if (nrow(kodama) == 1L) "" else "s", "\n", sep = "")
+  }
+  grandqc <- x$files$grandqc_geojson %||% wsi_cellphenotyper_empty_grandqc_geojson()
+  if (is.data.frame(grandqc) && nrow(grandqc)) {
+    cat("  GrandQC GeoJSON: ", nrow(grandqc), " file", if (nrow(grandqc) == 1L) "" else "s", "\n", sep = "")
   }
   invisible(x)
 }

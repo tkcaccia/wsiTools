@@ -791,7 +791,9 @@ channel overlays on top of the H&E image. Channel names are read from
 StarDist label mask remains on disk. If the manifest contains
 MedSAM-refined KODAMA GeoJSON outputs, for example in `18_cluster_geojson`,
 the viewer adds a top `KODAMA` menu so the refined regions can be visualized as
-editable GeoJSON annotations.
+editable GeoJSON annotations. If a GrandQC GeoJSON is available, commonly under
+`01a_grandqc`, the top `Artifacts` menu imports those QC regions as editable
+annotations instead of running browser-side artifact detection.
 
 ```r
 library(wsiTools)
@@ -824,7 +826,8 @@ as tiled colour channels in the top `Stains` menu, where each marker can be
 shown, hidden, recoloured, and blended over the H&E. Open the top `KODAMA` menu
 and click `Load all` or an individual refined GeoJSON file to overlay the
 MedSAM-refined KODAMA tissue regions; the imported regions also appear in the
-left annotation list and can be exported again as GeoJSON.
+left annotation list and can be exported again as GeoJSON. Open `Artifacts` and
+click `Load GrandQC` to show the GrandQC artifact/QC regions from the project.
 
 The same CellPhenotyper project workflow is available as
 `inst/examples/cellphenotyper-project-viewer.R`.
@@ -1665,12 +1668,10 @@ dust$dust_fraction_heatmap
 dust$tiles[, c("tile_id", "dust_candidate", "dust_object_count")]
 ```
 
-The interactive viewer also includes an **Artifacts** menu for quick
-viewport-level screening. It can inspect the currently rendered view for
-obvious blur, pen-like marks, folds, bubbles, or very bright/dark content and
-optionally create an `artefact` ROI. This is intended for manual QC while
-viewing; reproducible ML tile export should still use `artifact_filter = TRUE`
-in the tile manifest workflow.
+The interactive viewer **Artifacts** menu is used to load GrandQC GeoJSON QC
+regions when a CellPhenotyper project provides them. Reproducible ML tile
+export should still use `artifact_filter = TRUE` in the tile manifest workflow
+when browser-side GrandQC annotations are not enough.
 
 Whitespace/background labelling is separate from artifact detection. It adds
 manifest columns such as `whitespace_fraction`, `whitespace_flag`,

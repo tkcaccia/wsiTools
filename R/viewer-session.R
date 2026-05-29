@@ -152,6 +152,7 @@ wsi_viewer_allowed_events <- function() {
     "channel_source_added", "channel_source_removed", "channel_updated",
     "artifact_detected", "artifact_flagged", "artifact_overlay_toggled",
     "artifact_sensitivity_updated", "artifacts_cleared",
+    "grandqc_loaded", "grandqc_cleared",
     "ihc_intensity_measured",
     "segmentation_requested", "segmentation_started", "segmentation_progress",
     "segmentation_added", "segmentation_completed",

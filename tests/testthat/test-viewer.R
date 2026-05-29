@@ -381,19 +381,16 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "addSegmentationGeojson", fixed = TRUE)
   expect_match(html, "stardist", fixed = TRUE)
   expect_match(html, "Artifacts", fixed = TRUE)
-  expect_match(html, "Viewport QC", fixed = TRUE)
-  expect_match(html, "detectVisibleArtifacts", fixed = TRUE)
-  expect_match(html, "flagArtifactViewport", fixed = TRUE)
-  expect_match(html, "toggleArtifactOverlay", fixed = TRUE)
-  expect_match(html, "clearArtifactFlags", fixed = TRUE)
-  expect_match(html, "artifactSensitivity", fixed = TRUE)
+  expect_match(html, "GrandQC GeoJSON", fixed = TRUE)
+  expect_match(html, "grandqcLoadAll", fixed = TRUE)
+  expect_match(html, "loadAllGrandqcGeojsons", fixed = TRUE)
+  expect_match(html, "clearGrandqcRois", fixed = TRUE)
   expect_match(html, "artifactPayload", fixed = TRUE)
-  expect_match(html, "artifactPixelMetrics", fixed = TRUE)
   expect_match(html, "drawArtifactOverlays", fixed = TRUE)
   expect_match(html, "bindArtifactControls", fixed = TRUE)
-  expect_match(html, "artifact_detection", fixed = TRUE)
-  expect_match(html, "artifact_filter = TRUE", fixed = TRUE)
-  expect_match(html, "Detect visible artifacts", fixed = TRUE)
+  expect_match(html, "Load GrandQC artifacts", fixed = TRUE)
+  expect_false(grepl("detectVisibleArtifacts", html, fixed = TRUE))
+  expect_false(grepl("artifactPixelMetrics", html, fixed = TRUE))
   expect_match(html, "Measure", fixed = TRUE)
   expect_match(html, "toolMeasure", fixed = TRUE)
   expect_match(html, "clearMeasures", fixed = TRUE)
@@ -1649,7 +1646,7 @@ test_that("viewer event validation allowlists live WebSocket events", {
     "trajectory_area_created",
     "segmentation_started", "segmentation_progress",
     "segmentation_finished", "job_status", "project_image_reordered",
-    "project_image_closed"
+    "project_image_closed", "grandqc_loaded", "grandqc_cleared"
   )
 
   expect_true(all(expected %in% wsiTools:::wsi_viewer_allowed_events()))
@@ -1866,7 +1863,7 @@ test_that("interactive tiled viewer writes Deep Zoom HTML when libvips is availa
   expect_match(html, "stainOverlayCacheKey", fixed = TRUE)
   expect_match(html, "hasTiledStainChannels()){stainOverlayCanvas=null", fixed = TRUE)
   expect_match(html, "Stain channel selection needs readable tiles", fixed = TRUE)
-  expect_match(html, "detectVisibleArtifacts", fixed = TRUE)
+  expect_match(html, "loadAllGrandqcGeojsons", fixed = TRUE)
   expect_match(html, "drawArtifactOverlays", fixed = TRUE)
   expect_match(html, "saveGeojson", fixed = TRUE)
 })

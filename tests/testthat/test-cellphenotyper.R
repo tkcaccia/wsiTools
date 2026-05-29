@@ -140,6 +140,7 @@ test_that("CellPhenotyper KODAMA MedSAM GeoJSON is exposed in the viewer", {
   dir.create(file.path(root, "00_execution"), recursive = TRUE)
   dir.create(file.path(root, "01_input", "sample"), recursive = TRUE)
   dir.create(file.path(root, "02_stardist", "sample", "stardist_out"), recursive = TRUE)
+  dir.create(file.path(root, "01a_grandqc", "sample", "grandqc_sample"), recursive = TRUE)
   dir.create(file.path(root, "18_cluster_geojson", "sample"), recursive = TRUE)
 
   input <- file.path(root, "01_input", "sample", "sample.ome.tif")
@@ -159,8 +160,10 @@ test_that("CellPhenotyper KODAMA MedSAM GeoJSON is exposed in the viewer", {
   )
   fine <- file.path(root, "18_cluster_geojson", "sample", "sample_fine_grown_mask_smooth_class.geojson")
   standard <- file.path(root, "18_cluster_geojson", "sample", "sample_standard_grown_mask_smooth_class.geojson")
+  grandqc <- file.path(root, "01a_grandqc", "sample", "grandqc_sample", "sample_grandqc.geojson")
   write_cellphenotyper_test_geojson(fine, class = "tumour")
   write_cellphenotyper_test_geojson(standard, class = "stroma")
+  write_cellphenotyper_test_geojson(grandqc, class = "Fold")
 
   manifest <- data.frame(
     output_id = c("input_1", "cluster_geojson_fine", "cluster_geojson_standard"),
@@ -186,6 +189,7 @@ test_that("CellPhenotyper KODAMA MedSAM GeoJSON is exposed in the viewer", {
 
   project <- wsi_read_cellphenotyper_project(root, load_cells = FALSE)
   expect_equal(nrow(project$files$kodama_geojson), 2L)
+  expect_equal(nrow(project$files$grandqc_geojson), 1L)
 
   config <- wsiTools:::wsi_cellphenotyper_viewer_config(project)
   expect_true(config$kodama$enabled)
@@ -199,6 +203,11 @@ test_that("CellPhenotyper KODAMA MedSAM GeoJSON is exposed in the viewer", {
     config$kodama$geojsons[[1L]]$geojson$features[[1L]]$properties$wsiTools$source_coordinate_space,
     "cellphenotyper_crop"
   )
+  expect_true(config$grandqc$enabled)
+  expect_length(config$grandqc$geojsons, 1L)
+  expect_equal(config$grandqc$geojsons[[1L]]$feature_count, 1L)
+  grandqc_point <- config$grandqc$geojsons[[1L]]$geojson$features[[1L]]$geometry$coordinates[[1L]][[1L]]
+  expect_equal(unlist(grandqc_point, use.names = FALSE), c(10, 10))
 
   slide <- wsi_mock_slide(width = 1000, height = 800, levels = c(1, 4))
   html <- tempfile(fileext = ".html")
@@ -216,6 +225,9 @@ test_that("CellPhenotyper KODAMA MedSAM GeoJSON is exposed in the viewer", {
   expect_match(text, "bindKodamaControls", fixed = TRUE)
   expect_match(text, "KODAMA Fine MedSAM", fixed = TRUE)
   expect_match(text, "sample_fine_grown_mask_smooth_class.geojson", fixed = TRUE)
+  expect_match(text, "Load GrandQC", fixed = TRUE)
+  expect_match(text, "sample_grandqc.geojson", fixed = TRUE)
+  expect_match(text, "bindArtifactControls", fixed = TRUE)
 })
 
 test_that("CellPhenotyper layer and menu are included in viewer HTML", {
