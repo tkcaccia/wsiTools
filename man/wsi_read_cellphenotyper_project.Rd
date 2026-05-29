@@ -112,8 +112,8 @@ the HTML viewer path invisibly.
 by using \code{00_execution/project_outputs.tsv} as the project manifest. It
 resolves local output paths, identifies the input image, and loads the StarDist
 centroid table when available. The large label image is not loaded into memory.
-GigaTIME OME-TIFF probability output and preview files are resolved from the
-same manifest when present.
+GigaTIME OME-TIFF probability output, preview files, and MedSAM-refined
+KODAMA GeoJSON annotations are resolved from the same manifest when present.
 }
 \details{
 \code{wsi_viewer_cellphenotyper()} opens the input image in the interactive
@@ -121,7 +121,8 @@ wsiTools viewer and adds a top \strong{Cells} menu that can show or hide the
 CellPhenotyper/StarDist cell segmentation overlay. When
 \code{gigatime_probs.ome.tif} is available, it is shown as live tiled mIHC
 channel overlays on top of the H&E image and controlled from the top
-\strong{Stains} menu.
+\strong{Stains} menu. When refined KODAMA GeoJSON is available, the top
+\strong{KODAMA} menu can import it as editable viewer annotations.
 }
 \examples{
 \dontrun{

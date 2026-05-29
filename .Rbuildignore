@@ -13,3 +13,4 @@
 ^.*\.Rcheck$
 ^\.\.Rcheck$
 ^.*\.tar\.gz$
+^src/.*\.(o|so|dll|rds)$

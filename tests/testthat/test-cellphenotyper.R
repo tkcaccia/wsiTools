@@ -14,6 +14,32 @@ write_cellphenotyper_test_tiff <- function(path) {
   graphics::rect(0, 0, 1, 1, col = "#dcc4cf", border = NA)
 }
 
+write_cellphenotyper_test_geojson <- function(path, class = "tumour") {
+  geojson <- list(
+    type = "FeatureCollection",
+    features = list(list(
+      type = "Feature",
+      id = paste0("kodama_", class, "_1"),
+      properties = list(
+        name = paste("KODAMA", class),
+        classification = list(name = class, color = "#F59E0B"),
+        measurements = list(area = 361)
+      ),
+      geometry = list(
+        type = "Polygon",
+        coordinates = list(list(
+          c(10, 10),
+          c(30, 10),
+          c(30, 30),
+          c(10, 30),
+          c(10, 10)
+        ))
+      )
+    ))
+  )
+  writeLines(jsonlite::toJSON(geojson, auto_unbox = TRUE), path, useBytes = TRUE)
+}
+
 test_that("CellPhenotyper project reader resolves input and cells", {
   root <- file.path(tempdir(), "cellphenotyper_project")
   unlink(root, recursive = TRUE, force = TRUE)
@@ -106,6 +132,68 @@ test_that("CellPhenotyper project reader resolves input and cells", {
   expect_equal(project$files$gigatime_channels, normalizePath(channels, mustWork = TRUE))
   expect_equal(wsiTools:::wsi_cellphenotyper_gigatime_channel_names(project), c("DAPI", "CK"))
   expect_equal(wsiTools:::wsi_cellphenotyper_gigatime_extent(project), c(x = 11, y = 7, width = 80, height = 60))
+})
+
+test_that("CellPhenotyper KODAMA MedSAM GeoJSON is exposed in the viewer", {
+  root <- file.path(tempdir(), "cellphenotyper_project_kodama")
+  unlink(root, recursive = TRUE, force = TRUE)
+  dir.create(file.path(root, "00_execution"), recursive = TRUE)
+  dir.create(file.path(root, "01_input", "sample"), recursive = TRUE)
+  dir.create(file.path(root, "18_cluster_geojson", "sample"), recursive = TRUE)
+
+  input <- file.path(root, "01_input", "sample", "sample.ome.tif")
+  file.create(input)
+  fine <- file.path(root, "18_cluster_geojson", "sample", "sample_fine_grown_mask_smooth_class.geojson")
+  standard <- file.path(root, "18_cluster_geojson", "sample", "sample_standard_grown_mask_smooth_class.geojson")
+  write_cellphenotyper_test_geojson(fine, class = "tumour")
+  write_cellphenotyper_test_geojson(standard, class = "stroma")
+
+  manifest <- data.frame(
+    output_id = c("input_1", "cluster_geojson_fine", "cluster_geojson_standard"),
+    stage_id = c("input", "medsam_refinement", "medsam_refinement"),
+    stage_title = c("Input Conversion", "KODAMA MedSAM refinement", "KODAMA MedSAM refinement"),
+    stage_folder = c("01_input", "18_cluster_geojson", "18_cluster_geojson"),
+    relative_path = c(
+      "sample/sample.ome.tif",
+      "sample/sample_fine_grown_mask_smooth_class.geojson",
+      "sample/sample_standard_grown_mask_smooth_class.geojson"
+    ),
+    absolute_path = c("", "", ""),
+    size_bytes = c(1, file.info(fine)$size, file.info(standard)$size),
+    check.names = FALSE
+  )
+  utils::write.table(
+    manifest,
+    file.path(root, "00_execution", "project_outputs.tsv"),
+    sep = "\t",
+    row.names = FALSE,
+    quote = FALSE
+  )
+
+  project <- wsi_read_cellphenotyper_project(root, load_cells = FALSE)
+  expect_equal(nrow(project$files$kodama_geojson), 2L)
+
+  config <- wsiTools:::wsi_cellphenotyper_viewer_config(project)
+  expect_true(config$kodama$enabled)
+  expect_length(config$kodama$geojsons, 2L)
+  expect_equal(config$kodama$geojsons[[1L]]$feature_count, 1L)
+
+  slide <- wsi_mock_slide(width = 1000, height = 800, levels = c(1, 4))
+  html <- tempfile(fileext = ".html")
+  wsi_viewer(
+    slide,
+    output = html,
+    open = FALSE,
+    overwrite = TRUE,
+    mode = "thumbnail",
+    cellphenotyper = config
+  )
+  text <- paste(readLines(html, warn = FALSE), collapse = "\n")
+  expect_match(text, "KODAMA", fixed = TRUE)
+  expect_match(text, "kodamaLoadAll", fixed = TRUE)
+  expect_match(text, "bindKodamaControls", fixed = TRUE)
+  expect_match(text, "KODAMA Fine MedSAM", fixed = TRUE)
+  expect_match(text, "sample_fine_grown_mask_smooth_class.geojson", fixed = TRUE)
 })
 
 test_that("CellPhenotyper layer and menu are included in viewer HTML", {

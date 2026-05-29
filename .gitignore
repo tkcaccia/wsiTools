@@ -5,5 +5,9 @@
 *.tar.gz
 *.Rcheck/
 ..Rcheck/
+src/*.o
+src/*.so
+src/*.dll
+src/*.rds
 manuscript/
 scripts/create_bioinformatics_application_note.py

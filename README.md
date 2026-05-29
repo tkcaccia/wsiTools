@@ -788,7 +788,10 @@ the cells as a viewer layer. When the manifest contains
 `03_gigatime/.../gigatime_probs.ome.tif`, wsiTools opens it as live tiled mIHC
 channel overlays on top of the H&E image. Channel names are read from
 `gigatime_channels.json` or `gigatime_metadata.json` when present. The large
-StarDist label mask remains on disk.
+StarDist label mask remains on disk. If the manifest contains
+MedSAM-refined KODAMA GeoJSON outputs, for example in `18_cluster_geojson`,
+the viewer adds a top `KODAMA` menu so the refined regions can be visualized as
+editable GeoJSON annotations.
 
 ```r
 library(wsiTools)
@@ -818,7 +821,10 @@ hide the CellPhenotyper segmentation. `Zoom cells` moves the viewport to the
 cell extent, while `Opacity` and `Cell size` adjust the overlay only. The H&E
 input image is the active base slide; the GigaTIME probability OME-TIFF appears
 as tiled colour channels in the top `Stains` menu, where each marker can be
-shown, hidden, recoloured, and blended over the H&E.
+shown, hidden, recoloured, and blended over the H&E. Open the top `KODAMA` menu
+and click `Load all` or an individual refined GeoJSON file to overlay the
+MedSAM-refined KODAMA tissue regions; the imported regions also appear in the
+left annotation list and can be exported again as GeoJSON.
 
 The same CellPhenotyper project workflow is available as
 `inst/examples/cellphenotyper-project-viewer.R`.

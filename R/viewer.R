@@ -792,6 +792,55 @@ wsi_viewer_stain_controls <- function(config) {
   )
 }
 
+wsi_viewer_kodama_controls <- function(config) {
+  kodama <- config$cellphenotyper$kodama %||% list(enabled = FALSE, geojsons = list())
+  geojsons <- kodama$geojsons %||% list()
+  geojsons <- if (is.list(geojsons)) geojsons else list()
+  has_geojson <- isTRUE(kodama$enabled) && length(geojsons) > 0L
+  load_buttons <- if (has_geojson) {
+    paste(vapply(seq_along(geojsons), function(i) {
+      item <- geojsons[[i]]
+      count <- item$feature_count %||% 0L
+      label <- sprintf(
+        "%s (%s ROI%s)",
+        item$label %||% sprintf("KODAMA GeoJSON %d", i),
+        format(as.integer(count), big.mark = ","),
+        if (identical(as.integer(count), 1L)) "" else "s"
+      )
+      paste0(
+        "<button class=\"kodamaLoad\" type=\"button\" data-kodama-index=\"",
+        i - 1L,
+        "\" title=\"Visualize ",
+        wsi_html_escape(item$path %||% ""),
+        "\">",
+        wsi_html_escape(label),
+        "</button>"
+      )
+    }, character(1)), collapse = "")
+  } else {
+    "<div class=\"menuHint\">No MedSAM-refined KODAMA GeoJSON was found in this CellPhenotyper project manifest.</div>"
+  }
+  wsi_viewer_menu(
+    "KODAMA",
+    "Visualize KODAMA/MedSAM refined GeoJSON annotations",
+    paste0(
+      "<div class=\"menuTitle\">MedSAM refinement GeoJSON</div>",
+      "<div class=\"menuGrid\">",
+      "<button id=\"kodamaLoadAll\" type=\"button\" title=\"Import all KODAMA refined GeoJSON annotations\"",
+      if (has_geojson) "" else " disabled",
+      ">Load all</button>",
+      "<button id=\"kodamaClear\" type=\"button\" title=\"Remove KODAMA annotations from the viewer\"",
+      if (has_geojson) "" else " disabled",
+      ">Clear KODAMA</button>",
+      "</div>",
+      "<div class=\"menuGrid kodamaList\">",
+      load_buttons,
+      "</div>",
+      "<div id=\"kodamaSummary\" class=\"menuHint\"></div>"
+    )
+  )
+}
+
 wsi_viewer_chrome <- function(config, loading_message, tiled = FALSE) {
   class_options <- wsi_viewer_class_options(config$roi_class_presets)
   roi_panel_class <- "panel"
@@ -895,6 +944,7 @@ wsi_viewer_chrome <- function(config, loading_message, tiled = FALSE) {
         "<div id=\"cellSummary\" class=\"menuHint\">No CellPhenotyper cells loaded.</div>"
       )
     ),
+    wsi_viewer_kodama_controls(config),
     wsi_viewer_menu(
       "Artifacts",
       "Detect and flag visible image artifacts",
@@ -1829,6 +1879,22 @@ wsi_viewer_cell_controls_js <- function() {
   )
 }
 
+wsi_viewer_kodama_js <- function() {
+  paste0(
+    "function kodamaConfig(){const cp=(typeof cellphenotyperConfig==='function')?cellphenotyperConfig():(cfg.cellphenotyper||{});return cp.kodama||{enabled:false,geojsons:[]};}\n",
+    "function kodamaItems(){const items=kodamaConfig().geojsons||[];return Array.isArray(items)?items:[];}\n",
+    "function kodamaSource(item){return 'KODAMA: '+String((item&&(item.label||item.id))||'MedSAM refined GeoJSON');}\n",
+    "function kodamaStatus(msg){const box=el('kodamaSummary');if(box)box.textContent=msg||'';}\n",
+    "function isKodamaRoi(roi,id=null){if(!roi)return false;const props=roi.properties||{},source=String(roi.source||'');if(id&&String(props.kodama_id||'')===String(id))return true;return roi.kodama===true||source.indexOf('KODAMA:')===0||props.source_menu==='KODAMA';}\n",
+    "function clearKodamaRois(redraw=true){let removed=0;for(let i=rois.length-1;i>=0;i--){if(isKodamaRoi(rois[i])){if(!removed)pushAnnotationUndo('kodama_cleared');rois.splice(i,1);removed++;}}if(selectedRoi>=rois.length)selectedRoi=rois.length-1;if(removed){recordAnnotationHistory('kodama_cleared',{removed:removed});scheduleViewerStateSync('kodama_cleared',{removed:removed});markAnnotationsDirty('kodama_cleared');}if(redraw){buildRoiList();updateButtons();draw();kodamaStatus(removed?('Removed '+removed+' KODAMA ROI'+(removed===1?'':'s')+'.'):'No KODAMA annotations were loaded.');}return removed;}\n",
+    "function tagKodamaRois(start,item){const source=kodamaSource(item),colourSeed=(item&&item.profile==='fine')?'#f59e0b':((item&&item.profile==='standard')?'#22c55e':'#38bdf8');let tagged=0;for(let i=start;i<rois.length;i++){const roi=rois[i];if(!roi)continue;roi.kodama=true;roi.source=source;roi.properties=roi.properties||{};roi.properties.source_menu='KODAMA';roi.properties.kodama_id=item&&item.id||null;roi.properties.kodama_profile=item&&item.profile||null;if(!roi.colour){roi.colour=colourSeed;roi.fill=hexToRgba(roi.colour,.18);}tagged++;}return tagged;}\n",
+    "function appendKodamaGeojson(item){if(!item||!item.geojson){notify('No KODAMA GeoJSON is available for this entry','warning');return 0;}const before=rois.length;addImportedGeojson(item.geojson,kodamaSource(item));const added=tagKodamaRois(before,item);return added;}\n",
+    "function loadKodamaGeojson(index){const item=kodamaItems()[Number(index)];if(!item){kodamaStatus('KODAMA entry not found.');return;}clearKodamaRois(false);const added=appendKodamaGeojson(item);buildRoiList();updateButtons();draw();kodamaStatus('Loaded '+added+' ROI'+(added===1?'':'s')+' from '+(item.label||item.id||'KODAMA')+'.');notify('KODAMA GeoJSON loaded','success');}\n",
+    "function loadAllKodamaGeojsons(){const items=kodamaItems();if(!items.length){kodamaStatus('No KODAMA GeoJSON was found in this project.');notify('No KODAMA GeoJSON found','warning');return;}clearKodamaRois(false);let added=0;items.forEach(item=>{added+=appendKodamaGeojson(item);});buildRoiList();updateButtons();draw();kodamaStatus('Loaded '+added+' KODAMA ROI'+(added===1?'':'s')+' from '+items.length+' file'+(items.length===1?'':'s')+'.');notify('KODAMA annotations loaded','success');}\n",
+    "function bindKodamaControls(){const items=kodamaItems(),loadAll=el('kodamaLoadAll'),clear=el('kodamaClear');document.querySelectorAll('.kodamaLoad').forEach(button=>{button.onclick=()=>loadKodamaGeojson(button.dataset.kodamaIndex);button.disabled=!items.length;});if(loadAll){loadAll.onclick=loadAllKodamaGeojsons;loadAll.disabled=!items.length;}if(clear){clear.onclick=()=>clearKodamaRois(true);clear.disabled=!items.length;}kodamaStatus(items.length?(items.length+' KODAMA/MedSAM GeoJSON file'+(items.length===1?'':'s')+' available.'):'No KODAMA/MedSAM GeoJSON was found in this project.');}\n"
+  )
+}
+
 wsi_viewer_measure_js <- function() {
   paste0(
     "function measurePixelSize(){const m=cfg.mpp||{};const x=Number(m.x),y=Number(m.y);return Number.isFinite(x)&&Number.isFinite(y)&&x>0&&y>0?{x:x,y:y}:null;}\n",
@@ -2100,6 +2166,7 @@ wsi_viewer_html <- function(config) {
     wsi_viewer_geometry_js(),
     wsi_viewer_layers_js(),
     wsi_viewer_cell_controls_js(),
+    wsi_viewer_kodama_js(),
     wsi_viewer_measure_js(),
     wsi_viewer_trajectory_js(),
     wsi_viewer_segmentation_js(),
@@ -2112,7 +2179,7 @@ wsi_viewer_html <- function(config) {
     "el('roiToggle').onclick=()=>{showRois=!showRois;updateButtons();draw();};el('labelsToggle').onclick=()=>{showLabels=!showLabels;updateButtons();draw();};el('prevRoi').onclick=()=>centerRoi(selectedRoi<=0?rois.length-1:selectedRoi-1);el('nextRoi').onclick=()=>centerRoi(selectedRoi+1);el('layersToggle').onclick=()=>{toggleRoiPanel();updateButtons();};el('roiOpacity').oninput=e=>{roiOpacity=Number(e.target.value);saveRoiOpacityPreference();draw();};el('crosshairToggle').onclick=()=>{showCrosshair=!showCrosshair;updateButtons();draw();};\n",
     "window.addEventListener('keydown',e=>{const key=String(e.key||'').toLowerCase(),typing=e.target&&['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName);if(brushSubtractKeyEvent(e)){brushAltDown=true;updateCursorFeedback(e);draw();}if((e.ctrlKey||e.metaKey)&&!typing&&((e.shiftKey&&key==='z')||key==='y')){e.preventDefault();restoreAnnotationRedo();return;}if((e.ctrlKey||e.metaKey)&&!e.shiftKey&&key==='z'&&!typing){e.preventDefault();if(mode==='trajectory'&&trajectoryDraft.length){undoTrajectoryPoint();return;}restoreAnnotationUndo();return;}if(!typing&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.shiftKey&&key==='n'){e.preventDefault();startNewAnnotation(mode==='draw'?'draw':'brush');return;}if(e.key==='f')fitView();if(e.key==='1')oneToOne();if(e.key==='d')setMode('draw');if(e.key==='b')setMode('brush');if(e.key==='e')setMode('edit');if(e.key==='m')setMode('measure');if(e.key==='t')setMode('trajectory');if(e.key==='Enter'&&mode==='draw')finishDraft();if(e.key==='Enter'&&mode==='trajectory'){e.preventDefault();finishTrajectory();}if((e.key==='Backspace'||e.key==='Delete')&&mode==='draw'){e.preventDefault();undoDraftPoint();}if((e.key==='Backspace'||e.key==='Delete')&&mode==='trajectory'){e.preventDefault();undoTrajectoryPoint();}if((e.key==='Backspace'||e.key==='Delete')&&mode==='edit'&&activeVertex){e.preventDefault();deleteSelectedVertex();}if(e.key==='r'&&rois.length)el('roiToggle').click();if(e.key==='l'&&rois.length)el('labelsToggle').click();if(e.key==='c')el('crosshairToggle').click();if(e.key==='['&&rois.length)el('prevRoi').click();if(e.key===']'&&rois.length)el('nextRoi').click();if(e.key==='Escape'){measureStart=null;trajectoryDraft=[];brushing=false;brushPoints=[];brushOperation='new';brushTargetRoi=-1;brushClass='';brushAdditiveSelection=false;brushTouchedSelection=new Set();draggingVertex=null;activeVertex=null;setMode('pan');draw();}});\n",
     "window.addEventListener('keyup',e=>{if(e.key==='Alt'||e.key==='Meta'||mode==='brush'||mode==='edit'){brushAltDown=brushSubtractModifier(e);updateCursorFeedback(e);draw();}});\n",
-    "bindExclusiveMenus();bindShortcutHelp();bindCommandPalette();bindMiniNavigator();bindProjectPanel();bindRoiPanelControls();bindSelectionCardControls();bindJobControls();bindStainControls();bindBaseImageControls();bindRoiClassControls();bindAnnotationListControls();bindAnnotationHistoryControls();bindAnnotationSectionMaximizeControls();bindMeasureControls();bindTrajectoryControls();bindImageTransformControls();bindGeojsonImportControls();bindSegmentationControls();bindArtifactControls();bindCellControls();bindMagnificationControls();bindMultiViewControls();bindPreferenceControls();buildRoiList();buildLayerList();buildChannelList();const initialMode=applyViewerPreferences();updateButtons();updateAnnotationDirtyIndicator();syncMessage('');setMode(initialMode||'pan');startViewerStateSocket();scheduleViewerStateSync('viewer_loaded',{});startViewerCommandPolling();startViewerAutosave();\n",
+    "bindExclusiveMenus();bindShortcutHelp();bindCommandPalette();bindMiniNavigator();bindProjectPanel();bindRoiPanelControls();bindSelectionCardControls();bindJobControls();bindStainControls();bindBaseImageControls();bindRoiClassControls();bindAnnotationListControls();bindAnnotationHistoryControls();bindAnnotationSectionMaximizeControls();bindMeasureControls();bindTrajectoryControls();bindImageTransformControls();bindGeojsonImportControls();bindSegmentationControls();bindArtifactControls();bindCellControls();bindKodamaControls();bindMagnificationControls();bindMultiViewControls();bindPreferenceControls();buildRoiList();buildLayerList();buildChannelList();const initialMode=applyViewerPreferences();updateButtons();updateAnnotationDirtyIndicator();syncMessage('');setMode(initialMode||'pan');startViewerStateSocket();scheduleViewerStateSync('viewer_loaded',{});startViewerCommandPolling();startViewerAutosave();\n",
     "window.addEventListener('resize',resize);\n",
     "image.onload=resize;\n",
     "image.src=cfg.image_data_uri;\n",
@@ -2222,6 +2289,7 @@ wsi_tiled_viewer_html <- function(config) {
     wsi_viewer_geometry_js(),
     wsi_viewer_layers_js(),
     wsi_viewer_cell_controls_js(),
+    wsi_viewer_kodama_js(),
     wsi_viewer_measure_js(),
     wsi_viewer_trajectory_js(),
     wsi_viewer_segmentation_js(),
@@ -2235,7 +2303,7 @@ wsi_tiled_viewer_html <- function(config) {
     "window.addEventListener('keydown',e=>{const key=String(e.key||'').toLowerCase(),typing=e.target&&['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName);if(brushSubtractKeyEvent(e)){brushAltDown=true;updateCursorFeedback(e);draw();}if((e.ctrlKey||e.metaKey)&&!typing&&((e.shiftKey&&key==='z')||key==='y')){e.preventDefault();restoreAnnotationRedo();return;}if((e.ctrlKey||e.metaKey)&&!e.shiftKey&&key==='z'&&!typing){e.preventDefault();if(mode==='trajectory'&&trajectoryDraft.length){undoTrajectoryPoint();return;}restoreAnnotationUndo();return;}if(!typing&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.shiftKey&&key==='n'){e.preventDefault();startNewAnnotation(mode==='draw'?'draw':'brush');return;}if(e.key==='f')fitView();if(e.key==='1')oneToOne();if(e.key==='d')setMode('draw');if(e.key==='b')setMode('brush');if(e.key==='e')setMode('edit');if(e.key==='m')setMode('measure');if(e.key==='t')setMode('trajectory');if(e.key==='Enter'&&mode==='draw')finishDraft();if(e.key==='Enter'&&mode==='trajectory'){e.preventDefault();finishTrajectory();}if((e.key==='Backspace'||e.key==='Delete')&&mode==='draw'){e.preventDefault();undoDraftPoint();}if((e.key==='Backspace'||e.key==='Delete')&&mode==='trajectory'){e.preventDefault();undoTrajectoryPoint();}if((e.key==='Backspace'||e.key==='Delete')&&mode==='edit'&&activeVertex){e.preventDefault();deleteSelectedVertex();}if(e.key==='r'&&rois.length)el('roiToggle').click();if(e.key==='l'&&rois.length)el('labelsToggle').click();if(e.key==='c')el('crosshairToggle').click();if(e.key==='['&&rois.length)el('prevRoi').click();if(e.key===']'&&rois.length)el('nextRoi').click();if(e.key==='Escape'){measureStart=null;trajectoryDraft=[];brushing=false;brushPoints=[];brushOperation='new';brushTargetRoi=-1;brushClass='';brushAdditiveSelection=false;brushTouchedSelection=new Set();draggingVertex=null;activeVertex=null;setMode('pan');draw();}});\n",
     "window.addEventListener('keyup',e=>{if(e.key==='Alt'||e.key==='Meta'||mode==='brush'||mode==='edit'){brushAltDown=brushSubtractModifier(e);updateCursorFeedback(e);draw();}});\n",
     "function initOpenSeadragon(){if(!window.OpenSeadragon){notify('OpenSeadragon failed to load','error',4200);return;}const roundMode=(OpenSeadragon.SUBPIXEL_ROUNDING_OCCURRENCES&&OpenSeadragon.SUBPIXEL_ROUNDING_OCCURRENCES.ALWAYS)||undefined;osdViewer=OpenSeadragon({element:viewerEl,showNavigationControl:false,showNavigator:false,blendTime:0,alwaysBlend:false,immediateRender:true,placeholderFillStyle:'#fff',subPixelRoundingForTransparency:roundMode,minPixelRatio:1,maxImageCacheCount:512,animationTime:0.12,springStiffness:9,visibilityRatio:0.8,constrainDuringPan:true,minZoomImageRatio:0.7,maxZoomPixelRatio:16,gestureSettingsMouse:{clickToZoom:false,dblClickToZoom:false,scrollToZoom:false,dragToPan:false},gestureSettingsTouch:{pinchToZoom:true,dragToPan:false},tileSources:tileSourceFromConfig()});osdViewer.addHandler('open',()=>{osdReady=true;tileFailureNotified=false;applyOpenSeadragonImageTransform();applyBaseImageDisplay();installInitialChannelSources();resize();if(typeof projectItems!=='undefined'&&projectItems.length&&typeof activeProjectSection==='function'&&typeof zoomToProjectContent==='function')zoomToProjectContent(projectItems[activeProjectIndex]||null,activeProjectSection());if(typeof refreshMultiViewSources==='function')refreshMultiViewSources();prefetchNeighborTiles();notify(activeTileMode()?'Tiled viewer ready':'Preview image ready',activeTileMode()?'success':'info');draw();});['animation','animation-finish','tile-drawn','tile-loaded','tile-load-failed','resize'].forEach(name=>osdViewer.addHandler(name,()=>{markBaseImageDirty();syncViewState();if(name==='animation-finish'){if(typeof syncMultiViewFrom==='function')syncMultiViewFrom(osdViewer);scheduleViewerStateSync('viewport_changed',{scale:scale,offset_x:offsetX,offset_y:offsetY});prefetchNeighborTiles();}else if(name==='tile-loaded')prefetchNeighborTiles();else if(name==='tile-load-failed'&&!tileFailureNotified){tileFailureNotified=true;notify('Tiles did not load. For live CZI viewing, keep the R session that created the viewer running.','warning',7200);}requestDraw();}));}\n",
-    "bindExclusiveMenus();bindShortcutHelp();bindCommandPalette();bindMiniNavigator();bindProjectPanel();bindRoiPanelControls();bindSelectionCardControls();bindJobControls();bindStainControls();bindBaseImageControls();bindRoiClassControls();bindAnnotationListControls();bindAnnotationHistoryControls();bindAnnotationSectionMaximizeControls();bindMeasureControls();bindTrajectoryControls();bindImageTransformControls();bindGeojsonImportControls();bindSegmentationControls();bindArtifactControls();bindCellControls();bindMagnificationControls();bindMultiViewControls();bindPreferenceControls();buildRoiList();buildLayerList();buildChannelList();const initialMode=applyViewerPreferences();updateButtons();updateAnnotationDirtyIndicator();syncMessage('');setMode(initialMode||'pan');startViewerStateSocket();scheduleViewerStateSync('viewer_loaded',{});startViewerCommandPolling();startViewerAutosave();\n",
+    "bindExclusiveMenus();bindShortcutHelp();bindCommandPalette();bindMiniNavigator();bindProjectPanel();bindRoiPanelControls();bindSelectionCardControls();bindJobControls();bindStainControls();bindBaseImageControls();bindRoiClassControls();bindAnnotationListControls();bindAnnotationHistoryControls();bindAnnotationSectionMaximizeControls();bindMeasureControls();bindTrajectoryControls();bindImageTransformControls();bindGeojsonImportControls();bindSegmentationControls();bindArtifactControls();bindCellControls();bindKodamaControls();bindMagnificationControls();bindMultiViewControls();bindPreferenceControls();buildRoiList();buildLayerList();buildChannelList();const initialMode=applyViewerPreferences();updateButtons();updateAnnotationDirtyIndicator();syncMessage('');setMode(initialMode||'pan');startViewerStateSocket();scheduleViewerStateSync('viewer_loaded',{});startViewerCommandPolling();startViewerAutosave();\n",
     "window.addEventListener('resize',resize);\n",
     "resize();initOpenSeadragon();\n",
     "</script>\n",

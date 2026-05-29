@@ -301,11 +301,85 @@ wsi_cellphenotyper_find_gigatime_metadata <- function(manifest) {
   )
 }
 
+wsi_cellphenotyper_empty_kodama_geojson <- function() {
+  data.frame(
+    label = character(),
+    path = character(),
+    profile = character(),
+    output_id = character(),
+    stage_id = character(),
+    stringsAsFactors = FALSE
+  )
+}
+
+wsi_cellphenotyper_kodama_label <- function(path, output_id = "", stage_id = "") {
+  text <- paste(basename(path), output_id %||% "", stage_id %||% "")
+  profile <- if (grepl("fine", text, ignore.case = TRUE)) {
+    "Fine"
+  } else if (grepl("standard", text, ignore.case = TRUE)) {
+    "Standard"
+  } else {
+    "Refined"
+  }
+  sprintf("KODAMA %s MedSAM", profile)
+}
+
+wsi_cellphenotyper_find_kodama_geojson <- function(manifest) {
+  if (!nrow(manifest)) {
+    return(wsi_cellphenotyper_empty_kodama_geojson())
+  }
+  manifest_text <- paste(
+    manifest$output_id %||% "",
+    manifest$stage_id %||% "",
+    manifest$stage_folder %||% "",
+    manifest$resolved_path %||% ""
+  )
+  geojson_hit <- manifest$file_exists &
+    grepl("\\.geojson$", manifest$resolved_path, ignore.case = TRUE) &
+    grepl("kodama|medsam|cluster_geojson|grown_mask_smooth_class|refined", manifest_text, ignore.case = TRUE)
+  if (!any(geojson_hit)) {
+    return(wsi_cellphenotyper_empty_kodama_geojson())
+  }
+  rows <- manifest[geojson_hit, , drop = FALSE]
+  rows <- rows[!duplicated(rows$resolved_path), , drop = FALSE]
+  profile <- ifelse(
+    grepl("fine", rows$resolved_path, ignore.case = TRUE),
+    "fine",
+    ifelse(grepl("standard", rows$resolved_path, ignore.case = TRUE), "standard", "refined")
+  )
+  data.frame(
+    label = mapply(
+      wsi_cellphenotyper_kodama_label,
+      rows$resolved_path,
+      rows$output_id %||% "",
+      rows$stage_id %||% "",
+      USE.NAMES = FALSE
+    ),
+    path = normalizePath(rows$resolved_path, mustWork = TRUE),
+    profile = profile,
+    output_id = rows$output_id,
+    stage_id = rows$stage_id,
+    stringsAsFactors = FALSE
+  )
+}
+
 wsi_cellphenotyper_read_json <- function(path) {
   if (is.na(path) || !nzchar(path) || !file.exists(path)) {
     return(NULL)
   }
   tryCatch(jsonlite::fromJSON(path, simplifyVector = TRUE), error = function(err) NULL)
+}
+
+wsi_cellphenotyper_read_geojson <- function(path) {
+  if (is.na(path) || !nzchar(path) || !file.exists(path)) {
+    return(NULL)
+  }
+  tryCatch(jsonlite::fromJSON(path, simplifyVector = FALSE), error = function(err) NULL)
+}
+
+wsi_cellphenotyper_geojson_feature_count <- function(geojson) {
+  features <- geojson$features %||% list()
+  if (is.list(features)) length(features) else 0L
 }
 
 wsi_cellphenotyper_gigatime_channel_names <- function(project) {
@@ -429,6 +503,35 @@ wsi_cellphenotyper_cell_layer <- function(cells, radius = 6, colour = "#38BDF8",
   layer
 }
 
+wsi_cellphenotyper_kodama_config <- function(project) {
+  files <- project$files$kodama_geojson %||% wsi_cellphenotyper_empty_kodama_geojson()
+  if (!is.data.frame(files) || !nrow(files)) {
+    return(list(enabled = FALSE, geojsons = list()))
+  }
+  geojsons <- lapply(seq_len(nrow(files)), function(i) {
+    geojson <- wsi_cellphenotyper_read_geojson(files$path[[i]])
+    if (is.null(geojson)) {
+      return(NULL)
+    }
+    id <- wsi_safe_id(paste("kodama", files$profile[[i]], tools::file_path_sans_ext(basename(files$path[[i]])), sep = "_"), "kodama")
+    list(
+      id = id,
+      label = files$label[[i]],
+      profile = files$profile[[i]],
+      path = files$path[[i]],
+      output_id = files$output_id[[i]],
+      stage_id = files$stage_id[[i]],
+      feature_count = wsi_cellphenotyper_geojson_feature_count(geojson),
+      geojson = geojson
+    )
+  })
+  geojsons <- Filter(Negate(is.null), geojsons)
+  list(
+    enabled = length(geojsons) > 0L,
+    geojsons = geojsons
+  )
+}
+
 wsi_cellphenotyper_viewer_config <- function(project, layer_id = "cellphenotyper_stardist_cells") {
   list(
     enabled = TRUE,
@@ -442,6 +545,7 @@ wsi_cellphenotyper_viewer_config <- function(project, layer_id = "cellphenotyper
     stardist_layer_id = layer_id,
     stardist_cells = project$files$cell_table %||% NA_character_,
     stardist_roi = project$files$stardist_roi %||% NA_character_,
+    kodama = wsi_cellphenotyper_kodama_config(project),
     cell_count = as.integer(project$cell_count %||% 0L)
   )
 }
@@ -491,15 +595,17 @@ wsi_viewer_cellphenotyper_config <- function(cellphenotyper = NULL) {
 #' by using `00_execution/project_outputs.tsv` as the project manifest. It
 #' resolves local output paths, identifies the input image, and loads the
 #' StarDist centroid table when available. The large label image is not loaded
-#' into memory. GigaTIME OME-TIFF probability output and preview files are
-#' resolved from the same manifest when present.
+#' into memory. GigaTIME OME-TIFF probability output, preview files, and
+#' MedSAM-refined KODAMA GeoJSON annotations are resolved from the same
+#' manifest when present.
 #'
 #' `wsi_viewer_cellphenotyper()` opens the input image in the interactive
 #' wsiTools viewer and adds a top **Cells** menu that can show or hide the
 #' CellPhenotyper/StarDist cell segmentation overlay. When
 #' `gigatime_probs.ome.tif` is available, it is shown as live tiled mIHC
 #' channel overlays on top of the H&E image and controlled from the top
-#' **Stains** menu.
+#' **Stains** menu. When refined KODAMA GeoJSON is available, the top
+#' **KODAMA** menu can import it as editable viewer annotations.
 #'
 #' @param path CellPhenotyper output directory or path to
 #'   `00_execution/project_outputs.tsv`.
@@ -564,7 +670,8 @@ wsi_read_cellphenotyper_project <- function(path, load_cells = TRUE) {
       gigatime_panel = wsi_cellphenotyper_find_gigatime_panel(manifest),
       gigatime_probs = wsi_cellphenotyper_find_gigatime_probs(manifest),
       gigatime_channels = wsi_cellphenotyper_find_gigatime_channels(manifest),
-      gigatime_metadata = wsi_cellphenotyper_find_gigatime_metadata(manifest)
+      gigatime_metadata = wsi_cellphenotyper_find_gigatime_metadata(manifest),
+      kodama_geojson = wsi_cellphenotyper_find_kodama_geojson(manifest)
     )
   )
   class(project) <- "wsi_cellphenotyper_project"
@@ -712,6 +819,10 @@ print.wsi_cellphenotyper_project <- function(x, ...) {
   }
   if (!is.na(x$files$gigatime_probs %||% NA_character_)) {
     cat("  GigaTIME OME-TIFF: ", x$files$gigatime_probs, "\n", sep = "")
+  }
+  kodama <- x$files$kodama_geojson %||% wsi_cellphenotyper_empty_kodama_geojson()
+  if (is.data.frame(kodama) && nrow(kodama)) {
+    cat("  KODAMA GeoJSON: ", nrow(kodama), " file", if (nrow(kodama) == 1L) "" else "s", "\n", sep = "")
   }
   invisible(x)
 }

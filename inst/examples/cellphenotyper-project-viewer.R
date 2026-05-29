@@ -20,6 +20,12 @@ if (!is.na(project$files$gigatime_probs) && nzchar(project$files$gigatime_probs)
 } else {
   message("No GigaTIME probability OME-TIFF was found in project_outputs.tsv.")
 }
+if (is.data.frame(project$files$kodama_geojson) && nrow(project$files$kodama_geojson)) {
+  message("KODAMA/MedSAM refined GeoJSON files: ", nrow(project$files$kodama_geojson))
+  print(project$files$kodama_geojson[, c("label", "path"), drop = FALSE])
+} else {
+  message("No KODAMA/MedSAM refined GeoJSON was found in project_outputs.tsv.")
+}
 
 viewer <- wsi_viewer_cellphenotyper(
   project,
@@ -34,4 +40,5 @@ viewer <- wsi_viewer_cellphenotyper(
 assign("cellphenotyper_viewer", viewer, envir = .GlobalEnv)
 message("Viewer object saved as `cellphenotyper_viewer`.")
 message("Use the top Stains menu to show/hide GigaTIME marker channels over the H&E.")
+message("Use the top KODAMA menu to load MedSAM-refined KODAMA GeoJSON regions as annotations.")
 message("Inspect channel settings with: cellphenotyper_viewer$get_channel_settings()")
