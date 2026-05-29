@@ -75,11 +75,13 @@ returns the HTML viewer path invisibly.
 by using \code{00_execution/project_outputs.tsv} as the project manifest. It
 resolves local output paths, identifies the input image, and loads the StarDist
 centroid table when available. The large label image is not loaded into memory.
+GigaTIME output images are resolved from the same manifest when present.
 }
 \details{
 \code{wsi_viewer_cellphenotyper()} opens the input image in the interactive
 wsiTools viewer and adds a top \strong{Cells} menu that can show or hide the
-CellPhenotyper/StarDist cell segmentation overlay.
+CellPhenotyper/StarDist cell segmentation overlay. GigaTIME channel panels from
+\code{03_gigatime} are added to the left Project panel as a related image.
 }
 \examples{
 \dontrun{

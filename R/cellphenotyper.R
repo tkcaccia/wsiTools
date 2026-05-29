@@ -241,6 +241,74 @@ wsi_cellphenotyper_find_preview <- function(manifest) {
   wsi_cellphenotyper_find_first_existing(previews)
 }
 
+wsi_cellphenotyper_find_stage_file <- function(manifest, stage_id, pattern,
+                                               fallback_pattern = NULL) {
+  if (!nrow(manifest)) {
+    return(NA_character_)
+  }
+  stage_hit <- grepl(stage_id, manifest$stage_id, ignore.case = TRUE) |
+    grepl(stage_id, manifest$output_id, ignore.case = TRUE) |
+    grepl(stage_id, manifest$stage_folder, ignore.case = TRUE)
+  path_hit <- grepl(pattern, manifest$resolved_path, ignore.case = TRUE)
+  candidates <- manifest$resolved_path[manifest$file_exists & stage_hit & path_hit]
+  found <- wsi_cellphenotyper_find_first_existing(candidates)
+  if (!is.na(found)) {
+    return(found)
+  }
+  if (!is.null(fallback_pattern)) {
+    fallback <- manifest$resolved_path[
+      manifest$file_exists & stage_hit &
+        grepl(fallback_pattern, manifest$resolved_path, ignore.case = TRUE)
+    ]
+    return(wsi_cellphenotyper_find_first_existing(fallback))
+  }
+  NA_character_
+}
+
+wsi_cellphenotyper_find_gigatime_panel <- function(manifest) {
+  wsi_cellphenotyper_find_stage_file(
+    manifest,
+    stage_id = "gigatime",
+    pattern = "gigatime_.*channel_panels\\.(png|jpg|jpeg|webp)$",
+    fallback_pattern = "channel_panels\\.(png|jpg|jpeg|webp)$|composite_preview\\.(png|jpg|jpeg|webp)$"
+  )
+}
+
+wsi_cellphenotyper_find_gigatime_probs <- function(manifest) {
+  wsi_cellphenotyper_find_stage_file(
+    manifest,
+    stage_id = "gigatime",
+    pattern = "gigatime_.*probs\\.ome\\.tiff?$",
+    fallback_pattern = "probs\\.ome\\.tiff?$"
+  )
+}
+
+wsi_cellphenotyper_find_gigatime_channels <- function(manifest) {
+  wsi_cellphenotyper_find_stage_file(
+    manifest,
+    stage_id = "gigatime",
+    pattern = "gigatime_.*channels\\.json$",
+    fallback_pattern = "channels\\.json$"
+  )
+}
+
+wsi_cellphenotyper_project_images <- function(project) {
+  gigatime_panel <- project$files$gigatime_panel %||% NA_character_
+  if (is.na(gigatime_panel) || !nzchar(gigatime_panel) || !file.exists(gigatime_panel)) {
+    return(list())
+  }
+  list(list(
+    id = "cellphenotyper_gigatime_panel",
+    label = "GigaTIME channel panels",
+    path = gigatime_panel,
+    backend = "cellphenotyper",
+    type = "gigatime-panel",
+    status = "manifest output",
+    role = "gigatime",
+    stage = "03_gigatime"
+  ))
+}
+
 wsi_cellphenotyper_cell_layer <- function(cells, radius = 6, colour = "#38BDF8",
                                           opacity = 0.75, visible = FALSE) {
   if (is.null(cells) || !is.data.frame(cells) || !nrow(cells)) {
@@ -267,6 +335,9 @@ wsi_cellphenotyper_viewer_config <- function(project, layer_id = "cellphenotyper
     project_root = project$root,
     manifest_path = project$manifest_path,
     input_image = project$input_image,
+    gigatime_panel = project$files$gigatime_panel %||% NA_character_,
+    gigatime_probs = project$files$gigatime_probs %||% NA_character_,
+    gigatime_channels = project$files$gigatime_channels %||% NA_character_,
     stardist_layer_id = layer_id,
     stardist_cells = project$files$cell_table %||% NA_character_,
     stardist_roi = project$files$stardist_roi %||% NA_character_,
@@ -319,11 +390,13 @@ wsi_viewer_cellphenotyper_config <- function(cellphenotyper = NULL) {
 #' by using `00_execution/project_outputs.tsv` as the project manifest. It
 #' resolves local output paths, identifies the input image, and loads the
 #' StarDist centroid table when available. The large label image is not loaded
-#' into memory.
+#' into memory. GigaTIME output images are resolved from the same manifest when
+#' present.
 #'
 #' `wsi_viewer_cellphenotyper()` opens the input image in the interactive
 #' wsiTools viewer and adds a top **Cells** menu that can show or hide the
-#' CellPhenotyper/StarDist cell segmentation overlay.
+#' CellPhenotyper/StarDist cell segmentation overlay. GigaTIME channel panels
+#' from `03_gigatime` are added to the left Project panel as a related image.
 #'
 #' @param path CellPhenotyper output directory or path to
 #'   `00_execution/project_outputs.tsv`.
@@ -371,7 +444,10 @@ wsi_read_cellphenotyper_project <- function(path, load_cells = TRUE) {
       cell_table = cell_table,
       shift = shift_path,
       stardist_roi = wsi_cellphenotyper_find_stardist_roi(manifest, root),
-      stardist_preview = wsi_cellphenotyper_find_preview(manifest)
+      stardist_preview = wsi_cellphenotyper_find_preview(manifest),
+      gigatime_panel = wsi_cellphenotyper_find_gigatime_panel(manifest),
+      gigatime_probs = wsi_cellphenotyper_find_gigatime_probs(manifest),
+      gigatime_channels = wsi_cellphenotyper_find_gigatime_channels(manifest)
     )
   )
   class(project) <- "wsi_cellphenotyper_project"
@@ -410,17 +486,31 @@ wsi_viewer_cellphenotyper <- function(project, output = NULL, open = interactive
   layers <- Filter(Negate(is.null), layers)
   slide <- wsi_open(project$input_image, backend = backend)
   on.exit(wsi_close(slide), add = TRUE)
-  wsi_viewer(
-    slide,
-    output = output,
-    open = open,
-    overwrite = overwrite,
-    mode = mode,
-    title = sprintf("CellPhenotyper: %s", basename(project$root)),
-    layers = layers,
-    cellphenotyper = wsi_cellphenotyper_viewer_config(project),
-    ...
+  dots <- list(...)
+  if (!is.null(dots$layers)) {
+    extra_layers <- dots$layers
+    if (inherits(extra_layers, "wsi_viewer_layer") || is.data.frame(extra_layers) ||
+        is.matrix(extra_layers) || inherits(extra_layers, "wsi_roi")) {
+      extra_layers <- list(extra_layers)
+    }
+    layers <- c(layers, extra_layers)
+    dots$layers <- NULL
+  }
+  dots$project_images <- dots$project_images %||% wsi_cellphenotyper_project_images(project)
+  dots$title <- dots$title %||% sprintf("CellPhenotyper: %s", basename(project$root))
+  dots$cellphenotyper <- dots$cellphenotyper %||% wsi_cellphenotyper_viewer_config(project)
+  args <- c(
+    list(
+      slide = slide,
+      output = output,
+      open = open,
+      overwrite = overwrite,
+      mode = mode,
+      layers = layers
+    ),
+    dots
   )
+  do.call(wsi_viewer, args)
 }
 
 #' @rdname wsi_read_cellphenotyper_project
@@ -436,6 +526,9 @@ print.wsi_cellphenotyper_project <- function(x, ...) {
   cat("  StarDist cells: ", format(x$cell_count %||% 0L, big.mark = ","), "\n", sep = "")
   if (!is.na(x$files$cell_table %||% NA_character_)) {
     cat("  cell table: ", x$files$cell_table, "\n", sep = "")
+  }
+  if (!is.na(x$files$gigatime_panel %||% NA_character_)) {
+    cat("  GigaTIME panel: ", x$files$gigatime_panel, "\n", sep = "")
   }
   invisible(x)
 }

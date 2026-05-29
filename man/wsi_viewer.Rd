@@ -183,17 +183,17 @@ disk so zooming can reveal full-resolution detail in the browser.
 The viewer includes lightweight pathology-viewer controls inspired by tools
 such as QuPath and napari. Controls are grouped into menus for navigation,
 annotations, GeoJSON overlays, view aids, and optional stains. These cover
-pan/select modes, fit and 1:1 zoom, ROI visibility and label toggles, ROI
+pan and annotation modes, fit and 1:1 zoom, ROI visibility and label toggles, ROI
 opacity, ROI previous/next navigation, a left-side annotation manager with
 GeoJSON geometry listing, visibility toggles, lock/unlock, colour editing,
 name/class editing, duplicate/delete, zoom-to-ROI, selected-ROI export,
 browser-side GeoJSON import, crosshair display, polygon drawing,
 brush-style annotation painting with a brush-size slider,
 selected-ROI extension, platform-aware brush removal (\code{Alt} on Windows/Linux
-and \code{Command} on macOS), smoothing, simplification, hole
-filling, checked-ROI merge, multi-part split, selected-ROI vertex editing,
+and \code{Command} on macOS), hole filling, selected-ROI vertex editing,
 name/class reassignment including custom annotation categories, 10-step
-\code{Ctrl+Z} undo and \code{Ctrl+Shift+Z}/\code{Ctrl+Y} redo, selected-ROI StarDist export,
+\code{Ctrl+Z} undo and \code{Ctrl+Shift+Z}/\code{Ctrl+Y} redo for annotations and
+trajectories, selected-ROI StarDist export,
 optional selected-ROI segmentation runs, segmentation GeoJSON/CSV import,
 distance measurement in pixels and micrometres when MPP metadata is
 available, browser-based GeoJSON export, and a \code{Ctrl+K} command palette for

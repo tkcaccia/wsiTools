@@ -784,7 +784,10 @@ path.
 CellPhenotyper output folders can be opened directly from their
 `00_execution/project_outputs.tsv` manifest. wsiTools resolves the local input
 image, reads the StarDist/cell-assignment centroid table when present, and adds
-the cells as a viewer layer. The large StarDist label mask remains on disk.
+the cells as a viewer layer. When the manifest contains GigaTIME outputs,
+the `03_gigatime/.../gigatime_5marker_channel_panels.png` image is also added
+to the left Project panel as a related image. The large StarDist label mask
+remains on disk.
 
 ```r
 library(wsiTools)
@@ -793,6 +796,9 @@ project <- wsi_read_cellphenotyper_project(
   "/Users/stefano/Documents/CellPhenotyper_1927zoom_full_20260527_215129_outputs"
 )
 project
+
+project$input_image
+project$files$gigatime_panel
 
 html <- wsi_viewer_cellphenotyper(
   project,
@@ -805,8 +811,12 @@ html <- wsi_viewer_cellphenotyper(
 
 In the viewer, open the top `Cells` menu and click `StarDist cells` to show or
 hide the CellPhenotyper segmentation. `Zoom cells` moves the viewport to the
-cell extent, while `Opacity` and `Cell size` adjust the overlay only; the input
-image is still viewed through the normal thumbnail or tiled WSI backend.
+cell extent, while `Opacity` and `Cell size` adjust the overlay only. The H&E
+input image is the active base slide; the GigaTIME channel panel appears in the
+left Project panel if it is listed in `project_outputs.tsv`.
+
+The same CellPhenotyper project workflow is available as
+`inst/examples/cellphenotyper-project-viewer.R`.
 
 For a live R workflow, use `wsi_viewer_live()`. The ordinary static
 `wsi_viewer()` writes an HTML file; it can export GeoJSON from the browser, but
