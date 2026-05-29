@@ -323,6 +323,14 @@ wsi_cellphenotyper_gigatime_channel_names <- function(project) {
 }
 
 wsi_cellphenotyper_gigatime_extent <- function(project) {
+  shift_path <- project$files$shift %||% NA_character_
+  if (!is.na(shift_path) && nzchar(shift_path) && file.exists(shift_path)) {
+    shift_extent <- tryCatch(wsi_registration_extent(shift_path), error = function(err) NULL)
+    if (is.numeric(shift_extent) && length(shift_extent) == 4L && all(is.finite(shift_extent))) {
+      names(shift_extent) <- c("x", "y", "width", "height")
+      return(shift_extent)
+    }
+  }
   metadata <- wsi_cellphenotyper_read_json(project$files$gigatime_metadata %||% NA_character_)
   if (!is.list(metadata)) {
     return(NULL)

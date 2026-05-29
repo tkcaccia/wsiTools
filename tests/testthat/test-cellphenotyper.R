@@ -20,6 +20,7 @@ test_that("CellPhenotyper project reader resolves input and cells", {
   dir.create(file.path(root, "00_execution"), recursive = TRUE)
   dir.create(file.path(root, "01_input", "sample"), recursive = TRUE)
   dir.create(file.path(root, "05_cell_assignments", "sample"), recursive = TRUE)
+  dir.create(file.path(root, "02_stardist", "sample", "stardist_out"), recursive = TRUE)
   dir.create(file.path(root, "03_gigatime", "sample", "gigatime_sample"), recursive = TRUE)
 
   input <- file.path(root, "01_input", "sample", "sample.ome.tif")
@@ -34,6 +35,19 @@ test_that("CellPhenotyper project reader resolves input and cells", {
   writeLines(
     jsonlite::toJSON(list(original_shape_yx = c(60, 80), store_channels = c("DAPI", "CK")), auto_unbox = TRUE),
     metadata,
+    useBytes = TRUE
+  )
+  shift_file <- file.path(root, "02_stardist", "sample", "stardist_out", "shift.json")
+  writeLines(
+    jsonlite::toJSON(
+      list(
+        crop_bbox_xyxy = list(x0 = 11, y0 = 7, x1 = 91, y1 = 67),
+        offset_crop_to_original = list(dx = 11, dy = 7),
+        crop_size = list(width = 80, height = 60)
+      ),
+      auto_unbox = TRUE
+    ),
+    shift_file,
     useBytes = TRUE
   )
   manifest <- data.frame(
@@ -91,7 +105,7 @@ test_that("CellPhenotyper project reader resolves input and cells", {
   expect_equal(project$files$gigatime_probs, normalizePath(probs, mustWork = TRUE))
   expect_equal(project$files$gigatime_channels, normalizePath(channels, mustWork = TRUE))
   expect_equal(wsiTools:::wsi_cellphenotyper_gigatime_channel_names(project), c("DAPI", "CK"))
-  expect_equal(wsiTools:::wsi_cellphenotyper_gigatime_extent(project), c(x = 0, y = 0, width = 80, height = 60))
+  expect_equal(wsiTools:::wsi_cellphenotyper_gigatime_extent(project), c(x = 11, y = 7, width = 80, height = 60))
 })
 
 test_that("CellPhenotyper layer and menu are included in viewer HTML", {
