@@ -899,8 +899,6 @@ wsi_cellphenotyper_kodama_config <- function(project) {
       if (is.na(path) || !nzchar(path) || !file.exists(path)) {
         return(NULL)
       }
-      ext <- tolower(tools::file_ext(path))
-      mime <- switch(ext, jpg = "image/jpeg", jpeg = "image/jpeg", webp = "image/webp", "image/png")
       points <- wsi_cellphenotyper_read_kodama_plot_points(embedding, plot_files$cluster_csv[[i]])
       list(
         id = wsi_safe_id(paste("kodama_plot", plot_files$profile[[i]], plot_files$plot_type[[i]], sep = "_"), "kodama_plot"),
@@ -912,7 +910,6 @@ wsi_cellphenotyper_kodama_config <- function(project) {
         embedding = embedding,
         output_id = plot_files$output_id[[i]],
         stage_id = plot_files$stage_id[[i]],
-        data_uri = wsi_image_data_uri(path, mime = mime),
         points = points,
         point_count = if (is.null(points)) 0L else as.integer(attr(points, "total_points") %||% nrow(points))
       )
@@ -1036,10 +1033,9 @@ wsi_viewer_cellphenotyper_config <- function(cellphenotyper = NULL) {
 #' **KODAMA** menu can import it as editable viewer annotations and can open
 #' membership plots in a floating window. The default KODAMA plot view redraws
 #' the KODAMA embedding points using the same cluster colours as the imported
-#' GeoJSON annotations, with a spatial GeoJSON redraw fallback and an option to
-#' show the original source PNG. When GrandQC GeoJSON is available, the top
-#' **Artifacts** menu imports those QC regions instead of running browser-side
-#' artifact detection.
+#' GeoJSON annotations, with a spatial GeoJSON redraw fallback. When GrandQC
+#' GeoJSON is available, the top **Artifacts** menu imports those QC regions
+#' instead of running browser-side artifact detection.
 #'
 #' @param path CellPhenotyper output directory or path to
 #'   `00_execution/project_outputs.tsv`.

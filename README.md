@@ -797,10 +797,9 @@ opened in a floating KODAMA plot window. When the CellPhenotyper KODAMA RData
 and cluster CSV are available, the default plot view redraws the same KODAMA
 embedding points with the same `color_1`, `color_2`, ... colours used for the
 viewer GeoJSON annotations. If those files are unavailable, it falls back to a
-spatial GeoJSON redraw. The original source PNG remains available for
-reference. If a GrandQC GeoJSON is available, commonly under `01a_grandqc`, the top
-`Artifacts` menu imports those QC regions as editable annotations instead of
-running browser-side artifact detection.
+spatial GeoJSON redraw. If a GrandQC GeoJSON is available, commonly under
+`01a_grandqc`, the top `Artifacts` menu imports those QC regions as editable
+annotations instead of running browser-side artifact detection.
 
 ```r
 library(wsiTools)
@@ -834,9 +833,9 @@ shown, hidden, recoloured, and blended over the H&E. Open the top `KODAMA` menu
 and click `Load all` or an individual refined GeoJSON file to overlay the
 MedSAM-refined KODAMA tissue regions; the imported regions also appear in the
 left annotation list and can be exported again as GeoJSON. In the same menu,
-click a KODAMA plot button to open the floating plot window and toggle between
-`Annotation colours` and `Source PNG`. Open `Artifacts` and click
-`Load GrandQC` to show the GrandQC artifact/QC regions from the project.
+click a KODAMA plot button to open the floating plot window using the same
+annotation colours. Open `Artifacts` and click `Load GrandQC` to show the
+GrandQC artifact/QC regions from the project.
 
 The same CellPhenotyper project workflow is available as
 `inst/examples/cellphenotyper-project-viewer.R`.

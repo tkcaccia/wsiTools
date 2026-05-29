@@ -126,10 +126,9 @@ channel overlays on top of the H&E image and controlled from the top
 \strong{KODAMA} menu can import it as editable viewer annotations and can open
 membership plots in a floating window. The default KODAMA plot view redraws
 the KODAMA embedding points using the same cluster colours as the imported
-GeoJSON annotations, with a spatial GeoJSON redraw fallback and an option to
-show the original source PNG. When GrandQC GeoJSON is available, the top
-\strong{Artifacts} menu imports those QC regions instead of running
-browser-side artifact detection.
+GeoJSON annotations, with a spatial GeoJSON redraw fallback. When GrandQC
+GeoJSON is available, the top \strong{Artifacts} menu imports those QC regions
+instead of running browser-side artifact detection.
 }
 \examples{
 \dontrun{
