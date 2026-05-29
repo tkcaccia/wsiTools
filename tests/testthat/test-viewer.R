@@ -1646,7 +1646,8 @@ test_that("viewer event validation allowlists live WebSocket events", {
     "trajectory_area_created",
     "segmentation_started", "segmentation_progress",
     "segmentation_finished", "job_status", "project_image_reordered",
-    "project_image_closed", "grandqc_loaded", "grandqc_cleared"
+    "project_image_closed", "grandqc_loaded", "grandqc_cleared",
+    "kodama_cells_selected"
   )
 
   expect_true(all(expected %in% wsiTools:::wsi_viewer_allowed_events()))
@@ -1659,6 +1660,10 @@ test_that("viewer event validation allowlists live WebSocket events", {
     wsiTools:::wsi_viewer_validate_state_payload(list(event = "roi_created", code = "system('rm -rf /')")),
     "unsupported field"
   )
+  expect_silent(wsiTools:::wsi_viewer_validate_state_payload(list(
+    event = "kodama_cells_selected",
+    kodama_selection = list(labels = c("1", "2"), count = 2L, matched_count = 2L)
+  )))
 })
 
 test_that("channel source API updates live viewer settings", {

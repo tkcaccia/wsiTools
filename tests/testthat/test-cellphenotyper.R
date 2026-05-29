@@ -229,6 +229,7 @@ test_that("CellPhenotyper KODAMA MedSAM GeoJSON is exposed in the viewer", {
   expect_null(config$kodama$plots[[1L]]$data_uri)
   expect_equal(config$kodama$plots[[1L]]$point_count, 2L)
   expect_equal(config$kodama$plots[[1L]]$points$class, c("color_1", "color_2"))
+  expect_equal(config$kodama$plots[[1L]]$points$label, c("1", "2"))
   expect_equal(config$kodama$geojsons[[1L]]$feature_count, 1L)
   expect_equal(config$kodama$geojsons[[1L]]$shift_dx, 100)
   expect_equal(config$kodama$geojsons[[1L]]$shift_dy, 200)
@@ -269,6 +270,12 @@ test_that("CellPhenotyper KODAMA MedSAM GeoJSON is exposed in the viewer", {
   expect_false(grepl("Source PNG", text, fixed = TRUE))
   expect_false(grepl("kodamaPlotSource", text, fixed = TRUE))
   expect_match(text, "kodamaPointClass", fixed = TRUE)
+  expect_match(text, "kodamaCellItemLabels", fixed = TRUE)
+  expect_match(text, "kodamaSelectedLabels", fixed = TRUE)
+  expect_match(text, "kodama_selected_cells", fixed = TRUE)
+  expect_match(text, "kodama_cells_selected", fixed = TRUE)
+  expect_match(text, "Drag over KODAMA points", fixed = TRUE)
+  expect_match(text, "Clear selection", fixed = TRUE)
   expect_match(text, "bindKodamaPlotResize", fixed = TRUE)
   expect_match(text, "ResizeObserver", fixed = TRUE)
   expect_match(text, "drawKodamaAnnotationPlot", fixed = TRUE)
@@ -286,6 +293,7 @@ test_that("CellPhenotyper layer and menu are included in viewer HTML", {
     class = c("cell", "cell")
   )
   layer <- wsi_cellphenotyper_cell_layer(cells, radius = 7)
+  expect_equal(layer$items[[1L]]$source_label, "cell_1")
   html <- tempfile(fileext = ".html")
   wsi_viewer(
     slide,

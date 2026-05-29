@@ -59,6 +59,7 @@ wsi_new_viewer_state <- function(name = "wsi_viewer_live_state", envir = parent.
   state$channel_sources <- list()
   state$channel_settings <- wsi_empty_channel_settings()
   state$tile_sources <- list()
+  state$kodama_selection <- list(labels = character(), count = 0L, matched_count = 0L)
   state$annotations <- list(dirty = FALSE, dirty_reason = "")
   state$history <- wsi_empty_annotation_history()
   state$jobs <- list()
@@ -153,6 +154,7 @@ wsi_viewer_allowed_events <- function() {
     "artifact_detected", "artifact_flagged", "artifact_overlay_toggled",
     "artifact_sensitivity_updated", "artifacts_cleared",
     "grandqc_loaded", "grandqc_cleared",
+    "kodama_cells_selected",
     "ihc_intensity_measured",
     "segmentation_requested", "segmentation_started", "segmentation_progress",
     "segmentation_added", "segmentation_completed",
@@ -173,7 +175,7 @@ wsi_viewer_allowed_payload_fields <- function() {
     "selected_roi", "selected_rois", "rois", "segmentation", "layers",
     "measurements", "trajectories", "artifacts", "view", "annotations",
     "history", "stain", "channel_sources", "channel_settings",
-    "tile_sources", "detail"
+    "tile_sources", "kodama_selection", "detail"
   )
 }
 
@@ -1205,6 +1207,7 @@ wsi_assign_viewer_state <- function(state) {
   assign(paste0(name, "_selected_roi"), state$selected_roi, envir = envir)
   assign(paste0(name, "_selected_rois"), state$selected_rois, envir = envir)
   assign(paste0(name, "_last_segmentation"), state$last_segmentation, envir = envir)
+  assign(paste0(name, "_kodama_selection"), state$kodama_selection %||% list(labels = character(), count = 0L, matched_count = 0L), envir = envir)
   assign(paste0(name, "_last_event"), state$last_payload, envir = envir)
   invisible(state)
 }
@@ -1246,6 +1249,8 @@ wsi_viewer_state_apply <- function(state, payload) {
   if (!is.null(payload[["tile_sources", exact = TRUE]])) {
     state$tile_sources <- payload[["tile_sources", exact = TRUE]]
   }
+  state$kodama_selection <- payload[["kodama_selection", exact = TRUE]] %||%
+    state$kodama_selection %||% list(labels = character(), count = 0L, matched_count = 0L)
   state$annotations <- payload[["annotations", exact = TRUE]] %||% list(dirty = FALSE, dirty_reason = "")
   state$history <- wsi_annotation_history_from_payload(payload[["history", exact = TRUE]])
   wsi_viewer_update_measurement_tables(state)
@@ -1643,6 +1648,7 @@ wsi_viewer_layer_points_items <- function(points, colour = NULL, radius = 6) {
   radius <- wsi_check_scalar_number(radius, "radius", allow_zero = FALSE)
   colour <- wsi_viewer_layer_colour(colour, fallback = "#38bdf8")
   ids <- if ("id" %in% names(points)) as.character(points$id) else sprintf("point_%05d", seq_len(nrow(points)))
+  source_labels <- if ("label" %in% names(points)) as.character(points$label) else ids
   classes <- if ("class" %in% names(points)) as.character(points$class) else rep("point", nrow(points))
   lapply(seq_len(nrow(points)), function(i) {
     x <- as.numeric(points$x[[i]])
@@ -1652,6 +1658,7 @@ wsi_viewer_layer_points_items <- function(points, colour = NULL, radius = 6) {
       name = ids[[i]],
       label = ids[[i]],
       class = classes[[i]],
+      source_label = source_labels[[i]],
       type = "point",
       x = x,
       y = y,
@@ -2355,6 +2362,9 @@ wsi_attach_viewer_session_methods <- function(session) {
   }
   session$get_channel_settings <- function(service = TRUE) {
     session$get_state(service = service)$channel_settings
+  }
+  session$get_kodama_selection <- function(service = TRUE) {
+    session$get_state(service = service)$kodama_selection
   }
   session$list_layers <- function(service = TRUE) {
     wsi_viewer_layer_summary(session$get_layers(service = service))
@@ -3602,7 +3612,8 @@ wsi_viewer_stardist <- function(slide, ..., stardist = TRUE) {
 #' @return A list containing ROIs, distance measurements, ROI/cell/class summary
 #'   tables, trajectories, segmentation overlays, selected ROI(s), R-controlled
 #'   viewer layers, previewed tile coordinates, last segmentation run metadata,
-#'   annotation history, view/stain settings, autosave status, and event history.
+#'   KODAMA selected-cell labels, annotation history, view/stain settings,
+#'   autosave status, and event history.
 #' @export
 wsi_viewer_state <- function(x) {
   state <- if (inherits(x, "wsi_viewer_session")) {
@@ -3629,6 +3640,7 @@ wsi_viewer_state <- function(x) {
     channel_sources = state$channel_sources %||% list(),
     channel_settings = state$channel_settings %||% wsi_empty_channel_settings(),
     tile_sources = state$tile_sources %||% list(),
+    kodama_selection = state$kodama_selection %||% list(labels = character(), count = 0L, matched_count = 0L),
     tile_preview = state$tile_preview %||% wsi_empty_tile_preview(),
     selected_roi = state$selected_roi,
     selected_rois = state$selected_rois,
@@ -3731,7 +3743,7 @@ print.wsi_viewer_session <- function(x, ...) {
   if (!is.null(x$stardist_server)) {
     cat(sprintf("  stardist: %s\n", x$stardist_server$url))
   }
-  cat("  methods: capabilities(), on(), get_rois(), get_selected_roi(), get_selected_rois(), get_measurements(), get_trajectories(), get_roi_summary(), get_cell_summary(), get_ihc_summary(), get_segmentation(), get_layers(), get_channel_settings(), get_history(), get_tile_preview(), add_rois(), add_layer(), add_channel_source(), measure_ihc_intensity(), preview_tiles(), extract_tile_preview(), list_jobs(), run_segmentation_async(), run_tiles_async(), save_project(), autosave_start()\n")
+  cat("  methods: capabilities(), on(), get_rois(), get_selected_roi(), get_selected_rois(), get_measurements(), get_trajectories(), get_roi_summary(), get_cell_summary(), get_ihc_summary(), get_segmentation(), get_layers(), get_channel_settings(), get_kodama_selection(), get_history(), get_tile_preview(), add_rois(), add_layer(), add_channel_source(), measure_ihc_intensity(), preview_tiles(), extract_tile_preview(), list_jobs(), run_segmentation_async(), run_tiles_async(), save_project(), autosave_start()\n")
   cat("  stop with: wsi_viewer_stop(x)\n")
   invisible(x)
 }

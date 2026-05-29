@@ -1033,7 +1033,9 @@ wsi_viewer_cellphenotyper_config <- function(cellphenotyper = NULL) {
 #' **KODAMA** menu can import it as editable viewer annotations and can open
 #' membership plots in a floating window. The default KODAMA plot view redraws
 #' the KODAMA embedding points using the same cluster colours as the imported
-#' GeoJSON annotations, with a spatial GeoJSON redraw fallback. When GrandQC
+#' GeoJSON annotations, with a spatial GeoJSON redraw fallback. Users can drag
+#' over KODAMA points to highlight the matching StarDist cells on the slide; in
+#' live sessions this selected-cell set is synced back to R. When GrandQC
 #' GeoJSON is available, the top **Artifacts** menu imports those QC regions
 #' instead of running browser-side artifact detection.
 #'
