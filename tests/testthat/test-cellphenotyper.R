@@ -141,6 +141,8 @@ test_that("CellPhenotyper KODAMA MedSAM GeoJSON is exposed in the viewer", {
   dir.create(file.path(root, "01_input", "sample"), recursive = TRUE)
   dir.create(file.path(root, "02_stardist", "sample", "stardist_out"), recursive = TRUE)
   dir.create(file.path(root, "01a_grandqc", "sample", "grandqc_sample"), recursive = TRUE)
+  dir.create(file.path(root, "11_kodama", "sample", "kodama_output"), recursive = TRUE)
+  dir.create(file.path(root, "13_clustering", "sample"), recursive = TRUE)
   dir.create(file.path(root, "18_cluster_geojson", "sample"), recursive = TRUE)
 
   input <- file.path(root, "01_input", "sample", "sample.ome.tif")
@@ -161,22 +163,46 @@ test_that("CellPhenotyper KODAMA MedSAM GeoJSON is exposed in the viewer", {
   fine <- file.path(root, "18_cluster_geojson", "sample", "sample_fine_grown_mask_smooth_class.geojson")
   standard <- file.path(root, "18_cluster_geojson", "sample", "sample_standard_grown_mask_smooth_class.geojson")
   grandqc <- file.path(root, "01a_grandqc", "sample", "grandqc_sample", "sample_grandqc.geojson")
+  embedding <- file.path(root, "11_kodama", "sample", "kodama_output", "kodama_full_20.RData")
+  cluster_csv <- file.path(root, "13_clustering", "sample", "sample_fine_cluster.csv")
+  plot <- file.path(root, "13_clustering", "sample", "sample_fine_cluster_kodama_membership.png")
   write_cellphenotyper_test_geojson(fine, class = "tumour")
   write_cellphenotyper_test_geojson(standard, class = "stroma")
   write_cellphenotyper_test_geojson(grandqc, class = "Fold")
+  vis <- matrix(c(0, 0, 1, 1), ncol = 2, byrow = TRUE)
+  rownames(vis) <- c("1", "2")
+  save(vis, file = embedding)
+  utils::write.csv(
+    data.frame(label = c(1, 2), cluster = c(1, 2)),
+    cluster_csv,
+    row.names = FALSE
+  )
+  write_cellphenotyper_test_png(plot)
 
   manifest <- data.frame(
-    output_id = c("input_1", "cluster_geojson_fine", "cluster_geojson_standard"),
-    stage_id = c("input", "medsam_refinement", "medsam_refinement"),
-    stage_title = c("Input Conversion", "KODAMA MedSAM refinement", "KODAMA MedSAM refinement"),
-    stage_folder = c("01_input", "18_cluster_geojson", "18_cluster_geojson"),
+    output_id = c(
+      "input_1", "kodama_embedding", "cluster_geojson_fine",
+      "cluster_geojson_standard", "cluster_csv_fine", "clustering_plot_fine"
+    ),
+    stage_id = c("input", "kodama", "medsam_refinement", "medsam_refinement", "clustering", "clustering"),
+    stage_title = c(
+      "Input Conversion", "KODAMA", "KODAMA MedSAM refinement",
+      "KODAMA MedSAM refinement", "Clustering", "Clustering"
+    ),
+    stage_folder = c("01_input", "11_kodama", "18_cluster_geojson", "18_cluster_geojson", "13_clustering", "13_clustering"),
     relative_path = c(
       "sample/sample.ome.tif",
+      "sample/kodama_output/kodama_full_20.RData",
       "sample/sample_fine_grown_mask_smooth_class.geojson",
-      "sample/sample_standard_grown_mask_smooth_class.geojson"
+      "sample/sample_standard_grown_mask_smooth_class.geojson",
+      "sample/sample_fine_cluster.csv",
+      "sample/sample_fine_cluster_kodama_membership.png"
     ),
-    absolute_path = c("", "", ""),
-    size_bytes = c(1, file.info(fine)$size, file.info(standard)$size),
+    absolute_path = c("", "", "", "", "", ""),
+    size_bytes = c(
+      1, file.info(embedding)$size, file.info(fine)$size,
+      file.info(standard)$size, file.info(cluster_csv)$size, file.info(plot)$size
+    ),
     check.names = FALSE
   )
   utils::write.table(
@@ -189,11 +215,20 @@ test_that("CellPhenotyper KODAMA MedSAM GeoJSON is exposed in the viewer", {
 
   project <- wsi_read_cellphenotyper_project(root, load_cells = FALSE)
   expect_equal(nrow(project$files$kodama_geojson), 2L)
+  expect_equal(project$files$kodama_embedding, normalizePath(embedding, mustWork = TRUE))
+  expect_equal(nrow(project$files$kodama_plots), 1L)
+  expect_equal(project$files$kodama_plots$cluster_csv, normalizePath(cluster_csv, mustWork = TRUE))
   expect_equal(nrow(project$files$grandqc_geojson), 1L)
 
   config <- wsiTools:::wsi_cellphenotyper_viewer_config(project)
   expect_true(config$kodama$enabled)
   expect_length(config$kodama$geojsons, 2L)
+  expect_length(config$kodama$plots, 1L)
+  expect_equal(config$kodama$plots[[1L]]$profile, "fine")
+  expect_equal(config$kodama$plots[[1L]]$plot_type, "cluster")
+  expect_match(config$kodama$plots[[1L]]$data_uri, "^data:image/png;base64,")
+  expect_equal(config$kodama$plots[[1L]]$point_count, 2L)
+  expect_equal(config$kodama$plots[[1L]]$points$class, c("color_1", "color_2"))
   expect_equal(config$kodama$geojsons[[1L]]$feature_count, 1L)
   expect_equal(config$kodama$geojsons[[1L]]$shift_dx, 100)
   expect_equal(config$kodama$geojsons[[1L]]$shift_dy, 200)
@@ -225,6 +260,12 @@ test_that("CellPhenotyper KODAMA MedSAM GeoJSON is exposed in the viewer", {
   expect_match(text, "bindKodamaControls", fixed = TRUE)
   expect_match(text, "KODAMA Fine MedSAM", fixed = TRUE)
   expect_match(text, "sample_fine_grown_mask_smooth_class.geojson", fixed = TRUE)
+  expect_match(text, "KODAMA Fine Cluster plot", fixed = TRUE)
+  expect_match(text, "sample_fine_cluster_kodama_membership.png", fixed = TRUE)
+  expect_match(text, "kodamaPlotWindow", fixed = TRUE)
+  expect_match(text, "Annotation colours", fixed = TRUE)
+  expect_match(text, "kodamaPointClass", fixed = TRUE)
+  expect_match(text, "drawKodamaAnnotationPlot", fixed = TRUE)
   expect_match(text, "Load GrandQC", fixed = TRUE)
   expect_match(text, "sample_grandqc.geojson", fixed = TRUE)
   expect_match(text, "bindArtifactControls", fixed = TRUE)

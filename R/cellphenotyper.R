@@ -312,6 +312,19 @@ wsi_cellphenotyper_empty_kodama_geojson <- function() {
   )
 }
 
+wsi_cellphenotyper_empty_kodama_plots <- function() {
+  data.frame(
+    label = character(),
+    path = character(),
+    profile = character(),
+    plot_type = character(),
+    cluster_csv = character(),
+    output_id = character(),
+    stage_id = character(),
+    stringsAsFactors = FALSE
+  )
+}
+
 wsi_cellphenotyper_empty_grandqc_geojson <- function() {
   data.frame(
     label = character(),
@@ -332,6 +345,177 @@ wsi_cellphenotyper_kodama_label <- function(path, output_id = "", stage_id = "")
     "Refined"
   }
   sprintf("KODAMA %s MedSAM", profile)
+}
+
+wsi_cellphenotyper_kodama_profile <- function(path) {
+  text <- basename(path %||% "")
+  if (grepl("fine", text, ignore.case = TRUE)) {
+    "fine"
+  } else if (grepl("standard", text, ignore.case = TRUE)) {
+    "standard"
+  } else {
+    "refined"
+  }
+}
+
+wsi_cellphenotyper_kodama_plot_type <- function(path) {
+  text <- basename(path %||% "")
+  if (grepl("cluster", text, ignore.case = TRUE)) {
+    "cluster"
+  } else if (grepl("medsam", text, ignore.case = TRUE)) {
+    "medsam"
+  } else {
+    "membership"
+  }
+}
+
+wsi_cellphenotyper_kodama_plot_label <- function(path) {
+  profile <- tools::toTitleCase(wsi_cellphenotyper_kodama_profile(path))
+  type <- switch(
+    wsi_cellphenotyper_kodama_plot_type(path),
+    medsam = "MedSAM",
+    cluster = "Cluster",
+    "Membership"
+  )
+  sprintf("KODAMA %s %s plot", profile, type)
+}
+
+wsi_cellphenotyper_find_kodama_embedding <- function(manifest, root) {
+  candidates <- character()
+  if (nrow(manifest)) {
+    manifest_text <- paste(
+      manifest$output_id %||% "",
+      manifest$stage_id %||% "",
+      manifest$stage_folder %||% "",
+      manifest$resolved_path %||% ""
+    )
+    hit <- manifest$file_exists &
+      grepl("\\.(rda|rdata)$", manifest$resolved_path, ignore.case = TRUE) &
+      grepl("kodama", manifest_text, ignore.case = TRUE)
+    candidates <- manifest$resolved_path[hit]
+  }
+  fallback <- if (dir.exists(root)) {
+    list.files(
+      root,
+      pattern = "kodama.*\\.(rda|rdata)$",
+      recursive = TRUE,
+      full.names = TRUE,
+      ignore.case = TRUE
+    )
+  } else {
+    character()
+  }
+  paths <- unique(c(candidates, fallback))
+  paths <- paths[file.exists(paths)]
+  if (!length(paths)) {
+    return(NA_character_)
+  }
+  normalizePath(paths[[1L]], mustWork = TRUE)
+}
+
+wsi_cellphenotyper_find_kodama_cluster_csv <- function(manifest, root, profile) {
+  profile <- tolower(profile %||% "")
+  candidates <- character()
+  if (nrow(manifest)) {
+    manifest_text <- paste(
+      manifest$output_id %||% "",
+      manifest$stage_id %||% "",
+      manifest$stage_folder %||% "",
+      manifest$resolved_path %||% ""
+    )
+    hit <- manifest$file_exists &
+      grepl("\\.csv$", manifest$resolved_path, ignore.case = TRUE) &
+      grepl("cluster", manifest_text, ignore.case = TRUE) &
+      !grepl("summary", manifest_text, ignore.case = TRUE)
+    if (nzchar(profile)) {
+      hit <- hit & grepl(profile, manifest_text, ignore.case = TRUE)
+    }
+    candidates <- manifest$resolved_path[hit]
+  }
+  fallback <- if (dir.exists(root) && nzchar(profile)) {
+    list.files(
+      root,
+      pattern = paste0(profile, ".*cluster.*\\.csv$"),
+      recursive = TRUE,
+      full.names = TRUE,
+      ignore.case = TRUE
+    )
+  } else {
+    character()
+  }
+  paths <- unique(c(candidates, fallback))
+  paths <- paths[!grepl("summary", basename(paths), ignore.case = TRUE)]
+  paths <- paths[file.exists(paths)]
+  if (!length(paths)) {
+    return(NA_character_)
+  }
+  normalizePath(paths[[1L]], mustWork = TRUE)
+}
+
+wsi_cellphenotyper_read_kodama_plot_points <- function(embedding, cluster_csv, max_points = 75000L) {
+  if (is.na(embedding) || !nzchar(embedding) || !file.exists(embedding)) {
+    return(NULL)
+  }
+  if (is.na(cluster_csv) || !nzchar(cluster_csv) || !file.exists(cluster_csv)) {
+    return(NULL)
+  }
+  env <- new.env(parent = emptyenv())
+  ok <- tryCatch({
+    load(embedding, envir = env)
+    TRUE
+  }, error = function(e) FALSE)
+  if (!isTRUE(ok) || !exists("vis", envir = env, inherits = FALSE)) {
+    return(NULL)
+  }
+  vis <- get("vis", envir = env, inherits = FALSE)
+  if (!is.matrix(vis) && !is.data.frame(vis)) {
+    return(NULL)
+  }
+  vis <- as.matrix(vis)
+  if (ncol(vis) < 2L || !nrow(vis)) {
+    return(NULL)
+  }
+  kodama_x <- suppressWarnings(as.numeric(vis[, 1L]))
+  kodama_y <- suppressWarnings(as.numeric(vis[, 2L]))
+  labels <- rownames(vis)
+  if (is.null(labels) && exists("ann", envir = env, inherits = FALSE)) {
+    ann <- get("ann", envir = env, inherits = FALSE)
+    if (is.data.frame(ann) && "label" %in% names(ann) && nrow(ann) == nrow(vis)) {
+      labels <- as.character(ann$label)
+    }
+  }
+  if (is.null(labels)) {
+    labels <- as.character(seq_len(nrow(vis)))
+  }
+  clusters <- tryCatch(
+    utils::read.csv(cluster_csv, stringsAsFactors = FALSE, check.names = FALSE),
+    error = function(e) NULL
+  )
+  if (!is.data.frame(clusters) || !all(c("label", "cluster") %in% names(clusters))) {
+    return(NULL)
+  }
+  cluster_idx <- match(as.character(labels), as.character(clusters$label))
+  cluster <- clusters$cluster[cluster_idx]
+  keep <- is.finite(kodama_x) & is.finite(kodama_y) & !is.na(cluster)
+  if (!any(keep)) {
+    return(NULL)
+  }
+  points <- data.frame(
+    label = as.character(labels[keep]),
+    x = kodama_x[keep],
+    y = kodama_y[keep],
+    cluster = as.character(cluster[keep]),
+    class = paste0("color_", as.character(cluster[keep])),
+    stringsAsFactors = FALSE
+  )
+  total <- nrow(points)
+  if (total > max_points) {
+    idx <- unique(round(seq(1, total, length.out = max_points)))
+    points <- points[idx, , drop = FALSE]
+  }
+  row.names(points) <- NULL
+  attr(points, "total_points") <- total
+  points
 }
 
 wsi_cellphenotyper_find_kodama_geojson <- function(manifest) {
@@ -371,6 +555,67 @@ wsi_cellphenotyper_find_kodama_geojson <- function(manifest) {
     stage_id = rows$stage_id,
     stringsAsFactors = FALSE
   )
+}
+
+wsi_cellphenotyper_find_kodama_plots <- function(manifest, root) {
+  manifest_candidates <- character()
+  if (nrow(manifest)) {
+    manifest_text <- paste(
+      manifest$output_id %||% "",
+      manifest$stage_id %||% "",
+      manifest$stage_folder %||% "",
+      manifest$resolved_path %||% ""
+    )
+    plot_hit <- manifest$file_exists &
+      grepl("\\.(png|jpg|jpeg|webp)$", manifest$resolved_path, ignore.case = TRUE) &
+      grepl("kodama.*membership|membership.*kodama", manifest_text, ignore.case = TRUE)
+    manifest_candidates <- manifest$resolved_path[plot_hit]
+  }
+  fallback <- if (dir.exists(root)) {
+    list.files(
+      root,
+      pattern = "kodama.*membership.*\\.(png|jpg|jpeg|webp)$|membership.*kodama.*\\.(png|jpg|jpeg|webp)$",
+      recursive = TRUE,
+      full.names = TRUE,
+      ignore.case = TRUE
+    )
+  } else {
+    character()
+  }
+  paths <- unique(c(manifest_candidates, fallback))
+  paths <- paths[file.exists(paths)]
+  if (!length(paths)) {
+    return(wsi_cellphenotyper_empty_kodama_plots())
+  }
+  rows <- data.frame(
+    label = vapply(paths, wsi_cellphenotyper_kodama_plot_label, character(1)),
+    path = normalizePath(paths, mustWork = TRUE),
+    profile = vapply(paths, wsi_cellphenotyper_kodama_profile, character(1)),
+    plot_type = vapply(paths, wsi_cellphenotyper_kodama_plot_type, character(1)),
+    cluster_csv = NA_character_,
+    output_id = NA_character_,
+    stage_id = NA_character_,
+    stringsAsFactors = FALSE
+  )
+  rows$cluster_csv <- vapply(
+    rows$profile,
+    function(profile) wsi_cellphenotyper_find_kodama_cluster_csv(manifest, root, profile),
+    character(1)
+  )
+  if (nrow(manifest)) {
+    idx <- match(rows$path, normalizePath(manifest$resolved_path, mustWork = FALSE))
+    hit <- !is.na(idx)
+    rows$output_id[hit] <- manifest$output_id[idx[hit]]
+    rows$stage_id[hit] <- manifest$stage_id[idx[hit]]
+  }
+  order <- order(
+    match(rows$profile, c("fine", "standard", "refined"), nomatch = 99L),
+    match(rows$plot_type, c("cluster", "medsam", "membership"), nomatch = 99L),
+    rows$label
+  )
+  rows <- rows[order, , drop = FALSE]
+  row.names(rows) <- NULL
+  rows
 }
 
 wsi_cellphenotyper_find_grandqc_geojson <- function(manifest, root) {
@@ -619,35 +864,65 @@ wsi_cellphenotyper_cell_layer <- function(cells, radius = 6, colour = "#38BDF8",
 
 wsi_cellphenotyper_kodama_config <- function(project) {
   files <- project$files$kodama_geojson %||% wsi_cellphenotyper_empty_kodama_geojson()
-  if (!is.data.frame(files) || !nrow(files)) {
-    return(list(enabled = FALSE, geojsons = list()))
-  }
+  plot_files <- project$files$kodama_plots %||% wsi_cellphenotyper_empty_kodama_plots()
+  embedding <- project$files$kodama_embedding %||% NA_character_
   shift <- wsi_cellphenotyper_kodama_shift(project)
-  geojsons <- lapply(seq_len(nrow(files)), function(i) {
-    geojson <- wsi_cellphenotyper_read_geojson(files$path[[i]])
-    if (is.null(geojson)) {
-      return(NULL)
-    }
-    geojson <- wsi_cellphenotyper_shift_geojson(geojson, dx = shift[["dx"]], dy = shift[["dy"]])
-    id <- wsi_safe_id(paste("kodama", files$profile[[i]], tools::file_path_sans_ext(basename(files$path[[i]])), sep = "_"), "kodama")
-    list(
-      id = id,
-      label = files$label[[i]],
-      profile = files$profile[[i]],
-      path = files$path[[i]],
-      output_id = files$output_id[[i]],
-      stage_id = files$stage_id[[i]],
-      shift_dx = unname(shift[["dx"]]),
-      shift_dy = unname(shift[["dy"]]),
-      coordinate_space = "slide",
-      feature_count = wsi_cellphenotyper_geojson_feature_count(geojson),
-      geojson = geojson
-    )
-  })
+  geojsons <- list()
+  if (is.data.frame(files) && nrow(files)) {
+    geojsons <- lapply(seq_len(nrow(files)), function(i) {
+      geojson <- wsi_cellphenotyper_read_geojson(files$path[[i]])
+      if (is.null(geojson)) {
+        return(NULL)
+      }
+      geojson <- wsi_cellphenotyper_shift_geojson(geojson, dx = shift[["dx"]], dy = shift[["dy"]])
+      id <- wsi_safe_id(paste("kodama", files$profile[[i]], tools::file_path_sans_ext(basename(files$path[[i]])), sep = "_"), "kodama")
+      list(
+        id = id,
+        label = files$label[[i]],
+        profile = files$profile[[i]],
+        path = files$path[[i]],
+        output_id = files$output_id[[i]],
+        stage_id = files$stage_id[[i]],
+        shift_dx = unname(shift[["dx"]]),
+        shift_dy = unname(shift[["dy"]]),
+        coordinate_space = "slide",
+        feature_count = wsi_cellphenotyper_geojson_feature_count(geojson),
+        geojson = geojson
+      )
+    })
+  }
   geojsons <- Filter(Negate(is.null), geojsons)
+  plots <- list()
+  if (is.data.frame(plot_files) && nrow(plot_files)) {
+    plots <- lapply(seq_len(nrow(plot_files)), function(i) {
+      path <- plot_files$path[[i]]
+      if (is.na(path) || !nzchar(path) || !file.exists(path)) {
+        return(NULL)
+      }
+      ext <- tolower(tools::file_ext(path))
+      mime <- switch(ext, jpg = "image/jpeg", jpeg = "image/jpeg", webp = "image/webp", "image/png")
+      points <- wsi_cellphenotyper_read_kodama_plot_points(embedding, plot_files$cluster_csv[[i]])
+      list(
+        id = wsi_safe_id(paste("kodama_plot", plot_files$profile[[i]], plot_files$plot_type[[i]], sep = "_"), "kodama_plot"),
+        label = plot_files$label[[i]],
+        path = path,
+        profile = plot_files$profile[[i]],
+        plot_type = plot_files$plot_type[[i]],
+        cluster_csv = plot_files$cluster_csv[[i]],
+        embedding = embedding,
+        output_id = plot_files$output_id[[i]],
+        stage_id = plot_files$stage_id[[i]],
+        data_uri = wsi_image_data_uri(path, mime = mime),
+        points = points,
+        point_count = if (is.null(points)) 0L else as.integer(attr(points, "total_points") %||% nrow(points))
+      )
+    })
+    plots <- Filter(Negate(is.null), plots)
+  }
   list(
     enabled = length(geojsons) > 0L,
-    geojsons = geojsons
+    geojsons = geojsons,
+    plots = plots
   )
 }
 
@@ -748,7 +1023,8 @@ wsi_viewer_cellphenotyper_config <- function(cellphenotyper = NULL) {
 #' resolves local output paths, identifies the input image, and loads the
 #' StarDist centroid table when available. The large label image is not loaded
 #' into memory. GigaTIME OME-TIFF probability output, preview files, and
-#' MedSAM-refined KODAMA GeoJSON annotations are resolved from the same
+#' MedSAM-refined KODAMA GeoJSON annotations, KODAMA membership plot PNGs,
+#' KODAMA RData embeddings, and cluster CSV files are resolved from the same
 #' manifest when present.
 #'
 #' `wsi_viewer_cellphenotyper()` opens the input image in the interactive
@@ -757,9 +1033,13 @@ wsi_viewer_cellphenotyper_config <- function(cellphenotyper = NULL) {
 #' `gigatime_probs.ome.tif` is available, it is shown as live tiled mIHC
 #' channel overlays on top of the H&E image and controlled from the top
 #' **Stains** menu. When refined KODAMA GeoJSON is available, the top
-#' **KODAMA** menu can import it as editable viewer annotations. When GrandQC
-#' GeoJSON is available, the top **Artifacts** menu imports those QC regions
-#' instead of running browser-side artifact detection.
+#' **KODAMA** menu can import it as editable viewer annotations and can open
+#' membership plots in a floating window. The default KODAMA plot view redraws
+#' the KODAMA embedding points using the same cluster colours as the imported
+#' GeoJSON annotations, with a spatial GeoJSON redraw fallback and an option to
+#' show the original source PNG. When GrandQC GeoJSON is available, the top
+#' **Artifacts** menu imports those QC regions instead of running browser-side
+#' artifact detection.
 #'
 #' @param path CellPhenotyper output directory or path to
 #'   `00_execution/project_outputs.tsv`.
@@ -825,7 +1105,9 @@ wsi_read_cellphenotyper_project <- function(path, load_cells = TRUE) {
       gigatime_probs = wsi_cellphenotyper_find_gigatime_probs(manifest),
       gigatime_channels = wsi_cellphenotyper_find_gigatime_channels(manifest),
       gigatime_metadata = wsi_cellphenotyper_find_gigatime_metadata(manifest),
+      kodama_embedding = wsi_cellphenotyper_find_kodama_embedding(manifest, root),
       kodama_geojson = wsi_cellphenotyper_find_kodama_geojson(manifest),
+      kodama_plots = wsi_cellphenotyper_find_kodama_plots(manifest, root),
       grandqc_geojson = wsi_cellphenotyper_find_grandqc_geojson(manifest, root)
     )
   )
@@ -978,6 +1260,13 @@ print.wsi_cellphenotyper_project <- function(x, ...) {
   kodama <- x$files$kodama_geojson %||% wsi_cellphenotyper_empty_kodama_geojson()
   if (is.data.frame(kodama) && nrow(kodama)) {
     cat("  KODAMA GeoJSON: ", nrow(kodama), " file", if (nrow(kodama) == 1L) "" else "s", "\n", sep = "")
+  }
+  if (!is.na(x$files$kodama_embedding %||% NA_character_)) {
+    cat("  KODAMA embedding: ", x$files$kodama_embedding, "\n", sep = "")
+  }
+  kodama_plots <- x$files$kodama_plots %||% wsi_cellphenotyper_empty_kodama_plots()
+  if (is.data.frame(kodama_plots) && nrow(kodama_plots)) {
+    cat("  KODAMA plots: ", nrow(kodama_plots), " file", if (nrow(kodama_plots) == 1L) "" else "s", "\n", sep = "")
   }
   grandqc <- x$files$grandqc_geojson %||% wsi_cellphenotyper_empty_grandqc_geojson()
   if (is.data.frame(grandqc) && nrow(grandqc)) {

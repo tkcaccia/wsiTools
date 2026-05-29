@@ -112,8 +112,9 @@ the HTML viewer path invisibly.
 by using \code{00_execution/project_outputs.tsv} as the project manifest. It
 resolves local output paths, identifies the input image, and loads the StarDist
 centroid table when available. The large label image is not loaded into memory.
-GigaTIME OME-TIFF probability output, preview files, and MedSAM-refined
-KODAMA GeoJSON annotations are resolved from the same manifest when present.
+GigaTIME OME-TIFF probability output, preview files, MedSAM-refined KODAMA
+GeoJSON annotations, KODAMA membership plot PNGs, KODAMA RData embeddings, and
+cluster CSV files are resolved from the same manifest when present.
 }
 \details{
 \code{wsi_viewer_cellphenotyper()} opens the input image in the interactive
@@ -122,7 +123,13 @@ CellPhenotyper/StarDist cell segmentation overlay. When
 \code{gigatime_probs.ome.tif} is available, it is shown as live tiled mIHC
 channel overlays on top of the H&E image and controlled from the top
 \strong{Stains} menu. When refined KODAMA GeoJSON is available, the top
-\strong{KODAMA} menu can import it as editable viewer annotations.
+\strong{KODAMA} menu can import it as editable viewer annotations and can open
+membership plots in a floating window. The default KODAMA plot view redraws
+the KODAMA embedding points using the same cluster colours as the imported
+GeoJSON annotations, with a spatial GeoJSON redraw fallback and an option to
+show the original source PNG. When GrandQC GeoJSON is available, the top
+\strong{Artifacts} menu imports those QC regions instead of running
+browser-side artifact detection.
 }
 \examples{
 \dontrun{

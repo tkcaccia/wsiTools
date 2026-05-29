@@ -553,6 +553,17 @@ wsi_viewer_styles <- function(background = "#101010") {
     ".shortcutList dt{margin:0;text-align:right;}\n",
     ".shortcutList dd{margin:0;color:#e5e7eb;}\n",
     ".shortcutHelpActions{display:flex;justify-content:flex-end;margin-top:10px;}\n",
+    "#kodamaPlotWindow{position:fixed;right:18px;top:76px;z-index:43;width:min(760px,calc(100vw - 36px));max-height:calc(100vh - 108px);display:none;pointer-events:auto;padding:10px;box-shadow:0 24px 60px rgba(0,0,0,.48);overflow:hidden;}\n",
+    "#kodamaPlotWindow.open{display:flex;flex-direction:column;}\n",
+    ".kodamaPlotHead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px;}\n",
+    "#kodamaPlotTitle{font-weight:650;line-height:1.2;}\n",
+    "#kodamaPlotSubtitle{font-size:11px;color:#b8b8b8;margin-top:2px;word-break:break-word;}\n",
+    ".kodamaPlotTools{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;}\n",
+    "#kodamaPlotViewport{position:relative;min-height:260px;max-height:calc(100vh - 250px);background:#f8fafc;border-radius:6px;overflow:auto;display:flex;align-items:center;justify-content:center;}\n",
+    "#kodamaPlotCanvas,#kodamaPlotImage{max-width:100%;height:auto;display:block;}\n",
+    "#kodamaPlotImage{display:none;}\n",
+    "#kodamaPlotLegend{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;max-height:84px;overflow:auto;}\n",
+    ".kodamaLegendItem{display:inline-flex;align-items:center;gap:5px;border:1px solid rgba(255,255,255,.14);border-radius:999px;background:rgba(255,255,255,.06);padding:3px 7px;font-size:11px;color:#e5e7eb;}\n",
     "#workspacePanel{position:fixed;left:12px;top:72px;width:420px;max-height:calc(100vh - 132px);display:flex;flex-direction:column;gap:8px;z-index:29;pointer-events:auto;}\n",
     "#workspaceResizeHandle{position:absolute;right:-6px;top:0;bottom:0;width:12px;cursor:ew-resize;z-index:3;touch-action:none;}\n",
     "#workspaceResizeHandle::after{content:'';position:absolute;right:4px;top:12px;bottom:12px;width:2px;border-radius:999px;background:rgba(255,255,255,.18);opacity:.45;transition:opacity .12s ease,background .12s ease;}\n",
@@ -796,7 +807,10 @@ wsi_viewer_kodama_controls <- function(config) {
   kodama <- config$cellphenotyper$kodama %||% list(enabled = FALSE, geojsons = list())
   geojsons <- kodama$geojsons %||% list()
   geojsons <- if (is.list(geojsons)) geojsons else list()
+  plots <- kodama$plots %||% list()
+  plots <- if (is.list(plots)) plots else list()
   has_geojson <- isTRUE(kodama$enabled) && length(geojsons) > 0L
+  has_plots <- length(plots) > 0L
   load_buttons <- if (has_geojson) {
     paste(vapply(seq_along(geojsons), function(i) {
       item <- geojsons[[i]]
@@ -820,9 +834,26 @@ wsi_viewer_kodama_controls <- function(config) {
   } else {
     "<div class=\"menuHint\">No MedSAM-refined KODAMA GeoJSON was found in this CellPhenotyper project manifest.</div>"
   }
+  plot_buttons <- if (has_plots) {
+    paste(vapply(seq_along(plots), function(i) {
+      item <- plots[[i]]
+      label <- item$label %||% sprintf("KODAMA plot %d", i)
+      paste0(
+        "<button class=\"kodamaPlot\" type=\"button\" data-kodama-plot-index=\"",
+        i - 1L,
+        "\" title=\"Open ",
+        wsi_html_escape(item$path %||% ""),
+        "\">",
+        wsi_html_escape(label),
+        "</button>"
+      )
+    }, character(1)), collapse = "")
+  } else {
+    "<div class=\"menuHint\">No KODAMA membership plot PNG was found for this project.</div>"
+  }
   wsi_viewer_menu(
     "KODAMA",
-    "Visualize KODAMA/MedSAM refined GeoJSON annotations",
+    "Visualize KODAMA/MedSAM refined GeoJSON annotations and membership plots",
     paste0(
       "<div class=\"menuTitle\">MedSAM refinement GeoJSON</div>",
       "<div class=\"menuGrid\">",
@@ -835,6 +866,10 @@ wsi_viewer_kodama_controls <- function(config) {
       "</div>",
       "<div class=\"menuGrid kodamaList\">",
       load_buttons,
+      "</div>",
+      "<div class=\"menuTitle\">KODAMA plot</div>",
+      "<div class=\"menuGrid kodamaPlotList\">",
+      plot_buttons,
       "</div>",
       "<div id=\"kodamaSummary\" class=\"menuHint\"></div>"
     )
@@ -1199,6 +1234,16 @@ wsi_viewer_chrome <- function(config, loading_message, tiled = FALSE) {
     "<div class=\"commandPaletteHint\">Type an action or use arrow keys</div></div><span class=\"commandKbd\">Ctrl+K</span></div>",
     "<input id=\"commandPaletteSearch\" type=\"text\" autocomplete=\"off\" spellcheck=\"false\" placeholder=\"Search commands\">",
     "<div id=\"commandPaletteList\" class=\"commandPaletteList\" role=\"listbox\" aria-label=\"Viewer commands\"></div>",
+    "</div>\n",
+    "<div id=\"kodamaPlotWindow\" class=\"panel\" role=\"dialog\" aria-modal=\"false\" aria-labelledby=\"kodamaPlotTitle\" aria-hidden=\"true\">",
+    "<div class=\"kodamaPlotHead\"><div><div id=\"kodamaPlotTitle\">KODAMA plot</div>",
+    "<div id=\"kodamaPlotSubtitle\"></div></div><button id=\"kodamaPlotClose\" type=\"button\" title=\"Close KODAMA plot window\">X</button></div>",
+    "<div class=\"kodamaPlotTools\">",
+    "<button id=\"kodamaPlotAnnotation\" type=\"button\" title=\"Draw KODAMA polygons with the same class colors used for annotations\">Annotation colours</button>",
+    "<button id=\"kodamaPlotSource\" type=\"button\" title=\"Show the original KODAMA membership PNG from CellPhenotyper\">Source PNG</button>",
+    "</div>",
+    "<div id=\"kodamaPlotViewport\"><canvas id=\"kodamaPlotCanvas\"></canvas><img id=\"kodamaPlotImage\" alt=\"KODAMA membership plot\"></div>",
+    "<div id=\"kodamaPlotLegend\"></div>",
     "</div>\n",
     "<div id=\"shortcutHelpBackdrop\" aria-hidden=\"true\"></div>\n",
     "<div id=\"shortcutHelp\" class=\"panel\" role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"shortcutHelpTitle\" aria-hidden=\"true\">",
@@ -1912,15 +1957,38 @@ wsi_viewer_kodama_js <- function() {
   paste0(
     "function kodamaConfig(){const cp=(typeof cellphenotyperConfig==='function')?cellphenotyperConfig():(cfg.cellphenotyper||{});return cp.kodama||{enabled:false,geojsons:[]};}\n",
     "function kodamaItems(){const items=kodamaConfig().geojsons||[];return Array.isArray(items)?items:[];}\n",
+    "function kodamaPlots(){const plots=kodamaConfig().plots||[];return Array.isArray(plots)?plots:[];}\n",
     "function kodamaSource(item){return 'KODAMA: '+String((item&&(item.label||item.id))||'MedSAM refined GeoJSON');}\n",
     "function kodamaStatus(msg){const box=el('kodamaSummary');if(box)box.textContent=msg||'';}\n",
+    "let kodamaPlotIndex=-1,kodamaPlotMode='annotation';\n",
+    "function kodamaPlotItem(){return kodamaPlots()[kodamaPlotIndex]||null;}\n",
+    "function kodamaGeojsonForPlot(plot){const items=kodamaItems();if(!items.length)return null;if(plot&&plot.profile){const hit=items.find(item=>String(item.profile||'').toLowerCase()===String(plot.profile||'').toLowerCase());if(hit)return hit;}return items[0];}\n",
+    "function kodamaPlotPoints(plot){const pts=plot&&plot.points||[];return Array.isArray(pts)?pts:[];}\n",
+    "function kodamaPointClass(point){if(!point)return 'annotation';if(point.class)return String(point.class);if(point.cluster!==undefined&&point.cluster!==null)return 'color_'+String(point.cluster);return 'annotation';}\n",
+    "function kodamaPlotFeatures(plot){const item=kodamaGeojsonForPlot(plot);return item&&item.geojson?geojsonFeatures(item.geojson):[];}\n",
+    "function kodamaPlotPointBounds(features){const pts=[];(features||[]).forEach(feature=>collectGeojsonPoints((feature.geometry||{}).coordinates||[]).forEach(p=>pts.push(p)));return pts.length?boundsFromPoints(pts):null;}\n",
+    "function kodamaPointBounds(points){const pts=(points||[]).map(p=>({x:Number(p.x),y:Number(p.y)})).filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.y));return pts.length?boundsFromPoints(pts):null;}\n",
+    "function kodamaPlotClasses(features){const map=new Map();(features||[]).forEach(feature=>{const cls=importedFeatureClass(feature.properties||{}),colour=classColour(cls);if(!map.has(cls))map.set(cls,colour);});return Array.from(map.entries()).map(([label,colour])=>({label:label,colour:colour}));}\n",
+    "function kodamaPointClasses(points){const map=new Map();(points||[]).forEach(point=>{const cls=kodamaPointClass(point),colour=classColour(cls);if(!map.has(cls))map.set(cls,colour);});return Array.from(map.entries()).map(([label,colour])=>({label:label,colour:colour}));}\n",
+    "function renderKodamaLegendItems(items){const legend=el('kodamaPlotLegend');if(!legend)return;legend.innerHTML='';(items||[]).forEach(item=>{const row=document.createElement('span');row.className='kodamaLegendItem';const sw=document.createElement('span');sw.className='swatch';sw.style.background=item.colour;const tx=document.createElement('span');tx.textContent=item.label;row.append(sw,tx);legend.appendChild(row);});}\n",
+    "function renderKodamaPlotLegend(features){renderKodamaLegendItems(kodamaPlotClasses(features));}\n",
+    "function renderKodamaPointLegend(points){renderKodamaLegendItems(kodamaPointClasses(points));}\n",
+    "function resizeKodamaPlotCanvas(canvas,bounds){const viewport=el('kodamaPlotViewport'),maxW=Math.max(320,(viewport&&viewport.clientWidth?viewport.clientWidth-24:720)),maxH=Math.max(240,Math.min(620,innerHeight-280)),bw=Math.max(1,bounds.xmax-bounds.xmin),bh=Math.max(1,bounds.ymax-bounds.ymin),scale=Math.min(maxW/bw,maxH/bh);canvas.width=Math.max(320,Math.round(bw*scale));canvas.height=Math.max(240,Math.round(bh*scale));return {scale:scale,xmin:bounds.xmin,ymin:bounds.ymin};}\n",
+    "function drawKodamaPlotGeometry(ctx,part,tx,colour){const groups=[part.rings].concat(part.add_groups||[]).filter(g=>g&&g.length);if(!groups.length)return;ctx.beginPath();groups.forEach(group=>group.forEach(ring=>{ring.forEach((p,i)=>{const x=(p.x-tx.xmin)*tx.scale,y=(p.y-tx.ymin)*tx.scale;if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);});ctx.closePath();}));ctx.fillStyle=hexToRgba(colour,.72);ctx.strokeStyle=colour;ctx.lineWidth=1.1;ctx.fill('evenodd');ctx.stroke();}\n",
+    "function drawKodamaPointPlot(plot,canvas,ctx2){const points=kodamaPlotPoints(plot),bounds=kodamaPointBounds(points);if(!points.length||!bounds)return false;const tx=resizeKodamaPlotCanvas(canvas,bounds),pad=10;ctx2.fillStyle='#f8fafc';ctx2.fillRect(0,0,canvas.width,canvas.height);ctx2.save();ctx2.translate(pad,pad);const sx=(canvas.width-pad*2)/Math.max(1,canvas.width),sy=(canvas.height-pad*2)/Math.max(1,canvas.height);ctx2.scale(sx,sy);const radius=Math.max(.9,Math.min(2.2,120/Math.sqrt(points.length)));points.forEach(point=>{const x=(Number(point.x)-tx.xmin)*tx.scale,y=(Number(point.y)-tx.ymin)*tx.scale;if(!Number.isFinite(x)||!Number.isFinite(y))return;ctx2.fillStyle=classColour(kodamaPointClass(point));ctx2.globalAlpha=.78;ctx2.beginPath();ctx2.arc(x,y,radius,0,Math.PI*2);ctx2.fill();});ctx2.restore();ctx2.globalAlpha=1;renderKodamaPointLegend(points);return true;}\n",
+    "function drawKodamaAnnotationPlot(){const plot=kodamaPlotItem(),features=kodamaPlotFeatures(plot),canvas=el('kodamaPlotCanvas'),img=el('kodamaPlotImage');if(!canvas)return;if(img)img.style.display='none';canvas.style.display='block';const ctx2=canvas.getContext('2d');if(drawKodamaPointPlot(plot,canvas,ctx2))return;const bounds=kodamaPlotPointBounds(features);if(!features.length||!bounds){canvas.width=520;canvas.height=280;ctx2.fillStyle='#f8fafc';ctx2.fillRect(0,0,canvas.width,canvas.height);ctx2.fillStyle='#111827';ctx2.font='14px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif';ctx2.fillText('No KODAMA embedding or GeoJSON is available for this plot.',24,36);renderKodamaPlotLegend([]);return;}const tx=resizeKodamaPlotCanvas(canvas,bounds);ctx2.fillStyle='#f8fafc';ctx2.fillRect(0,0,canvas.width,canvas.height);features.forEach(feature=>{const cls=importedFeatureClass(feature.properties||{}),colour=classColour(cls),parts=geojsonGeometryParts(feature.geometry||{});parts.forEach(part=>drawKodamaPlotGeometry(ctx2,part,tx,colour));});renderKodamaPlotLegend(features);}\n",
+    "function showKodamaSourcePlot(){const plot=kodamaPlotItem(),img=el('kodamaPlotImage'),canvas=el('kodamaPlotCanvas');if(!img||!plot||!plot.data_uri){notify('No KODAMA source PNG is available for this plot','warning');kodamaPlotMode='annotation';drawKodamaAnnotationPlot();return;}if(canvas)canvas.style.display='none';img.style.display='block';if(img.src!==plot.data_uri)img.src=plot.data_uri;const pts=kodamaPlotPoints(plot);if(pts.length)renderKodamaPointLegend(pts);else renderKodamaPlotLegend(kodamaPlotFeatures(plot));}\n",
+    "function updateKodamaPlotModeButtons(){const ann=el('kodamaPlotAnnotation'),src=el('kodamaPlotSource'),plot=kodamaPlotItem();if(ann)ann.classList.toggle('active',kodamaPlotMode==='annotation');if(src){src.classList.toggle('active',kodamaPlotMode==='source');src.disabled=!(plot&&plot.data_uri);}}\n",
+    "function renderKodamaPlotWindow(){const plot=kodamaPlotItem(),title=el('kodamaPlotTitle'),sub=el('kodamaPlotSubtitle');if(title)title.textContent=plot?(plot.label||'KODAMA plot'):'KODAMA plot';if(sub){const n=plot&&plot.point_count?(' | '+Number(plot.point_count).toLocaleString()+' KODAMA points'):'';sub.textContent=plot?((plot.path||'Annotation-colour KODAMA view')+n):'No plot selected';}updateKodamaPlotModeButtons();if(kodamaPlotMode==='source')showKodamaSourcePlot();else drawKodamaAnnotationPlot();}\n",
+    "function openKodamaPlot(index,mode='annotation'){const plots=kodamaPlots();if(!plots.length){kodamaStatus('No KODAMA plot PNG was found in this project.');notify('No KODAMA plot found','warning');return;}kodamaPlotIndex=clamp(Number(index)||0,0,plots.length-1);kodamaPlotMode=mode;const panel=el('kodamaPlotWindow');if(panel){panel.classList.add('open');panel.setAttribute('aria-hidden','false');}setTimeout(renderKodamaPlotWindow,0);kodamaStatus('Opened '+(plots[kodamaPlotIndex].label||'KODAMA plot')+'.');}\n",
+    "function closeKodamaPlot(){const panel=el('kodamaPlotWindow');if(panel){panel.classList.remove('open');panel.setAttribute('aria-hidden','true');}}\n",
     "function isKodamaRoi(roi,id=null){if(!roi)return false;const props=roi.properties||{},source=String(roi.source||'');if(id&&String(props.kodama_id||'')===String(id))return true;return roi.kodama===true||source.indexOf('KODAMA:')===0||props.source_menu==='KODAMA';}\n",
     "function clearKodamaRois(redraw=true){let removed=0;for(let i=rois.length-1;i>=0;i--){if(isKodamaRoi(rois[i])){if(!removed)pushAnnotationUndo('kodama_cleared');rois.splice(i,1);removed++;}}if(selectedRoi>=rois.length)selectedRoi=rois.length-1;if(removed){recordAnnotationHistory('kodama_cleared',{removed:removed});scheduleViewerStateSync('kodama_cleared',{removed:removed});markAnnotationsDirty('kodama_cleared');}if(redraw){buildRoiList();updateButtons();draw();kodamaStatus(removed?('Removed '+removed+' KODAMA ROI'+(removed===1?'':'s')+'.'):'No KODAMA annotations were loaded.');}return removed;}\n",
     "function tagKodamaRois(start,item){const source=kodamaSource(item),colourSeed=(item&&item.profile==='fine')?'#f59e0b':((item&&item.profile==='standard')?'#22c55e':'#38bdf8');let tagged=0;for(let i=start;i<rois.length;i++){const roi=rois[i];if(!roi)continue;roi.kodama=true;roi.source=source;roi.properties=roi.properties||{};roi.properties.source_menu='KODAMA';roi.properties.kodama_id=item&&item.id||null;roi.properties.kodama_profile=item&&item.profile||null;if(!roi.colour){roi.colour=colourSeed;roi.fill=hexToRgba(roi.colour,.18);}tagged++;}return tagged;}\n",
     "function appendKodamaGeojson(item){if(!item||!item.geojson){notify('No KODAMA GeoJSON is available for this entry','warning');return 0;}const before=rois.length;addImportedGeojson(item.geojson,kodamaSource(item));const added=tagKodamaRois(before,item);return added;}\n",
     "function loadKodamaGeojson(index){const item=kodamaItems()[Number(index)];if(!item){kodamaStatus('KODAMA entry not found.');return;}clearKodamaRois(false);const added=appendKodamaGeojson(item);buildRoiList();updateButtons();draw();kodamaStatus('Loaded '+added+' ROI'+(added===1?'':'s')+' from '+(item.label||item.id||'KODAMA')+'.');notify('KODAMA GeoJSON loaded','success');}\n",
     "function loadAllKodamaGeojsons(){const items=kodamaItems();if(!items.length){kodamaStatus('No KODAMA GeoJSON was found in this project.');notify('No KODAMA GeoJSON found','warning');return;}clearKodamaRois(false);let added=0;items.forEach(item=>{added+=appendKodamaGeojson(item);});buildRoiList();updateButtons();draw();kodamaStatus('Loaded '+added+' KODAMA ROI'+(added===1?'':'s')+' from '+items.length+' file'+(items.length===1?'':'s')+'.');notify('KODAMA annotations loaded','success');}\n",
-    "function bindKodamaControls(){const items=kodamaItems(),loadAll=el('kodamaLoadAll'),clear=el('kodamaClear');document.querySelectorAll('.kodamaLoad').forEach(button=>{button.onclick=()=>loadKodamaGeojson(button.dataset.kodamaIndex);button.disabled=!items.length;});if(loadAll){loadAll.onclick=loadAllKodamaGeojsons;loadAll.disabled=!items.length;}if(clear){clear.onclick=()=>clearKodamaRois(true);clear.disabled=!items.length;}kodamaStatus(items.length?(items.length+' KODAMA/MedSAM GeoJSON file'+(items.length===1?'':'s')+' available.'):'No KODAMA/MedSAM GeoJSON was found in this project.');}\n"
+    "function bindKodamaControls(){const items=kodamaItems(),plots=kodamaPlots(),loadAll=el('kodamaLoadAll'),clear=el('kodamaClear'),close=el('kodamaPlotClose'),ann=el('kodamaPlotAnnotation'),src=el('kodamaPlotSource');document.querySelectorAll('.kodamaLoad').forEach(button=>{button.onclick=()=>loadKodamaGeojson(button.dataset.kodamaIndex);button.disabled=!items.length;});document.querySelectorAll('.kodamaPlot').forEach(button=>{button.onclick=()=>openKodamaPlot(button.dataset.kodamaPlotIndex,'annotation');button.disabled=!plots.length;});if(loadAll){loadAll.onclick=loadAllKodamaGeojsons;loadAll.disabled=!items.length;}if(clear){clear.onclick=()=>clearKodamaRois(true);clear.disabled=!items.length;}if(close)close.onclick=closeKodamaPlot;if(ann)ann.onclick=()=>{kodamaPlotMode='annotation';renderKodamaPlotWindow();};if(src)src.onclick=()=>{kodamaPlotMode='source';renderKodamaPlotWindow();};window.addEventListener('resize',()=>{if(el('kodamaPlotWindow')&&el('kodamaPlotWindow').classList.contains('open')&&kodamaPlotMode==='annotation')drawKodamaAnnotationPlot();});kodamaStatus((items.length?(items.length+' KODAMA/MedSAM GeoJSON file'+(items.length===1?'':'s')):'No KODAMA/MedSAM GeoJSON')+(plots.length?(' | '+plots.length+' plot'+(plots.length===1?'':'s')+' available.'):'.'));}\n"
   )
 }
 

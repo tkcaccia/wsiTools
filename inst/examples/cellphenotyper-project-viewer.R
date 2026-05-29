@@ -26,6 +26,16 @@ if (is.data.frame(project$files$kodama_geojson) && nrow(project$files$kodama_geo
 } else {
   message("No KODAMA/MedSAM refined GeoJSON was found in project_outputs.tsv.")
 }
+kodama_embedding <- if (!is.null(project$files$kodama_embedding)) project$files$kodama_embedding else NA_character_
+if (!is.na(kodama_embedding) && nzchar(kodama_embedding)) {
+  message("KODAMA embedding from manifest: ", kodama_embedding)
+}
+if (is.data.frame(project$files$kodama_plots) && nrow(project$files$kodama_plots)) {
+  message("KODAMA membership plots: ", nrow(project$files$kodama_plots))
+  print(project$files$kodama_plots[, c("label", "path"), drop = FALSE])
+} else {
+  message("No KODAMA membership plot PNG was found in project_outputs.tsv.")
+}
 
 viewer <- wsi_viewer_cellphenotyper(
   project,
@@ -40,5 +50,5 @@ viewer <- wsi_viewer_cellphenotyper(
 assign("cellphenotyper_viewer", viewer, envir = .GlobalEnv)
 message("Viewer object saved as `cellphenotyper_viewer`.")
 message("Use the top Stains menu to show/hide GigaTIME marker channels over the H&E.")
-message("Use the top KODAMA menu to load MedSAM-refined KODAMA GeoJSON regions as annotations.")
+message("Use the top KODAMA menu to load MedSAM-refined GeoJSON regions and open the KODAMA plot window.")
 message("Inspect channel settings with: cellphenotyper_viewer$get_channel_settings()")
