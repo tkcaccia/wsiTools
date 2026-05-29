@@ -292,9 +292,101 @@ wsi_cellphenotyper_find_gigatime_channels <- function(manifest) {
   )
 }
 
-wsi_cellphenotyper_project_images <- function(project) {
+wsi_cellphenotyper_find_gigatime_metadata <- function(manifest) {
+  wsi_cellphenotyper_find_stage_file(
+    manifest,
+    stage_id = "gigatime",
+    pattern = "gigatime_.*metadata\\.json$",
+    fallback_pattern = "metadata\\.json$"
+  )
+}
+
+wsi_cellphenotyper_read_json <- function(path) {
+  if (is.na(path) || !nzchar(path) || !file.exists(path)) {
+    return(NULL)
+  }
+  tryCatch(jsonlite::fromJSON(path, simplifyVector = TRUE), error = function(err) NULL)
+}
+
+wsi_cellphenotyper_gigatime_channel_names <- function(project) {
+  channels_path <- project$files$gigatime_channels %||% NA_character_
+  channels <- wsi_cellphenotyper_read_json(channels_path)
+  if (is.character(channels) && length(channels)) {
+    return(channels)
+  }
+  metadata <- wsi_cellphenotyper_read_json(project$files$gigatime_metadata %||% NA_character_)
+  metadata_channels <- metadata$store_channels %||% metadata$channels %||% NULL
+  if (is.character(metadata_channels) && length(metadata_channels)) {
+    return(metadata_channels)
+  }
+  NULL
+}
+
+wsi_cellphenotyper_gigatime_extent <- function(project) {
+  metadata <- wsi_cellphenotyper_read_json(project$files$gigatime_metadata %||% NA_character_)
+  if (!is.list(metadata)) {
+    return(NULL)
+  }
+  shape <- metadata$original_shape_yx %||% NULL
+  if (is.numeric(shape) && length(shape) >= 2L && all(is.finite(shape[seq_len(2L)]))) {
+    return(c(x = 0, y = 0, width = as.numeric(shape[[2L]]), height = as.numeric(shape[[1L]])))
+  }
+  NULL
+}
+
+wsi_cellphenotyper_bind_channels_to_slide <- function(channels, slide) {
+  if (is.null(channels) || !inherits(channels, "wsi_mihc_channel_sources")) {
+    return(channels)
+  }
+  base_path <- as.character(slide$path %||% "")
+  base_project_id <- paste0("project_slide_", wsi_project_id(basename(base_path)))
+  channels$dynamic_sources <- lapply(channels$dynamic_sources, function(source) {
+    source$metadata <- utils::modifyList(
+      source$metadata %||% list(),
+      list(
+        target_path = base_path,
+        base_path = base_path,
+        base_slide_path = base_path,
+        slide_path = base_path,
+        project_item_id = base_project_id,
+        target_project_item_id = base_project_id,
+        target_role = "base",
+        source_type = "cellphenotyper_gigatime"
+      ),
+      keep.null = TRUE
+    )
+    source
+  })
+  channels
+}
+
+wsi_cellphenotyper_gigatime_channel_sources <- function(project, slide,
+                                                        colours = NULL,
+                                                        opacity = 0.55,
+                                                        visible = TRUE,
+                                                        tile_size = 512,
+                                                        format = "png") {
+  probs <- project$files$gigatime_probs %||% NA_character_
+  if (is.na(probs) || !nzchar(probs) || !file.exists(probs)) {
+    return(NULL)
+  }
+  channels <- wsi_mihc_channel_sources(
+    probs,
+    channel_names = wsi_cellphenotyper_gigatime_channel_names(project),
+    colours = colours,
+    opacity = opacity,
+    visible = visible,
+    tile_size = tile_size,
+    format = format,
+    extent = wsi_cellphenotyper_gigatime_extent(project)
+  )
+  wsi_cellphenotyper_bind_channels_to_slide(channels, slide)
+}
+
+wsi_cellphenotyper_project_images <- function(project, include_gigatime_panel = FALSE) {
   gigatime_panel <- project$files$gigatime_panel %||% NA_character_
-  if (is.na(gigatime_panel) || !nzchar(gigatime_panel) || !file.exists(gigatime_panel)) {
+  if (!isTRUE(include_gigatime_panel) ||
+      is.na(gigatime_panel) || !nzchar(gigatime_panel) || !file.exists(gigatime_panel)) {
     return(list())
   }
   list(list(
@@ -338,6 +430,7 @@ wsi_cellphenotyper_viewer_config <- function(project, layer_id = "cellphenotyper
     gigatime_panel = project$files$gigatime_panel %||% NA_character_,
     gigatime_probs = project$files$gigatime_probs %||% NA_character_,
     gigatime_channels = project$files$gigatime_channels %||% NA_character_,
+    gigatime_metadata = project$files$gigatime_metadata %||% NA_character_,
     stardist_layer_id = layer_id,
     stardist_cells = project$files$cell_table %||% NA_character_,
     stardist_roi = project$files$stardist_roi %||% NA_character_,
@@ -390,13 +483,15 @@ wsi_viewer_cellphenotyper_config <- function(cellphenotyper = NULL) {
 #' by using `00_execution/project_outputs.tsv` as the project manifest. It
 #' resolves local output paths, identifies the input image, and loads the
 #' StarDist centroid table when available. The large label image is not loaded
-#' into memory. GigaTIME output images are resolved from the same manifest when
-#' present.
+#' into memory. GigaTIME OME-TIFF probability output and preview files are
+#' resolved from the same manifest when present.
 #'
 #' `wsi_viewer_cellphenotyper()` opens the input image in the interactive
 #' wsiTools viewer and adds a top **Cells** menu that can show or hide the
-#' CellPhenotyper/StarDist cell segmentation overlay. GigaTIME channel panels
-#' from `03_gigatime` are added to the left Project panel as a related image.
+#' CellPhenotyper/StarDist cell segmentation overlay. When
+#' `gigatime_probs.ome.tif` is available, it is shown as live tiled mIHC
+#' channel overlays on top of the H&E image and controlled from the top
+#' **Stains** menu.
 #'
 #' @param path CellPhenotyper output directory or path to
 #'   `00_execution/project_outputs.tsv`.
@@ -414,11 +509,24 @@ wsi_viewer_cellphenotyper_config <- function(cellphenotyper = NULL) {
 #'   centroids.
 #' @param cell_colour Cell overlay colour.
 #' @param cell_opacity Cell overlay opacity.
+#' @param gigatime_overlay Whether to overlay the GigaTIME probability OME-TIFF
+#'   as tiled mIHC channels when available.
+#' @param gigatime_colours Optional display colours for the GigaTIME channels.
+#' @param gigatime_opacity Initial GigaTIME channel opacity.
+#' @param gigatime_visible Initial GigaTIME channel visibility.
+#' @param live Whether to use the live `httpuv` bridge. The default uses live
+#'   mode automatically when a GigaTIME OME-TIFF overlay can be served.
+#' @param dynamic_tiles Whether the H&E base image should also use live dynamic
+#'   tiles. The default keeps the base image on static Deep Zoom tiles when
+#'   possible and uses live tiles only for the GigaTIME channels.
+#' @param transport Live viewer transport.
+#' @param wait Whether to run the live viewer event loop before returning.
 #' @param ... Additional arguments passed to [wsi_viewer()].
 #'
 #' @return `wsi_read_cellphenotyper_project()` returns a
 #'   `wsi_cellphenotyper_project` object. `wsi_viewer_cellphenotyper()` returns
-#'   the HTML viewer path invisibly.
+#'   a live viewer session when GigaTIME channels are overlaid, otherwise the
+#'   HTML viewer path invisibly.
 #' @export
 wsi_read_cellphenotyper_project <- function(path, load_cells = TRUE) {
   manifest_path <- wsi_cellphenotyper_manifest_path(path)
@@ -447,7 +555,8 @@ wsi_read_cellphenotyper_project <- function(path, load_cells = TRUE) {
       stardist_preview = wsi_cellphenotyper_find_preview(manifest),
       gigatime_panel = wsi_cellphenotyper_find_gigatime_panel(manifest),
       gigatime_probs = wsi_cellphenotyper_find_gigatime_probs(manifest),
-      gigatime_channels = wsi_cellphenotyper_find_gigatime_channels(manifest)
+      gigatime_channels = wsi_cellphenotyper_find_gigatime_channels(manifest),
+      gigatime_metadata = wsi_cellphenotyper_find_gigatime_metadata(manifest)
     )
   )
   class(project) <- "wsi_cellphenotyper_project"
@@ -467,12 +576,21 @@ wsi_viewer_cellphenotyper <- function(project, output = NULL, open = interactive
                                       cell_radius = 6,
                                       cell_colour = "#38BDF8",
                                       cell_opacity = 0.75,
+                                      gigatime_overlay = TRUE,
+                                      gigatime_colours = NULL,
+                                      gigatime_opacity = 0.55,
+                                      gigatime_visible = TRUE,
+                                      live = NULL,
+                                      dynamic_tiles = FALSE,
+                                      transport = c("auto", "websocket", "polling"),
+                                      wait = FALSE,
                                       ...) {
   if (!inherits(project, "wsi_cellphenotyper_project")) {
     project <- wsi_read_cellphenotyper_project(project)
   }
   mode <- match.arg(mode)
   backend <- match.arg(backend)
+  transport <- match.arg(transport)
   if (is.null(output)) {
     output <- file.path(project$root, "cellphenotyper_wsiTools_viewer.html")
   }
@@ -485,7 +603,6 @@ wsi_viewer_cellphenotyper <- function(project, output = NULL, open = interactive
   ))
   layers <- Filter(Negate(is.null), layers)
   slide <- wsi_open(project$input_image, backend = backend)
-  on.exit(wsi_close(slide), add = TRUE)
   dots <- list(...)
   if (!is.null(dots$layers)) {
     extra_layers <- dots$layers
@@ -496,9 +613,64 @@ wsi_viewer_cellphenotyper <- function(project, output = NULL, open = interactive
     layers <- c(layers, extra_layers)
     dots$layers <- NULL
   }
-  dots$project_images <- dots$project_images %||% wsi_cellphenotyper_project_images(project)
+  overlay_possible <- isTRUE(gigatime_overlay) &&
+    !is.na(project$files$gigatime_probs %||% NA_character_) &&
+    nzchar(project$files$gigatime_probs %||% "") &&
+    file.exists(project$files$gigatime_probs %||% "") &&
+    wsi_has_vips() &&
+    requireNamespace("httpuv", quietly = TRUE)
+  use_live <- if (is.null(live)) overlay_possible else isTRUE(live)
+  dots$project_images <- dots$project_images %||%
+    wsi_cellphenotyper_project_images(project, include_gigatime_panel = !overlay_possible)
   dots$title <- dots$title %||% sprintf("CellPhenotyper: %s", basename(project$root))
   dots$cellphenotyper <- dots$cellphenotyper %||% wsi_cellphenotyper_viewer_config(project)
+
+  if (isTRUE(gigatime_overlay) && !overlay_possible &&
+      !is.na(project$files$gigatime_probs %||% NA_character_) &&
+      nzchar(project$files$gigatime_probs %||% "") &&
+      file.exists(project$files$gigatime_probs %||% "")) {
+    wsi_warn(
+      "GigaTIME OME-TIFF was found, but live mIHC overlay requires both libvips and the optional R package `httpuv`. Opening without the tiled GigaTIME overlay."
+    )
+  }
+
+  if (isTRUE(use_live)) {
+    channels <- tryCatch(
+      wsi_cellphenotyper_gigatime_channel_sources(
+        project,
+        slide,
+        colours = gigatime_colours,
+        opacity = gigatime_opacity,
+        visible = gigatime_visible
+      ),
+      error = function(err) {
+        wsi_warn(paste0("Could not prepare GigaTIME channel overlays: ", conditionMessage(err)))
+        NULL
+      }
+    )
+    if (!is.null(channels)) {
+      dots$channel_sources <- wsi_channel_sources_combine(dots$channel_sources %||% NULL, channels)
+      dots$base_layer_name <- dots$base_layer_name %||% "H&E"
+      dots$stain <- dots$stain %||% "none"
+    }
+    args <- c(
+      list(
+        slide = slide,
+        output = output,
+        open = open,
+        overwrite = overwrite,
+        mode = mode,
+        dynamic_tiles = dynamic_tiles,
+        transport = transport,
+        wait = wait,
+        layers = layers
+      ),
+      dots
+    )
+    return(do.call(wsi_viewer_live, args))
+  }
+
+  on.exit(wsi_close(slide), add = TRUE)
   args <- c(
     list(
       slide = slide,
@@ -529,6 +701,9 @@ print.wsi_cellphenotyper_project <- function(x, ...) {
   }
   if (!is.na(x$files$gigatime_panel %||% NA_character_)) {
     cat("  GigaTIME panel: ", x$files$gigatime_panel, "\n", sep = "")
+  }
+  if (!is.na(x$files$gigatime_probs %||% NA_character_)) {
+    cat("  GigaTIME OME-TIFF: ", x$files$gigatime_probs, "\n", sep = "")
   }
   invisible(x)
 }

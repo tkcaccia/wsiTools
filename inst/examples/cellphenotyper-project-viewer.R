@@ -1,5 +1,5 @@
 # Open a CellPhenotyper output folder in the wsiTools viewer.
-# The input H&E image and GigaTIME panel are resolved from
+# The input H&E image and GigaTIME probability OME-TIFF are resolved from
 # 00_execution/project_outputs.tsv.
 
 library(wsiTools)
@@ -15,20 +15,23 @@ project <- wsi_read_cellphenotyper_project(project_dir)
 print(project)
 
 message("H&E input from manifest: ", project$input_image)
-if (!is.na(project$files$gigatime_panel) && nzchar(project$files$gigatime_panel)) {
-  message("GigaTIME panel from manifest: ", project$files$gigatime_panel)
+if (!is.na(project$files$gigatime_probs) && nzchar(project$files$gigatime_probs)) {
+  message("GigaTIME OME-TIFF from manifest: ", project$files$gigatime_probs)
 } else {
-  message("No GigaTIME channel panel was found in project_outputs.tsv.")
+  message("No GigaTIME probability OME-TIFF was found in project_outputs.tsv.")
 }
 
-html <- wsi_viewer_cellphenotyper(
+viewer <- wsi_viewer_cellphenotyper(
   project,
   output = file.path(viewer_dir, "cellphenotyper_project_viewer.html"),
   tile_dir = file.path(viewer_dir, "cellphenotyper_project_viewer_tiles"),
   mode = "tiles",
   overwrite = TRUE,
-  open = interactive()
+  open = interactive(),
+  wait = FALSE
 )
 
-message("Viewer written to: ", html)
-message("Use the left Project panel to switch between the H&E input and GigaTIME channel panel.")
+assign("cellphenotyper_viewer", viewer, envir = .GlobalEnv)
+message("Viewer object saved as `cellphenotyper_viewer`.")
+message("Use the top Stains menu to show/hide GigaTIME marker channels over the H&E.")
+message("Inspect channel settings with: cellphenotyper_viewer$get_channel_settings()")

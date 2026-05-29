@@ -784,10 +784,11 @@ path.
 CellPhenotyper output folders can be opened directly from their
 `00_execution/project_outputs.tsv` manifest. wsiTools resolves the local input
 image, reads the StarDist/cell-assignment centroid table when present, and adds
-the cells as a viewer layer. When the manifest contains GigaTIME outputs,
-the `03_gigatime/.../gigatime_5marker_channel_panels.png` image is also added
-to the left Project panel as a related image. The large StarDist label mask
-remains on disk.
+the cells as a viewer layer. When the manifest contains
+`03_gigatime/.../gigatime_probs.ome.tif`, wsiTools opens it as live tiled mIHC
+channel overlays on top of the H&E image. Channel names are read from
+`gigatime_channels.json` or `gigatime_metadata.json` when present. The large
+StarDist label mask remains on disk.
 
 ```r
 library(wsiTools)
@@ -798,22 +799,26 @@ project <- wsi_read_cellphenotyper_project(
 project
 
 project$input_image
-project$files$gigatime_panel
+project$files$gigatime_probs
 
-html <- wsi_viewer_cellphenotyper(
+viewer <- wsi_viewer_cellphenotyper(
   project,
   output = "/Users/stefano/Documents/viewer/cellphenotyper_project_viewer.html",
   mode = "tiles",
   overwrite = TRUE,
+  wait = FALSE,
   open = TRUE
 )
+
+viewer$get_channel_settings()
 ```
 
 In the viewer, open the top `Cells` menu and click `StarDist cells` to show or
 hide the CellPhenotyper segmentation. `Zoom cells` moves the viewport to the
 cell extent, while `Opacity` and `Cell size` adjust the overlay only. The H&E
-input image is the active base slide; the GigaTIME channel panel appears in the
-left Project panel if it is listed in `project_outputs.tsv`.
+input image is the active base slide; the GigaTIME probability OME-TIFF appears
+as tiled colour channels in the top `Stains` menu, where each marker can be
+shown, hidden, recoloured, and blended over the H&E.
 
 The same CellPhenotyper project workflow is available as
 `inst/examples/cellphenotyper-project-viewer.R`.
