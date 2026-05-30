@@ -63,12 +63,13 @@ inferred full-resolution dimensions. \code{"hires"} and \code{"lowres"} convert 
 \code{coordinate_scale = "custom"}.}
 
 \item{coordinate_transform}{Optional orientation transform applied after
-coordinate scaling and before viewer display. Use \code{"x_y_y_neg_x"} when the
-external image orientation requires \code{x1 = y} and \code{y1 = -x}; wsiTools adds
-the required image-width offset internally, so displayed coordinates use
-\code{x1 = y} and \code{y1 = image_width - x}. Aliases \code{"rotate_90_cw"} and
-\code{"flip_y_rotate_90_cw"} use the same transform. The default \code{"none"}
-preserves coordinates.}
+coordinate scaling and before viewer display. Use \code{"flip_y"} when the
+external image orientation requires \code{y1 = -y}; wsiTools adds the required
+image-height offset internally, so displayed coordinates use \code{x1 = x} and
+\code{y1 = image_height - y}. Use \code{"x_y_y_neg_x"} when the orientation requires
+\code{x1 = y} and \code{y1 = -x}; wsiTools similarly uses \code{y1 = image_width - x}.
+Aliases \code{"rotate_90_cw"} and \code{"flip_y_rotate_90_cw"} use the same
+rotation transform. The default \code{"none"} preserves coordinates.}
 
 \item{spot_radius}{Spot marker radius, in slide pixels. When \code{NULL}, an
 estimate is taken from Seurat scale factors when available.}

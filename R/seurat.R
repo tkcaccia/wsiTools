@@ -40,12 +40,13 @@
 #' @param scale_x,scale_y Custom coordinate scale factors used when
 #'   `coordinate_scale = "custom"`.
 #' @param coordinate_transform Optional orientation transform applied after
-#'   coordinate scaling and before viewer display. Use `"x_y_y_neg_x"` when the
-#'   external image orientation requires `x1 = y` and `y1 = -x`; wsiTools adds
-#'   the required image-width offset internally, so displayed coordinates use
-#'   `x1 = y` and `y1 = image_width - x`. Aliases `"rotate_90_cw"` and
-#'   `"flip_y_rotate_90_cw"` use the same transform. The default `"none"`
-#'   preserves coordinates.
+#'   coordinate scaling and before viewer display. Use `"flip_y"` when the
+#'   external image orientation requires `y1 = -y`; wsiTools adds the required
+#'   image-height offset internally, so displayed coordinates use `x1 = x` and
+#'   `y1 = image_height - y`. Use `"x_y_y_neg_x"` when the orientation requires
+#'   `x1 = y` and `y1 = -x`; wsiTools similarly uses `y1 = image_width - x`.
+#'   Aliases `"rotate_90_cw"` and `"flip_y_rotate_90_cw"` use the same
+#'   rotation transform. The default `"none"` preserves coordinates.
 #' @param spot_radius Spot marker radius, in slide pixels. When `NULL`, an
 #'   estimate is taken from Seurat scale factors when available.
 #' @param max_points Maximum number of spots to keep in the browser payload.
@@ -643,6 +644,10 @@ wsi_seurat_coordinate_transform_arg <- function(transform) {
   aliases <- c(
     none = "none",
     identity = "none",
+    flip_y = "flip_y",
+    flip_vertical = "flip_y",
+    vertical_flip = "flip_y",
+    y_neg_y = "flip_y",
     x_y_y_neg_x = "x_y_y_neg_x",
     y_neg_x = "x_y_y_neg_x",
     rotate_90_cw = "x_y_y_neg_x",
@@ -652,8 +657,8 @@ wsi_seurat_coordinate_transform_arg <- function(transform) {
   out <- aliases[[transform]]
   if (is.null(out)) {
     wsi_abort(paste0(
-      "`coordinate_transform` must be one of: \"none\", \"x_y_y_neg_x\", ",
-      "\"rotate_90_cw\", or \"flip_y_rotate_90_cw\"."
+      "`coordinate_transform` must be one of: \"none\", \"flip_y\", ",
+      "\"x_y_y_neg_x\", \"rotate_90_cw\", or \"flip_y_rotate_90_cw\"."
     ))
   }
   unname(out)
@@ -670,6 +675,17 @@ wsi_seurat_apply_coordinate_transform <- function(x, y, width, height, transform
       x = x,
       y = y,
       transform = "none",
+      width = width,
+      height = height,
+      rescale_x = 1,
+      rescale_y = 1
+    ))
+  }
+  if (identical(transform, "flip_y")) {
+    return(list(
+      x = x,
+      y = height - y,
+      transform = "flip_y",
       width = width,
       height = height,
       rescale_x = 1,
