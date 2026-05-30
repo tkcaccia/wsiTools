@@ -68,8 +68,11 @@ external image orientation requires \code{y1 = -y}; wsiTools adds the required
 image-height offset internally, so displayed coordinates use \code{x1 = x} and
 \code{y1 = image_height - y}. Use \code{"x_y_y_neg_x"} when the orientation requires
 \code{x1 = y} and \code{y1 = -x}; wsiTools similarly uses \code{y1 = image_width - x}.
-Aliases \code{"rotate_90_cw"} and \code{"flip_y_rotate_90_cw"} use the same
-rotation transform. The default \code{"none"} preserves coordinates.}
+Use \code{"x_neg_y_y_neg_x"} when the orientation requires \code{x1 = -y} and
+\code{y1 = -x}; wsiTools uses \code{x1 = image_height - y} and
+\code{y1 = image_width - x}. Aliases \code{"rotate_90_cw"} and
+\code{"flip_y_rotate_90_cw"} use the same rotation transform. The default
+\code{"none"} preserves coordinates.}
 
 \item{spot_radius}{Spot marker radius, in slide pixels. When \code{NULL}, an
 estimate is taken from Seurat scale factors when available.}

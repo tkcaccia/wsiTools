@@ -45,8 +45,11 @@
 #'   image-height offset internally, so displayed coordinates use `x1 = x` and
 #'   `y1 = image_height - y`. Use `"x_y_y_neg_x"` when the orientation requires
 #'   `x1 = y` and `y1 = -x`; wsiTools similarly uses `y1 = image_width - x`.
-#'   Aliases `"rotate_90_cw"` and `"flip_y_rotate_90_cw"` use the same
-#'   rotation transform. The default `"none"` preserves coordinates.
+#'   Use `"x_neg_y_y_neg_x"` when the orientation requires `x1 = -y` and
+#'   `y1 = -x`; wsiTools uses `x1 = image_height - y` and
+#'   `y1 = image_width - x`. Aliases `"rotate_90_cw"` and
+#'   `"flip_y_rotate_90_cw"` use the same rotation transform. The default
+#'   `"none"` preserves coordinates.
 #' @param spot_radius Spot marker radius, in slide pixels. When `NULL`, an
 #'   estimate is taken from Seurat scale factors when available.
 #' @param max_points Maximum number of spots to keep in the browser payload.
@@ -652,13 +655,18 @@ wsi_seurat_coordinate_transform_arg <- function(transform) {
     y_neg_x = "x_y_y_neg_x",
     rotate_90_cw = "x_y_y_neg_x",
     rot90cw = "x_y_y_neg_x",
-    flip_y_rotate_90_cw = "x_y_y_neg_x"
+    flip_y_rotate_90_cw = "x_y_y_neg_x",
+    x_neg_y_y_neg_x = "x_neg_y_y_neg_x",
+    neg_y_neg_x = "x_neg_y_y_neg_x",
+    y_neg_x_x_neg_y = "x_neg_y_y_neg_x",
+    anti_diagonal_flip = "x_neg_y_y_neg_x"
   )
   out <- aliases[[transform]]
   if (is.null(out)) {
     wsi_abort(paste0(
       "`coordinate_transform` must be one of: \"none\", \"flip_y\", ",
-      "\"x_y_y_neg_x\", \"rotate_90_cw\", or \"flip_y_rotate_90_cw\"."
+      "\"x_y_y_neg_x\", \"x_neg_y_y_neg_x\", \"rotate_90_cw\", ",
+      "or \"flip_y_rotate_90_cw\"."
     ))
   }
   unname(out)
@@ -688,6 +696,17 @@ wsi_seurat_apply_coordinate_transform <- function(x, y, width, height, transform
       transform = "flip_y",
       width = width,
       height = height,
+      rescale_x = 1,
+      rescale_y = 1
+    ))
+  }
+  if (identical(transform, "x_neg_y_y_neg_x")) {
+    return(list(
+      x = height - y,
+      y = width - x,
+      transform = "x_neg_y_y_neg_x",
+      width = height,
+      height = width,
       rescale_x = 1,
       rescale_y = 1
     ))

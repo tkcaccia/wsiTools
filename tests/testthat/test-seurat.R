@@ -211,6 +211,49 @@ test_that("Seurat spot coordinates can be flipped vertically", {
   expect_equal(alias$spots$y, linked$spots$y)
 })
 
+test_that("Seurat spot coordinates can be transformed with x1 equals negative y and y1 equals negative x", {
+  embeddings <- matrix(
+    c(-2, 0.5, 1, -0.5),
+    ncol = 2,
+    byrow = TRUE,
+    dimnames = list(c("spot_a", "spot_b"), c("PC_1", "PC_2"))
+  )
+  seurat_like <- list(
+    reductions = list(pca = list(cell.embeddings = embeddings)),
+    images = list(
+      anterior1 = list(
+        coordinates = data.frame(
+          barcode = c("spot_a", "spot_b"),
+          imagecol = c(100, 250),
+          imagerow = c(20, 80)
+        ),
+        image = array(0, dim = c(100, 300, 3))
+      )
+    )
+  )
+  slide <- wsi_mock_slide(width = 300, height = 100, levels = c(1, 2))
+
+  linked <- wsi_link_seurat_image(
+    seurat_like,
+    slide,
+    coordinate_scale = "none",
+    coordinate_transform = "x_neg_y_y_neg_x"
+  )
+
+  expect_equal(linked$coordinate_mapping$coordinate_transform, "x_neg_y_y_neg_x")
+  expect_equal(linked$spots$x, c(80, 20))
+  expect_equal(linked$spots$y, c(200, 50))
+
+  alias <- wsi_link_seurat_image(
+    seurat_like,
+    slide,
+    coordinate_scale = "none",
+    coordinate_transform = "neg_y_neg_x"
+  )
+  expect_equal(alias$spots$x, linked$spots$x)
+  expect_equal(alias$spots$y, linked$spots$y)
+})
+
 test_that("missing scalefactors path can be recovered from a spatial directory", {
   embeddings <- matrix(
     c(-1, 0, 1, 1),
