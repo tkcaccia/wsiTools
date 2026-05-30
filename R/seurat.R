@@ -16,11 +16,25 @@
 #' @param image Path to the high-resolution image, or a `wsi_slide` object.
 #' @param image_name Optional Seurat spatial image name. When `NULL`, the first
 #'   available spatial image is used.
+#' @param spatial_dir Optional 10x Genomics `spatial/` directory. When supplied,
+#'   wsiTools looks for `scalefactors_json.json` and `tissue_positions.csv` or
+#'   `tissue_positions_list.csv` and uses full-resolution Space Ranger
+#'   coordinates when available.
+#' @param scalefactors_json Optional path to a 10x Space Ranger
+#'   `scalefactors_json.json` file. This is useful when the Seurat object stores
+#'   only downsampled image coordinates.
+#' @param tissue_positions Optional path to a 10x Space Ranger tissue positions
+#'   CSV file. These files contain full-resolution pixel coordinates and are the
+#'   preferred source for alignment to an external high-resolution image.
 #' @param reduction Dimensional reduction to extract, for example `"pca"`.
 #' @param dims Two reduction dimensions to plot.
 #' @param coordinate_scale How to map Seurat image coordinates onto `image`.
 #'   `"auto"` rescales from the stored Seurat image dimensions when coordinates
 #'   appear to be in that preview space. `"none"` uses coordinates as supplied.
+#'   `"fullres"` treats coordinates as 10x full-resolution pixels and only
+#'   applies a final scale if the external image dimensions differ from the 10x
+#'   inferred full-resolution dimensions. `"hires"` and `"lowres"` convert from
+#'   10x hires/lowres preview pixels back to full-resolution pixels.
 #'   `"seurat_image"` always rescales from the stored Seurat image dimensions.
 #'   `"custom"` uses `scale_x` and `scale_y`.
 #' @param scale_x,scale_y Custom coordinate scale factors used when
@@ -50,8 +64,10 @@
 #' )
 #' }
 wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
+                                  spatial_dir = NULL, scalefactors_json = NULL,
+                                  tissue_positions = NULL,
                                   reduction = "pca", dims = c(1L, 2L),
-                                  coordinate_scale = c("auto", "none", "seurat_image", "custom"),
+                                  coordinate_scale = c("auto", "none", "fullres", "hires", "lowres", "seurat_image", "custom"),
                                   scale_x = NULL, scale_y = NULL,
                                   spot_radius = NULL, max_points = 100000L,
                                   colour_by = c("component_1", "none")) {
@@ -70,9 +86,20 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
     wsi_open(image)
   }
 
+  spatial <- wsi_seurat_spatial_files(
+    spatial_dir = spatial_dir,
+    scalefactors_json = scalefactors_json,
+    tissue_positions = tissue_positions
+  )
   image_name <- wsi_seurat_image_name(seurat, image_name)
   image_obj <- wsi_seurat_image_object(seurat, image_name)
-  coordinates <- wsi_seurat_coordinate_table(seurat, image_name = image_name, image_obj = image_obj)
+  scale_factors <- wsi_seurat_scale_factors(image_obj, scalefactors_json = spatial$scalefactors_json)
+  coordinates <- wsi_seurat_coordinate_table(
+    seurat,
+    image_name = image_name,
+    image_obj = image_obj,
+    tissue_positions = spatial$tissue_positions
+  )
   embeddings <- wsi_seurat_embeddings(seurat, reduction = reduction)
   if (ncol(embeddings) < max(dims)) {
     wsi_abort(sprintf(
@@ -95,6 +122,7 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
     coordinates = coordinates,
     image_obj = image_obj,
     slide = slide,
+    scale_factors = scale_factors,
     coordinate_scale = coordinate_scale,
     scale_x = scale_x,
     scale_y = scale_y
@@ -151,7 +179,7 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
   )
 
   if (is.null(spot_radius)) {
-    spot_radius <- wsi_seurat_spot_radius(image_obj, mapping = mapping)
+    spot_radius <- wsi_seurat_spot_radius(scale_factors = scale_factors, mapping = mapping)
   }
   spot_radius <- as.numeric(wsi_check_scalar_number(spot_radius, "spot_radius", allow_zero = FALSE))
 
@@ -339,6 +367,73 @@ wsi_seurat_try_accessor <- function(namespace, fun, ...) {
   tryCatch(f(...), error = function(e) NULL)
 }
 
+wsi_seurat_check_optional_path <- function(path, name) {
+  if (is.null(path)) {
+    return(NULL)
+  }
+  if (!is.character(path) || length(path) != 1L || is.na(path) || !nzchar(path)) {
+    wsi_abort(sprintf("`%s` must be `NULL` or a single non-empty path.", name))
+  }
+  path
+}
+
+wsi_seurat_resolve_spatial_file <- function(path = NULL, spatial_dir = NULL, patterns = character(), name = "file") {
+  path <- wsi_seurat_check_optional_path(path, name)
+  spatial_dir <- wsi_seurat_check_optional_path(spatial_dir, "spatial_dir")
+  if (!is.null(path) && file.exists(path)) {
+    return(normalizePath(path, mustWork = TRUE))
+  }
+  search_dirs <- character()
+  if (!is.null(path)) {
+    search_dirs <- c(search_dirs, dirname(path))
+  }
+  if (!is.null(spatial_dir)) {
+    search_dirs <- c(search_dirs, spatial_dir)
+  }
+  search_dirs <- unique(search_dirs[file.exists(search_dirs) & dir.exists(search_dirs)])
+  for (dir in search_dirs) {
+    files <- list.files(dir, full.names = TRUE)
+    if (!length(files)) {
+      next
+    }
+    base <- basename(files)
+    for (pattern in patterns) {
+      hit <- files[grepl(pattern, base, ignore.case = TRUE)]
+      if (length(hit)) {
+        return(normalizePath(hit[[1L]], mustWork = TRUE))
+      }
+    }
+  }
+  if (!is.null(path)) {
+    wsi_abort(sprintf("Could not find `%s`: %s", name, path))
+  }
+  NULL
+}
+
+wsi_seurat_spatial_files <- function(spatial_dir = NULL, scalefactors_json = NULL, tissue_positions = NULL) {
+  spatial_dir <- wsi_seurat_check_optional_path(spatial_dir, "spatial_dir")
+  if (!is.null(spatial_dir) && (!file.exists(spatial_dir) || !dir.exists(spatial_dir))) {
+    wsi_abort(sprintf("`spatial_dir` does not exist or is not a directory: %s", spatial_dir))
+  }
+  scalefactors_json <- wsi_seurat_resolve_spatial_file(
+    scalefactors_json,
+    spatial_dir = spatial_dir,
+    patterns = c("scalefactors_json\\.json$"),
+    name = "scalefactors_json"
+  )
+  tissue_positions <- wsi_seurat_resolve_spatial_file(
+    tissue_positions,
+    spatial_dir = spatial_dir,
+    patterns = c("^tissue_positions\\.csv$", "^tissue_positions_list\\.csv$"),
+    name = "tissue_positions"
+  )
+  list(
+    spatial_dir = if (!is.null(spatial_dir)) normalizePath(spatial_dir, mustWork = TRUE) else NULL,
+    scalefactors_json = scalefactors_json,
+    tissue_positions = tissue_positions
+  )
+}
+
 wsi_seurat_images <- function(seurat) {
   out <- wsi_seurat_try_accessor("SeuratObject", "Images", object = seurat) %||%
     wsi_seurat_try_accessor("Seurat", "Images", object = seurat)
@@ -400,8 +495,57 @@ wsi_seurat_coordinates_from_accessor <- function(seurat, image_name) {
     wsi_seurat_try_accessor("Seurat", "GetTissueCoordinates", object = seurat)
 }
 
-wsi_seurat_coordinate_table <- function(seurat, image_name, image_obj = NULL) {
-  coords <- wsi_seurat_coordinates_from_accessor(seurat, image_name)
+wsi_seurat_read_tissue_positions <- function(path) {
+  if (is.null(path)) {
+    return(NULL)
+  }
+  first <- readLines(path, n = 1L, warn = FALSE)
+  if (!length(first)) {
+    wsi_abort(sprintf("Tissue positions file is empty: %s", path))
+  }
+  fields <- strsplit(first, ",", fixed = TRUE)[[1L]]
+  has_header <- any(grepl("barcode|pxl|in_tissue|array", fields, ignore.case = TRUE))
+  coords <- tryCatch(
+    utils::read.csv(path, header = has_header, stringsAsFactors = FALSE, check.names = FALSE),
+    error = function(err) {
+      wsi_abort(sprintf("Could not read tissue positions file `%s`: %s", path, conditionMessage(err)))
+    }
+  )
+  if (!has_header) {
+    if (ncol(coords) < 6L) {
+      wsi_abort("10x tissue positions files without a header must contain at least 6 columns.")
+    }
+    names(coords)[seq_len(6L)] <- c(
+      "barcode", "in_tissue", "array_row", "array_col",
+      "pxl_row_in_fullres", "pxl_col_in_fullres"
+    )
+  }
+  barcode_col <- wsi_seurat_first_column(coords, c("barcode", "barcodes", "cell", "cells"))
+  x_col <- wsi_seurat_first_column(coords, c("pxl_col_in_fullres", "imagecol", "col", "x", "X"))
+  y_col <- wsi_seurat_first_column(coords, c("pxl_row_in_fullres", "imagerow", "row", "y", "Y"))
+  if (is.null(barcode_col) || is.null(x_col) || is.null(y_col)) {
+    wsi_abort("Tissue positions must contain barcode plus full-resolution row/column coordinate columns.")
+  }
+  out <- data.frame(
+    barcode = as.character(coords[[barcode_col]]),
+    x = suppressWarnings(as.numeric(coords[[x_col]])),
+    y = suppressWarnings(as.numeric(coords[[y_col]])),
+    stringsAsFactors = FALSE
+  )
+  out <- out[is.finite(out$x) & is.finite(out$y) & nzchar(out$barcode), , drop = FALSE]
+  row.names(out) <- NULL
+  attr(out, "coordinate_space") <- if (all(c("pxl_col_in_fullres", "pxl_row_in_fullres") %in% names(coords))) "fullres" else "unknown"
+  attr(out, "coordinate_source") <- path
+  attr(out, "x_column") <- x_col
+  attr(out, "y_column") <- y_col
+  out
+}
+
+wsi_seurat_coordinate_table <- function(seurat, image_name, image_obj = NULL, tissue_positions = NULL) {
+  coords <- wsi_seurat_read_tissue_positions(tissue_positions)
+  if (is.null(coords)) {
+    coords <- wsi_seurat_coordinates_from_accessor(seurat, image_name)
+  }
   if (is.null(coords)) {
     coords <- wsi_seurat_slot(image_obj, "coordinates")
   }
@@ -432,6 +576,15 @@ wsi_seurat_coordinate_table <- function(seurat, image_name, image_obj = NULL) {
   )
   out <- out[is.finite(out$x) & is.finite(out$y) & nzchar(out$barcode), , drop = FALSE]
   row.names(out) <- NULL
+  source_space <- if (identical(x_col, "pxl_col_in_fullres") && identical(y_col, "pxl_row_in_fullres")) {
+    "fullres"
+  } else {
+    "unknown"
+  }
+  attr(out, "coordinate_space") <- attr(coords, "coordinate_space", exact = TRUE) %||% source_space
+  attr(out, "coordinate_source") <- attr(coords, "coordinate_source", exact = TRUE) %||% "seurat"
+  attr(out, "x_column") <- x_col
+  attr(out, "y_column") <- y_col
   out
 }
 
@@ -467,28 +620,94 @@ wsi_seurat_image_dimensions <- function(image_obj) {
   c(width = as.numeric(dims[[2L]]), height = as.numeric(dims[[1L]]))
 }
 
-wsi_seurat_scale_factors <- function(image_obj) {
-  sf <- wsi_seurat_slot(image_obj, "scale.factors") %||%
-    wsi_seurat_slot(image_obj, "scale_factors")
+wsi_seurat_normalize_scale_factors <- function(sf) {
   if (is.null(sf)) {
     return(list())
   }
   if (isS4(sf)) {
     out <- lapply(methods::slotNames(sf), function(name) methods::slot(sf, name))
     names(out) <- methods::slotNames(sf)
-    return(out)
+    sf <- out
   }
-  if (is.list(sf)) {
-    return(sf)
+  if (!is.list(sf)) {
+    return(list())
   }
-  list()
+  out <- sf
+  if (!is.null(out$tissue_hires_scalef)) {
+    out$hires <- out$tissue_hires_scalef
+  }
+  if (!is.null(out$tissue_lowres_scalef)) {
+    out$lowres <- out$tissue_lowres_scalef
+  }
+  if (!is.null(out$spot_diameter_fullres)) {
+    out$spot <- out$spot_diameter_fullres
+  }
+  if (!is.null(out$fiducial_diameter_fullres)) {
+    out$fiducial <- out$fiducial_diameter_fullres
+  }
+  out
+}
+
+wsi_seurat_read_scalefactors_json <- function(path) {
+  if (is.null(path)) {
+    return(list())
+  }
+  out <- tryCatch(
+    jsonlite::fromJSON(path, simplifyVector = TRUE),
+    error = function(err) {
+      wsi_abort(sprintf("Could not read scalefactors JSON `%s`: %s", path, conditionMessage(err)))
+    }
+  )
+  wsi_seurat_normalize_scale_factors(as.list(out))
+}
+
+wsi_seurat_scale_factors <- function(image_obj, scalefactors_json = NULL) {
+  sf <- wsi_seurat_slot(image_obj, "scale.factors") %||%
+    wsi_seurat_slot(image_obj, "scale_factors")
+  sf <- wsi_seurat_normalize_scale_factors(sf)
+  json_sf <- wsi_seurat_read_scalefactors_json(scalefactors_json)
+  wsi_seurat_normalize_scale_factors(utils::modifyList(sf, json_sf, keep.null = TRUE))
+}
+
+wsi_seurat_scale_value <- function(scale_factors, name) {
+  value <- suppressWarnings(as.numeric(scale_factors[[name]] %||% NA_real_))
+  if (length(value) != 1L || !is.finite(value) || value <= 0) {
+    return(NA_real_)
+  }
+  value
+}
+
+wsi_seurat_fullres_dimensions <- function(image_obj, slide, scale_factors) {
+  slide_dims <- c(
+    width = as.numeric(slide$dimensions[["width"]]),
+    height = as.numeric(slide$dimensions[["height"]])
+  )
+  image_dims <- wsi_seurat_image_dimensions(image_obj)
+  if (!is.null(image_dims) && all(is.finite(image_dims)) && all(image_dims > 0)) {
+    for (scale_name in c("lowres", "hires")) {
+      sf <- wsi_seurat_scale_value(scale_factors, scale_name)
+      if (is.finite(sf)) {
+        inferred <- c(width = image_dims[["width"]] / sf, height = image_dims[["height"]] / sf)
+        if (all(is.finite(inferred)) && all(inferred > 0) &&
+            max(abs(inferred / slide_dims - 1), na.rm = TRUE) < 0.25) {
+          return(inferred)
+        }
+      }
+    }
+  }
+  slide_dims
 }
 
 wsi_seurat_coordinate_mapping <- function(coordinates, image_obj, slide,
+                                          scale_factors = list(),
                                           coordinate_scale, scale_x = NULL,
                                           scale_y = NULL) {
   slide_width <- as.numeric(slide$dimensions[["width"]])
   slide_height <- as.numeric(slide$dimensions[["height"]])
+  fullres_dims <- wsi_seurat_fullres_dimensions(image_obj, slide, scale_factors)
+  fullres_to_slide_x <- slide_width / fullres_dims[["width"]]
+  fullres_to_slide_y <- slide_height / fullres_dims[["height"]]
+  coordinate_space <- attr(coordinates, "coordinate_space", exact = TRUE) %||% "unknown"
   if (identical(coordinate_scale, "custom")) {
     if (is.null(scale_x) || is.null(scale_y)) {
       wsi_abort("`scale_x` and `scale_y` are required when `coordinate_scale = \"custom\"`.")
@@ -502,9 +721,37 @@ wsi_seurat_coordinate_mapping <- function(coordinates, image_obj, slide,
   if (identical(coordinate_scale, "none")) {
     return(list(method = "none", scale_x = 1, scale_y = 1))
   }
+  if (identical(coordinate_scale, "fullres")) {
+    return(list(
+      method = "fullres",
+      scale_x = fullres_to_slide_x,
+      scale_y = fullres_to_slide_y,
+      fullres_width = unname(fullres_dims[["width"]]),
+      fullres_height = unname(fullres_dims[["height"]]),
+      coordinate_space = coordinate_space
+    ))
+  }
+  if (coordinate_scale %in% c("hires", "lowres")) {
+    sf <- wsi_seurat_scale_value(scale_factors, coordinate_scale)
+    if (!is.finite(sf)) {
+      wsi_abort(sprintf(
+        "`coordinate_scale = \"%s\"` requires `%s` in the Seurat scale factors or scalefactors JSON.",
+        coordinate_scale,
+        coordinate_scale
+      ))
+    }
+    return(list(
+      method = coordinate_scale,
+      scale_x = fullres_to_slide_x / sf,
+      scale_y = fullres_to_slide_y / sf,
+      fullres_width = unname(fullres_dims[["width"]]),
+      fullres_height = unname(fullres_dims[["height"]]),
+      coordinate_space = coordinate_space
+    ))
+  }
   seurat_dims <- wsi_seurat_image_dimensions(image_obj)
   if (is.null(seurat_dims) || !all(is.finite(seurat_dims)) || any(seurat_dims <= 0)) {
-    return(list(method = "none", scale_x = 1, scale_y = 1))
+    return(list(method = "auto_fullres", scale_x = fullres_to_slide_x, scale_y = fullres_to_slide_y))
   }
   sx <- slide_width / seurat_dims[["width"]]
   sy <- slide_height / seurat_dims[["height"]]
@@ -513,6 +760,47 @@ wsi_seurat_coordinate_mapping <- function(coordinates, image_obj, slide,
   }
   max_x <- suppressWarnings(max(coordinates$x, na.rm = TRUE))
   max_y <- suppressWarnings(max(coordinates$y, na.rm = TRUE))
+  if (identical(coordinate_space, "fullres")) {
+    return(list(
+      method = "auto_fullres",
+      scale_x = fullres_to_slide_x,
+      scale_y = fullres_to_slide_y,
+      fullres_width = unname(fullres_dims[["width"]]),
+      fullres_height = unname(fullres_dims[["height"]]),
+      coordinate_space = coordinate_space
+    ))
+  }
+  for (scale_name in c("lowres", "hires")) {
+    sf <- wsi_seurat_scale_value(scale_factors, scale_name)
+    if (!is.finite(sf)) {
+      next
+    }
+    scaled_dims <- fullres_dims * sf
+    if (is.finite(max_x) && is.finite(max_y) &&
+        max_x <= scaled_dims[["width"]] * 1.15 &&
+        max_y <= scaled_dims[["height"]] * 1.15) {
+      return(list(
+        method = paste0("auto_", scale_name),
+        scale_x = fullres_to_slide_x / sf,
+        scale_y = fullres_to_slide_y / sf,
+        fullres_width = unname(fullres_dims[["width"]]),
+        fullres_height = unname(fullres_dims[["height"]]),
+        coordinate_space = coordinate_space
+      ))
+    }
+  }
+  if (is.finite(max_x) && is.finite(max_y) &&
+      max_x > seurat_dims[["width"]] * 1.15 &&
+      max_y > seurat_dims[["height"]] * 1.15) {
+    return(list(
+      method = "auto_fullres",
+      scale_x = fullres_to_slide_x,
+      scale_y = fullres_to_slide_y,
+      fullres_width = unname(fullres_dims[["width"]]),
+      fullres_height = unname(fullres_dims[["height"]]),
+      coordinate_space = coordinate_space
+    ))
+  }
   in_seurat_space <- is.finite(max_x) && is.finite(max_y) &&
     max_x <= seurat_dims[["width"]] * 1.15 &&
     max_y <= seurat_dims[["height"]] * 1.15 &&
@@ -523,11 +811,10 @@ wsi_seurat_coordinate_mapping <- function(coordinates, image_obj, slide,
   list(method = "auto_none", scale_x = 1, scale_y = 1)
 }
 
-wsi_seurat_spot_radius <- function(image_obj, mapping) {
-  sf <- wsi_seurat_scale_factors(image_obj)
-  spot <- suppressWarnings(as.numeric(sf$spot %||% sf$spot_diameter_fullres %||% NA_real_))
+wsi_seurat_spot_radius <- function(scale_factors, mapping) {
+  spot <- suppressWarnings(as.numeric(scale_factors$spot %||% scale_factors$spot_diameter_fullres %||% NA_real_))
   if (length(spot) == 1L && is.finite(spot) && spot > 0) {
-    return(max(2, spot / 2))
+    return(max(2, spot * mean(c(mapping$scale_x, mapping$scale_y)) / 2))
   }
   max(6, 28 * mean(c(mapping$scale_x, mapping$scale_y)))
 }

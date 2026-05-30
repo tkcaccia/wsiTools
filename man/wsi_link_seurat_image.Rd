@@ -8,9 +8,13 @@ wsi_link_seurat_image(
   seurat,
   image,
   image_name = NULL,
+  spatial_dir = NULL,
+  scalefactors_json = NULL,
+  tissue_positions = NULL,
   reduction = "pca",
   dims = c(1L, 2L),
-  coordinate_scale = c("auto", "none", "seurat_image", "custom"),
+  coordinate_scale = c("auto", "none", "fullres", "hires", "lowres", "seurat_image",
+    "custom"),
   scale_x = NULL,
   scale_y = NULL,
   spot_radius = NULL,
@@ -27,6 +31,19 @@ coordinates and reductions.}
 \item{image_name}{Optional Seurat spatial image name. When \code{NULL}, the first
 available spatial image is used.}
 
+\item{spatial_dir}{Optional 10x Genomics \verb{spatial/} directory. When supplied,
+wsiTools looks for \code{scalefactors_json.json} and \code{tissue_positions.csv} or
+\code{tissue_positions_list.csv} and uses full-resolution Space Ranger
+coordinates when available.}
+
+\item{scalefactors_json}{Optional path to a 10x Space Ranger
+\code{scalefactors_json.json} file. This is useful when the Seurat object stores
+only downsampled image coordinates.}
+
+\item{tissue_positions}{Optional path to a 10x Space Ranger tissue positions
+CSV file. These files contain full-resolution pixel coordinates and are the
+preferred source for alignment to an external high-resolution image.}
+
 \item{reduction}{Dimensional reduction to extract, for example \code{"pca"}.}
 
 \item{dims}{Two reduction dimensions to plot.}
@@ -34,6 +51,10 @@ available spatial image is used.}
 \item{coordinate_scale}{How to map Seurat image coordinates onto \code{image}.
 \code{"auto"} rescales from the stored Seurat image dimensions when coordinates
 appear to be in that preview space. \code{"none"} uses coordinates as supplied.
+\code{"fullres"} treats coordinates as 10x full-resolution pixels and only
+applies a final scale if the external image dimensions differ from the 10x
+inferred full-resolution dimensions. \code{"hires"} and \code{"lowres"} convert from
+10x hires/lowres preview pixels back to full-resolution pixels.
 \code{"seurat_image"} always rescales from the stored Seurat image dimensions.
 \code{"custom"} uses \code{scale_x} and \code{scale_y}.}
 

@@ -41,6 +41,123 @@ test_that("Seurat spatial objects can be linked to high-resolution slide coordin
   expect_true(length(unique(vapply(layer$items, `[[`, character(1), "colour"))) > 1)
 })
 
+test_that("10x tissue positions and scalefactors align Seurat spots to full-resolution images", {
+  embeddings <- matrix(
+    c(-2, 0.5, 1, -0.5),
+    ncol = 2,
+    byrow = TRUE,
+    dimnames = list(c("spot_a", "spot_b"), c("PC_1", "PC_2"))
+  )
+  seurat_like <- list(
+    reductions = list(pca = list(cell.embeddings = embeddings)),
+    images = list(
+      anterior1 = list(
+        coordinates = data.frame(
+          barcode = c("spot_a", "spot_b"),
+          imagecol = c(10, 20),
+          imagerow = c(5, 15)
+        ),
+        image = array(0, dim = c(50, 100, 3)),
+        scale.factors = list(lowres = 0.1, spot = 20)
+      )
+    )
+  )
+  spatial_dir <- tempfile("spatial")
+  dir.create(spatial_dir)
+  writeLines(
+    '{"spot_diameter_fullres": 80, "tissue_lowres_scalef": 0.1}',
+    file.path(spatial_dir, "scalefactors_json.json")
+  )
+  utils::write.table(
+    data.frame(
+      barcode = c("spot_a", "spot_b", "other"),
+      in_tissue = c(1, 1, 0),
+      array_row = c(0, 0, 0),
+      array_col = c(0, 1, 2),
+      pxl_row_in_fullres = c(120, 360, 999),
+      pxl_col_in_fullres = c(240, 480, 999)
+    ),
+    file.path(spatial_dir, "tissue_positions.csv"),
+    sep = ",",
+    row.names = FALSE,
+    quote = FALSE
+  )
+  slide <- wsi_mock_slide(width = 1000, height = 500, levels = c(1, 2))
+
+  linked <- wsi_link_seurat_image(seurat_like, slide, spatial_dir = spatial_dir)
+
+  expect_equal(linked$coordinate_mapping$method, "auto_fullres")
+  expect_equal(linked$coordinate_mapping$scale_x, 1)
+  expect_equal(linked$coordinate_mapping$scale_y, 1)
+  expect_equal(linked$spots$x, c(240, 480))
+  expect_equal(linked$spots$y, c(120, 360))
+  expect_equal(linked$spot_radius, 40)
+})
+
+test_that("Seurat object scale factors are used before external spatial files", {
+  embeddings <- matrix(
+    c(-2, 0.5, 1, -0.5),
+    ncol = 2,
+    byrow = TRUE,
+    dimnames = list(c("spot_a", "spot_b"), c("PC_1", "PC_2"))
+  )
+  seurat_like <- list(
+    reductions = list(pca = list(cell.embeddings = embeddings)),
+    images = list(
+      anterior1 = list(
+        coordinates = data.frame(
+          barcode = c("spot_a", "spot_b"),
+          imagecol = c(240, 480),
+          imagerow = c(120, 360)
+        ),
+        image = array(0, dim = c(100, 100, 3)),
+        scale.factors = list(lowres = 0.1, spot = 80)
+      )
+    )
+  )
+  slide <- wsi_mock_slide(width = 1000, height = 1000, levels = c(1, 2))
+
+  linked <- wsi_link_seurat_image(seurat_like, slide)
+
+  expect_equal(linked$coordinate_mapping$method, "auto_fullres")
+  expect_equal(linked$spots$x, c(240, 480))
+  expect_equal(linked$spots$y, c(120, 360))
+  expect_equal(linked$spot_radius, 40)
+})
+
+test_that("missing scalefactors path can be recovered from a spatial directory", {
+  embeddings <- matrix(
+    c(-1, 0, 1, 1),
+    ncol = 2,
+    byrow = TRUE,
+    dimnames = list(c("a", "b"), c("PC_1", "PC_2"))
+  )
+  seurat_like <- list(
+    reductions = list(pca = list(cell.embeddings = embeddings)),
+    images = list(slice = list(
+      coordinates = data.frame(barcode = c("a", "b"), imagecol = c(20, 80), imagerow = c(30, 70)),
+      image = array(0, dim = c(100, 100, 3))
+    ))
+  )
+  spatial_dir <- tempfile("spatial")
+  dir.create(spatial_dir)
+  writeLines(
+    '{"tissue_lowres_scalef": 0.1, "spot_diameter_fullres": 60}',
+    file.path(spatial_dir, "prefix_scalefactors_json.json")
+  )
+  slide <- wsi_mock_slide(width = 1000, height = 1000, levels = c(1, 2))
+
+  linked <- wsi_link_seurat_image(
+    seurat_like,
+    slide,
+    scalefactors_json = file.path(spatial_dir, "scalefactors_json.json")
+  )
+
+  expect_equal(linked$coordinate_mapping$method, "auto_lowres")
+  expect_equal(linked$spots$x, c(200, 800))
+  expect_equal(linked$spots$y, c(300, 700))
+})
+
 test_that("Seurat viewer exposes spot layer and PCA controls", {
   embeddings <- matrix(
     c(-1, 0, 1, 1),

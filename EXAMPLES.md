@@ -407,14 +407,19 @@ viewer <- wsi_viewer_seurat(
 viewer$get_state()$seurat_selection
 ```
 
-If spots appear shifted or scaled, inspect the linked object and override the
-coordinate scaling:
+By default, wsiTools first tries to use the coordinates and scale factors stored
+inside the Seurat object. If spots appear shifted or scaled, pass the original
+Space Ranger `spatial/` directory so wsiTools can use `tissue_positions.csv`
+and `scalefactors_json.json`. If the external image is a resized/cropped
+derivative of the 10x full-resolution image, inspect the linked object and
+override the coordinate scaling:
 
 ```r
 linked <- wsi_link_seurat_image(
   brain,
   image = "/Users/stefano/Downloads/V1_Mouse_Brain_Sagittal_Anterior_image.tif",
   image_name = "anterior1",
+  spatial_dir = "/Users/stefano/Downloads/spatial",
   coordinate_scale = "custom",
   scale_x = 2.0,
   scale_y = 2.0
