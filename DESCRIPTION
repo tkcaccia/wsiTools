@@ -25,6 +25,7 @@ Imports:
     grDevices,
     graphics,
     jsonlite,
+    methods,
     utils
 Suggests:
     callr,

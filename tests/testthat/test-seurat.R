@@ -41,6 +41,59 @@ test_that("Seurat spatial objects can be linked to high-resolution slide coordin
   expect_true(length(unique(vapply(layer$items, `[[`, character(1), "colour"))) > 1)
 })
 
+test_that("Seurat spots can be coloured by selected gene expression values", {
+  embeddings <- matrix(
+    c(-2, 0.5, 1, -0.5, 2, 1.5),
+    ncol = 2,
+    byrow = TRUE,
+    dimnames = list(c("spot_a", "spot_b", "spot_c"), c("PC_1", "PC_2"))
+  )
+  expression <- matrix(
+    c(0, 2, 4, 5, 4, 3),
+    nrow = 2,
+    byrow = TRUE,
+    dimnames = list(c("Mbp", "Plp1"), c("spot_a", "spot_b", "spot_c"))
+  )
+  seurat_like <- list(
+    reductions = list(pca = list(cell.embeddings = embeddings)),
+    assays = list(Spatial = list(data = expression)),
+    images = list(
+      anterior1 = list(
+        coordinates = data.frame(
+          barcode = c("spot_a", "spot_b", "spot_c"),
+          imagecol = c(10, 20, 30),
+          imagerow = c(5, 15, 25)
+        ),
+        image = array(0, dim = c(50, 100, 3)),
+        scale.factors = list(spot = 12)
+      )
+    )
+  )
+  slide <- wsi_mock_slide(width = 1000, height = 500, levels = c(1, 2))
+
+  linked <- wsi_link_seurat_image(
+    seurat_like,
+    slide,
+    spot_genes = c("Mbp", "Plp1"),
+    default_gene = "Mbp"
+  )
+
+  expect_true(linked$gene_expression$enabled)
+  expect_equal(linked$gene_expression$genes, c("Mbp", "Plp1"))
+  expect_equal(as.numeric(linked$gene_expression$values[, "Mbp"]), c(0, 2, 4))
+  expect_equal(linked$gene_expression$default_gene, "Mbp")
+  expect_true(length(unique(linked$spots$colour)) > 1)
+  expect_equal(linked$pca$points$gene_values[[1]]$Mbp, 0)
+
+  layer <- wsiTools:::wsi_seurat_spots_layer(linked)
+  expect_equal(layer$items[[2]]$gene_values$Mbp, 2)
+  expect_match(layer$items[[2]]$base_colour, "^#")
+
+  config <- wsiTools:::wsi_viewer_seurat_config(linked)
+  expect_true(config$gene_expression$enabled)
+  expect_equal(config$gene_expression$default_gene, "Mbp")
+})
+
 test_that("10x tissue positions and scalefactors align Seurat spots to full-resolution images", {
   embeddings <- matrix(
     c(-2, 0.5, 1, -0.5),
@@ -389,6 +442,7 @@ test_that("Seurat viewer exposes spot layer and PCA controls", {
   expect_match(text, "seurat_spots", fixed = TRUE)
   expect_match(text, "seuratPlotWindow", fixed = TRUE)
   expect_match(text, "bindSeuratControls", fixed = TRUE)
+  expect_match(text, "seuratGeneInput", fixed = TRUE)
   expect_match(text, "seuratSelectionPayload", fixed = TRUE)
   expect_match(text, "Draw a lasso around PCA points", fixed = TRUE)
 })
@@ -401,4 +455,11 @@ test_that("Seurat selection events are accepted by the live bridge validator", {
   ))
 
   expect_equal(payload$event, "seurat_spots_selected")
+
+  gene_payload <- wsiTools:::wsi_viewer_validate_state_payload(list(
+    event = "seurat_gene_coloured",
+    sequence = 2,
+    detail = list(gene = "Mbp")
+  ))
+  expect_equal(gene_payload$event, "seurat_gene_coloured")
 })

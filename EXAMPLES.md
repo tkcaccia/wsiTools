@@ -380,6 +380,8 @@ viewer <- wsi_viewer_seurat(
   image_name = "anterior1",
   coordinate_flip = "horizontal",
   coordinate_rotation = 270,
+  spot_genes = c("Mbp", "Plp1", "Snap25", "Gad1"),
+  default_gene = "Mbp",
   reduction = "pca",
   dims = c(1, 2),
   mode = "tiles",
@@ -398,6 +400,8 @@ viewer <- wsi_viewer_seurat(
   image_name = "anterior1",
   coordinate_flip = "horizontal",
   coordinate_rotation = 270,
+  spot_genes = c("Mbp", "Plp1", "Snap25", "Gad1"),
+  default_gene = "Mbp",
   reduction = "pca",
   dims = c(1, 2),
   live = TRUE,
@@ -425,6 +429,11 @@ wsiTools can use `tissue_positions.csv` and `scalefactors_json.json`. If the
 external image is a resized/cropped derivative of the 10x full-resolution image,
 inspect the linked object and override the coordinate scaling:
 
+The Seurat menu can also colour spots by gene expression. Because whole Seurat
+objects can contain many genes, wsiTools embeds only the genes requested with
+`spot_genes`; type one of those names in the Seurat gene field and click
+**Colour by gene**.
+
 ```r
 linked <- wsi_link_seurat_image(
   brain,
@@ -433,6 +442,8 @@ linked <- wsi_link_seurat_image(
   spatial_dir = "/Users/stefano/Downloads/spatial",
   coordinate_flip = "horizontal",
   coordinate_rotation = 270,
+  spot_genes = c("Mbp", "Plp1", "Snap25", "Gad1"),
+  default_gene = "Mbp",
   coordinate_scale = "custom",
   scale_x = 2.0,
   scale_y = 2.0

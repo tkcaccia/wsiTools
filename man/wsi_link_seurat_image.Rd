@@ -20,9 +20,11 @@ wsi_link_seurat_image(
   coordinate_flip = c("none", "vertical", "horizontal"),
   coordinate_rotation = c(0, 90, 180, 270),
   coordinate_transform = "none",
+  spot_genes = NULL,
+  default_gene = NULL,
   spot_radius = NULL,
   max_points = 100000L,
-  colour_by = c("component_1", "none")
+  colour_by = c("component_1", "gene", "none")
 )
 }
 \arguments{
@@ -78,6 +80,14 @@ backwards compatibility. Prefer \code{coordinate_flip} and
 \code{"x_neg_y_y_neg_x"} transform is equivalent to
 \code{coordinate_flip = "horizontal"} and \code{coordinate_rotation = 90}.}
 
+\item{spot_genes}{Optional character vector of gene names to extract and
+send to the viewer for spot colouring. Only these genes are embedded in the
+viewer payload; the full expression matrix is never copied into the
+browser.}
+
+\item{default_gene}{Optional gene name used as the initial spot colour
+variable. The gene is automatically added to \code{spot_genes} when needed.}
+
 \item{spot_radius}{Spot marker radius, in slide pixels. When \code{NULL}, an
 estimate is taken from Seurat scale factors when available.}
 
@@ -85,7 +95,8 @@ estimate is taken from Seurat scale factors when available.}
 This protects interactive HTML viewers from very large objects.}
 
 \item{colour_by}{Spot colour mode. \code{"component_1"} colours by the first
-plotted reduction component; \code{"none"} uses one colour.}
+plotted reduction component; \code{"gene"} colours by \code{default_gene}; \code{"none"}
+uses one colour.}
 }
 \value{
 A \code{wsi_seurat_spatial} object containing the slide, spot table, PCA

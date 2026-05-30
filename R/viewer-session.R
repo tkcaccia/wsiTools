@@ -155,7 +155,7 @@ wsi_viewer_allowed_events <- function() {
     "artifact_detected", "artifact_flagged", "artifact_overlay_toggled",
     "artifact_sensitivity_updated", "artifacts_cleared",
     "grandqc_loaded", "grandqc_cleared",
-    "kodama_cells_selected", "seurat_spots_selected",
+    "kodama_cells_selected", "seurat_spots_selected", "seurat_gene_coloured",
     "ihc_intensity_measured",
     "segmentation_requested", "segmentation_started", "segmentation_progress",
     "segmentation_added", "segmentation_completed",

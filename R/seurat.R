@@ -50,12 +50,19 @@
 #'   `coordinate_rotation` for new code. For example, the old
 #'   `"x_neg_y_y_neg_x"` transform is equivalent to
 #'   `coordinate_flip = "horizontal"` and `coordinate_rotation = 90`.
+#' @param spot_genes Optional character vector of gene names to extract and
+#'   send to the viewer for spot colouring. Only these genes are embedded in the
+#'   viewer payload; the full expression matrix is never copied into the
+#'   browser.
+#' @param default_gene Optional gene name used as the initial spot colour
+#'   variable. The gene is automatically added to `spot_genes` when needed.
 #' @param spot_radius Spot marker radius, in slide pixels. When `NULL`, an
 #'   estimate is taken from Seurat scale factors when available.
 #' @param max_points Maximum number of spots to keep in the browser payload.
 #'   This protects interactive HTML viewers from very large objects.
 #' @param colour_by Spot colour mode. `"component_1"` colours by the first
-#'   plotted reduction component; `"none"` uses one colour.
+#'   plotted reduction component; `"gene"` colours by `default_gene`; `"none"`
+#'   uses one colour.
 #'
 #' @return A `wsi_seurat_spatial` object containing the slide, spot table, PCA
 #'   points, and coordinate mapping metadata.
@@ -83,11 +90,13 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
                                   coordinate_flip = c("none", "vertical", "horizontal"),
                                   coordinate_rotation = c(0, 90, 180, 270),
                                   coordinate_transform = "none",
+                                  spot_genes = NULL, default_gene = NULL,
                                   spot_radius = NULL, max_points = 100000L,
-                                  colour_by = c("component_1", "none")) {
+                                  colour_by = c("component_1", "gene", "none")) {
   coordinate_flip_missing <- missing(coordinate_flip)
   coordinate_rotation_missing <- missing(coordinate_rotation)
   coordinate_transform_missing <- missing(coordinate_transform)
+  colour_by_missing <- missing(colour_by)
   coordinate_scale <- match.arg(coordinate_scale)
   coordinate_transform <- wsi_seurat_coordinate_transform_arg(coordinate_transform)
   coordinate_flip <- wsi_seurat_coordinate_flip_arg(coordinate_flip)
@@ -101,7 +110,18 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
     coordinate_flip <- preset$flip
     coordinate_rotation <- preset$rotation
   }
+  spot_genes <- wsi_seurat_gene_vector(spot_genes, "spot_genes")
+  default_gene <- wsi_seurat_default_gene_arg(default_gene)
+  if (!is.null(default_gene) && !default_gene %in% spot_genes) {
+    spot_genes <- c(default_gene, spot_genes)
+  }
+  if (!is.null(default_gene) && isTRUE(colour_by_missing)) {
+    colour_by <- "gene"
+  }
   colour_by <- match.arg(colour_by)
+  if (identical(colour_by, "gene") && !length(spot_genes)) {
+    wsi_abort("`colour_by = \"gene\"` requires `default_gene` or at least one value in `spot_genes`.")
+  }
   reduction <- wsi_seurat_check_scalar_character(reduction, "reduction")
   dims <- as.integer(dims)
   if (length(dims) != 2L || anyNA(dims) || any(dims < 1L)) {
@@ -146,6 +166,12 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
   if (!nrow(coordinates)) {
     wsi_abort("No shared spot/barcode identifiers were found between Seurat coordinates and the reduction.")
   }
+  gene_expression <- wsi_seurat_gene_expression(
+    seurat,
+    genes = spot_genes,
+    spot_ids = coordinates$barcode,
+    default_gene = default_gene
+  )
 
   mapping <- wsi_seurat_coordinate_mapping(
     coordinates = coordinates,
@@ -182,8 +208,16 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
   if (is.null(component_names) || any(!nzchar(component_names))) {
     component_names <- paste0(toupper(reduction), "_", dims)
   }
-  colours <- if (identical(colour_by, "component_1")) {
-    wsi_seurat_gradient(component_values[, 1L])
+  component_colours <- wsi_seurat_gradient(component_values[, 1L])
+  base_colours <- if (identical(colour_by, "none")) {
+    rep("#2B6CB0", nrow(component_values))
+  } else {
+    component_colours
+  }
+  colours <- if (identical(colour_by, "gene")) {
+    wsi_seurat_gene_colours(gene_expression, default_gene)
+  } else if (identical(colour_by, "component_1")) {
+    component_colours
   } else {
     rep("#2B6CB0", nrow(component_values))
   }
@@ -199,6 +233,8 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
     component_2 = component_values[, 2L],
     colour = colours,
     color = colours,
+    base_colour = base_colours,
+    base_color = base_colours,
     class = reduction,
     stringsAsFactors = FALSE
   )
@@ -211,7 +247,10 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
     spots <- spots[idx, , drop = FALSE]
     component_values <- component_values[idx, , drop = FALSE]
     colours <- colours[idx]
+    base_colours <- base_colours[idx]
+    gene_expression <- wsi_seurat_subset_gene_expression(gene_expression, idx)
   }
+  gene_value_items <- wsi_seurat_gene_value_items(gene_expression)
 
   plot_points <- data.frame(
     label = spots$label,
@@ -222,8 +261,13 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
     slide_y = spots$y,
     colour = spots$colour,
     color = spots$colour,
+    base_colour = spots$base_colour,
+    base_color = spots$base_colour,
     stringsAsFactors = FALSE
   )
+  if (length(gene_value_items)) {
+    plot_points$gene_values <- I(gene_value_items)
+  }
 
   if (is.null(spot_radius)) {
     spot_radius <- wsi_seurat_spot_radius(scale_factors = scale_factors, mapping = mapping)
@@ -238,6 +282,7 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
     dims = dims,
     component_names = component_names,
     coordinate_mapping = mapping,
+    gene_expression = gene_expression,
     spot_radius = spot_radius,
     spot_count = total,
     displayed_spot_count = nrow(spots),
@@ -363,6 +408,21 @@ wsi_seurat_spots_layer <- function(linked, visible = TRUE, opacity = 0.85) {
     colour = "#2B6CB0",
     radius = linked$spot_radius
   )
+  gene_values <- wsi_seurat_gene_value_items(linked$gene_expression)
+  if (length(gene_values) && length(layer$items)) {
+    n <- min(length(gene_values), length(layer$items))
+    for (i in seq_len(n)) {
+      layer$items[[i]]$gene_values <- gene_values[[i]]
+      layer$items[[i]]$base_colour <- linked$spots$base_colour[[i]] %||% layer$items[[i]]$colour
+      layer$items[[i]]$base_color <- layer$items[[i]]$base_colour
+    }
+  } else if (length(layer$items) && "base_colour" %in% names(linked$spots)) {
+    n <- min(nrow(linked$spots), length(layer$items))
+    for (i in seq_len(n)) {
+      layer$items[[i]]$base_colour <- linked$spots$base_colour[[i]] %||% layer$items[[i]]$colour
+      layer$items[[i]]$base_color <- layer$items[[i]]$base_colour
+    }
+  }
   layer$id <- "seurat_spots"
   layer$name <- "Seurat spatial spots"
   layer$source_type <- "seurat_spots"
@@ -391,6 +451,7 @@ wsi_viewer_seurat_config <- function(seurat = NULL) {
     spot_count = as.integer(seurat$spot_count),
     displayed_spot_count = as.integer(seurat$displayed_spot_count),
     spot_radius = as.numeric(seurat$spot_radius),
+    gene_expression = wsi_seurat_gene_expression_config(seurat$gene_expression),
     plots = list(seurat$pca)
   )
 }
@@ -662,6 +723,277 @@ wsi_seurat_match_spots <- function(coordinates, embeddings) {
   embeddings <- embeddings[idx[keep], , drop = FALSE]
   row.names(coordinates) <- NULL
   list(coordinates = coordinates, embeddings = embeddings)
+}
+
+wsi_seurat_gene_vector <- function(x, name = "spot_genes") {
+  if (is.null(x)) {
+    return(character())
+  }
+  if (!is.character(x)) {
+    wsi_abort(sprintf("`%s` must be `NULL` or a character vector of gene names.", name))
+  }
+  x <- unique(trimws(x))
+  x <- x[nzchar(x) & !is.na(x)]
+  if (!length(x)) {
+    return(character())
+  }
+  x
+}
+
+wsi_seurat_default_gene_arg <- function(x) {
+  if (is.null(x)) {
+    return(NULL)
+  }
+  if (!is.character(x) || length(x) != 1L || is.na(x) || !nzchar(trimws(x))) {
+    wsi_abort("`default_gene` must be `NULL` or a single non-empty gene name.")
+  }
+  trimws(x)
+}
+
+wsi_seurat_gene_match <- function(requested, available) {
+  if (!length(requested) || !length(available)) {
+    return(integer())
+  }
+  idx <- match(requested, available)
+  missing <- is.na(idx)
+  if (any(missing)) {
+    lower_idx <- match(tolower(requested[missing]), tolower(available))
+    idx[missing] <- lower_idx
+  }
+  idx
+}
+
+wsi_seurat_fetch_gene_expression <- function(seurat, genes, spot_ids) {
+  for (namespace in c("SeuratObject", "Seurat")) {
+    fetched <- wsi_seurat_try_accessor(namespace, "FetchData", object = seurat, vars = genes, cells = spot_ids)
+    if (is.null(fetched) || !is.data.frame(fetched) || !nrow(fetched)) {
+      next
+    }
+    gene_idx <- wsi_seurat_gene_match(genes, names(fetched))
+    keep <- !is.na(gene_idx)
+    if (!any(keep)) {
+      next
+    }
+    values <- as.data.frame(fetched[, gene_idx[keep], drop = FALSE], stringsAsFactors = FALSE)
+    names(values) <- names(fetched)[gene_idx[keep]]
+    row_ids <- rownames(values) %||% character()
+    row_idx <- match(spot_ids, row_ids)
+    if (all(!is.na(row_idx))) {
+      values <- values[row_idx, , drop = FALSE]
+    } else if (nrow(values) != length(spot_ids)) {
+      next
+    }
+    mat <- as.matrix(values)
+    storage.mode(mat) <- "double"
+    rownames(mat) <- spot_ids
+    return(mat)
+  }
+  NULL
+}
+
+wsi_seurat_matrix_like <- function(x) {
+  dims <- tryCatch(dim(x), error = function(e) NULL)
+  length(dims) == 2L && all(dims > 0)
+}
+
+wsi_seurat_collect_expression_matrices <- function(seurat) {
+  matrices <- list()
+  add_matrix <- function(x, name) {
+    if (!wsi_seurat_matrix_like(x)) {
+      return(invisible(NULL))
+    }
+    rn <- tryCatch(rownames(x), error = function(e) NULL)
+    cn <- tryCatch(colnames(x), error = function(e) NULL)
+    if (!length(rn) || !length(cn)) {
+      return(invisible(NULL))
+    }
+    matrices[[length(matrices) + 1L]] <<- list(name = name, matrix = x)
+    invisible(NULL)
+  }
+  visit_container <- function(x, prefix = "object") {
+    if (is.null(x)) {
+      return(invisible(NULL))
+    }
+    if (wsi_seurat_matrix_like(x)) {
+      add_matrix(x, prefix)
+      return(invisible(NULL))
+    }
+    for (slot_name in c("data", "counts", "scale.data", "scale_data", "expression", "exprs")) {
+      add_matrix(wsi_seurat_slot(x, slot_name), paste(prefix, slot_name, sep = "$"))
+    }
+    if (is.list(x)) {
+      for (nm in names(x)) {
+        if (nm %in% c("reductions", "images", "meta.data", "meta_data", "coordinates")) {
+          next
+        }
+        value <- x[[nm]]
+        if (wsi_seurat_matrix_like(value)) {
+          add_matrix(value, paste(prefix, nm, sep = "$"))
+        } else if (is.list(value) || isS4(value)) {
+          for (slot_name in c("data", "counts", "scale.data", "scale_data", "expression", "exprs")) {
+            add_matrix(wsi_seurat_slot(value, slot_name), paste(prefix, nm, slot_name, sep = "$"))
+          }
+        }
+      }
+    }
+    invisible(NULL)
+  }
+  assays <- wsi_seurat_slot(seurat, "assays")
+  if (is.list(assays) && length(assays)) {
+    for (assay_name in names(assays)) {
+      visit_container(assays[[assay_name]], paste("assays", assay_name, sep = "$"))
+    }
+  }
+  for (slot_name in c("data", "counts", "expression", "exprs")) {
+    add_matrix(wsi_seurat_slot(seurat, slot_name), slot_name)
+  }
+  visit_container(seurat, "seurat")
+  matrices
+}
+
+wsi_seurat_matrix_gene_expression <- function(seurat, genes, spot_ids) {
+  matrices <- wsi_seurat_collect_expression_matrices(seurat)
+  if (!length(matrices)) {
+    return(NULL)
+  }
+  for (entry in matrices) {
+    mat <- entry$matrix
+    rn <- rownames(mat)
+    cn <- colnames(mat)
+    gene_idx <- wsi_seurat_gene_match(genes, rn)
+    spot_idx <- match(spot_ids, cn)
+    if (any(!is.na(gene_idx)) && any(!is.na(spot_idx))) {
+      keep_gene <- !is.na(gene_idx)
+      keep_spot <- !is.na(spot_idx)
+      out <- matrix(NA_real_, nrow = length(spot_ids), ncol = sum(keep_gene))
+      colnames(out) <- rn[gene_idx[keep_gene]]
+      rownames(out) <- spot_ids
+      sub <- as.matrix(mat[gene_idx[keep_gene], spot_idx[keep_spot], drop = FALSE])
+      storage.mode(sub) <- "double"
+      out[keep_spot, ] <- t(sub)
+      return(out)
+    }
+    gene_idx <- wsi_seurat_gene_match(genes, cn)
+    spot_idx <- match(spot_ids, rn)
+    if (any(!is.na(gene_idx)) && any(!is.na(spot_idx))) {
+      keep_gene <- !is.na(gene_idx)
+      keep_spot <- !is.na(spot_idx)
+      out <- matrix(NA_real_, nrow = length(spot_ids), ncol = sum(keep_gene))
+      colnames(out) <- cn[gene_idx[keep_gene]]
+      rownames(out) <- spot_ids
+      sub <- as.matrix(mat[spot_idx[keep_spot], gene_idx[keep_gene], drop = FALSE])
+      storage.mode(sub) <- "double"
+      out[keep_spot, ] <- sub
+      return(out)
+    }
+  }
+  NULL
+}
+
+wsi_seurat_gene_expression <- function(seurat, genes, spot_ids, default_gene = NULL) {
+  genes <- wsi_seurat_gene_vector(genes, "spot_genes")
+  if (!length(genes)) {
+    return(list(enabled = FALSE, genes = character(), default_gene = NULL, values = matrix(numeric(), nrow = length(spot_ids), ncol = 0L)))
+  }
+  spot_ids <- as.character(spot_ids)
+  values <- wsi_seurat_fetch_gene_expression(seurat, genes, spot_ids) %||%
+    wsi_seurat_matrix_gene_expression(seurat, genes, spot_ids)
+  if (is.null(values) || !ncol(values)) {
+    wsi_abort(sprintf(
+      "None of the requested `spot_genes` were found in the Seurat expression data: %s",
+      paste(genes, collapse = ", ")
+    ))
+  }
+  requested_idx <- wsi_seurat_gene_match(genes, colnames(values))
+  keep <- !is.na(requested_idx)
+  missing_genes <- genes[!keep]
+  values <- values[, requested_idx[keep], drop = FALSE]
+  storage.mode(values) <- "double"
+  found <- colnames(values)
+  if (length(missing_genes)) {
+    wsi_warn(sprintf(
+      "Some requested `spot_genes` were not found and will be unavailable in the viewer: %s",
+      paste(missing_genes, collapse = ", ")
+    ))
+  }
+  if (!is.null(default_gene)) {
+    default_idx <- wsi_seurat_gene_match(default_gene, found)
+    if (is.na(default_idx)) {
+      wsi_abort(sprintf("`default_gene` was not found in the extracted Seurat expression data: %s", default_gene))
+    }
+    default_gene <- found[[default_idx]]
+  } else {
+    default_gene <- found[[1L]]
+  }
+  list(
+    enabled = TRUE,
+    genes = found,
+    default_gene = default_gene,
+    values = values,
+    ranges = wsi_seurat_gene_ranges(values)
+  )
+}
+
+wsi_seurat_gene_ranges <- function(values) {
+  if (is.null(values) || !ncol(values)) {
+    return(list())
+  }
+  stats <- lapply(seq_len(ncol(values)), function(i) {
+    x <- suppressWarnings(as.numeric(values[, i]))
+    finite <- is.finite(x)
+    list(
+      min = if (any(finite)) min(x[finite]) else NA_real_,
+      max = if (any(finite)) max(x[finite]) else NA_real_
+    )
+  })
+  names(stats) <- colnames(values)
+  stats
+}
+
+wsi_seurat_gene_colours <- function(gene_expression, gene = NULL) {
+  if (!isTRUE(gene_expression$enabled) || is.null(gene_expression$values) || !ncol(gene_expression$values)) {
+    wsi_abort("No Seurat gene expression values are available for spot colouring.")
+  }
+  genes <- gene_expression$genes
+  gene <- gene %||% gene_expression$default_gene %||% genes[[1L]]
+  idx <- wsi_seurat_gene_match(gene, genes)
+  if (is.na(idx)) {
+    wsi_abort(sprintf("Gene `%s` was not found in the extracted Seurat expression data.", gene))
+  }
+  values <- suppressWarnings(as.numeric(gene_expression$values[, idx]))
+  wsi_seurat_gradient(values, low = "#dbeafe", mid = "#fef3c7", high = "#dc2626")
+}
+
+wsi_seurat_subset_gene_expression <- function(gene_expression, idx) {
+  if (!isTRUE(gene_expression$enabled) || is.null(gene_expression$values) || !ncol(gene_expression$values)) {
+    return(gene_expression)
+  }
+  gene_expression$values <- gene_expression$values[idx, , drop = FALSE]
+  gene_expression
+}
+
+wsi_seurat_gene_value_items <- function(gene_expression) {
+  if (!isTRUE(gene_expression$enabled) || is.null(gene_expression$values) || !ncol(gene_expression$values)) {
+    return(list())
+  }
+  values <- gene_expression$values
+  lapply(seq_len(nrow(values)), function(i) {
+    row <- as.list(as.numeric(values[i, ]))
+    names(row) <- colnames(values)
+    row
+  })
+}
+
+wsi_seurat_gene_expression_config <- function(gene_expression) {
+  if (!isTRUE(gene_expression$enabled)) {
+    return(list(enabled = FALSE, genes = character(), default_gene = NULL, ranges = list()))
+  }
+  list(
+    enabled = TRUE,
+    genes = as.character(gene_expression$genes %||% character()),
+    default_gene = gene_expression$default_gene %||% NULL,
+    ranges = gene_expression$ranges %||% list()
+  )
 }
 
 wsi_seurat_coordinate_transform_arg <- function(transform) {
