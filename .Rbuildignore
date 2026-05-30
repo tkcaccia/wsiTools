@@ -8,6 +8,7 @@
 ^docs$
 ^pkgdown$
 ^README\.Rmd$
+^EXAMPLES\.md$
 ^scripts$
 ^manuscript$
 ^.*\.Rcheck$

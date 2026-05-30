@@ -94,6 +94,48 @@ test_that("Seurat spots can be coloured by selected gene expression values", {
   expect_equal(config$gene_expression$default_gene, "Mbp")
 })
 
+test_that("live Seurat gene payload fetches one selected gene without preloading all genes", {
+  embeddings <- matrix(
+    c(-2, 0.5, 1, -0.5, 2, 1.5),
+    ncol = 2,
+    byrow = TRUE,
+    dimnames = list(c("spot_a", "spot_b", "spot_c"), c("PC_1", "PC_2"))
+  )
+  expression <- matrix(
+    c(0, 2, 4, 5, 4, 3, 9, 0, 1),
+    nrow = 3,
+    byrow = TRUE,
+    dimnames = list(c("Mbp", "Plp1", "Gad1"), c("spot_a", "spot_b", "spot_c"))
+  )
+  seurat_like <- list(
+    reductions = list(pca = list(cell.embeddings = embeddings)),
+    assays = list(Spatial = list(data = expression)),
+    images = list(
+      anterior1 = list(
+        coordinates = data.frame(
+          barcode = c("spot_a", "spot_b", "spot_c"),
+          imagecol = c(10, 20, 30),
+          imagerow = c(5, 15, 25)
+        ),
+        image = array(0, dim = c(50, 100, 3)),
+        scale.factors = list(spot = 12)
+      )
+    )
+  )
+  slide <- wsi_mock_slide(width = 1000, height = 500, levels = c(1, 2))
+
+  linked <- wsi_link_seurat_image(seurat_like, slide)
+  expect_false(linked$gene_expression$enabled)
+  expect_true(wsiTools:::wsi_seurat_live_gene_available(linked))
+
+  payload <- wsiTools:::wsi_seurat_dynamic_gene_payload(linked, "Gad1")
+
+  expect_true(payload$ok)
+  expect_equal(payload$gene, "Gad1")
+  expect_equal(payload$count, 3)
+  expect_equal(vapply(payload$points, `[[`, numeric(1), "value"), c(9, 0, 1))
+})
+
 test_that("10x tissue positions and scalefactors align Seurat spots to full-resolution images", {
   embeddings <- matrix(
     c(-2, 0.5, 1, -0.5),
@@ -434,12 +476,15 @@ test_that("Seurat viewer exposes spot layer and PCA controls", {
     overwrite = TRUE,
     mode = "thumbnail",
     layers = list(wsiTools:::wsi_seurat_spots_layer(linked)),
-    seurat = linked
+    seurat = linked,
+    seurat_gene_url = "http://127.0.0.1:8788/seurat-gene"
   )
   text <- paste(readLines(html, warn = FALSE), collapse = "\n")
 
   expect_match(text, "Seurat", fixed = TRUE)
   expect_match(text, "seurat_spots", fixed = TRUE)
+  expect_match(text, "seurat_gene_url", fixed = TRUE)
+  expect_match(text, "Type any gene name", fixed = TRUE)
   expect_match(text, "seuratPlotWindow", fixed = TRUE)
   expect_match(text, "bindSeuratControls", fixed = TRUE)
   expect_match(text, "seuratGeneInput", fixed = TRUE)

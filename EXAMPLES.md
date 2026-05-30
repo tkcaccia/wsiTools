@@ -400,8 +400,6 @@ viewer <- wsi_viewer_seurat(
   image_name = "anterior1",
   coordinate_flip = "horizontal",
   coordinate_rotation = 270,
-  spot_genes = c("Mbp", "Plp1", "Snap25", "Gad1"),
-  default_gene = "Mbp",
   reduction = "pca",
   dims = c(1, 2),
   live = TRUE,
@@ -414,6 +412,9 @@ viewer <- wsi_viewer_seurat(
 
 viewer$get_state()$seurat_selection
 ```
+
+In this live version, keep the R session open and type any gene name in the
+viewer. The browser retrieves expression for only that selected gene from R.
 
 By default, wsiTools first tries to use the coordinates and scale factors stored
 inside the Seurat object. The external mouse-brain TIFF above is oriented
@@ -429,10 +430,11 @@ wsiTools can use `tissue_positions.csv` and `scalefactors_json.json`. If the
 external image is a resized/cropped derivative of the 10x full-resolution image,
 inspect the linked object and override the coordinate scaling:
 
-The Seurat menu can also colour spots by gene expression. Because whole Seurat
-objects can contain many genes, wsiTools embeds only the genes requested with
-`spot_genes`; type one of those names in the Seurat gene field and click
-**Colour by gene**.
+The Seurat menu can also colour spots by gene expression. In a live viewer,
+wsiTools does not send the whole expression matrix to the browser. Type any
+gene name in the Seurat gene field and click **Colour by gene**; the browser
+asks the active R session for that one gene only. For a static HTML viewer with
+no live R bridge, use `spot_genes` to embed a small gene set.
 
 ```r
 linked <- wsi_link_seurat_image(
@@ -442,14 +444,20 @@ linked <- wsi_link_seurat_image(
   spatial_dir = "/Users/stefano/Downloads/spatial",
   coordinate_flip = "horizontal",
   coordinate_rotation = 270,
-  spot_genes = c("Mbp", "Plp1", "Snap25", "Gad1"),
-  default_gene = "Mbp",
   coordinate_scale = "custom",
   scale_x = 2.0,
   scale_y = 2.0
 )
 
-wsi_viewer_seurat(brain, image = linked$image_path, linked = linked, open = TRUE)
+viewer <- wsi_viewer_seurat(
+  brain,
+  image = linked$image_path,
+  linked = linked,
+  live = TRUE,
+  dynamic_tiles = TRUE,
+  open = TRUE,
+  wait = FALSE
+)
 ```
 
 ## Selected-ROI StarDist Workflow

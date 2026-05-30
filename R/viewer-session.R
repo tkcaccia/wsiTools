@@ -3042,7 +3042,9 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
                                           host = "127.0.0.1", port = 8788,
                                           path = "/viewer-state", max_tries = 20L,
                                           tile_sources = list(),
-                                          tile_path = "/tiles") {
+                                          tile_path = "/tiles",
+                                          seurat = NULL,
+                                          seurat_gene_path = "/seurat-gene") {
   if (!requireNamespace("httpuv", quietly = TRUE)) {
     wsi_abort(
       "Live viewer state sync requires the optional package `httpuv`.",
@@ -3053,6 +3055,9 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
   max_tries <- as.integer(wsi_check_scalar_number(max_tries, "max_tries", allow_zero = TRUE))
   if (!startsWith(path, "/")) {
     path <- paste0("/", path)
+  }
+  if (!startsWith(seurat_gene_path, "/")) {
+    seurat_gene_path <- paste0("/", seurat_gene_path)
   }
   tile_path <- wsi_dynamic_tile_route(tile_path)
   if (inherits(tile_sources, "wsi_dynamic_tile_source")) {
@@ -3083,12 +3088,55 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
     wsi_viewer_state_response(state, dequeue_commands = dequeue_commands)
   }
 
+  seurat_gene_response <- function(req) {
+    method <- req$REQUEST_METHOD %||% "GET"
+    if (!wsi_seurat_live_gene_available(seurat)) {
+      return(wsi_http_json_response(
+        status = 404L,
+        body = list(error = "No live Seurat expression source is attached to this viewer.")
+      ))
+    }
+    gene <- NULL
+    if (identical(method, "GET")) {
+      query <- wsi_dynamic_tile_query_settings(req$QUERY_STRING %||% "")
+      gene <- query$gene %||% query$q %||% NULL
+    } else if (identical(method, "POST")) {
+      body <- wsi_http_request_body(req)
+      payload <- if (nzchar(body)) jsonlite::fromJSON(body, simplifyVector = FALSE) else list()
+      if (!is.list(payload)) {
+        return(wsi_http_json_response(status = 400L, body = list(error = "Seurat gene request must be a JSON object.")))
+      }
+      unknown <- setdiff(names(payload), c("gene", "q"))
+      if (length(unknown)) {
+        return(wsi_http_json_response(
+          status = 400L,
+          body = list(error = sprintf("Unsupported Seurat gene request field%s: %s.", if (length(unknown) == 1L) "" else "s", paste(unknown, collapse = ", ")))
+        ))
+      }
+      gene <- payload$gene %||% payload$q %||% NULL
+    } else {
+      return(wsi_http_json_response(status = 405L, body = list(error = "Use GET or POST for Seurat gene expression lookup.")))
+    }
+    if (is.null(gene) || !is.character(gene) || length(gene) != 1L || is.na(gene) || !nzchar(trimws(gene))) {
+      return(wsi_http_json_response(status = 400L, body = list(error = "Provide a single non-empty `gene` value.")))
+    }
+    tryCatch(
+      wsi_http_json_response(body = wsi_seurat_dynamic_gene_payload(seurat, trimws(gene))),
+      error = function(err) {
+        wsi_http_json_response(status = 404L, body = list(error = conditionMessage(err), gene = trimws(gene)))
+      }
+    )
+  }
+
   app <- list(
     call = function(req) {
       method <- req$REQUEST_METHOD %||% "GET"
       request_path <- req$PATH_INFO %||% "/"
       if (identical(method, "OPTIONS")) {
         return(wsi_http_json_response(status = 204L, body = ""))
+      }
+      if (identical(request_path, seurat_gene_path)) {
+        return(seurat_gene_response(req))
       }
       tile_request <- wsi_dynamic_tile_parse(request_path, route = tile_path)
       if (!is.null(tile_request)) {
@@ -3178,6 +3226,8 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
         url = url,
         ws_url = ws_url,
         tile_path = tile_path,
+        seurat_gene_path = seurat_gene_path,
+        seurat_gene_url = if (wsi_seurat_live_gene_available(seurat)) sprintf("http://%s:%d%s", host, candidate, seurat_gene_path) else NULL,
         tile_sources = tile_sources
       ))
     }
@@ -3236,6 +3286,8 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 #'   Zoom generation in [wsi_viewer()] is unchanged.
 #' @param dynamic_tile_format,dynamic_tile_cache_dir,dynamic_tile_path Format,
 #'   cache directory, and HTTP route for on-demand live tiles.
+#' @param seurat_gene_path Local HTTP route used by live Seurat viewers to
+#'   retrieve one gene at a time from the active R session.
 #' @param project_tile_sources Optional dynamic tile sources used only by
 #'   Project-panel image/section entries. These sources are served by the live
 #'   tile server but are not exposed as Stains/channel layers.
@@ -3333,6 +3385,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
                                dynamic_tile_format = c("png", "jpg", "jpeg"),
                                dynamic_tile_cache_dir = NULL,
                                dynamic_tile_path = "/tiles",
+                               seurat_gene_path = "/seurat-gene",
                                project_tile_sources = NULL,
                                wait = interactive(),
                                open = interactive(),
@@ -3383,6 +3436,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   wsi_assign_viewer_state(state)
 
   dots <- list(...)
+  live_seurat <- dots$seurat %||% NULL
   requested_channel_sources <- dots$channel_sources %||% NULL
   dynamic_project_sources <- wsi_dynamic_channel_sources(project_tile_sources)
   dynamic_source <- NULL
@@ -3441,7 +3495,9 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
     path = path,
     max_tries = max_tries,
     tile_sources = all_dynamic_sources,
-    tile_path = dynamic_tile_path
+    tile_path = dynamic_tile_path,
+    seurat = live_seurat,
+    seurat_gene_path = seurat_gene_path
   )
 
   stardist_bridge <- NULL
@@ -3523,6 +3579,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   dots$viewer_state_url <- bridge$url
   dots$viewer_state_ws_url <- if (identical(transport, "polling")) NULL else bridge$ws_url
   dots$viewer_transport <- transport
+  dots$seurat_gene_url <- bridge$seurat_gene_url %||% NULL
   if (!is.null(dots$channel_sources)) {
     state$channel_sources <- wsi_channel_sources_payload(dots$channel_sources)
     state$channel_settings <- wsi_channel_settings_from_sources(state$channel_sources)
@@ -3578,6 +3635,9 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   }
   if (length(dynamic_project_sources)) {
     message("Dynamic project tile sources active: ", length(dynamic_project_sources), " tissue/section source", if (length(dynamic_project_sources) == 1L) "" else "s")
+  }
+  if (!is.null(bridge$seurat_gene_url)) {
+    message("Live Seurat gene lookup active at ", bridge$seurat_gene_url)
   }
   message("Browser edits update `", name, "` and companion objects in the chosen R environment.")
   if (!is.null(stardist_bridge)) {

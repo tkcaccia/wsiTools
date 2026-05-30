@@ -963,6 +963,28 @@ directory, and removes that cache when `wsi_viewer_stop(session)` is called.
 Tiles are produced from region reads through the available libvips/OpenSlide
 backend; the full WSI is not loaded into R memory.
 
+### Seurat/Visium live gene colouring
+
+`wsi_viewer_seurat(..., live = TRUE)` keeps the Seurat expression matrix in R.
+The browser receives spot coordinates and PCA values, but not all genes. When
+you type a gene name in the **Seurat** menu and click **Colour by gene**, the
+viewer asks the active R session for that one gene only.
+
+```r
+viewer <- wsi_viewer_seurat(
+  brain,
+  "/Users/stefano/Downloads/V1_Mouse_Brain_Sagittal_Anterior_image.tif",
+  live = TRUE,
+  dynamic_tiles = TRUE,
+  coordinate_flip = "horizontal",
+  coordinate_rotation = 270,
+  wait = FALSE
+)
+```
+
+Static HTML viewers cannot ask R for new genes after the file is opened. For
+static export, pass a small preselected gene set with `spot_genes`.
+
 ### H&E plus mIHC channel overlays
 
 Use `wsi_viewer_he_mihc()` to open an H&E WSI as the base tiled image and

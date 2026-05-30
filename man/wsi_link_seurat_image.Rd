@@ -83,7 +83,9 @@ backwards compatibility. Prefer \code{coordinate_flip} and
 \item{spot_genes}{Optional character vector of gene names to extract and
 send to the viewer for spot colouring. Only these genes are embedded in the
 viewer payload; the full expression matrix is never copied into the
-browser.}
+browser. In live mode, \code{\link[=wsi_viewer_seurat]{wsi_viewer_seurat()}} can instead retrieve one
+selected gene at a time from the active R session, so \code{spot_genes} may be
+left \code{NULL}.}
 
 \item{default_gene}{Optional gene name used as the initial spot colour
 variable. The gene is automatically added to \code{spot_genes} when needed.}

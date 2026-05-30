@@ -947,7 +947,10 @@ wsi_viewer_seurat_controls <- function(config) {
   gene_expression <- seurat$gene_expression %||% list(enabled = FALSE, genes = character(), default_gene = NULL)
   genes <- as.character(gene_expression$genes %||% character())
   genes <- genes[nzchar(genes) & !is.na(genes)]
-  has_genes <- enabled && spot_count > 0L && isTRUE(gene_expression$enabled) && length(genes) > 0L
+  has_live_gene_lookup <- !is.null(config$seurat_gene_url) &&
+    is.character(config$seurat_gene_url) && length(config$seurat_gene_url) == 1L &&
+    !is.na(config$seurat_gene_url) && nzchar(config$seurat_gene_url)
+  has_genes <- enabled && spot_count > 0L && (length(genes) > 0L || has_live_gene_lookup)
   default_gene <- as.character(gene_expression$default_gene %||% "")
   gene_options <- paste0(
     vapply(genes, function(gene) {
@@ -998,9 +1001,13 @@ wsi_viewer_seurat_controls <- function(config) {
       "</div>",
       "<div id=\"seuratGeneSummary\" class=\"menuHint\">",
       if (has_genes) {
-        paste0(length(genes), " gene", if (length(genes) == 1L) "" else "s", " available for spot colouring.")
+        if (has_live_gene_lookup) {
+          "Type any gene name; expression values are fetched from R only when selected."
+        } else {
+          paste0(length(genes), " gene", if (length(genes) == 1L) "" else "s", " available for spot colouring.")
+        }
       } else {
-        "No gene expression values are embedded. Pass `spot_genes` to `wsi_viewer_seurat()`."
+        "No live Seurat gene lookup or embedded gene values are available."
       },
       "</div>",
       "<div class=\"menuTitle\">Dimensional reduction</div>",
@@ -2078,13 +2085,15 @@ wsi_viewer_seurat_js <- function() {
     "function seuratPlotItem(){const plots=seuratConfig().plots||[];return Array.isArray(plots)&&plots.length?plots[0]:null;}\n",
     "function seuratPlotPoints(){const plot=seuratPlotItem(),pts=plot&&plot.points||[];return Array.isArray(pts)?pts:[];}\n",
     "function seuratSummary(msg){const box=el('seuratSummary');if(box&&msg)box.textContent=msg;}\n",
-    "function updateSeuratControls(){const layer=findSeuratLayer(),cfgs=seuratConfig(),has=seuratEnabled()&&!!layer&&layerCount(layer)>0,toggle=el('seuratSpotToggle'),zoom=el('seuratSpotZoom'),panel=el('seuratLayerPanel'),opacity=el('seuratSpotOpacity'),radius=el('seuratSpotRadius'),radiusValue=el('seuratSpotRadiusValue'),open=el('seuratOpenPca'),clear=el('seuratClearSelection'),summary=el('seuratSummary'),geneInput=el('seuratGeneInput'),geneApply=el('seuratGeneApply'),geneClear=el('seuratGeneClear'),geneSummary=el('seuratGeneSummary');if(toggle){toggle.disabled=!has;toggle.classList.toggle('active',has&&layerVisible(layer));}if(zoom)zoom.disabled=!has;if(panel)panel.disabled=!has;if(opacity){opacity.disabled=!has;if(layer)opacity.value=String(layerOpacity(layer));}if(radius){radius.disabled=!has;const r=layer&&Array.isArray(layer.items)&&layer.items.length?Number(layer.items[0].radius||layer.radius||8):Number(layer&&layer.radius||cfgs.spot_radius||8);if(Number.isFinite(r))radius.value=String(Math.round(r));if(radiusValue)radiusValue.textContent=(Number.isFinite(r)?Math.round(r):8)+' px';}const genes=seuratExpressionGenes(),hasGenes=has&&genes.length>0;if(geneInput){geneInput.disabled=!hasGenes;if(seuratActiveGene&&!geneInput.value)geneInput.value=seuratActiveGene;}if(geneApply)geneApply.disabled=!hasGenes;if(geneClear)geneClear.disabled=!has;if(geneSummary){if(!hasGenes)geneSummary.textContent='No gene expression values are embedded. Pass spot_genes to wsi_viewer_seurat().';else geneSummary.textContent=(seuratActiveGene?('Colouring spots by '+seuratActiveGene+'. '):'')+genes.length.toLocaleString()+' gene'+(genes.length===1?'':'s')+' available.';}const hasPlot=seuratEnabled()&&seuratPlotPoints().length>0;if(open)open.disabled=!hasPlot;if(clear)clear.disabled=!hasPlot&&!seuratSelectedLabels.size;if(summary){if(!seuratEnabled())summary.textContent='No Seurat object is attached to this viewer.';else if(!has)summary.textContent='No Seurat spatial spots were found.';else summary.textContent=(layerVisible(layer)?'Showing ':'Hidden ')+layerCount(layer).toLocaleString()+' Seurat spot'+(layerCount(layer)===1?'':'s')+' | '+String((cfgs.reduction||'PCA')).toUpperCase()+(seuratActiveGene?' | gene '+seuratActiveGene:'');}}\n",
+    "function updateSeuratControls(){const layer=findSeuratLayer(),cfgs=seuratConfig(),has=seuratEnabled()&&!!layer&&layerCount(layer)>0,toggle=el('seuratSpotToggle'),zoom=el('seuratSpotZoom'),panel=el('seuratLayerPanel'),opacity=el('seuratSpotOpacity'),radius=el('seuratSpotRadius'),radiusValue=el('seuratSpotRadiusValue'),open=el('seuratOpenPca'),clear=el('seuratClearSelection'),summary=el('seuratSummary'),geneInput=el('seuratGeneInput'),geneApply=el('seuratGeneApply'),geneClear=el('seuratGeneClear'),geneSummary=el('seuratGeneSummary');if(toggle){toggle.disabled=!has;toggle.classList.toggle('active',has&&layerVisible(layer));}if(zoom)zoom.disabled=!has;if(panel)panel.disabled=!has;if(opacity){opacity.disabled=!has;if(layer)opacity.value=String(layerOpacity(layer));}if(radius){radius.disabled=!has;const r=layer&&Array.isArray(layer.items)&&layer.items.length?Number(layer.items[0].radius||layer.radius||8):Number(layer&&layer.radius||cfgs.spot_radius||8);if(Number.isFinite(r))radius.value=String(Math.round(r));if(radiusValue)radiusValue.textContent=(Number.isFinite(r)?Math.round(r):8)+' px';}const genes=seuratExpressionGenes(),dynamic=seuratDynamicGeneAvailable(),hasGenes=has&&(genes.length>0||dynamic);if(geneInput){geneInput.disabled=!hasGenes;if(seuratActiveGene&&!geneInput.value)geneInput.value=seuratActiveGene;}if(geneApply)geneApply.disabled=!hasGenes;if(geneClear)geneClear.disabled=!has;if(geneSummary){if(!hasGenes)geneSummary.textContent='No live Seurat gene lookup or embedded gene values are available.';else if(dynamic)geneSummary.textContent=(seuratActiveGene?('Colouring spots by '+seuratActiveGene+'. '):'')+'Type any gene name; values are fetched from R when selected.';else geneSummary.textContent=(seuratActiveGene?('Colouring spots by '+seuratActiveGene+'. '):'')+genes.length.toLocaleString()+' gene'+(genes.length===1?'':'s')+' available.';}const hasPlot=seuratEnabled()&&seuratPlotPoints().length>0;if(open)open.disabled=!hasPlot;if(clear)clear.disabled=!hasPlot&&!seuratSelectedLabels.size;if(summary){if(!seuratEnabled())summary.textContent='No Seurat object is attached to this viewer.';else if(!has)summary.textContent='No Seurat spatial spots were found.';else summary.textContent=(layerVisible(layer)?'Showing ':'Hidden ')+layerCount(layer).toLocaleString()+' Seurat spot'+(layerCount(layer)===1?'':'s')+' | '+String((cfgs.reduction||'PCA')).toUpperCase()+(seuratActiveGene?' | gene '+seuratActiveGene:'');}}\n",
     "function toggleSeuratSpots(){const layer=findSeuratLayer();if(!layer)return;setViewerLayerVisible(layer.id,!layerVisible(layer));updateSeuratControls();}\n",
     "function setSeuratSpotOpacity(value){const layer=findSeuratLayer();if(!layer)return;layer.opacity=clamp(Number(value),0,1);draw();scheduleViewerStateSync('layer_opacity_updated',{id:layer.id,name:layer.name,opacity:layerOpacity(layer)});}\n",
     "function setSeuratSpotRadius(value){const layer=findSeuratLayer();if(!layer)return;const r=clamp(Math.round(Number(value)||8),1,120);layer.radius=r;(layer.items||[]).forEach(item=>{if(item.type==='point'||(Number.isFinite(Number(item.x))&&Number.isFinite(Number(item.y))))item.radius=r;});updateSeuratControls();draw();scheduleViewerStateSync('layer_updated',{id:layer.id,name:layer.name,radius:r});}\n",
     "function zoomToSeuratSpots(){const layer=findSeuratLayer();if(!layer||!Array.isArray(layer.items)||!layer.items.length)return;const b=cellLayerBounds(layer);if(!b)return;const corners=[{x:b.xmin,y:b.ymin},{x:b.xmax,y:b.ymin},{x:b.xmax,y:b.ymax},{x:b.xmin,y:b.ymax}].map(slideToViewImagePoint),xs=corners.map(p=>p.x),ys=corners.map(p=>p.y),pad=1.25;scale=clamp(Math.min(innerWidth/Math.max(1,(Math.max(...xs)-Math.min(...xs))*pad),innerHeight/Math.max(1,(Math.max(...ys)-Math.min(...ys))*pad)),minScale*0.8,40);offsetX=innerWidth/2-((Math.min(...xs)+Math.max(...xs))/2)*scale;offsetY=innerHeight/2-((Math.min(...ys)+Math.max(...ys))/2)*scale;draw();}\n",
-    "let seuratPlotTransform=null,seuratSelectionDrag=null,seuratSelectionPolygon=[],seuratSelectedLabels=new Set(),seuratSelectionMatchedCount=0,seuratPlotDrag=null,seuratPlotResizeObserver=null,seuratActiveGene=String(((seuratConfig().gene_expression||{}).default_gene)||'');\n",
+    "let seuratPlotTransform=null,seuratSelectionDrag=null,seuratSelectionPolygon=[],seuratSelectedLabels=new Set(),seuratSelectionMatchedCount=0,seuratPlotDrag=null,seuratPlotResizeObserver=null,seuratActiveGene=String(((seuratConfig().gene_expression||{}).default_gene)||''),seuratGeneFetchToken=0;\n",
     "function seuratPointLabel(point){if(!point)return '';return String(point.label??point.spot_id??point.id??'');}\n",
+    "function seuratDynamicGeneUrl(){return String(cfg.seurat_gene_url||'');}\n",
+    "function seuratDynamicGeneAvailable(){return !!seuratDynamicGeneUrl();}\n",
     "function seuratExpressionConfig(){return seuratConfig().gene_expression||{enabled:false,genes:[],ranges:{}};}\n",
     "function seuratExpressionGenes(){const genes=seuratExpressionConfig().genes||[];return Array.isArray(genes)?genes.map(g=>String(g||'')).filter(Boolean):[];}\n",
     "function seuratFindExpressionGene(name){const query=String(name||'').trim();if(!query)return '';const genes=seuratExpressionGenes();return genes.find(g=>g===query)||genes.find(g=>g.toLowerCase()===query.toLowerCase())||'';}\n",
@@ -2095,7 +2104,11 @@ wsi_viewer_seurat_js <- function() {
     "function seuratRememberBaseColour(item){if(!item)return;if(!item.seurat_base_colour)item.seurat_base_colour=normaliseHexColour(item.base_colour||item.base_color||item.colour||item.color||'','#2B6CB0');}\n",
     "function seuratSetGeneItemColour(item,gene){if(!item)return;seuratRememberBaseColour(item);const value=seuratGeneValue(item,gene),colour=seuratExpressionColour(value,gene);item.colour=colour;item.color=colour;item.gene=gene;item.gene_value=Number.isFinite(value)?value:null;item.fill=hexToRgba(colour,.42);}\n",
     "function seuratRestoreItemColour(item){if(!item)return;const colour=normaliseHexColour(item.seurat_base_colour||item.base_colour||item.base_color||item.colour||item.color||'','#2B6CB0');item.colour=colour;item.color=colour;item.fill=hexToRgba(colour,.35);delete item.gene;delete item.gene_value;}\n",
-    "function applySeuratGeneColour(gene=null,sync=true){const actual=seuratFindExpressionGene(gene||((el('seuratGeneInput')||{}).value)||seuratActiveGene);if(!actual){notify('Gene not found in the embedded Seurat genes. Pass it in spot_genes when creating the viewer.','warning',4200);return false;}const layer=findSeuratLayer();if(layer&&Array.isArray(layer.items))layer.items.forEach(item=>seuratSetGeneItemColour(item,actual));seuratPlotPoints().forEach(point=>seuratSetGeneItemColour(point,actual));seuratActiveGene=actual;const input=el('seuratGeneInput');if(input)input.value=actual;updateSeuratControls();drawSeuratPlot();draw();if(sync)scheduleViewerStateSync('seurat_gene_coloured',{detail:{gene:actual}});notify('Seurat spots coloured by '+actual,'success',2200);return true;}\n",
+    "function seuratGeneKeys(item){return [item&&item.id,item&&item.label,item&&item.barcode,item&&item.spot_id].map(v=>String(v??'').trim().toLowerCase()).filter(Boolean);}\n",
+    "function seuratMergeGenePayload(payload){if(!payload||payload.ok===false)throw new Error(payload&&payload.error||'No Seurat gene payload returned');const gene=String(payload.gene||payload.requested_gene||'').trim();if(!gene)throw new Error('The Seurat gene response did not include a gene name.');const cfgExpr=seuratExpressionConfig();cfgExpr.enabled=true;cfgExpr.genes=Array.isArray(cfgExpr.genes)?cfgExpr.genes:[];if(!seuratFindExpressionGene(gene))cfgExpr.genes.push(gene);cfgExpr.ranges=cfgExpr.ranges||{};if(payload.range)cfgExpr.ranges[gene]=payload.range;seuratConfig().gene_expression=cfgExpr;const valueMap=new Map();(payload.points||[]).forEach(point=>{const raw=point.value,value=(raw===null||typeof raw==='undefined')?NaN:Number(raw);[point.id,point.label,point.barcode,point.spot_id].forEach(key=>{key=String(key??'').trim().toLowerCase();if(key)valueMap.set(key,value);});});const attach=item=>{if(!item)return;let value=NaN;for(const key of seuratGeneKeys(item)){if(valueMap.has(key)){value=valueMap.get(key);break;}}item.gene_values=item.gene_values||{};item.gene_values[gene]=Number.isFinite(value)?value:NaN;};const layer=findSeuratLayer();if(layer&&Array.isArray(layer.items))layer.items.forEach(attach);seuratPlotPoints().forEach(attach);return gene;}\n",
+    "async function seuratFetchGene(gene){const url=seuratDynamicGeneUrl();if(!url)return '';const token=++seuratGeneFetchToken;const sep=url.indexOf('?')>=0?'&':'?';const response=await fetch(url+sep+'gene='+encodeURIComponent(gene),{method:'GET',headers:{'Accept':'application/json'}});let payload=null;try{payload=await response.json();}catch(e){}if(token!==seuratGeneFetchToken)return '';if(!response.ok){throw new Error((payload&&payload.error)||('HTTP '+response.status));}return seuratMergeGenePayload(payload);}\n",
+    "function applySeuratEmbeddedGeneColour(actual,sync=true){const layer=findSeuratLayer();if(layer&&Array.isArray(layer.items))layer.items.forEach(item=>seuratSetGeneItemColour(item,actual));seuratPlotPoints().forEach(point=>seuratSetGeneItemColour(point,actual));seuratActiveGene=actual;const input=el('seuratGeneInput');if(input)input.value=actual;updateSeuratControls();drawSeuratPlot();draw();if(sync)scheduleViewerStateSync('seurat_gene_coloured',{detail:{gene:actual}});notify('Seurat spots coloured by '+actual,'success',2200);return true;}\n",
+    "async function applySeuratGeneColour(gene=null,sync=true){const requested=String(gene||((el('seuratGeneInput')||{}).value)||seuratActiveGene||'').trim();if(!requested){notify('Type a gene name first','warning',2600);return false;}let actual=seuratFindExpressionGene(requested);if(!actual&&seuratDynamicGeneAvailable()){try{notify('Fetching '+requested+' from R...','info',1800);actual=await seuratFetchGene(requested);}catch(e){notify('Could not fetch '+requested+': '+e.message,'warning',5200);return false;}}if(!actual){notify('Gene not found in the embedded Seurat genes. In live mode, keep the R session running and reopen with wsi_viewer_seurat(..., live = TRUE).','warning',5200);return false;}return applySeuratEmbeddedGeneColour(actual,sync);}\n",
     "function clearSeuratGeneColour(sync=true){const layer=findSeuratLayer();if(layer&&Array.isArray(layer.items))layer.items.forEach(seuratRestoreItemColour);seuratPlotPoints().forEach(seuratRestoreItemColour);seuratActiveGene='';const input=el('seuratGeneInput');if(input)input.value='';updateSeuratControls();drawSeuratPlot();draw();if(sync)scheduleViewerStateSync('seurat_gene_coloured',{detail:{gene:null}});notify('Seurat spot colours reset','info',1600);}\n",
     "function seuratPointColour(point){if(!point)return '#2B6CB0';return normaliseHexColour(point.colour||point.color||'','#2B6CB0');}\n",
     "function seuratPointBounds(points){const pts=(points||[]).map(p=>({x:Number(p.x),y:Number(p.y)})).filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.y));return pts.length?boundsFromPoints(pts):null;}\n",
@@ -2713,6 +2726,9 @@ wsi_tiled_viewer_html <- function(config) {
 #' @param viewer_transport Browser-to-R live transport advertised to the
 #'   viewer: `"auto"`, `"websocket"`, or `"polling"`. Static viewers ignore
 #'   this value.
+#' @param seurat_gene_url Optional live HTTP endpoint used by the Seurat menu
+#'   to retrieve one selected gene from R at a time. Static viewers ignore this
+#'   unless a compatible endpoint is supplied manually.
 #' @param autosave_enabled Whether the viewer should periodically sync state to
 #'   the live R bridge for project autosave. This is normally set by
 #'   [wsi_viewer_live()].
@@ -2767,6 +2783,7 @@ wsi_viewer <- function(slide, width = 1600, height = NULL, output = NULL,
                        segmentation_run_url = NULL,
                        viewer_state_url = NULL,
                        viewer_state_ws_url = NULL,
+                       seurat_gene_url = NULL,
                        autosave_enabled = FALSE,
                        autosave_interval = 5,
                        autosave_path = NULL,
@@ -2816,6 +2833,12 @@ wsi_viewer <- function(slide, width = 1600, height = NULL, output = NULL,
     }
     if (!grepl("^wss?://", viewer_state_ws_url)) {
       wsi_abort("`viewer_state_ws_url` must start with `ws://` or `wss://`.")
+    }
+  }
+  if (!is.null(seurat_gene_url)) {
+    if (!is.character(seurat_gene_url) || length(seurat_gene_url) != 1L ||
+        is.na(seurat_gene_url) || !nzchar(seurat_gene_url)) {
+      wsi_abort("`seurat_gene_url` must be `NULL` or a single non-empty URL.")
     }
   }
   if (!is.null(tile_url_base) &&
@@ -2913,6 +2936,7 @@ wsi_viewer <- function(slide, width = 1600, height = NULL, output = NULL,
       viewer_state_url = viewer_state_url,
       viewer_state_ws_url = viewer_state_ws_url,
       viewer_transport = viewer_transport,
+      seurat_gene_url = seurat_gene_url,
       autosave_enabled = isTRUE(autosave_enabled) && (!is.null(viewer_state_url) || !is.null(viewer_state_ws_url)),
       autosave_interval_ms = as.integer(max(1000, round(autosave_interval * 1000))),
       autosave_path = autosave_path,
@@ -2970,6 +2994,7 @@ wsi_viewer <- function(slide, width = 1600, height = NULL, output = NULL,
       viewer_state_url = viewer_state_url,
       viewer_state_ws_url = viewer_state_ws_url,
       viewer_transport = viewer_transport,
+      seurat_gene_url = seurat_gene_url,
       autosave_enabled = isTRUE(autosave_enabled) && (!is.null(viewer_state_url) || !is.null(viewer_state_ws_url)),
       autosave_interval_ms = as.integer(max(1000, round(autosave_interval * 1000))),
       autosave_path = autosave_path,

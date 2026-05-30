@@ -53,7 +53,9 @@
 #' @param spot_genes Optional character vector of gene names to extract and
 #'   send to the viewer for spot colouring. Only these genes are embedded in the
 #'   viewer payload; the full expression matrix is never copied into the
-#'   browser.
+#'   browser. In live mode, [wsi_viewer_seurat()] can instead retrieve one
+#'   selected gene at a time from the active R session, so `spot_genes` may be
+#'   left `NULL`.
 #' @param default_gene Optional gene name used as the initial spot colour
 #'   variable. The gene is automatically added to `spot_genes` when needed.
 #' @param spot_radius Spot marker radius, in slide pixels. When `NULL`, an
@@ -287,6 +289,10 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
     spot_count = total,
     displayed_spot_count = nrow(spots),
     spots = spots,
+    expression_source = list(
+      object = seurat,
+      spot_ids = as.character(spots$barcode %||% spots$id)
+    ),
     pca = list(
       id = paste0("seurat_", wsi_safe_id(reduction, "reduction")),
       label = paste0("Seurat ", toupper(reduction), " plot"),
@@ -305,7 +311,9 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
 #'
 #' `wsi_viewer_seurat()` opens a high-resolution tissue image and overlays
 #' Seurat spatial spots. The top **Seurat** menu opens the PCA scatter plot and
-#' can show/hide or zoom to the spot overlay.
+#' can show/hide or zoom to the spot overlay. In live mode, typing a gene in
+#' the Seurat menu retrieves only that selected gene from R; static HTML viewers
+#' use genes embedded with `spot_genes`.
 #'
 #' @param seurat A Seurat object.
 #' @param image Path to the high-resolution image, or a `wsi_slide` object.
@@ -351,6 +359,12 @@ wsi_viewer_seurat <- function(seurat, image, linked = NULL,
     )
   } else if (!inherits(linked, "wsi_seurat_spatial")) {
     wsi_abort("`linked` must be an object returned by `wsi_link_seurat_image()`.")
+  }
+  if (is.null(linked$expression_source$object)) {
+    linked$expression_source <- list(
+      object = seurat,
+      spot_ids = as.character(linked$spots$barcode %||% linked$spots$id)
+    )
   }
 
   spot_layer <- wsi_seurat_spots_layer(linked)
@@ -993,6 +1007,67 @@ wsi_seurat_gene_expression_config <- function(gene_expression) {
     genes = as.character(gene_expression$genes %||% character()),
     default_gene = gene_expression$default_gene %||% NULL,
     ranges = gene_expression$ranges %||% list()
+  )
+}
+
+wsi_seurat_live_gene_available <- function(seurat = NULL) {
+  inherits(seurat, "wsi_seurat_spatial") && !is.null(seurat$expression_source$object)
+}
+
+wsi_seurat_dynamic_gene_payload <- function(linked, gene) {
+  if (!inherits(linked, "wsi_seurat_spatial")) {
+    wsi_abort("Dynamic Seurat gene lookup requires an object from `wsi_link_seurat_image()`.")
+  }
+  gene <- wsi_seurat_default_gene_arg(gene)
+  source <- linked$expression_source %||% list()
+  object <- source$object %||% NULL
+  if (is.null(object)) {
+    wsi_abort(
+      paste(
+        "This viewer was not created with a live Seurat expression source.",
+        "Reopen it with `wsi_viewer_seurat(..., live = TRUE)` or preload a small gene set with `spot_genes`."
+      )
+    )
+  }
+  spot_ids <- as.character(source$spot_ids %||% linked$spots$barcode %||% linked$spots$id)
+  if (!length(spot_ids)) {
+    wsi_abort("No Seurat spot identifiers are available for dynamic gene lookup.")
+  }
+  gene_expression <- wsi_seurat_gene_expression(
+    object,
+    genes = gene,
+    spot_ids = spot_ids,
+    default_gene = gene
+  )
+  actual_gene <- gene_expression$default_gene %||% gene_expression$genes[[1L]]
+  idx <- wsi_seurat_gene_match(actual_gene, colnames(gene_expression$values))
+  if (is.na(idx)) {
+    wsi_abort(sprintf("Gene `%s` was not found in the Seurat expression data.", gene))
+  }
+  values <- suppressWarnings(as.numeric(gene_expression$values[, idx]))
+  colours <- wsi_seurat_gene_colours(gene_expression, actual_gene)
+  spots <- linked$spots
+  if (nrow(spots) != length(values)) {
+    spots <- spots[seq_len(min(nrow(spots), length(values))), , drop = FALSE]
+    values <- values[seq_len(nrow(spots))]
+    colours <- colours[seq_len(nrow(spots))]
+  }
+  points <- lapply(seq_len(nrow(spots)), function(i) {
+    list(
+      id = as.character(spots$id[[i]] %||% ""),
+      label = as.character(spots$label[[i]] %||% spots$id[[i]] %||% ""),
+      barcode = as.character(spots$barcode[[i]] %||% spots$id[[i]] %||% ""),
+      value = if (is.finite(values[[i]])) values[[i]] else NA_real_,
+      colour = as.character(colours[[i]] %||% "#d1d5db")
+    )
+  })
+  list(
+    ok = TRUE,
+    gene = as.character(actual_gene),
+    requested_gene = as.character(gene),
+    range = gene_expression$ranges[[actual_gene]] %||% list(min = NA_real_, max = NA_real_),
+    count = length(points),
+    points = points
   )
 }
 

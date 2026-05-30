@@ -40,6 +40,7 @@ wsi_viewer(
   segmentation_run_url = NULL,
   viewer_state_url = NULL,
   viewer_state_ws_url = NULL,
+  seurat_gene_url = NULL,
   autosave_enabled = FALSE,
   autosave_interval = 5,
   autosave_path = NULL,
@@ -143,6 +144,10 @@ measurements, segmentation overlays, and display state back to R. Use
 \item{viewer_state_ws_url}{Optional WebSocket endpoint used by live viewers
 for lower-latency browser-to-R sync. The HTTP polling bridge remains the
 fallback when this is \code{NULL} or WebSockets are unavailable.}
+
+\item{seurat_gene_url}{Optional live HTTP endpoint used by the Seurat menu
+to retrieve one selected gene from R at a time. Static viewers ignore this
+unless a compatible endpoint is supplied manually.}
 
 \item{autosave_enabled}{Whether the viewer should periodically sync state to
 the live R bridge for project autosave. This is normally set by

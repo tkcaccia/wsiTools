@@ -20,6 +20,7 @@ wsi_viewer_session(
   dynamic_tile_format = c("png", "jpg", "jpeg"),
   dynamic_tile_cache_dir = NULL,
   dynamic_tile_path = "/tiles",
+  seurat_gene_path = "/seurat-gene",
   project_tile_sources = NULL,
   wait = interactive(),
   open = interactive(),
@@ -60,6 +61,7 @@ wsi_viewer_live(
   dynamic_tile_format = c("png", "jpg", "jpeg"),
   dynamic_tile_cache_dir = NULL,
   dynamic_tile_path = "/tiles",
+  seurat_gene_path = "/seurat-gene",
   project_tile_sources = NULL,
   wait = interactive(),
   open = interactive(),
@@ -119,6 +121,9 @@ Zoom generation in \code{\link[=wsi_viewer]{wsi_viewer()}} is unchanged.}
 
 \item{dynamic_tile_format, dynamic_tile_cache_dir, dynamic_tile_path}{Format,
 cache directory, and HTTP route for on-demand live tiles.}
+
+\item{seurat_gene_path}{Local HTTP route used by live Seurat viewers to
+retrieve one gene at a time from the active R session.}
 
 \item{project_tile_sources}{Optional dynamic tile sources used only by
 Project-panel image/section entries. These sources are served by the live
