@@ -46,6 +46,7 @@ wsi_viewer(
   project_images = NULL,
   channel_sources = NULL,
   layers = NULL,
+  seurat = NULL,
   cellphenotyper = NULL,
   viewer_transport = c("auto", "websocket", "polling")
 )
@@ -162,6 +163,9 @@ bridge, or an explicitly enabled legacy Python bridge.}
 
 \item{layers}{Optional viewer overlay layers, for example point layers from
 CellPhenotyper/StarDist outputs.}
+
+\item{seurat}{Optional object returned by \code{\link[=wsi_link_seurat_image]{wsi_link_seurat_image()}} used to
+enable the top \strong{Seurat} menu and PCA plot.}
 
 \item{cellphenotyper}{Optional CellPhenotyper project metadata used to enable
 the top \strong{Cells} menu.}

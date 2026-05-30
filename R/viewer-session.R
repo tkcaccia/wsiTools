@@ -60,6 +60,7 @@ wsi_new_viewer_state <- function(name = "wsi_viewer_live_state", envir = parent.
   state$channel_settings <- wsi_empty_channel_settings()
   state$tile_sources <- list()
   state$kodama_selection <- list(labels = character(), count = 0L, matched_count = 0L)
+  state$seurat_selection <- list(labels = character(), count = 0L, matched_count = 0L)
   state$annotations <- list(dirty = FALSE, dirty_reason = "")
   state$history <- wsi_empty_annotation_history()
   state$jobs <- list()
@@ -154,7 +155,7 @@ wsi_viewer_allowed_events <- function() {
     "artifact_detected", "artifact_flagged", "artifact_overlay_toggled",
     "artifact_sensitivity_updated", "artifacts_cleared",
     "grandqc_loaded", "grandqc_cleared",
-    "kodama_cells_selected",
+    "kodama_cells_selected", "seurat_spots_selected",
     "ihc_intensity_measured",
     "segmentation_requested", "segmentation_started", "segmentation_progress",
     "segmentation_added", "segmentation_completed",
@@ -175,7 +176,7 @@ wsi_viewer_allowed_payload_fields <- function() {
     "selected_roi", "selected_rois", "rois", "segmentation", "layers",
     "measurements", "trajectories", "artifacts", "view", "annotations",
     "history", "stain", "channel_sources", "channel_settings",
-    "tile_sources", "kodama_selection", "detail"
+    "tile_sources", "kodama_selection", "seurat_selection", "detail"
   )
 }
 
@@ -1208,6 +1209,7 @@ wsi_assign_viewer_state <- function(state) {
   assign(paste0(name, "_selected_rois"), state$selected_rois, envir = envir)
   assign(paste0(name, "_last_segmentation"), state$last_segmentation, envir = envir)
   assign(paste0(name, "_kodama_selection"), state$kodama_selection %||% list(labels = character(), count = 0L, matched_count = 0L), envir = envir)
+  assign(paste0(name, "_seurat_selection"), state$seurat_selection %||% list(labels = character(), count = 0L, matched_count = 0L), envir = envir)
   assign(paste0(name, "_last_event"), state$last_payload, envir = envir)
   invisible(state)
 }
@@ -1251,6 +1253,8 @@ wsi_viewer_state_apply <- function(state, payload) {
   }
   state$kodama_selection <- payload[["kodama_selection", exact = TRUE]] %||%
     state$kodama_selection %||% list(labels = character(), count = 0L, matched_count = 0L)
+  state$seurat_selection <- payload[["seurat_selection", exact = TRUE]] %||%
+    state$seurat_selection %||% list(labels = character(), count = 0L, matched_count = 0L)
   state$annotations <- payload[["annotations", exact = TRUE]] %||% list(dirty = FALSE, dirty_reason = "")
   state$history <- wsi_annotation_history_from_payload(payload[["history", exact = TRUE]])
   wsi_viewer_update_measurement_tables(state)
@@ -1650,9 +1654,17 @@ wsi_viewer_layer_points_items <- function(points, colour = NULL, radius = 6) {
   ids <- if ("id" %in% names(points)) as.character(points$id) else sprintf("point_%05d", seq_len(nrow(points)))
   source_labels <- if ("label" %in% names(points)) as.character(points$label) else ids
   classes <- if ("class" %in% names(points)) as.character(points$class) else rep("point", nrow(points))
+  point_colours <- if ("colour" %in% names(points)) {
+    as.character(points$colour)
+  } else if ("color" %in% names(points)) {
+    as.character(points$color)
+  } else {
+    rep(NA_character_, nrow(points))
+  }
   lapply(seq_len(nrow(points)), function(i) {
     x <- as.numeric(points$x[[i]])
     y <- as.numeric(points$y[[i]])
+    point_colour <- wsi_viewer_layer_colour(point_colours[[i]], fallback = colour)
     list(
       id = ids[[i]],
       name = ids[[i]],
@@ -1664,8 +1676,8 @@ wsi_viewer_layer_points_items <- function(points, colour = NULL, radius = 6) {
       y = y,
       radius = radius,
       source = "points",
-      colour = colour,
-      fill = wsi_viewer_hex_to_rgba(colour, alpha = 0.35)
+      colour = point_colour,
+      fill = wsi_viewer_hex_to_rgba(point_colour, alpha = 0.35)
     )
   })
 }

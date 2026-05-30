@@ -16,7 +16,8 @@ viewer_state(x)
 A list containing ROIs, distance measurements, ROI/cell/class summary
 tables, trajectories, segmentation overlays, selected ROI(s), R-controlled
 viewer layers, previewed tile coordinates, last segmentation run metadata,
-annotation history, view/stain settings, autosave status, and event history.
+KODAMA selected-cell labels, annotation history, view/stain settings,
+autosave status, and event history.
 }
 \description{
 Read live viewer state

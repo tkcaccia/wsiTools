@@ -452,6 +452,35 @@ wsi_cellphenotyper_find_kodama_cluster_csv <- function(manifest, root, profile) 
   normalizePath(paths[[1L]], mustWork = TRUE)
 }
 
+wsi_cellphenotyper_kodama_palette <- function() {
+  c(
+    "#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00",
+    "#A65628", "#F781BF", "#999999", "#1B9E77", "#D95F02",
+    "#7570B3", "#E7298A", "#66A61E", "#E6AB02", "#A6761D",
+    "#666666", "#8DD3C7", "#FB8072", "#80B1D3", "#B3DE69"
+  )
+}
+
+wsi_cellphenotyper_kodama_colour <- function(cluster) {
+  if (!length(cluster)) {
+    return(character())
+  }
+  palette <- wsi_cellphenotyper_kodama_palette()
+  raw <- as.character(cluster)
+  idx <- suppressWarnings(as.integer(raw))
+  bad <- is.na(idx) | idx < 1L
+  if (any(bad)) {
+    idx[bad] <- vapply(raw[bad], function(value) {
+      chars <- utf8ToInt(enc2utf8(value))
+      if (!length(chars)) {
+        return(1L)
+      }
+      as.integer((sum(chars * seq_along(chars)) %% length(palette)) + 1L)
+    }, integer(1L))
+  }
+  palette[((idx - 1L) %% length(palette)) + 1L]
+}
+
 wsi_cellphenotyper_read_kodama_plot_points <- function(embedding, cluster_csv, max_points = 75000L) {
   if (is.na(embedding) || !nzchar(embedding) || !file.exists(embedding)) {
     return(NULL)
@@ -500,12 +529,15 @@ wsi_cellphenotyper_read_kodama_plot_points <- function(embedding, cluster_csv, m
   if (!any(keep)) {
     return(NULL)
   }
+  colours <- wsi_cellphenotyper_kodama_colour(cluster[keep])
   points <- data.frame(
     label = as.character(labels[keep]),
     x = kodama_x[keep],
     y = kodama_y[keep],
     cluster = as.character(cluster[keep]),
     class = paste0("color_", as.character(cluster[keep])),
+    colour = colours,
+    color = colours,
     stringsAsFactors = FALSE
   )
   total <- nrow(points)

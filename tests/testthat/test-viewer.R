@@ -1417,6 +1417,32 @@ test_that("dynamic tile sources create OpenSeadragon-compatible URLs and cache f
   expect_gt(file.info(file)$size, 0)
 })
 
+test_that("vips-backed dynamic tiles cache low-resolution fit levels", {
+  skip_if_not(wsi_has_vips())
+
+  input <- tempfile(fileext = ".png")
+  grDevices::png(input, width = 1024, height = 512, units = "px", bg = "white")
+  graphics::par(mar = c(0, 0, 0, 0))
+  graphics::plot.new()
+  graphics::rect(0, 0, 1, 1, col = "#dbeafe", border = NA)
+  graphics::rect(0.25, 0.25, 0.75, 0.75, col = "#2563eb", border = NA)
+  grDevices::dev.off()
+
+  slide <- wsi_open(input, backend = "vips")
+  on.exit(wsi_close(slide), add = TRUE)
+  source <- wsi_dynamic_tile_source(slide, slide_id = "vips fit", tile_size = 64, format = "jpg")
+  on.exit(wsiTools:::wsi_dynamic_tile_cleanup(source), add = TRUE)
+  level <- max(0L, source$max_level - 6L)
+  region <- wsiTools:::wsi_dynamic_tile_region(source, level = level, col = 0, row = 0)
+  file <- wsiTools:::wsi_dynamic_tile_file(source, level = level, col = 0, row = 0, format = "jpg")
+  level_cache <- file.path(source$cache_dir, source$id, "_levels", sprintf("level_%d.tif", level))
+
+  expect_true(file.exists(level_cache))
+  expect_true(file.exists(file))
+  expect_equal(as.integer(wsiTools:::wsi_vips_field(file, "width")), region$desired_width)
+  expect_equal(as.integer(wsiTools:::wsi_vips_field(file, "height")), region$desired_height)
+})
+
 test_that("mIHC channel sources use registration extent and dynamic tiles", {
   skip_if_not(wsi_has_vips())
 

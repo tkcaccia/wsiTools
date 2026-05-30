@@ -802,6 +802,98 @@ wsi_dynamic_ensure_rgb_tile <- function(file, format) {
   invisible(file)
 }
 
+wsi_dynamic_level_cache_max_pixels <- function() {
+  value <- suppressWarnings(as.numeric(Sys.getenv(
+    "WSITOOLS_DYNAMIC_TILE_LEVEL_CACHE_MAX_PIXELS",
+    unset = "6000000"
+  )))
+  if (!is.finite(value) || value <= 0) {
+    value <- 6000000
+  }
+  value
+}
+
+wsi_dynamic_can_cache_vips_level <- function(source, level, region) {
+  identical(source$kind %||% "slide", "slide") &&
+    isTRUE(wsi_has_vips()) &&
+    identical(source$slide$backend %||% "", "vips") &&
+    is.character(source$slide$path) &&
+    length(source$slide$path) == 1L &&
+    nzchar(source$slide$path) &&
+    file.exists(source$slide$path) &&
+    is.finite(region$deepzoom_downsample) &&
+    region$deepzoom_downsample >= 4 &&
+    is.finite(source$width) &&
+    is.finite(source$height) &&
+    ceiling(source$width / region$deepzoom_downsample) *
+      ceiling(source$height / region$deepzoom_downsample) <=
+      wsi_dynamic_level_cache_max_pixels()
+}
+
+wsi_dynamic_vips_level_cache_file <- function(source, level, region) {
+  level_dir <- file.path(source$cache_dir, source$id, "_levels")
+  if (!dir.exists(level_dir) &&
+      !dir.create(level_dir, recursive = TRUE, showWarnings = FALSE)) {
+    wsi_abort(sprintf("Could not create dynamic tile level-cache directory: %s", level_dir))
+  }
+  level_file <- file.path(level_dir, sprintf("level_%d.tif", as.integer(level)))
+  if (file.exists(level_file) && file.info(level_file)$size > 0) {
+    return(level_file)
+  }
+
+  level_width <- ceiling(source$width / region$deepzoom_downsample)
+  level_height <- ceiling(source$height / region$deepzoom_downsample)
+  scale <- level_width / source$width
+  vscale <- level_height / source$height
+  tmp <- tempfile(fileext = ".tif", tmpdir = level_dir)
+  on.exit(unlink(tmp), add = TRUE)
+  wsi_run_command(
+    "vips",
+    args = c(
+      "resize",
+      source$slide$path,
+      tmp,
+      format(scale, scientific = FALSE, trim = TRUE),
+      "--vscale",
+      format(vscale, scientific = FALSE, trim = TRUE)
+    ),
+    error_message = "libvips failed to create a cached low-resolution viewer tile level."
+  )
+
+  if (!file.exists(level_file)) {
+    if (!file.rename(tmp, level_file)) {
+      if (!file.copy(tmp, level_file, overwrite = FALSE)) {
+        wsi_abort(sprintf("Could not create dynamic tile level-cache file: %s", level_file))
+      }
+    }
+  }
+  level_file
+}
+
+wsi_dynamic_vips_cached_level_tile_to_file <- function(source, level, region, output, format) {
+  if (!wsi_dynamic_can_cache_vips_level(source, level, region)) {
+    return(FALSE)
+  }
+  level_file <- wsi_dynamic_vips_level_cache_file(source, level, region)
+  crop_x <- as.integer(floor(region$x / region$deepzoom_downsample))
+  crop_y <- as.integer(floor(region$y / region$deepzoom_downsample))
+  wsi_run_command(
+    "vips",
+    args = c(
+      "crop",
+      level_file,
+      output,
+      as.character(crop_x),
+      as.character(crop_y),
+      as.character(region$desired_width),
+      as.character(region$desired_height)
+    ),
+    error_message = "libvips failed to crop a cached low-resolution viewer tile."
+  )
+  wsi_dynamic_ensure_rgb_tile(output, format)
+  TRUE
+}
+
 wsi_dynamic_image_tile_settings <- function(source, settings = list()) {
   settings <- settings %||% list()
   contrast <- wsi_channel_contrast(
@@ -1116,6 +1208,10 @@ wsi_dynamic_tile_file <- function(source, level, col, row, format = NULL,
 
   if (identical(source$slide$backend, "mock")) {
     wsi_dynamic_write_mock_tile(output, region$desired_width, region$desired_height, format = format)
+    return(output)
+  }
+
+  if (wsi_dynamic_vips_cached_level_tile_to_file(source, level, region, output, format)) {
     return(output)
   }
 

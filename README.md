@@ -9,6 +9,11 @@ backend metadata, pyramid levels, explicit region reads, tile manifests, and
 streaming conversion. It does not load complete level-0 slides into R memory by
 default.
 
+For runnable workflows, see the separate [examples page](EXAMPLES.md). It
+covers single-image viewing, CZI projects, H&E/mIHC overlays, CellPhenotyper,
+Seurat/Visium PCA, annotation round trips, tile extraction, conversion, and
+troubleshooting.
+
 ## Installation
 
 ### Quick install from GitHub
