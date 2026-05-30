@@ -39,6 +39,13 @@
 #'   `"custom"` uses `scale_x` and `scale_y`.
 #' @param scale_x,scale_y Custom coordinate scale factors used when
 #'   `coordinate_scale = "custom"`.
+#' @param coordinate_transform Optional orientation transform applied after
+#'   coordinate scaling and before viewer display. Use `"x_y_y_neg_x"` when the
+#'   external image orientation requires `x1 = y` and `y1 = -x`; wsiTools adds
+#'   the required image-width offset internally, so displayed coordinates use
+#'   `x1 = y` and `y1 = image_width - x`. Aliases `"rotate_90_cw"` and
+#'   `"flip_y_rotate_90_cw"` use the same transform. The default `"none"`
+#'   preserves coordinates.
 #' @param spot_radius Spot marker radius, in slide pixels. When `NULL`, an
 #'   estimate is taken from Seurat scale factors when available.
 #' @param max_points Maximum number of spots to keep in the browser payload.
@@ -69,9 +76,11 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
                                   reduction = "pca", dims = c(1L, 2L),
                                   coordinate_scale = c("auto", "none", "fullres", "hires", "lowres", "seurat_image", "custom"),
                                   scale_x = NULL, scale_y = NULL,
+                                  coordinate_transform = "none",
                                   spot_radius = NULL, max_points = 100000L,
                                   colour_by = c("component_1", "none")) {
   coordinate_scale <- match.arg(coordinate_scale)
+  coordinate_transform <- wsi_seurat_coordinate_transform_arg(coordinate_transform)
   colour_by <- match.arg(colour_by)
   reduction <- wsi_seurat_check_scalar_character(reduction, "reduction")
   dims <- as.integer(dims)
@@ -129,6 +138,20 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
   )
   coordinates$x <- coordinates$x * mapping$scale_x
   coordinates$y <- coordinates$y * mapping$scale_y
+  transformed <- wsi_seurat_apply_coordinate_transform(
+    x = coordinates$x,
+    y = coordinates$y,
+    width = as.numeric(slide$dimensions[["width"]]),
+    height = as.numeric(slide$dimensions[["height"]]),
+    transform = coordinate_transform
+  )
+  coordinates$x <- transformed$x
+  coordinates$y <- transformed$y
+  mapping$coordinate_transform <- transformed$transform
+  mapping$transform_width <- transformed$width
+  mapping$transform_height <- transformed$height
+  mapping$transform_rescale_x <- transformed$rescale_x
+  mapping$transform_rescale_y <- transformed$rescale_y
 
   component_values <- embeddings[, dims, drop = FALSE]
   component_names <- colnames(embeddings)[dims]
@@ -294,6 +317,10 @@ print.wsi_seurat_spatial <- function(x, ...) {
   cat("  displayed: ", format(x$displayed_spot_count, big.mark = ","), "\n", sep = "")
   cat("  mapping:   x*", signif(x$coordinate_mapping$scale_x, 5), " y*", signif(x$coordinate_mapping$scale_y, 5),
       " (", x$coordinate_mapping$method, ")\n", sep = "")
+  transform <- x$coordinate_mapping$coordinate_transform %||% "none"
+  if (!identical(transform, "none")) {
+    cat("  transform: ", transform, "\n", sep = "")
+  }
   invisible(x)
 }
 
@@ -606,6 +633,61 @@ wsi_seurat_match_spots <- function(coordinates, embeddings) {
   embeddings <- embeddings[idx[keep], , drop = FALSE]
   row.names(coordinates) <- NULL
   list(coordinates = coordinates, embeddings = embeddings)
+}
+
+wsi_seurat_coordinate_transform_arg <- function(transform) {
+  if (!is.character(transform) || length(transform) != 1L || is.na(transform) || !nzchar(transform)) {
+    wsi_abort("`coordinate_transform` must be a single non-empty string.")
+  }
+  transform <- tolower(gsub("[ -]+", "_", transform))
+  aliases <- c(
+    none = "none",
+    identity = "none",
+    x_y_y_neg_x = "x_y_y_neg_x",
+    y_neg_x = "x_y_y_neg_x",
+    rotate_90_cw = "x_y_y_neg_x",
+    rot90cw = "x_y_y_neg_x",
+    flip_y_rotate_90_cw = "x_y_y_neg_x"
+  )
+  out <- aliases[[transform]]
+  if (is.null(out)) {
+    wsi_abort(paste0(
+      "`coordinate_transform` must be one of: \"none\", \"x_y_y_neg_x\", ",
+      "\"rotate_90_cw\", or \"flip_y_rotate_90_cw\"."
+    ))
+  }
+  unname(out)
+}
+
+wsi_seurat_apply_coordinate_transform <- function(x, y, width, height, transform = "none") {
+  transform <- wsi_seurat_coordinate_transform_arg(transform)
+  width <- as.numeric(wsi_check_scalar_number(width, "width", allow_zero = FALSE))
+  height <- as.numeric(wsi_check_scalar_number(height, "height", allow_zero = FALSE))
+  x <- as.numeric(x)
+  y <- as.numeric(y)
+  if (identical(transform, "none")) {
+    return(list(
+      x = x,
+      y = y,
+      transform = "none",
+      width = width,
+      height = height,
+      rescale_x = 1,
+      rescale_y = 1
+    ))
+  }
+  if (identical(transform, "x_y_y_neg_x")) {
+    return(list(
+      x = y,
+      y = width - x,
+      transform = "x_y_y_neg_x",
+      width = height,
+      height = width,
+      rescale_x = 1,
+      rescale_y = 1
+    ))
+  }
+  wsi_abort(sprintf("Unsupported coordinate transform: %s", transform))
 }
 
 wsi_seurat_image_dimensions <- function(image_obj) {

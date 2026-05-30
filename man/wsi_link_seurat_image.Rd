@@ -17,6 +17,7 @@ wsi_link_seurat_image(
     "custom"),
   scale_x = NULL,
   scale_y = NULL,
+  coordinate_transform = "none",
   spot_radius = NULL,
   max_points = 100000L,
   colour_by = c("component_1", "none")
@@ -60,6 +61,14 @@ inferred full-resolution dimensions. \code{"hires"} and \code{"lowres"} convert 
 
 \item{scale_x, scale_y}{Custom coordinate scale factors used when
 \code{coordinate_scale = "custom"}.}
+
+\item{coordinate_transform}{Optional orientation transform applied after
+coordinate scaling and before viewer display. Use \code{"x_y_y_neg_x"} when the
+external image orientation requires \code{x1 = y} and \code{y1 = -x}; wsiTools adds
+the required image-width offset internally, so displayed coordinates use
+\code{x1 = y} and \code{y1 = image_width - x}. Aliases \code{"rotate_90_cw"} and
+\code{"flip_y_rotate_90_cw"} use the same transform. The default \code{"none"}
+preserves coordinates.}
 
 \item{spot_radius}{Spot marker radius, in slide pixels. When \code{NULL}, an
 estimate is taken from Seurat scale factors when available.}
