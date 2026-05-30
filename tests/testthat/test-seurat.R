@@ -136,6 +136,14 @@ test_that("live Seurat gene payload fetches one selected gene without preloading
   expect_equal(vapply(payload$points, `[[`, numeric(1), "value"), c(9, 0, 1))
 })
 
+test_that("live Seurat gene endpoint preserves the gene query parameter", {
+  query <- wsiTools:::wsi_http_query_params("gene=Cryzl2&q=Gad1")
+
+  expect_equal(query$gene, "Cryzl2")
+  expect_equal(query$q, "Gad1")
+  expect_null(wsiTools:::wsi_dynamic_tile_query_settings("gene=Cryzl2")$gene)
+})
+
 test_that("10x tissue positions and scalefactors align Seurat spots to full-resolution images", {
   embeddings <- matrix(
     c(-2, 0.5, 1, -0.5),

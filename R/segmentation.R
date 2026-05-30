@@ -789,6 +789,26 @@ wsi_http_request_body <- function(req) {
   paste(as.character(body), collapse = "\n")
 }
 
+wsi_http_query_params <- function(query = NULL) {
+  if (is.null(query) || !nzchar(query)) {
+    return(list())
+  }
+  parts <- strsplit(query, "&", fixed = TRUE)[[1L]]
+  values <- list()
+  for (part in parts) {
+    if (!nzchar(part)) {
+      next
+    }
+    kv <- strsplit(part, "=", fixed = TRUE)[[1L]]
+    key <- utils::URLdecode(kv[[1L]] %||% "")
+    value <- utils::URLdecode(kv[[2L]] %||% "")
+    if (nzchar(key)) {
+      values[[key]] <- value
+    }
+  }
+  values
+}
+
 #' Start a local StarDist ROI segmentation endpoint
 #'
 #' Starts an optional local HTTP endpoint for the interactive viewer's

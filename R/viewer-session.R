@@ -3098,7 +3098,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
     }
     gene <- NULL
     if (identical(method, "GET")) {
-      query <- wsi_dynamic_tile_query_settings(req$QUERY_STRING %||% "")
+      query <- wsi_http_query_params(req$QUERY_STRING %||% "")
       gene <- query$gene %||% query$q %||% NULL
     } else if (identical(method, "POST")) {
       body <- wsi_http_request_body(req)
