@@ -254,6 +254,75 @@ test_that("Seurat spot coordinates can be transformed with x1 equals negative y 
   expect_equal(alias$spots$y, linked$spots$y)
 })
 
+test_that("Seurat spot orientation can be controlled with separate flip and rotation arguments", {
+  embeddings <- matrix(
+    c(-2, 0.5, 1, -0.5),
+    ncol = 2,
+    byrow = TRUE,
+    dimnames = list(c("spot_a", "spot_b"), c("PC_1", "PC_2"))
+  )
+  seurat_like <- list(
+    reductions = list(pca = list(cell.embeddings = embeddings)),
+    images = list(
+      anterior1 = list(
+        coordinates = data.frame(
+          barcode = c("spot_a", "spot_b"),
+          imagecol = c(100, 250),
+          imagerow = c(20, 80)
+        ),
+        image = array(0, dim = c(100, 300, 3))
+      )
+    )
+  )
+  slide <- wsi_mock_slide(width = 300, height = 100, levels = c(1, 2))
+
+  negative_swap <- wsi_link_seurat_image(
+    seurat_like,
+    slide,
+    coordinate_scale = "none",
+    coordinate_flip = "horizontal",
+    coordinate_rotation = 90
+  )
+  expect_equal(negative_swap$coordinate_mapping$coordinate_flip, "horizontal")
+  expect_equal(negative_swap$coordinate_mapping$coordinate_rotation, 90L)
+  expect_equal(negative_swap$spots$x, c(80, 20))
+  expect_equal(negative_swap$spots$y, c(200, 50))
+
+  negative_swap_then_180 <- wsi_link_seurat_image(
+    seurat_like,
+    slide,
+    coordinate_scale = "none",
+    coordinate_flip = "horizontal",
+    coordinate_rotation = 270
+  )
+  expect_equal(negative_swap_then_180$coordinate_mapping$coordinate_flip, "horizontal")
+  expect_equal(negative_swap_then_180$coordinate_mapping$coordinate_rotation, 270L)
+  expect_equal(negative_swap_then_180$spots$x, c(20, 80))
+  expect_equal(negative_swap_then_180$spots$y, c(100, 250))
+
+  vertical_alias <- wsi_link_seurat_image(
+    seurat_like,
+    slide,
+    coordinate_scale = "none",
+    coordinate_flip = "verticcal",
+    coordinate_rotation = 0
+  )
+  expect_equal(vertical_alias$coordinate_mapping$coordinate_flip, "vertical")
+  expect_equal(vertical_alias$spots$x, c(100, 250))
+  expect_equal(vertical_alias$spots$y, c(80, 20))
+
+  expect_error(
+    wsi_link_seurat_image(
+      seurat_like,
+      slide,
+      coordinate_scale = "none",
+      coordinate_flip = "horizontal",
+      coordinate_transform = "flip_y"
+    ),
+    "Use either legacy"
+  )
+})
+
 test_that("missing scalefactors path can be recovered from a spatial directory", {
   embeddings <- matrix(
     c(-1, 0, 1, 1),

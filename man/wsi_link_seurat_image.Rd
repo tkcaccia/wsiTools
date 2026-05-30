@@ -17,6 +17,8 @@ wsi_link_seurat_image(
     "custom"),
   scale_x = NULL,
   scale_y = NULL,
+  coordinate_flip = c("none", "vertical", "horizontal"),
+  coordinate_rotation = c(0, 90, 180, 270),
   coordinate_transform = "none",
   spot_radius = NULL,
   max_points = 100000L,
@@ -62,17 +64,19 @@ inferred full-resolution dimensions. \code{"hires"} and \code{"lowres"} convert 
 \item{scale_x, scale_y}{Custom coordinate scale factors used when
 \code{coordinate_scale = "custom"}.}
 
-\item{coordinate_transform}{Optional orientation transform applied after
-coordinate scaling and before viewer display. Use \code{"flip_y"} when the
-external image orientation requires \code{y1 = -y}; wsiTools adds the required
-image-height offset internally, so displayed coordinates use \code{x1 = x} and
-\code{y1 = image_height - y}. Use \code{"x_y_y_neg_x"} when the orientation requires
-\code{x1 = y} and \code{y1 = -x}; wsiTools similarly uses \code{y1 = image_width - x}.
-Use \code{"x_neg_y_y_neg_x"} when the orientation requires \code{x1 = -y} and
-\code{y1 = -x}; wsiTools uses \code{x1 = image_height - y} and
-\code{y1 = image_width - x}. Aliases \code{"rotate_90_cw"} and
-\code{"flip_y_rotate_90_cw"} use the same rotation transform. The default
-\code{"none"} preserves coordinates.}
+\item{coordinate_flip}{Orientation flip applied after coordinate scaling and
+before rotation. Choices are \code{"none"}, \code{"vertical"} (\code{y1 = -y}, displayed
+as \code{image_height - y}) and \code{"horizontal"} (\code{x1 = -x}, displayed as
+\code{image_width - x}). The misspelling \code{"verticcal"} is accepted as an alias.}
+
+\item{coordinate_rotation}{Clockwise rotation applied after
+\code{coordinate_flip}. Choices are \code{0}, \code{90}, \code{180}, and \code{270} degrees.}
+
+\item{coordinate_transform}{Legacy one-step orientation transform kept for
+backwards compatibility. Prefer \code{coordinate_flip} and
+\code{coordinate_rotation} for new code. For example, the old
+\code{"x_neg_y_y_neg_x"} transform is equivalent to
+\code{coordinate_flip = "horizontal"} and \code{coordinate_rotation = 90}.}
 
 \item{spot_radius}{Spot marker radius, in slide pixels. When \code{NULL}, an
 estimate is taken from Seurat scale factors when available.}

@@ -39,17 +39,17 @@
 #'   `"custom"` uses `scale_x` and `scale_y`.
 #' @param scale_x,scale_y Custom coordinate scale factors used when
 #'   `coordinate_scale = "custom"`.
-#' @param coordinate_transform Optional orientation transform applied after
-#'   coordinate scaling and before viewer display. Use `"flip_y"` when the
-#'   external image orientation requires `y1 = -y`; wsiTools adds the required
-#'   image-height offset internally, so displayed coordinates use `x1 = x` and
-#'   `y1 = image_height - y`. Use `"x_y_y_neg_x"` when the orientation requires
-#'   `x1 = y` and `y1 = -x`; wsiTools similarly uses `y1 = image_width - x`.
-#'   Use `"x_neg_y_y_neg_x"` when the orientation requires `x1 = -y` and
-#'   `y1 = -x`; wsiTools uses `x1 = image_height - y` and
-#'   `y1 = image_width - x`. Aliases `"rotate_90_cw"` and
-#'   `"flip_y_rotate_90_cw"` use the same rotation transform. The default
-#'   `"none"` preserves coordinates.
+#' @param coordinate_flip Orientation flip applied after coordinate scaling and
+#'   before rotation. Choices are `"none"`, `"vertical"` (`y1 = -y`, displayed
+#'   as `image_height - y`) and `"horizontal"` (`x1 = -x`, displayed as
+#'   `image_width - x`). The misspelling `"verticcal"` is accepted as an alias.
+#' @param coordinate_rotation Clockwise rotation applied after
+#'   `coordinate_flip`. Choices are `0`, `90`, `180`, and `270` degrees.
+#' @param coordinate_transform Legacy one-step orientation transform kept for
+#'   backwards compatibility. Prefer `coordinate_flip` and
+#'   `coordinate_rotation` for new code. For example, the old
+#'   `"x_neg_y_y_neg_x"` transform is equivalent to
+#'   `coordinate_flip = "horizontal"` and `coordinate_rotation = 90`.
 #' @param spot_radius Spot marker radius, in slide pixels. When `NULL`, an
 #'   estimate is taken from Seurat scale factors when available.
 #' @param max_points Maximum number of spots to keep in the browser payload.
@@ -80,11 +80,27 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
                                   reduction = "pca", dims = c(1L, 2L),
                                   coordinate_scale = c("auto", "none", "fullres", "hires", "lowres", "seurat_image", "custom"),
                                   scale_x = NULL, scale_y = NULL,
+                                  coordinate_flip = c("none", "vertical", "horizontal"),
+                                  coordinate_rotation = c(0, 90, 180, 270),
                                   coordinate_transform = "none",
                                   spot_radius = NULL, max_points = 100000L,
                                   colour_by = c("component_1", "none")) {
+  coordinate_flip_missing <- missing(coordinate_flip)
+  coordinate_rotation_missing <- missing(coordinate_rotation)
+  coordinate_transform_missing <- missing(coordinate_transform)
   coordinate_scale <- match.arg(coordinate_scale)
   coordinate_transform <- wsi_seurat_coordinate_transform_arg(coordinate_transform)
+  coordinate_flip <- wsi_seurat_coordinate_flip_arg(coordinate_flip)
+  coordinate_rotation <- wsi_seurat_coordinate_rotation_arg(coordinate_rotation)
+  if (!coordinate_transform_missing && !identical(coordinate_transform, "none")) {
+    if ((!coordinate_flip_missing && !identical(coordinate_flip, "none")) ||
+        (!coordinate_rotation_missing && !identical(coordinate_rotation, 0L))) {
+      wsi_abort("Use either legacy `coordinate_transform` or the new `coordinate_flip`/`coordinate_rotation` pair, not both.")
+    }
+    preset <- wsi_seurat_coordinate_transform_preset(coordinate_transform)
+    coordinate_flip <- preset$flip
+    coordinate_rotation <- preset$rotation
+  }
   colour_by <- match.arg(colour_by)
   reduction <- wsi_seurat_check_scalar_character(reduction, "reduction")
   dims <- as.integer(dims)
@@ -147,11 +163,15 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
     y = coordinates$y,
     width = as.numeric(slide$dimensions[["width"]]),
     height = as.numeric(slide$dimensions[["height"]]),
-    transform = coordinate_transform
+    transform = coordinate_transform,
+    flip = coordinate_flip,
+    rotation = coordinate_rotation
   )
   coordinates$x <- transformed$x
   coordinates$y <- transformed$y
   mapping$coordinate_transform <- transformed$transform
+  mapping$coordinate_flip <- transformed$flip
+  mapping$coordinate_rotation <- transformed$rotation
   mapping$transform_width <- transformed$width
   mapping$transform_height <- transformed$height
   mapping$transform_rescale_x <- transformed$rescale_x
@@ -324,6 +344,11 @@ print.wsi_seurat_spatial <- function(x, ...) {
   transform <- x$coordinate_mapping$coordinate_transform %||% "none"
   if (!identical(transform, "none")) {
     cat("  transform: ", transform, "\n", sep = "")
+  }
+  flip <- x$coordinate_mapping$coordinate_flip %||% "none"
+  rotation <- x$coordinate_mapping$coordinate_rotation %||% 0L
+  if (!identical(flip, "none") || !identical(as.integer(rotation), 0L)) {
+    cat("  orientation: flip=", flip, " rotation=", as.integer(rotation), "\n", sep = "")
   }
   invisible(x)
 }
@@ -672,57 +697,168 @@ wsi_seurat_coordinate_transform_arg <- function(transform) {
   unname(out)
 }
 
-wsi_seurat_apply_coordinate_transform <- function(x, y, width, height, transform = "none") {
+wsi_seurat_coordinate_transform_preset <- function(transform) {
   transform <- wsi_seurat_coordinate_transform_arg(transform)
+  if (identical(transform, "none")) {
+    return(list(flip = "none", rotation = 0L))
+  }
+  if (identical(transform, "flip_y")) {
+    return(list(flip = "vertical", rotation = 0L))
+  }
+  if (identical(transform, "x_y_y_neg_x")) {
+    return(list(flip = "none", rotation = 270L))
+  }
+  if (identical(transform, "x_neg_y_y_neg_x")) {
+    return(list(flip = "horizontal", rotation = 90L))
+  }
+  wsi_abort(sprintf("Unsupported coordinate transform: %s", transform))
+}
+
+wsi_seurat_coordinate_flip_arg <- function(flip) {
+  if (length(flip) > 1L) {
+    defaults <- c("none", "vertical", "horizontal")
+    if (identical(as.character(flip), defaults)) {
+      flip <- flip[[1L]]
+    }
+  }
+  if (!is.character(flip) || length(flip) != 1L || is.na(flip) || !nzchar(flip)) {
+    wsi_abort("`coordinate_flip` must be one of: \"none\", \"vertical\", or \"horizontal\".")
+  }
+  flip <- tolower(gsub("[ -]+", "_", flip))
+  aliases <- c(
+    none = "none",
+    identity = "none",
+    vertical = "vertical",
+    verticcal = "vertical",
+    flip_y = "vertical",
+    y = "vertical",
+    horizontal = "horizontal",
+    flip_x = "horizontal",
+    x = "horizontal"
+  )
+  out <- aliases[[flip]]
+  if (is.null(out)) {
+    wsi_abort("`coordinate_flip` must be one of: \"none\", \"vertical\", or \"horizontal\".")
+  }
+  unname(out)
+}
+
+wsi_seurat_coordinate_rotation_arg <- function(rotation) {
+  if (length(rotation) > 1L) {
+    defaults <- c(0, 90, 180, 270)
+    if (identical(as.numeric(rotation), defaults)) {
+      rotation <- rotation[[1L]]
+    }
+  }
+  if (is.character(rotation)) {
+    rotation <- tolower(gsub("[[:space:]_]+", "", rotation))
+    rotation <- sub("degrees?$", "", rotation)
+    rotation <- sub("deg$", "", rotation)
+  }
+  rotation <- suppressWarnings(as.integer(rotation))
+  if (length(rotation) != 1L || is.na(rotation) || !(rotation %in% c(0L, 90L, 180L, 270L))) {
+    wsi_abort("`coordinate_rotation` must be one of: 0, 90, 180, or 270.")
+  }
+  rotation
+}
+
+wsi_seurat_coordinate_orientation_name <- function(flip, rotation) {
+  if (identical(flip, "none") && identical(rotation, 0L)) {
+    return("none")
+  }
+  if (identical(flip, "vertical") && identical(rotation, 0L)) {
+    return("flip_y")
+  }
+  if (identical(flip, "none") && identical(rotation, 270L)) {
+    return("x_y_y_neg_x")
+  }
+  if (identical(flip, "horizontal") && identical(rotation, 90L)) {
+    return("x_neg_y_y_neg_x")
+  }
+  paste0("flip_", flip, "_rotate_", rotation)
+}
+
+wsi_seurat_apply_coordinate_transform <- function(x, y, width, height, transform = "none",
+                                                  flip = "none", rotation = 0) {
+  transform <- wsi_seurat_coordinate_transform_arg(transform)
+  flip <- wsi_seurat_coordinate_flip_arg(flip)
+  rotation <- wsi_seurat_coordinate_rotation_arg(rotation)
+  legacy_transform <- transform
+  if (!identical(transform, "none")) {
+    preset <- wsi_seurat_coordinate_transform_preset(transform)
+    flip <- preset$flip
+    rotation <- preset$rotation
+  }
   width <- as.numeric(wsi_check_scalar_number(width, "width", allow_zero = FALSE))
   height <- as.numeric(wsi_check_scalar_number(height, "height", allow_zero = FALSE))
   x <- as.numeric(x)
   y <- as.numeric(y)
-  if (identical(transform, "none")) {
+  current_width <- width
+  current_height <- height
+
+  if (identical(flip, "horizontal")) {
+    x <- current_width - x
+  } else if (identical(flip, "vertical")) {
+    y <- current_height - y
+  }
+
+  if (identical(rotation, 0L)) {
     return(list(
       x = x,
       y = y,
-      transform = "none",
-      width = width,
-      height = height,
+      transform = if (identical(legacy_transform, "none")) wsi_seurat_coordinate_orientation_name(flip, rotation) else legacy_transform,
+      flip = flip,
+      rotation = rotation,
+      width = current_width,
+      height = current_height,
       rescale_x = 1,
       rescale_y = 1
     ))
   }
-  if (identical(transform, "flip_y")) {
+  if (identical(rotation, 90L)) {
+    old_x <- x
+    old_y <- y
     return(list(
-      x = x,
-      y = height - y,
-      transform = "flip_y",
-      width = width,
-      height = height,
+      x = current_height - old_y,
+      y = old_x,
+      transform = if (identical(legacy_transform, "none")) wsi_seurat_coordinate_orientation_name(flip, rotation) else legacy_transform,
+      flip = flip,
+      rotation = rotation,
+      width = current_height,
+      height = current_width,
       rescale_x = 1,
       rescale_y = 1
     ))
   }
-  if (identical(transform, "x_neg_y_y_neg_x")) {
+  if (identical(rotation, 180L)) {
     return(list(
-      x = height - y,
-      y = width - x,
-      transform = "x_neg_y_y_neg_x",
-      width = height,
-      height = width,
+      x = current_width - x,
+      y = current_height - y,
+      transform = if (identical(legacy_transform, "none")) wsi_seurat_coordinate_orientation_name(flip, rotation) else legacy_transform,
+      flip = flip,
+      rotation = rotation,
+      width = current_width,
+      height = current_height,
       rescale_x = 1,
       rescale_y = 1
     ))
   }
-  if (identical(transform, "x_y_y_neg_x")) {
+  if (identical(rotation, 270L)) {
+    old_x <- x
+    old_y <- y
     return(list(
-      x = y,
-      y = width - x,
-      transform = "x_y_y_neg_x",
-      width = height,
-      height = width,
+      x = old_y,
+      y = current_width - old_x,
+      transform = if (identical(legacy_transform, "none")) wsi_seurat_coordinate_orientation_name(flip, rotation) else legacy_transform,
+      flip = flip,
+      rotation = rotation,
+      width = current_height,
+      height = current_width,
       rescale_x = 1,
       rescale_y = 1
     ))
   }
-  wsi_abort(sprintf("Unsupported coordinate transform: %s", transform))
+  wsi_abort(sprintf("Unsupported coordinate rotation: %s", rotation))
 }
 
 wsi_seurat_image_dimensions <- function(image_obj) {

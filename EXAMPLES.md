@@ -378,7 +378,8 @@ viewer <- wsi_viewer_seurat(
   brain,
   image = "/Users/stefano/Downloads/V1_Mouse_Brain_Sagittal_Anterior_image.tif",
   image_name = "anterior1",
-  coordinate_transform = "x_neg_y_y_neg_x",
+  coordinate_flip = "horizontal",
+  coordinate_rotation = 270,
   reduction = "pca",
   dims = c(1, 2),
   mode = "tiles",
@@ -395,7 +396,8 @@ viewer <- wsi_viewer_seurat(
   brain,
   image = "/Users/stefano/Downloads/V1_Mouse_Brain_Sagittal_Anterior_image.tif",
   image_name = "anterior1",
-  coordinate_transform = "x_neg_y_y_neg_x",
+  coordinate_flip = "horizontal",
+  coordinate_rotation = 270,
   reduction = "pca",
   dims = c(1, 2),
   live = TRUE,
@@ -412,17 +414,16 @@ viewer$get_state()$seurat_selection
 By default, wsiTools first tries to use the coordinates and scale factors stored
 inside the Seurat object. The external mouse-brain TIFF above is oriented
 differently from the Seurat spot coordinate frame, so the example uses
-`coordinate_transform = "x_neg_y_y_neg_x"`, equivalent to `x1 = image_height - y`
-and `y1 = image_width - x`. This corresponds to the orientation correction
-`x1 = -y` and `y1 = -x`, with offsets added so browser coordinates remain
-positive. If the external image needs only a vertical flip, use
-`coordinate_transform = "flip_y"`. If it needs a 90-degree clockwise correction,
-use `coordinate_transform = "x_y_y_neg_x"`, equivalent to `x1 = y` and
-`y1 = image_width - x`. If spots appear shifted or scaled, pass the original
-Space Ranger `spatial/` directory so wsiTools can use `tissue_positions.csv`
-and `scalefactors_json.json`. If the external image is a resized/cropped
-derivative of the 10x full-resolution image, inspect the linked object and
-override the coordinate scaling:
+`coordinate_flip = "horizontal"` and `coordinate_rotation = 270`. This is the
+separate-parameter version of applying the `x1 = -y`, `y1 = -x` correction and
+then rotating the result by 180 degrees. If the image needs only `x1 = -y` and
+`y1 = -x`, use `coordinate_flip = "horizontal"` with `coordinate_rotation = 90`.
+If the external image needs only a vertical flip, use
+`coordinate_flip = "vertical"` and `coordinate_rotation = 0`. If spots appear
+shifted or scaled, pass the original Space Ranger `spatial/` directory so
+wsiTools can use `tissue_positions.csv` and `scalefactors_json.json`. If the
+external image is a resized/cropped derivative of the 10x full-resolution image,
+inspect the linked object and override the coordinate scaling:
 
 ```r
 linked <- wsi_link_seurat_image(
@@ -430,7 +431,8 @@ linked <- wsi_link_seurat_image(
   image = "/Users/stefano/Downloads/V1_Mouse_Brain_Sagittal_Anterior_image.tif",
   image_name = "anterior1",
   spatial_dir = "/Users/stefano/Downloads/spatial",
-  coordinate_transform = "x_neg_y_y_neg_x",
+  coordinate_flip = "horizontal",
+  coordinate_rotation = 270,
   coordinate_scale = "custom",
   scale_x = 2.0,
   scale_y = 2.0
