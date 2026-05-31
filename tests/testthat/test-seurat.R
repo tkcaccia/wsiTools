@@ -493,6 +493,7 @@ test_that("Seurat viewer exposes spot layer and PCA controls", {
   expect_match(text, "seurat_spots", fixed = TRUE)
   expect_match(text, "seurat_gene_url", fixed = TRUE)
   expect_match(text, "Type any gene name", fixed = TRUE)
+  expect_match(text, "JSON.stringify({gene:String(gene||'').trim()})", fixed = TRUE)
   expect_match(text, "seuratPlotWindow", fixed = TRUE)
   expect_match(text, "bindSeuratControls", fixed = TRUE)
   expect_match(text, "seuratGeneInput", fixed = TRUE)
