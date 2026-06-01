@@ -33,7 +33,10 @@ Suggests:
     httpuv,
     magick,
     rmarkdown,
+    SingleCellExperiment,
     sf,
+    SpatialExperiment,
+    SummarizedExperiment,
     testthat (>= 3.0.0)
 SystemRequirements: None required for installation. Optional runtime tools:
     OpenSlide command-line tools; libvips command-line tools; Bio-Formats

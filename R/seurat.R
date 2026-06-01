@@ -392,7 +392,8 @@ wsi_viewer_seurat <- function(seurat, image, linked = NULL,
 
 #' @export
 print.wsi_seurat_spatial <- function(x, ...) {
-  cat("<wsi_seurat_spatial>\n")
+  source_name <- x$source_name %||% "Seurat"
+  cat("<", tolower(source_name), "_spatial>\n", sep = "")
   cat("  image:     ", x$image_path %||% "<slide>", "\n", sep = "")
   cat("  image key: ", x$image_name %||% NA_character_, "\n", sep = "")
   cat("  reduction: ", x$reduction, " dims ", paste(x$dims, collapse = ","), "\n", sep = "")
@@ -413,8 +414,9 @@ print.wsi_seurat_spatial <- function(x, ...) {
 }
 
 wsi_seurat_spots_layer <- function(linked, visible = TRUE, opacity = 0.85) {
+  source_name <- linked$source_name %||% "Seurat"
   layer <- wsi_viewer_layer_payload(
-    name = "Seurat spatial spots",
+    name = paste(source_name, "spatial spots"),
     data = linked$spots,
     type = "points",
     visible = visible,
@@ -438,9 +440,10 @@ wsi_seurat_spots_layer <- function(linked, visible = TRUE, opacity = 0.85) {
     }
   }
   layer$id <- "seurat_spots"
-  layer$name <- "Seurat spatial spots"
+  layer$name <- paste(source_name, "spatial spots")
   layer$source_type <- "seurat_spots"
   layer$metadata <- list(
+    source_name = source_name,
     reduction = linked$reduction,
     image_name = linked$image_name,
     coordinate_mapping = linked$coordinate_mapping
@@ -452,11 +455,12 @@ wsi_viewer_seurat_config <- function(seurat = NULL) {
   if (is.null(seurat)) {
     return(list(enabled = FALSE, plots = list(), spot_count = 0L))
   }
-  if (!inherits(seurat, "wsi_seurat_spatial")) {
-    wsi_abort("`seurat` viewer configuration must be created by `wsi_link_seurat_image()`.")
+  if (!inherits(seurat, "wsi_seurat_spatial") && !inherits(seurat, "wsi_spatial_object")) {
+    wsi_abort("`seurat` viewer configuration must be created by `wsi_link_seurat_image()` or another wsiTools spatial-object linker.")
   }
   list(
     enabled = TRUE,
+    source_name = seurat$source_name %||% "Seurat",
     image_name = seurat$image_name,
     reduction = seurat$reduction,
     dims = as.integer(seurat$dims),
@@ -812,6 +816,12 @@ wsi_seurat_matrix_like <- function(x) {
 
 wsi_seurat_collect_expression_matrices <- function(seurat) {
   matrices <- list()
+  if (inherits(seurat, "wsi_spatialexperiment_expression_source")) {
+    requested_assay_name <- seurat$assay_name %||% NULL
+    seurat <- seurat$object
+  } else {
+    requested_assay_name <- NULL
+  }
   add_matrix <- function(x, name) {
     if (!wsi_seurat_matrix_like(x)) {
       return(invisible(NULL))
@@ -823,6 +833,20 @@ wsi_seurat_collect_expression_matrices <- function(seurat) {
     }
     matrices[[length(matrices) + 1L]] <<- list(name = name, matrix = x)
     invisible(NULL)
+  }
+  if (requireNamespace("SummarizedExperiment", quietly = TRUE)) {
+    se_assays <- tryCatch(SummarizedExperiment::assays(seurat), error = function(e) NULL)
+    if (!is.null(se_assays) && length(se_assays)) {
+      assay_names <- names(se_assays) %||% paste0("assay_", seq_along(se_assays))
+      if (!is.null(requested_assay_name) && requested_assay_name %in% assay_names) {
+        add_matrix(se_assays[[requested_assay_name]], paste("assays", requested_assay_name, sep = "$"))
+      }
+      for (i in seq_along(se_assays)) {
+        add_matrix(se_assays[[i]], paste("assays", assay_names[[i]], sep = "$"))
+      }
+    } else {
+      add_matrix(tryCatch(SummarizedExperiment::assay(seurat), error = function(e) NULL), "assay")
+    }
   }
   visit_container <- function(x, prefix = "object") {
     if (is.null(x)) {
@@ -904,7 +928,8 @@ wsi_seurat_matrix_gene_expression <- function(seurat, genes, spot_ids) {
   NULL
 }
 
-wsi_seurat_gene_expression <- function(seurat, genes, spot_ids, default_gene = NULL) {
+wsi_seurat_gene_expression <- function(seurat, genes, spot_ids, default_gene = NULL,
+                                       object_label = "Seurat") {
   genes <- wsi_seurat_gene_vector(genes, "spot_genes")
   if (!length(genes)) {
     return(list(enabled = FALSE, genes = character(), default_gene = NULL, values = matrix(numeric(), nrow = length(spot_ids), ncol = 0L)))
@@ -914,7 +939,8 @@ wsi_seurat_gene_expression <- function(seurat, genes, spot_ids, default_gene = N
     wsi_seurat_matrix_gene_expression(seurat, genes, spot_ids)
   if (is.null(values) || !ncol(values)) {
     wsi_abort(sprintf(
-      "None of the requested `spot_genes` were found in the Seurat expression data: %s",
+      "None of the requested `spot_genes` were found in the %s expression data: %s",
+      object_label,
       paste(genes, collapse = ", ")
     ))
   }
@@ -926,7 +952,8 @@ wsi_seurat_gene_expression <- function(seurat, genes, spot_ids, default_gene = N
   found <- colnames(values)
   if (length(missing_genes)) {
     wsi_warn(sprintf(
-      "Some requested `spot_genes` were not found and will be unavailable in the viewer: %s",
+      "Some requested `spot_genes` were not found in the %s object and will be unavailable in the viewer: %s",
+      object_label,
       paste(missing_genes, collapse = ", ")
     ))
   }

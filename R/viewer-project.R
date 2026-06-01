@@ -537,7 +537,27 @@ wsi_viewer_project_config <- function(slide, project_images = NULL, width = 768,
   )
   items <- list(active)
   if (!is.null(project_images) && length(project_images) > 0L) {
-    items <- c(items, wsi_viewer_project_items(project_images, width = width, height = height))
+    extras <- wsi_viewer_project_items(project_images, width = width, height = height)
+    same_active <- which(vapply(extras, function(item) {
+      if (isTRUE(item$active)) {
+        return(TRUE)
+      }
+      active_path <- active$path %||% ""
+      item_path <- item$path %||% ""
+      if (!nzchar(active_path) || !nzchar(item_path)) {
+        return(FALSE)
+      }
+      identical(
+        normalizePath(active_path, winslash = "/", mustWork = FALSE),
+        normalizePath(item_path, winslash = "/", mustWork = FALSE)
+      )
+    }, logical(1)))
+    if (length(same_active)) {
+      active <- utils::modifyList(active, extras[[same_active[[1L]]]])
+      active$active <- TRUE
+      extras <- extras[-same_active[[1L]]]
+    }
+    items <- c(list(active), extras)
   }
   list(items = items, active_index = 0L)
 }
@@ -603,6 +623,16 @@ wsi_viewer_project_item_from_record <- function(record, index = 1L, width = 768,
   for (field in intersect(names(record), names(item))) {
     if (!identical(field, "sections") && !identical(field, "image_data_uri") &&
         !identical(field, "navigator_image_data_uri") && !is.null(record[[field]])) {
+      item[[field]] <- record[[field]]
+    }
+  }
+  extra_fields <- c(
+    "tile_url_base", "tile_url_template", "tile_url_style", "tile_format",
+    "tile_size", "tile_overlap", "min_level", "max_level", "content_bbox",
+    "layers", "seurat", "cellphenotyper", "channel_sources"
+  )
+  for (field in intersect(extra_fields, names(record))) {
+    if (!is.null(record[[field]])) {
       item[[field]] <- record[[field]]
     }
   }
