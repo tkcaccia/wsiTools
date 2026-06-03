@@ -836,83 +836,49 @@ GrandQC artifact/QC regions from the project.
 The same CellPhenotyper project workflow is available as
 `inst/examples/cellphenotyper-project-viewer.R`.
 
-For a live R workflow, use `wsi_viewer_live()`. The ordinary static
-`wsi_viewer()` writes an HTML file; it can export GeoJSON from the browser, but
-it cannot automatically update R objects after the file is opened. The live
-viewer starts an optional local `httpuv` bridge so browser-side annotations,
-measurements, channel settings, and analyses are posted back to the current R
-session automatically. WebSocket sync is used when available, with HTTP
-POST/polling retained as a fallback:
+### Live synchronization with R
+
+Use `wsi_viewer()` for a static HTML viewer. Use `wsi_viewer_live()` when edits
+made in the browser should come back automatically to the current R session.
+Live mode starts a local `httpuv` bridge; WebSocket is used when available and
+HTTP polling is kept as a fallback.
+
+Minimal RStudio workflow:
 
 ```r
-session <- wsi_viewer_live(
-  slide,
-  mode = "tiles",
-  name = "viewer_state",
-  wait = FALSE
-)
+slide <- wsi_open("sample.svs")
+viewer <- wsi_viewer_live(slide, mode = "tiles", wait = FALSE)
 
-# After drawing ROIs, measuring distances, importing GeoJSON, or adding
-# segmentation overlays in the browser:
-session$capabilities()
-session$get_rois()
-session$get_selected_roi()
-session$get_selected_rois()
-session$get_measurements()
-session$get_roi_summary()
-session$get_cell_summary()
-session$get_class_summary()
-session$get_ihc_summary()
-session$get_ihc_class_summary()
-session$get_segmentation()
-session$get_layers()
-session$get_channel_settings()
-
-# After deconvolving a selected ROI or crop in R:
-session$measure_ihc_intensity(patch_channels, dab_threshold = 0.1)
-
-# Register R callbacks before interacting with the viewer:
-session$on("roi_created", function(roi) {
-  print(roi)
-})
-
-session$on("roi_selected", function(roi) {
-  crop <- export_roi_crop(slide, roi, file = tempfile(fileext = ".png"))
-})
-
-session$on("segmentation_finished", function(cells) {
-  print(summarise_rois(session$get_rois(), cells = cells))
-})
-
-# R can also push overlays back into the open viewer:
-session$add_rois(read_geojson("qupath_annotations.geojson"))
-session$add_segmentation(data.frame(cell_id = "cell_1", x = 1200, y = 900))
-session$add_layer("tumour ROIs", session$get_rois())
-session$add_layer("CellPhenotyper cells", session$get_segmentation())
-session$add_layer("DAB intensity", matrix(runif(100), nrow = 10), opacity = 0.4)
-session$set_layer_visible("CellPhenotyper cells", TRUE)
-
-# Optional channel-tile layers can also be pushed from R:
-dab_tiles <- wsi_channel_source(
-  "DAB tiles",
-  type = "deepzoom",
-  tile_url_base = "dab_tiles/slide_files",
-  width = slide$dimensions[["width"]],
-  height = slide$dimensions[["height"]],
-  max_level = 12,
-  opacity = 0.5,
-  colour = "#8b5a2b"
-)
-session$add_channel_source(dab_tiles)
-session$set_channel_opacity("DAB tiles", 0.35)
-
-# Save a reproducible project snapshot:
-session$save_project("case_001.wsiproject")
+rois <- viewer$get_rois()
+measurements <- viewer$get_measurements()
+proximity <- viewer$get_proximity()
 ```
 
-In plain R sessions, call `session$service()` periodically, or start with
-`wait = TRUE` for a blocking live loop that runs until you press Esc or Ctrl+C.
-The synced objects remain available in the chosen R environment.
+From `Rscript`, keep the live bridge open:
+
+```r
+viewer <- wsi_viewer_live(slide, mode = "tiles", wait = TRUE)
+```
+
+Common synchronized objects:
+
+```r
+viewer$get_rois()
+viewer$get_selected_roi()
+viewer$get_measurements()
+viewer$get_channel_settings()
+viewer$get_annotation_spots()
+viewer$get_prediction()
+viewer$get_proximity()
+```
+
+R can also update the open viewer:
+
+```r
+viewer$add_rois(read_geojson("annotations.geojson"))
+viewer$add_layer("spots", spots)
+viewer$save_project("case_001.wsiproject")
+```
 
 For full-resolution zooming, build a Deep Zoom tile pyramid with libvips:
 
