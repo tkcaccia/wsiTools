@@ -211,7 +211,7 @@ wsi_cellphenotyper_read_cells <- function(path, shift = list(dx = 0, dy = 0)) {
     cells$id <- paste0("cell_", label)
   }
   if (!"class" %in% names(cells)) {
-    cells$class <- if ("polygon_label" %in% names(cells)) as.character(cells$polygon_label) else "StarDist cell"
+    cells$class <- if ("polygon_label" %in% names(cells)) as.character(cells$polygon_label) else "CellPhenotyper cell"
   }
   attr(cells, "source_file") <- normalizePath(path, mustWork = TRUE)
   class(cells) <- unique(c("wsi_cellphenotyper_cells", "wsi_segmentation_centroids", "wsi_segmentation", class(cells)))
@@ -880,7 +880,7 @@ wsi_cellphenotyper_cell_layer <- function(cells, radius = 6, colour = "#38BDF8",
     return(NULL)
   }
   layer <- wsi_viewer_layer_payload(
-    "StarDist cells",
+    "CellPhenotyper cells",
     cells,
     type = "points",
     visible = visible,
@@ -949,7 +949,7 @@ wsi_cellphenotyper_kodama_config <- function(project) {
     plots <- Filter(Negate(is.null), plots)
   }
   list(
-    enabled = length(geojsons) > 0L,
+    enabled = length(geojsons) > 0L || length(plots) > 0L,
     geojsons = geojsons,
     plots = plots
   )
@@ -990,6 +990,8 @@ wsi_cellphenotyper_grandqc_config <- function(project) {
 wsi_cellphenotyper_viewer_config <- function(project, layer_id = "cellphenotyper_stardist_cells") {
   list(
     enabled = TRUE,
+    project_type = "cellphenotyper",
+    is_project = TRUE,
     project_root = project$root,
     manifest_path = project$manifest_path,
     input_image = project$input_image,
@@ -1050,7 +1052,7 @@ wsi_viewer_cellphenotyper_config <- function(cellphenotyper = NULL) {
 #' `wsi_read_cellphenotyper_project()` reads a CellPhenotyper output directory
 #' by using `00_execution/project_outputs.tsv` as the project manifest. It
 #' resolves local output paths, identifies the input image, and loads the
-#' StarDist centroid table when available. The large label image is not loaded
+#' CellPhenotyper centroid table when available. The large label image is not loaded
 #' into memory. GigaTIME OME-TIFF probability output, preview files, and
 #' MedSAM-refined KODAMA GeoJSON annotations, KODAMA membership plot PNGs,
 #' KODAMA RData embeddings, and cluster CSV files are resolved from the same
@@ -1058,22 +1060,23 @@ wsi_viewer_cellphenotyper_config <- function(cellphenotyper = NULL) {
 #'
 #' `wsi_viewer_cellphenotyper()` opens the input image in the interactive
 #' wsiTools viewer and adds a top **Cells** menu that can show or hide the
-#' CellPhenotyper/StarDist cell segmentation overlay. When
+#' CellPhenotyper cell segmentation overlay. When
 #' `gigatime_probs.ome.tif` is available, it is shown as live tiled mIHC
 #' channel overlays on top of the H&E image and controlled from the top
-#' **Stains** menu. When refined KODAMA GeoJSON is available, the top
-#' **KODAMA** menu can import it as editable viewer annotations and can open
-#' membership plots in a floating window. The default KODAMA plot view redraws
-#' the KODAMA embedding points using the same cluster colours as the imported
-#' GeoJSON annotations, with a spatial GeoJSON redraw fallback. Users can drag
-#' over KODAMA points to highlight the matching StarDist cells on the slide; in
-#' live sessions this selected-cell set is synced back to R. When GrandQC
-#' GeoJSON is available, the top **Artifacts** menu imports those QC regions
-#' instead of running browser-side artifact detection.
+#' **Stains** menu. When refined KODAMA GeoJSON or membership plots are
+#' available, the top **CellPhenotyper** menu can import them as editable viewer
+#' annotations and can open membership plots in a floating window. The default
+#' KODAMA plot view redraws the KODAMA embedding points using the same cluster
+#' colours as the imported GeoJSON annotations, with a spatial GeoJSON redraw
+#' fallback. Users can drag over KODAMA points to highlight the matching
+#' CellPhenotyper cells on the slide; in live sessions this selected-cell set is
+#' synced back to R. When GrandQC GeoJSON is available, the top **Artifacts**
+#' menu imports those QC regions instead of running browser-side artifact
+#' detection.
 #'
 #' @param path CellPhenotyper output directory or path to
 #'   `00_execution/project_outputs.tsv`.
-#' @param load_cells Whether to read the StarDist/cell-assignment centroid
+#' @param load_cells Whether to read the CellPhenotyper cell-assignment centroid
 #'   table.
 #' @param project A project object returned by
 #'   `wsi_read_cellphenotyper_project()`, or a CellPhenotyper output directory.
@@ -1083,7 +1086,7 @@ wsi_viewer_cellphenotyper_config <- function(cellphenotyper = NULL) {
 #' @param mode Viewer mode passed to [wsi_viewer()]. Use `"tiles"` for
 #'   full-resolution Deep Zoom viewing when libvips is available.
 #' @param backend Backend passed to [wsi_open()].
-#' @param cell_radius Display radius, in slide pixels, for StarDist cell
+#' @param cell_radius Display radius, in slide pixels, for CellPhenotyper cell
 #'   centroids.
 #' @param cell_colour Cell overlay colour.
 #' @param cell_opacity Cell overlay opacity.
@@ -1277,7 +1280,7 @@ print.wsi_cellphenotyper_project <- function(x, ...) {
   cat("  root: ", x$root, "\n", sep = "")
   cat("  input: ", x$input_image, "\n", sep = "")
   cat("  outputs: ", nrow(x$manifest), "\n", sep = "")
-  cat("  StarDist cells: ", format(x$cell_count %||% 0L, big.mark = ","), "\n", sep = "")
+  cat("  CellPhenotyper cells: ", format(x$cell_count %||% 0L, big.mark = ","), "\n", sep = "")
   if (!is.na(x$files$cell_table %||% NA_character_)) {
     cat("  cell table: ", x$files$cell_table, "\n", sep = "")
   }

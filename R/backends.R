@@ -21,9 +21,7 @@ wsi_backends <- function() {
       "native_czi",
       "aicspylibczi",
       "httpuv",
-      "callr",
-      "stardist",
-      "cellpose"
+      "callr"
     ),
     installed = c(
       wsi_has_openslide(),
@@ -34,9 +32,7 @@ wsi_backends <- function() {
       wsi_has_native_czi(),
       wsi_has_czi_python(),
       requireNamespace("httpuv", quietly = TRUE),
-      wsi_has_callr(),
-      wsi_has_stardist(),
-      wsi_has_cellpose()
+      wsi_has_callr()
     ),
     version = c(
       wsi_command_version("openslide-show-properties"),
@@ -47,9 +43,7 @@ wsi_backends <- function() {
       wsi_native_czi_version(),
       wsi_czi_python_version(),
       wsi_optional_package_version("httpuv"),
-      wsi_optional_package_version("callr"),
-      wsi_command_version(wsi_default_stardist_command()),
-      wsi_command_version(wsi_default_cellpose_command())
+      wsi_optional_package_version("callr")
     ),
     capabilities = c(
       "metadata, pyramid levels, region reads via openslide-write-png when available",
@@ -59,10 +53,8 @@ wsi_backends <- function() {
       "ordinary image metadata, thumbnails, and level-0 crop previews",
       "optional native CZI region/tile reader through ZEISS libCZI",
       "optional CZI mosaic metadata and lightweight preview generation",
-      "live R viewer bridge, browser-to-R events, selected-ROI segmentation endpoint",
-      "non-blocking background jobs for segmentation, tiling, conversion, and pyramids",
-      "optional external selected-ROI cell segmentation command",
-      "optional external selected-ROI cell segmentation command"
+      "live R viewer bridge and browser-to-R events",
+      "non-blocking background jobs for tiling, conversion, pyramids, and project sync"
     ),
     notes = c(
       "Requires OpenSlide command-line tools for this milestone; native C bindings are planned.",
@@ -73,9 +65,7 @@ wsi_backends <- function() {
       "Optional direct CZI backend. Install ZEISS libCZI/libCZIAPI and set WSITOOLS_LIBCZIAPI if it is not on the dynamic library path.",
       "Legacy optional fallback. Only used for CZI previews when WSITOOLS_CZI_ALLOW_PYTHON=true.",
       "Suggested R package; not required for static viewers or package installation.",
-      "Suggested R package; not required unless async jobs are requested.",
-      "Optional command. Set WSITOOLS_STARDIST_COMMAND or pass command/args when running.",
-      "Optional command. Set WSITOOLS_CELLPOSE_COMMAND or import Cellpose results manually."
+      "Suggested R package; not required unless async jobs are requested."
     ),
     stringsAsFactors = FALSE
   )
@@ -125,10 +115,7 @@ wsi_has_czi_python <- function(python = NULL) {
   identical(as.integer(status), 0L)
 }
 
-#' @rdname wsi_backends
-#' @param command Optional command to check for command-backed helpers such as
-#'   Cellpose.
-#' @export
+#' @keywords internal
 wsi_has_cellpose <- function(command = NULL) {
   command <- wsi_default_cellpose_command(command)
   is.character(command) && length(command) == 1L && nzchar(command) && wsi_command_exists(command)

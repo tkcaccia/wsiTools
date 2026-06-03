@@ -55,7 +55,7 @@ viewer_cellphenotyper(
 \item{path}{CellPhenotyper output directory or path to
 \code{00_execution/project_outputs.tsv}.}
 
-\item{load_cells}{Whether to read the StarDist/cell-assignment centroid table.}
+\item{load_cells}{Whether to read the CellPhenotyper cell-assignment centroid table.}
 
 \item{project}{A project object returned by
 \code{wsi_read_cellphenotyper_project()}, or a CellPhenotyper output directory.}
@@ -72,7 +72,7 @@ available.}
 
 \item{backend}{Backend passed to \code{\link[=wsi_open]{wsi_open()}}.}
 
-\item{cell_radius}{Display radius, in slide pixels, for StarDist cell
+\item{cell_radius}{Display radius, in slide pixels, for CellPhenotyper cell
 centroids.}
 
 \item{cell_colour}{Cell overlay colour.}
@@ -110,7 +110,7 @@ the HTML viewer path invisibly.
 \description{
 \code{wsi_read_cellphenotyper_project()} reads a CellPhenotyper output directory
 by using \code{00_execution/project_outputs.tsv} as the project manifest. It
-resolves local output paths, identifies the input image, and loads the StarDist
+resolves local output paths, identifies the input image, and loads the CellPhenotyper
 centroid table when available. The large label image is not loaded into memory.
 GigaTIME OME-TIFF probability output, preview files, MedSAM-refined KODAMA
 GeoJSON annotations, KODAMA membership plot PNGs, KODAMA RData embeddings, and
@@ -119,16 +119,18 @@ cluster CSV files are resolved from the same manifest when present.
 \details{
 \code{wsi_viewer_cellphenotyper()} opens the input image in the interactive
 wsiTools viewer and adds a top \strong{Cells} menu that can show or hide the
-CellPhenotyper/StarDist cell segmentation overlay. When
+CellPhenotyper cell segmentation overlay. When
 \code{gigatime_probs.ome.tif} is available, it is shown as live tiled mIHC
 channel overlays on top of the H&E image and controlled from the top
-\strong{Stains} menu. When refined KODAMA GeoJSON is available, the top
-\strong{KODAMA} menu can import it as editable viewer annotations and can open
-membership plots in a floating window. The default KODAMA plot view redraws
-the KODAMA embedding points using the same cluster colours as the imported
-GeoJSON annotations, with a spatial GeoJSON redraw fallback. When GrandQC
-GeoJSON is available, the top \strong{Artifacts} menu imports those QC regions
-instead of running browser-side artifact detection.
+\strong{Stains} menu. When refined KODAMA GeoJSON or membership plots are
+available, the top \strong{CellPhenotyper} menu can import them as editable
+viewer annotations and can open membership plots in a floating window. The
+default KODAMA plot view redraws the KODAMA embedding points using the same
+cluster colours as the imported GeoJSON annotations, with a spatial GeoJSON
+redraw fallback. Users can drag over KODAMA points to highlight the matching
+CellPhenotyper cells on the slide; in live sessions this selected-cell set is synced
+back to R. When GrandQC GeoJSON is available, the top \strong{Artifacts} menu
+imports those QC regions instead of running browser-side artifact detection.
 }
 \examples{
 \dontrun{

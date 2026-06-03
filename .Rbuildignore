@@ -11,6 +11,9 @@
 ^EXAMPLES\.md$
 ^scripts$
 ^manuscript$
+^Data$
+^Data/
+^\.DS_Store$
 ^.*\.Rcheck$
 ^\.\.Rcheck$
 ^.*\.tar\.gz$

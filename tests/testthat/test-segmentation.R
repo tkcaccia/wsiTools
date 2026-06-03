@@ -133,83 +133,15 @@ test_that("centroid segmentation coordinates can be shifted to slide coordinates
   expect_equal(shifted$y, 203)
 })
 
-test_that("StarDist viewer response includes overlay GeoJSON and run metadata", {
+test_that("CellPhenotyper-style centroid tables can become viewer cell overlays", {
   csv <- tempfile(fileext = ".csv")
   utils::write.csv(data.frame(cell_id = "cell-1", centroid_x = 2, centroid_y = 3), csv, row.names = FALSE)
+
   centroids <- import_segmentation(csv)
-  result <- wsiTools:::wsi_stardist_result(
-    input = "roi_crop.png",
-    output = "cells.csv",
-    segmentation = centroids,
-    crop = "roi_crop.png",
-    roi_id = "roi-1",
-    bbox = c(x = 10, y = 20, width = 30, height = 40),
-    status = "complete"
-  )
+  rois <- segmentation_to_rois(centroids, radius = 5)
 
-  body <- wsiTools:::wsi_stardist_response_body(result, cell_radius = 5)
-
-  expect_equal(body$crop, "roi_crop.png")
-  expect_equal(body$output, "cells.csv")
-  expect_equal(body$roi_id, "roi-1")
-  expect_equal(body$bbox$x, 10)
-  expect_identical(body$geojson$type, "FeatureCollection")
-  expect_equal(length(body$geojson$features), 1)
-})
-
-test_that("StarDist image wrapper can plan and run an optional external command", {
-  input <- tempfile(fileext = ".png")
-  writeBin(charToRaw("placeholder image"), input)
-  output <- tempfile(fileext = ".geojson")
-
-  planned <- stardist_segment_image(
-    input,
-    output,
-    command = "missing-stardist-command",
-    args = c("--input", "{input}", "--output", "{output}", "--model", "{model}"),
-    run = FALSE
-  )
-  expect_s3_class(planned, "wsi_stardist_result")
-  expect_equal(planned$status, "planned")
-  expect_true(any(planned$args == normalizePath(input, mustWork = TRUE)))
-  expect_true(any(planned$args == output))
-
-  expect_error(
-    stardist_segment_image(
-      input,
-      output,
-      command = "missing-stardist-command",
-      args = c("--input", "{input}", "--output", "{output}", "--model", "{model}")
-    ),
-    "No StarDist command was found"
-  )
-
-  script <- tempfile(fileext = ".R")
-  writeLines(
-    c(
-      "args <- commandArgs(TRUE)",
-      "writeLines('{",
-      "  \"type\": \"FeatureCollection\",",
-      "  \"features\": [{",
-      "    \"type\": \"Feature\",",
-      "    \"id\": \"cell-1\",",
-      "    \"properties\": {\"name\": \"StarDist cell\", \"classification\": {\"name\": \"cell\"}},",
-      "    \"geometry\": {\"type\": \"Polygon\", \"coordinates\": [[[1,1],[3,1],[3,3],[1,3],[1,1]]] }",
-      "  }]",
-      "}', args[[2]])"
-    ),
-    script
-  )
-
-  result <- stardist_segment_image(
-    input,
-    output,
-    command = file.path(R.home("bin"), "Rscript"),
-    args = c(script, "{input}", "{output}"),
-    overwrite = TRUE
-  )
-
-  expect_s3_class(result, "wsi_stardist_result")
-  expect_s3_class(result$segmentation, "wsi_segmentation")
-  expect_equal(result$segmentation$roi_id, "cell-1")
+  expect_s3_class(centroids, "wsi_segmentation_centroids")
+  expect_s3_class(rois, "wsi_roi")
+  expect_equal(rois$roi_id, "cell-1")
+  expect_equal(rois$class, "cell")
 })

@@ -40,8 +40,8 @@ wsi_install_backends(
 \item{method}{Package manager target. \code{"auto"} detects Homebrew, apt, dnf,
 winget, or conda when available.}
 
-\item{include_optional}{Whether to include Bio-Formats, StarDist, and
-Cellpose in the default system-tool plan.}
+\item{include_optional}{Whether to include Bio-Formats and native CZI support
+in the default system-tool plan.}
 
 \item{install}{Whether to run installation steps. Defaults to \code{FALSE} for
 \code{wsi_setup()} and \code{TRUE} for installer wrappers.}

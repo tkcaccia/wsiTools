@@ -10,8 +10,7 @@ wsi_segmentation_to_rois(segmentation, radius = 8, label = "cell")
 segmentation_to_rois(segmentation, radius = 8, label = "cell")
 }
 \arguments{
-\item{segmentation}{A segmentation object returned by \code{\link[=import_segmentation]{import_segmentation()}}
-or \verb{stardist_segment_*()$segmentation}.}
+\item{segmentation}{A segmentation object returned by \code{\link[=import_segmentation]{import_segmentation()}}.}
 
 \item{radius}{Radius, in slide pixels, for centroid cell markers.}
 

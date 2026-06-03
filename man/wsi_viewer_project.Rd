@@ -27,7 +27,10 @@ data frame/list of project image records.}
 \item{width}{Preview width used for openable files.
 Larger values provide sharper zoomable previews, at the cost of a larger
 self-contained HTML file. This is still a downsampled preview and does not
-load the full source image into R.}
+load the full source image into R. The generated project viewer uses the
+OpenSeadragon shell so the View menu can split multiple project
+images/sections into side-by-side panes even when full-resolution tiles are
+not yet available.}
 
 \item{height}{Optional preview height.}
 

@@ -56,7 +56,7 @@ The current GitHub package version is `0.1.22`. If R reports an older version
 after installation, remove the old package directory and reinstall from
 `tkcaccia/wsiTools` without pinning an old commit.
 
-OpenSlide, libvips, StarDist, Cellpose, Bio-Formats, and live web services are
+OpenSlide, libvips, Bio-Formats, and live web services are
 runtime capabilities rather than mandatory installation dependencies. Use
 `wsi_setup()` after installation to print a setup report with copyable commands
 for optional tools.
@@ -100,9 +100,8 @@ wsi_install_backends(
 ```
 
 Restart R or RStudio after installing system tools, then run `wsi_backends()`
-again. StarDist and Cellpose are external segmentation tools; keep them in
-separate environments and enable them explicitly rather than making them
-mandatory package dependencies.
+again. Cell segmentation should be run separately, for example with
+CellPhenotyper, and the resulting cell overlays can be imported into wsiTools.
 
 ### Bio-Formats Java helper and command-line tools
 
@@ -187,7 +186,7 @@ slide
 
 `wsi_open()` returns a lightweight `wsi_slide` object. It validates the file,
 chooses a backend, and reads metadata. It does not load the full slide.
-OpenSlide, libvips, StarDist, Cellpose, `httpuv`, and `callr` are optional
+OpenSlide, libvips, `httpuv`, and `callr` are optional
 runtime capabilities; the package should still install and load without them.
 
 For Zeiss CZI files on Windows, ImageMagick is not a CZI backend. wsiTools first
@@ -288,8 +287,8 @@ safe for very large WSI files.
 
 The viewer toolbar is organized into menus such as `Project`, `Annotations`,
 `Artifacts`, `Measure`, `Trajectories`, `Image`, `View`, `Stains`, and `Help`.
-Segmentation import and selected-ROI StarDist controls live inside
-`Annotations` beside the GeoJSON tools. Use `Project` to reopen the left-side
+GeoJSON import/export and ROI editing live inside
+`Annotations`. Use `Project` to reopen the left-side
 project panel or add ordinary browser-readable images as project items. Large
 WSI, CZI, SVS, OME-TIFF, and pyramidal images should still be opened from R or
 prepared as tiled project sources so the viewer can avoid loading full images
@@ -777,10 +776,6 @@ and results are collected later through a small job object.
 preview <- viewer$preview_tiles(tile_size = 512, stride = 512)
 tiles <- viewer$extract_tile_preview("confirmed_tiles", format = "png")
 
-job <- viewer$run_segmentation_async()
-job$status()
-cells <- job$result()
-
 tile_job <- viewer$run_tiles_async(tile_size = 512, stride = 512, save_images = FALSE)
 tiles <- tile_job$result()
 ```
@@ -905,7 +900,7 @@ installed libvips/libtiff build.
 ## Practical notes on OpenSlide and libvips
 
 The CRAN-facing core of wsiTools is intentionally lightweight. Installation
-does not require OpenSlide, libvips, Python, StarDist, Cellpose, or a running web
+does not require OpenSlide, libvips, Python, or a running web
 service. Those are optional runtime capabilities that are checked when a user
 asks for a backend-dependent operation.
 
@@ -917,10 +912,9 @@ libvips is used for efficient thumbnails, cropping, conversion, and pyramidal
 TIFF/OME-TIFF export. OME-TIFF behavior depends on the installed libvips
 version and its TIFF writer capabilities.
 
-StarDist and Cellpose integrations should remain external-command or local
-service workflows: export an ROI crop, run the model in the user's chosen
-environment, and import masks, centroids, polygons, or GeoJSON back into
-wsiTools. OME-Zarr metadata reads are lightweight; full chunked pixel access is
+Cell segmentation should remain outside the package: run the model in
+CellPhenotyper or another pipeline, then import masks, centroids, polygons, or
+GeoJSON back into wsiTools. OME-Zarr metadata reads are lightweight; full chunked pixel access is
 best treated as an optional backend rather than a mandatory dependency.
 
 Always check:

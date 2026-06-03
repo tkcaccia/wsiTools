@@ -50,5 +50,5 @@ viewer <- wsi_viewer_cellphenotyper(
 assign("cellphenotyper_viewer", viewer, envir = .GlobalEnv)
 message("Viewer object saved as `cellphenotyper_viewer`.")
 message("Use the top Stains menu to show/hide GigaTIME marker channels over the H&E.")
-message("Use the top KODAMA menu to load MedSAM-refined GeoJSON regions and open the KODAMA plot window.")
+message("Use the top CellPhenotyper menu to load MedSAM-refined GeoJSON regions and open the KODAMA plot window.")
 message("Inspect channel settings with: cellphenotyper_viewer$get_channel_settings()")

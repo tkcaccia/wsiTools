@@ -138,7 +138,7 @@ wsi_cell_table_from_segmentation <- function(segmentation) {
       (is.numeric(segmentation) && length(segmentation) >= 2L)) {
     return(wsi_cell_table_from_points(segmentation))
   }
-  wsi_abort("`segmentation` must be a centroid table, ROI/GeoJSON segmentation, StarDist result, or segmentation file path.")
+  wsi_abort("`segmentation` must be a centroid table, ROI/GeoJSON segmentation, imported segmentation object, or segmentation file path.")
 }
 
 wsi_cell_pixel_size <- function(slide = NULL, pixel_size = NULL) {
@@ -513,14 +513,14 @@ wsi_write_cell_counts <- function(result, output_dir = NULL, file = NULL,
 #'
 #' Combines imported segmentation with optional deconvolved stain channels and
 #' optional ROI annotations. The function works from centroid coordinates,
-#' polygon cell segmentations, or imported StarDist/Cellpose-style outputs. It
+#' polygon cell segmentations, or imported external outputs. It
 #' samples only the already-supplied channel matrices and never loads a whole
 #' slide into memory.
 #'
 #' @param slide Optional `wsi_slide` object. Used only to infer microns per
 #'   pixel via [wsi_mpp()] when `pixel_size` is not supplied.
 #' @param segmentation Cell segmentation as a centroid table, `wsi_roi`
-#'   polygons, imported segmentation object, StarDist result, or file path.
+#'   polygons, imported segmentation object, or file path.
 #' @param channels Optional `wsi_ihc_channels` object, or a named list of
 #'   numeric channel matrices, representing a patch/region/thumbnail already in
 #'   memory.

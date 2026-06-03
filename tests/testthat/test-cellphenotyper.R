@@ -257,7 +257,11 @@ test_that("CellPhenotyper KODAMA MedSAM GeoJSON is exposed in the viewer", {
     cellphenotyper = config
   )
   text <- paste(readLines(html, warn = FALSE), collapse = "\n")
-  expect_match(text, "KODAMA", fixed = TRUE)
+  expect_match(
+    text,
+    "Visualize CellPhenotyper KODAMA/MedSAM refined GeoJSON annotations and membership plots\">CellPhenotyper</summary>",
+    fixed = TRUE
+  )
   expect_match(text, "kodamaLoadAll", fixed = TRUE)
   expect_match(text, "bindKodamaControls", fixed = TRUE)
   expect_match(text, "KODAMA Fine MedSAM", fixed = TRUE)
@@ -312,10 +316,18 @@ test_that("CellPhenotyper layer and menu are included in viewer HTML", {
     )
   )
   text <- paste(readLines(html, warn = FALSE), collapse = "\n")
-  expect_match(text, "CellPhenotyper StarDist", fixed = TRUE)
+  expect_match(text, "CellPhenotyper cells", fixed = TRUE)
   expect_match(text, "cellToggle", fixed = TRUE)
   expect_match(text, "cellphenotyper_stardist_cells", fixed = TRUE)
   expect_match(text, "bindCellControls", fixed = TRUE)
+  expect_match(text, "\"managed_analysis_project\":true", fixed = TRUE)
+  expect_false(grepl("id=\"projectOpenImage\"", text, fixed = TRUE))
+  expect_false(grepl("id=\"projectImageFile\"", text, fixed = TRUE))
+  expect_false(grepl(
+    "Visualize CellPhenotyper KODAMA/MedSAM refined GeoJSON annotations and membership plots\">CellPhenotyper</summary>",
+    text,
+    fixed = TRUE
+  ))
 })
 
 test_that("CellPhenotyper GigaTIME panel can be added as a project fallback image", {
@@ -378,6 +390,9 @@ test_that("CellPhenotyper GigaTIME panel can be added as a project fallback imag
   text <- paste(readLines(html, warn = FALSE), collapse = "\n")
   expect_match(text, "GigaTIME channel panels", fixed = TRUE)
   expect_match(text, "gigatime_5marker_channel_panels.png", fixed = TRUE)
+  expect_match(text, "\"managed_analysis_project\":true", fixed = TRUE)
+  expect_false(grepl("id=\"projectOpenImage\"", text, fixed = TRUE))
+  expect_false(grepl("id=\"projectImageFile\"", text, fixed = TRUE))
 })
 
 test_that("CellPhenotyper viewer overlays GigaTIME OME-TIFF channels in live mode", {

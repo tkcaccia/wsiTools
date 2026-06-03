@@ -459,7 +459,7 @@ test_that("missing scalefactors path can be recovered from a spatial directory",
   expect_equal(linked$spots$y, c(300, 700))
 })
 
-test_that("Seurat viewer exposes spot layer and PCA controls", {
+test_that("Seurat viewer exposes spot layer and reduction controls", {
   embeddings <- matrix(
     c(-1, 0, 1, 1),
     ncol = 2,
@@ -495,10 +495,172 @@ test_that("Seurat viewer exposes spot layer and PCA controls", {
   expect_match(text, "Type any gene name", fixed = TRUE)
   expect_match(text, "JSON.stringify({gene:String(gene||'').trim()})", fixed = TRUE)
   expect_match(text, "seuratPlotWindow", fixed = TRUE)
+  expect_match(text, "Current tissue", fixed = TRUE)
+  expect_match(text, "All tissues", fixed = TRUE)
   expect_match(text, "bindSeuratControls", fixed = TRUE)
   expect_match(text, "seuratGeneInput", fixed = TRUE)
   expect_match(text, "seuratSelectionPayload", fixed = TRUE)
-  expect_match(text, "Draw a lasso around PCA points", fixed = TRUE)
+  expect_match(text, "Draw a lasso around reduction points", fixed = TRUE)
+  expect_match(text, "\"managed_analysis_project\":true", fixed = TRUE)
+  expect_false(grepl("id=\"projectOpenImage\"", text, fixed = TRUE))
+  expect_false(grepl("id=\"projectImageFile\"", text, fixed = TRUE))
+  expect_match(text, "Seurat/Giotto/SpatialExperiment/CellPhenotyper viewer from R", fixed = TRUE)
+})
+
+test_that("Seurat viewer only shows buttons for available reductions", {
+  embeddings <- matrix(
+    c(-1, 0, 1, 1, -2, 2, 2, -1),
+    ncol = 2,
+    byrow = TRUE,
+    dimnames = list(c("a", "b", "c", "d"), c("PC_1", "PC_2"))
+  )
+  umap <- matrix(
+    c(1, 3, 2, 4, 5, 1, 6, 2),
+    ncol = 2,
+    byrow = TRUE,
+    dimnames = list(c("a", "b", "c", "d"), c("UMAP_1", "UMAP_2"))
+  )
+  seurat_like <- list(
+    reductions = list(
+      pca = list(cell.embeddings = embeddings),
+      umap = list(cell.embeddings = umap)
+    ),
+    images = list(slice1 = list(
+      coordinates = data.frame(barcode = c("a", "b", "c", "d"), imagecol = c(20, 80, 30, 60), imagerow = c(30, 70, 45, 85)),
+      image = array(0, dim = c(100, 100, 3))
+    ))
+  )
+  slide <- wsi_mock_slide(width = 100, height = 100, levels = c(1, 2))
+  linked <- wsi_link_seurat_image(seurat_like, slide, image_name = "slice1", reduction = "pca")
+  config <- list(seurat = wsiTools:::wsi_viewer_seurat_config(linked))
+  controls <- wsiTools:::wsi_viewer_seurat_controls(config)
+
+  expect_equal(vapply(linked$plots, function(x) x$reduction, character(1)), c("pca", "umap"))
+  expect_match(controls, "data-plot-index=\"0\"", fixed = TRUE)
+  expect_match(controls, ">PCA<", fixed = TRUE)
+  expect_match(controls, ">UMAP<", fixed = TRUE)
+  expect_false(grepl(">tSNE<", controls, fixed = TRUE))
+})
+
+test_that("long reduction names are compacted in viewer controls", {
+  embeddings <- matrix(
+    c(-1, 0, 1, 1, -2, 2, 2, -1),
+    ncol = 2,
+    byrow = TRUE,
+    dimnames = list(c("a", "b", "c", "d"), c("RD_1", "RD_2"))
+  )
+  long_reduction <- "very_long_dimensionality_reduction_for_testing"
+  seurat_like <- list(
+    reductions = setNames(list(list(cell.embeddings = embeddings)), long_reduction),
+    images = list(slice1 = list(
+      coordinates = data.frame(barcode = c("a", "b", "c", "d"), imagecol = c(20, 80, 30, 60), imagerow = c(30, 70, 45, 85)),
+      image = array(0, dim = c(100, 100, 3))
+    ))
+  )
+  slide <- wsi_mock_slide(width = 100, height = 100, levels = c(1, 2))
+  linked <- wsi_link_seurat_image(seurat_like, slide, image_name = "slice1", reduction = long_reduction)
+  config <- list(seurat = wsiTools:::wsi_viewer_seurat_config(linked))
+  controls <- wsiTools:::wsi_viewer_seurat_controls(config)
+
+  expect_match(controls, wsiTools:::wsi_middle_ellipsis(long_reduction), fixed = TRUE)
+  expect_match(controls, paste0("Open the ", long_reduction, " reduction plot"), fixed = TRUE)
+  expect_false(grepl(paste0(">", long_reduction, "<"), controls, fixed = TRUE))
+})
+
+test_that("multi-image Seurat projects keep per-section overlays", {
+  embeddings <- matrix(
+    c(-1, 0, 1, 1, -2, 2, 2, -1),
+    ncol = 2,
+    byrow = TRUE,
+    dimnames = list(c("a", "b", "c", "d"), c("PC_1", "PC_2"))
+  )
+  seurat_like <- list(
+    reductions = list(pca = list(cell.embeddings = embeddings)),
+    images = list(
+      slice1 = list(
+        coordinates = data.frame(barcode = c("a", "b"), imagecol = c(20, 80), imagerow = c(30, 70)),
+        image = array(0, dim = c(100, 100, 3))
+      ),
+      slice2 = list(
+        coordinates = data.frame(barcode = c("c", "d"), imagecol = c(15, 60), imagerow = c(20, 75)),
+        image = array(0, dim = c(100, 100, 3))
+      )
+    )
+  )
+  slides <- list(
+    slice1 = wsi_mock_slide(width = 100, height = 100, levels = c(1, 2)),
+    slice2 = wsi_mock_slide(width = 120, height = 90, levels = c(1, 2))
+  )
+  output <- tempfile(fileext = ".html")
+
+  html <- wsi_viewer_seurat_project(
+    seurat_like,
+    images = slides,
+    image_names = names(slides),
+    mode = "thumbnail",
+    output = output,
+    open = FALSE,
+    overwrite = TRUE
+  )
+  text <- paste(readLines(html, warn = FALSE), collapse = "\n")
+
+  expect_true(file.exists(html))
+  expect_match(text, "slice1", fixed = TRUE)
+  expect_match(text, "slice2", fixed = TRUE)
+  expect_match(text, "seurat_spots", fixed = TRUE)
+  expect_match(text, "spatial spots", fixed = TRUE)
+  expect_match(text, "applyProjectSeurat", fixed = TRUE)
+  expect_match(text, "seuratAllTissuePlotPoints", fixed = TRUE)
+  expect_match(text, "seurat_plot_scope_changed", fixed = TRUE)
+  expect_match(text, "\"managed_analysis_project\":true", fixed = TRUE)
+  expect_false(grepl("id=\"projectOpenImage\"", text, fixed = TRUE))
+  expect_false(grepl("id=\"projectImageFile\"", text, fixed = TRUE))
+})
+
+test_that("Seurat project records expose source tiles without reopening paths", {
+  linked <- list(
+    first = list(
+      slide = wsi_mock_slide(width = 1000, height = 800, levels = c(1, 2)),
+      image_path = "first.tif",
+      image_name = "first",
+      source_name = "Seurat",
+      reduction = "pca",
+      dims = c(1L, 2L),
+      component_names = c("PC_1", "PC_2"),
+      coordinate_mapping = list(method = "none"),
+      spot_radius = 6,
+      spot_count = 2L,
+      displayed_spot_count = 2L,
+      gene_expression = list(enabled = FALSE, genes = character(), values = NULL),
+      spots = data.frame(
+        id = c("a", "b"),
+        label = c("a", "b"),
+        barcode = c("a", "b"),
+        x = c(100, 200),
+        y = c(120, 220),
+        PC_1 = c(0, 1),
+        PC_2 = c(1, 0),
+        colour = c("#000000", "#ffffff"),
+        base_colour = c("#000000", "#ffffff"),
+        stringsAsFactors = FALSE
+      ),
+      pca = list(id = "seurat_pca", label = "PCA", x_label = "PC_1", y_label = "PC_2", point_count = 2L, points = list())
+    )
+  )
+  class(linked[[1]]) <- c("wsi_seurat_spatial", "list")
+
+  records <- wsiTools:::wsi_seurat_project_records(
+    linked,
+    output = tempfile(fileext = ".html"),
+    labels = "First section",
+    mode = "thumbnail"
+  )
+
+  expect_length(records, 1)
+  expect_true(records[[1]]$seurat$enabled)
+  expect_true(records[[1]]$layers[[1]]$project_scoped)
+  expect_equal(records[[1]]$content_bbox$xmin, 64)
+  expect_equal(records[[1]]$content_bbox$ymin, 84)
 })
 
 test_that("Seurat selection events are accepted by the live bridge validator", {

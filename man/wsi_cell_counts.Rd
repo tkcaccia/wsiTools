@@ -44,7 +44,7 @@ cell_counts(
 pixel via \code{\link[=wsi_mpp]{wsi_mpp()}} when \code{pixel_size} is not supplied.}
 
 \item{segmentation}{Cell segmentation as a centroid table, \code{wsi_roi}
-polygons, imported segmentation object, StarDist result, or file path.}
+polygons, imported segmentation object, or file path.}
 
 \item{channels}{Optional \code{wsi_ihc_channels} object, or a named list of
 numeric channel matrices, representing a patch/region/thumbnail already in
@@ -87,7 +87,7 @@ A \code{wsi_cell_counts} list with \code{cell_table}, \code{counts_matrix},
 \description{
 Combines imported segmentation with optional deconvolved stain channels and
 optional ROI annotations. The function works from centroid coordinates,
-polygon cell segmentations, or imported StarDist/Cellpose-style outputs. It
+polygon cell segmentations, or imported external outputs. It
 samples only the already-supplied channel matrices and never loads a whole
 slide into memory.
 }

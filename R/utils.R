@@ -1,5 +1,11 @@
 `%||%` <- function(x, y) {
-  if (is.null(x) || length(x) == 0 || (length(x) == 1 && is.na(x))) y else x
+  if (is.null(x) || length(x) == 0) {
+    return(y)
+  }
+  if ((is.atomic(x) || is.factor(x)) && length(x) == 1L && is.na(x)) {
+    return(y)
+  }
+  x
 }
 
 .wsi_native_cache <- new.env(parent = emptyenv())

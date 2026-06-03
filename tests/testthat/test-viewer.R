@@ -36,6 +36,8 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "iconMove", fixed = TRUE)
   expect_match(html, "navDock", fixed = TRUE)
   expect_match(html, "Navigation controls", fixed = TRUE)
+  expect_match(html, "screenshotTool", fixed = TRUE)
+  expect_match(html, "Select screenshot area", fixed = TRUE)
   expect_match(html, "zoomIn", fixed = TRUE)
   expect_match(html, "zoomOut", fixed = TRUE)
   expect_match(html, "oneToOne", fixed = TRUE)
@@ -46,13 +48,24 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "toolEdit", fixed = TRUE)
   expect_false(grepl("<button id=\"finishRoi\"", html, fixed = TRUE))
   expect_false(grepl("<button id=\"undoPoint\"", html, fixed = TRUE))
+  expect_false(grepl("Zoom spots", html, fixed = TRUE))
+  expect_false(grepl("Layer panel", html, fixed = TRUE))
+  expect_false(grepl("seuratSpotZoom", html, fixed = TRUE))
+  expect_false(grepl("seuratLayerPanel", html, fixed = TRUE))
+  expect_false(grepl("cellPanelToggle", html, fixed = TRUE))
+  expect_false(grepl("<summary title=\"CellPhenotyper cell overlays\">Cells</summary>", html, fixed = TRUE))
+  expect_false(grepl("id=\"cellToggle\"", html, fixed = TRUE))
+  expect_false(grepl("No CellPhenotyper cells loaded.", html, fixed = TRUE))
+  expect_false(grepl("seuratSpotRadius", html, fixed = TRUE))
+  expect_false(grepl("seuratSpotRadiusValue", html, fixed = TRUE))
+  expect_false(grepl("setSeuratSpotRadius", html, fixed = TRUE))
+  expect_match(html, "Spot size is fixed by the spatial transcriptomics platform metadata.", fixed = TRUE)
+  expect_match(html, "Visium spots are 55 microns", fixed = TRUE)
   expect_match(html, "Stains", fixed = TRUE)
-  pos_annotations_menu <- regexpr("<summary title=\"Draw, select, import, export, segment, and manage annotations\">Annotations</summary>", html, fixed = TRUE)[[1]]
+  pos_annotations_menu <- regexpr("<summary title=\"Draw, select, import, export, and manage annotations\">Annotations</summary>", html, fixed = TRUE)[[1]]
   pos_segmentation_section <- regexpr("StarDist segmentation", html, fixed = TRUE)[[1]]
-  pos_separate_segmentation_menu <- regexpr("<summary title=\"StarDist segmentation import for selected ROIs\">Segmentation</summary>", html, fixed = TRUE)[[1]]
   expect_gt(pos_annotations_menu, 0)
-  expect_gt(pos_segmentation_section, pos_annotations_menu)
-  expect_identical(pos_separate_segmentation_menu, -1L)
+  expect_identical(pos_segmentation_section, -1L)
   pos_stains_menu <- regexpr("<summary title=\"Stain deconvolution display options\">Stains</summary>", html, fixed = TRUE)[[1]]
   pos_help_menu <- regexpr("<summary title=\"Viewer guide and shortcuts\">Help</summary>", html, fixed = TRUE)[[1]]
   expect_true(all(c(pos_stains_menu, pos_help_menu) > 0))
@@ -82,6 +95,7 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "viewerPreferenceKey", fixed = TRUE)
   expect_match(html, "wsiTools.viewer.preferences.v1", fixed = TRUE)
   expect_match(html, "applyViewerPreferences", fixed = TRUE)
+  expect_match(html, "return 'pan';", fixed = TRUE)
   expect_match(html, "stableClassColour", fixed = TRUE)
   expect_match(html, "roiClassKey", fixed = TRUE)
   expect_match(html, "annotationIndicesShareClass", fixed = TRUE)
@@ -217,17 +231,32 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "notifyAction", fixed = TRUE)
   expect_match(html, "Deleted '+deleteLabel+'.", fixed = TRUE)
   expect_match(html, "'Undo',()=>restoreAnnotationUndo()", fixed = TRUE)
-  expect_match(html, "Jobs", fixed = TRUE)
-  expect_match(html, "Long Jobs", fixed = TRUE)
-  expect_match(html, "jobSummary", fixed = TRUE)
-  expect_match(html, "jobList", fixed = TRUE)
+  expect_false(grepl("<summary title=\"Background task progress and live R synchronization status\">Jobs / Sync</summary>", html, fixed = TRUE))
+  expect_false(grepl("id=\"jobSummary\"", html, fixed = TRUE))
+  expect_false(grepl("id=\"jobList\"", html, fixed = TRUE))
+  expect_match(html, "jobSyncIndicator", fixed = TRUE)
+  expect_match(html, "jobSyncLabel", fixed = TRUE)
+  expect_match(html, "jobSyncDetail", fixed = TRUE)
+  expect_match(html, "syncIndicator", fixed = TRUE)
   expect_match(html, "jobProgress", fixed = TRUE)
+  expect_match(html, "jobProgressText", fixed = TRUE)
+  expect_match(html, "jobMessage", fixed = TRUE)
+  expect_match(html, "jobMeta", fixed = TRUE)
+  expect_match(html, "jobError", fixed = TRUE)
+  expect_match(html, "jobLogDetails", fixed = TRUE)
+  expect_match(html, "jobCountsObject", fixed = TRUE)
+  expect_match(html, "jobCountsText", fixed = TRUE)
+  expect_match(html, "jobErrorText", fixed = TRUE)
+  expect_match(html, "jobPrimaryStatus", fixed = TRUE)
+  expect_match(html, "updateJobSyncIndicator", fixed = TRUE)
+  expect_false(grepl("openJobSyncMenu", html, fixed = TRUE))
   expect_match(html, "viewerJobs", fixed = TRUE)
   expect_match(html, "upsertViewerJob", fixed = TRUE)
   expect_match(html, "updateViewerJob", fixed = TRUE)
   expect_match(html, "handleViewerJobs", fixed = TRUE)
   expect_match(html, "job_update", fixed = TRUE)
-  expect_match(html, "queued", fixed = TRUE)
+  expect_match(html, "Sync off", fixed = TRUE)
+  expect_match(html, "pending", fixed = TRUE)
   expect_match(html, "running", fixed = TRUE)
   expect_match(html, "completed", fixed = TRUE)
   expect_match(html, "failed", fixed = TRUE)
@@ -252,7 +281,7 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "markAnnotationsDirty", fixed = TRUE)
   expect_match(html, "markAnnotationsSaved", fixed = TRUE)
   expect_match(html, "updateAnnotationDirtyIndicator", fixed = TRUE)
-  expect_match(html, "annotations:{dirty:annotationsDirty", fixed = TRUE)
+  expect_match(html, "annotations:{dirty:!!(annotationsDirty||projectDirty)", fixed = TRUE)
   expect_match(html, "annotations_saved", fixed = TRUE)
   expect_match(html, "autosave_enabled", fixed = TRUE)
   expect_match(html, "startViewerAutosave", fixed = TRUE)
@@ -264,7 +293,7 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "toggleCommandPalette", fixed = TRUE)
   expect_match(html, "commandPaletteDefinitions", fixed = TRUE)
   expect_match(html, "Export selected ROIs", fixed = TRUE)
-  expect_match(html, "Run StarDist", fixed = TRUE)
+  expect_false(grepl("Run StarDist", html, fixed = TRUE))
   expect_match(html, "Show tile grid", fixed = TRUE)
   expect_match(html, "Save project", fixed = TRUE)
   expect_match(html, "tileGridVisible", fixed = TRUE)
@@ -280,8 +309,29 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "bindMultiViewControls", fixed = TRUE)
   expect_match(html, "setMultiViewLayout", fixed = TRUE)
   expect_match(html, "shortcutHelp", fixed = TRUE)
-  expect_match(html, "Viewer Guide", fixed = TRUE)
-  expect_match(html, "Keyboard shortcuts", fixed = TRUE)
+  expect_match(html, "Viewer Help", fixed = TRUE)
+  expect_match(html, "Quick Recommendations", fixed = TRUE)
+  expect_match(html, "Full Guide", fixed = TRUE)
+  expect_match(html, "Keyboard Shortcuts", fixed = TRUE)
+  pos_help_quick_menu <- regexpr("<div class=\"menuTitle\">Quick Recommendations</div>", html, fixed = TRUE)[[1]]
+  pos_help_button <- regexpr("<button id=\"shortcutHelpButton\"", html, fixed = TRUE)[[1]]
+  pos_help_quick_dialog <- regexpr("id=\"helpQuickRecommendations\"", html, fixed = TRUE)[[1]]
+  pos_help_full_dialog <- regexpr("id=\"helpFullGuide\"", html, fixed = TRUE)[[1]]
+  pos_help_shortcuts_dialog <- regexpr("id=\"helpKeyboardShortcuts\"", html, fixed = TRUE)[[1]]
+  expect_true(all(c(
+    pos_help_quick_menu,
+    pos_help_button,
+    pos_help_quick_dialog,
+    pos_help_full_dialog,
+    pos_help_shortcuts_dialog
+  ) > 0))
+  expect_lt(pos_help_quick_menu, pos_help_button)
+  expect_lt(pos_help_quick_dialog, pos_help_full_dialog)
+  expect_lt(pos_help_full_dialog, pos_help_shortcuts_dialog)
+  expect_match(html, "helpQuickRecommendations", fixed = TRUE)
+  expect_match(html, "helpFullGuide", fixed = TRUE)
+  expect_match(html, "helpKeyboardShortcuts", fixed = TRUE)
+  expect_match(html, "quickRecommendationList", fixed = TRUE)
   expect_match(html, "Open images", fixed = TRUE)
   expect_match(html, "Zoom and pan", fixed = TRUE)
   expect_match(html, "2, 4, or 6 side-by-side panes", fixed = TRUE)
@@ -293,14 +343,14 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "shortcutHelpButton", fixed = TRUE)
   expect_match(html, "bindShortcutHelp", fixed = TRUE)
   expect_match(html, "openShortcutHelp", fixed = TRUE)
-  expect_match(html, "Press ? anytime", fixed = TRUE)
+  expect_match(html, "Press ? anytime to open the organized help dialog", fixed = TRUE)
   expect_match(html, "Pan mode", fixed = TRUE)
   expect_match(html, "Draw polygon ROI", fixed = TRUE)
   expect_match(html, "Brush annotation editing", fixed = TRUE)
   expect_match(html, "Edit selected ROI vertices", fixed = TRUE)
   expect_match(html, "Measure distance between two points", fixed = TRUE)
-  expect_match(html, "Undo annotation or trajectory edit", fixed = TRUE)
-  expect_match(html, "Redo annotation or trajectory edit", fixed = TRUE)
+  expect_match(html, "Undo annotation, trajectory, or closed-image edit", fixed = TRUE)
+  expect_match(html, "Redo annotation, trajectory, or closed-image edit", fixed = TRUE)
   expect_match(html, "Ctrl+S", fixed = TRUE)
   expect_match(html, "Ctrl+I", fixed = TRUE)
   expect_match(html, "Ctrl+E", fixed = TRUE)
@@ -308,13 +358,16 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "ROI locked", fixed = TRUE)
   expect_match(html, "ROI saved", fixed = TRUE)
   expect_match(html, "GeoJSON exported", fixed = TRUE)
-  expect_match(html, "StarDist finished", fixed = TRUE)
+  expect_false(grepl("Run StarDist", html, fixed = TRUE))
   expect_match(html, "roiCompositeGeometry", fixed = TRUE)
   expect_match(html, "clippedHoleForGroup", fixed = TRUE)
   expect_match(html, "roiContainsPoint", fixed = TRUE)
   expect_match(html, "annotationUndo", fixed = TRUE)
   expect_match(html, "annotationRedo", fixed = TRUE)
   expect_match(html, "undoAnnotation", fixed = TRUE)
+  expect_match(html, "state&&state.project&&typeof restoreProjectUndoSnapshot", fixed = TRUE)
+  expect_match(html, "current.project=projectUndoSnapshot('project_redo')", fixed = TRUE)
+  expect_match(html, "current.project=projectUndoSnapshot('project_undo')", fixed = TRUE)
   expect_match(html, "redoAnnotation", fixed = TRUE)
   expect_match(html, "pushAnnotationUndo", fixed = TRUE)
   expect_match(html, "restoreAnnotationUndo", fixed = TRUE)
@@ -359,29 +412,18 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "deleteSelectedVertex", fixed = TRUE)
   expect_match(html, "deleteRoi", fixed = TRUE)
   expect_match(html, "Delete selected", fixed = TRUE)
-  expect_match(html, "Segmentation", fixed = TRUE)
-  expect_match(html, "exportSelectedRoi", fixed = TRUE)
-  expect_match(html, "startSegmentation", fixed = TRUE)
-  expect_match(html, "Run segmentation", fixed = TRUE)
-  expect_match(html, "loadSegmentation", fixed = TRUE)
-  expect_match(html, "loadSegmentationCsv", fixed = TRUE)
-  expect_match(html, "segmentationTableFile", fixed = TRUE)
-  expect_match(html, "segLocalCoords", fixed = TRUE)
-  expect_match(html, "segCellRadius", fixed = TRUE)
-  expect_match(html, "addSegmentationCentroidTable", fixed = TRUE)
-  expect_match(html, "parseDelimitedTable", fixed = TRUE)
-  expect_match(html, "centroid_x", fixed = TRUE)
-  expect_match(html, "bindSegmentationControls", fixed = TRUE)
-  expect_match(html, "startSegmentationForSelectedRoi", fixed = TRUE)
-  expect_match(html, "segmentationResultDetail", fixed = TRUE)
-  expect_match(html, "segmentation_run_url", fixed = TRUE)
-  expect_match(html, "No StarDist command was found. Install/configure it, or load a segmentation GeoJSON/CSV instead.", fixed = TRUE)
-  expect_match(html, "Copy R command", fixed = TRUE)
-  expect_match(html, "wsi_install_stardist(method = \"conda\")", fixed = TRUE)
-  expect_match(html, "addSegmentationGeojson", fixed = TRUE)
-  expect_match(html, "stardist", fixed = TRUE)
-  expect_match(html, "Artifacts", fixed = TRUE)
-  expect_match(html, "GrandQC GeoJSON", fixed = TRUE)
+  expect_false(grepl("StarDist segmentation", html, fixed = TRUE))
+  expect_false(grepl("id=\"exportSelectedRoi\"", html, fixed = TRUE))
+  expect_false(grepl("id=\"startSegmentation\"", html, fixed = TRUE))
+  expect_false(grepl("Run segmentation", html, fixed = TRUE))
+  expect_false(grepl("id=\"loadSegmentation\"", html, fixed = TRUE))
+  expect_false(grepl("id=\"loadSegmentationCsv\"", html, fixed = TRUE))
+  expect_false(grepl("id=\"segmentationTableFile\"", html, fixed = TRUE))
+  expect_false(grepl("id=\"segLocalCoords\"", html, fixed = TRUE))
+  expect_false(grepl("id=\"segCellRadius\"", html, fixed = TRUE))
+  expect_false(grepl("run_stardist", html, fixed = TRUE))
+  expect_false(grepl("<summary title=\"Visualize GrandQC artifact GeoJSON annotations\">Artifacts</summary>", html, fixed = TRUE))
+  expect_false(grepl("GrandQC GeoJSON</div>", html, fixed = TRUE))
   expect_match(html, "grandqcLoadAll", fixed = TRUE)
   expect_match(html, "loadAllGrandqcGeojsons", fixed = TRUE)
   expect_match(html, "clearGrandqcRois", fixed = TRUE)
@@ -406,10 +448,17 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "saved; trajectory drawing off", fixed = TRUE)
   expect_match(html, "if(e.detail===1)addTrajectoryPoint", fixed = TRUE)
   expect_match(html, "returns to pan mode", fixed = TRUE)
-  expect_match(html, "trajectoryResolution", fixed = TRUE)
+  expect_match(html, "function trajectoryResolution(){return 200;}", fixed = TRUE)
+  expect_false(grepl("id=\"trajectoryResolution\"", html, fixed = TRUE))
+  expect_false(grepl("trajectoryResolutionValue", html, fixed = TRUE))
   expect_match(html, "trajectoryAreaWidth", fixed = TRUE)
   expect_match(html, "trajectoryAreaRoi", fixed = TRUE)
+  expect_match(html, "editTrajectoryArea", fixed = TRUE)
+  expect_match(html, "updateTrajectoryArea", fixed = TRUE)
+  expect_match(html, "selectTrajectoryAreaRoi", fixed = TRUE)
+  expect_match(html, "updateTrajectoryAreaRoi", fixed = TRUE)
   expect_match(html, "createTrajectoryAreaRoi", fixed = TRUE)
+  expect_match(html, "applyTrajectoryAreaGeometry", fixed = TRUE)
   expect_match(html, "trajectoryAreaGeometry", fixed = TRUE)
   expect_match(html, "trajectoryPayload", fixed = TRUE)
   expect_match(html, "drawTrajectories", fixed = TRUE)
@@ -419,6 +468,8 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "projectOpenImage", fixed = TRUE)
   expect_match(html, "Add image", fixed = TRUE)
   expect_match(html, "add_project_image", fixed = TRUE)
+  expect_match(html, "\"managed_analysis_project\":false", fixed = TRUE)
+  expect_match(html, "item.id!=='add_project_image'", fixed = TRUE)
   expect_match(html, "projectSaveFile", fixed = TRUE)
   expect_match(html, "projectOpenFile", fixed = TRUE)
   expect_match(html, "projectImageFile", fixed = TRUE)
@@ -449,24 +500,39 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "projectItemClose", fixed = TRUE)
   expect_match(html, "removeProjectItem", fixed = TRUE)
   expect_match(html, "project_image_closed", fixed = TRUE)
+  expect_match(html, "projectUndoSnapshot", fixed = TRUE)
+  expect_match(html, "restoreProjectUndoSnapshot", fixed = TRUE)
+  expect_match(html, "undoSnapshot.project=projectUndoSnapshot('project_image_closed')", fixed = TRUE)
+  expect_match(html, "Restored closed image", fixed = TRUE)
+  expect_match(html, "Press Ctrl+Z to undo", fixed = TRUE)
   expect_match(html, "Close this project image", fixed = TRUE)
   expect_match(html, "saveProjectFile", fixed = TRUE)
   expect_match(html, "openProjectFile", fixed = TRUE)
   expect_match(html, "projectBrowserSnapshot", fixed = TRUE)
   expect_match(html, "projectAnnotationSetsFull", fixed = TRUE)
   expect_match(html, "wsiTools-viewer-project", fixed = TRUE)
+  expect_match(html, "projectHasUnsavedChanges", fixed = TRUE)
+  expect_match(html, "confirmProjectReplacement", fixed = TRUE)
+  expect_match(html, "You have an unsaved project. Do you want to save it before", fixed = TRUE)
+  expect_match(html, "Open the new project without saving current changes?", fixed = TRUE)
   expect_match(html, "trajectory_count", fixed = TRUE)
   expect_match(html, "addProjectImageDataUri", fixed = TRUE)
   expect_match(html, "project_image_added", fixed = TRUE)
-  expect_match(html, "Image", fixed = TRUE)
+  expect_false(grepl("Non-destructive image display transforms", html, fixed = TRUE))
   expect_match(html, "rotateImageLeft", fixed = TRUE)
   expect_match(html, "rotateImageRight", fixed = TRUE)
   expect_match(html, "flipImageHorizontal", fixed = TRUE)
   expect_match(html, "flipImageVertical", fixed = TRUE)
-  expect_match(html, "resetImageTransform", fixed = TRUE)
+  expect_match(html, "imageTransformButton", fixed = TRUE)
+  expect_match(html, "navIcon", fixed = TRUE)
+  expect_false(grepl("id=\"resetImageTransform\"", html, fixed = TRUE))
   expect_match(html, "imageTransformPayload", fixed = TRUE)
   expect_match(html, "drawTransformedImage", fixed = TRUE)
   expect_match(html, "bindImageTransformControls", fixed = TRUE)
+  expect_match(html, "beginScreenshotMode", fixed = TRUE)
+  expect_match(html, "drawScreenshotSelection", fixed = TRUE)
+  expect_match(html, "saveScreenshotPng", fixed = TRUE)
+  expect_match(html, "image/png", fixed = TRUE)
   expect_match(html, "mpp", fixed = TRUE)
   expect_match(html, "id=\"scaleBar\"", fixed = TRUE)
   expect_match(html, "Micron scale bar", fixed = TRUE)
@@ -481,6 +547,10 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "currentMagnification", fixed = TRUE)
   expect_match(html, "setMagnificationPower", fixed = TRUE)
   expect_match(html, "bindMagnificationControls", fixed = TRUE)
+  expect_match(html, "defaultObjectivePower", fixed = TRUE)
+  expect_match(html, "objectivePowerEstimated", fixed = TRUE)
+  expect_match(html, "40x full-resolution fallback", fixed = TRUE)
+  expect_false(grepl("Magnification unavailable: no MPP/objective metadata.", html, fixed = TRUE))
   expect_match(html, "objective_power", fixed = TRUE)
   expect_match(html, "\\u00b5m", fixed = TRUE)
   expect_match(html, "saveGeojson", fixed = TRUE)
@@ -619,10 +689,12 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_false(grepl("<summary title=\"Pan and zoom controls\">Navigate</summary>", html, fixed = TRUE))
   expect_match(html, "navDock", fixed = TRUE)
   expect_match(html, "navPanButton", fixed = TRUE)
+  expect_match(html, "screenshotButton", fixed = TRUE)
+  expect_match(html, "wsiTools_screenshot_", fixed = TRUE)
   expect_match(html, "Annotations", fixed = TRUE)
-  expect_match(html, "Draw, select, import, export, segment, and manage annotations", fixed = TRUE)
+  expect_match(html, "Draw, select, import, export, and manage annotations", fixed = TRUE)
   expect_match(html, "GeoJSON and display", fixed = TRUE)
-  expect_match(html, "StarDist segmentation", fixed = TRUE)
+  expect_false(grepl("StarDist segmentation", html, fixed = TRUE))
   expect_false(grepl("<summary title=\"StarDist segmentation import for selected ROIs\">Segmentation</summary>", html, fixed = TRUE))
   expect_false(grepl("<summary title=\"ROI overlay and GeoJSON geometry list\">GeoJSON</summary>", html, fixed = TRUE))
   expect_match(html, "Geometry list", fixed = TRUE)
@@ -663,6 +735,52 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "annotationLabelValue", fixed = TRUE)
   expect_match(html, "activeRoiName", fixed = TRUE)
   expect_match(html, "label:name", fixed = TRUE)
+})
+
+test_that("Artifact menu appears only for CellPhenotyper project viewers", {
+  slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 500, levels = c(1, 4))
+  output <- tempfile(fileext = ".html")
+  grandqc <- list(
+    enabled = TRUE,
+    geojsons = list(list(
+      id = "grandqc_artifacts",
+      label = "GrandQC artifacts",
+      path = "grandqc.geojson",
+      feature_count = 2L,
+      geojson = list(type = "FeatureCollection", features = list())
+    ))
+  )
+
+  result <- wsi_viewer(
+    slide,
+    width = 256,
+    output = output,
+    open = FALSE,
+    cellphenotyper = list(enabled = TRUE, grandqc = grandqc)
+  )
+  html <- paste(readLines(result, warn = FALSE), collapse = "\n")
+
+  expect_false(grepl("<summary title=\"Visualize GrandQC artifact GeoJSON annotations\">Artifacts</summary>", html, fixed = TRUE))
+
+  output_project <- tempfile(fileext = ".html")
+  result_project <- wsi_viewer(
+    slide,
+    width = 256,
+    output = output_project,
+    open = FALSE,
+    cellphenotyper = list(
+      enabled = TRUE,
+      project_type = "cellphenotyper",
+      is_project = TRUE,
+      grandqc = grandqc
+    )
+  )
+  html <- paste(readLines(result_project, warn = FALSE), collapse = "\n")
+
+  expect_match(html, "<summary title=\"Visualize GrandQC artifact GeoJSON annotations\">Artifacts</summary>", fixed = TRUE)
+  expect_match(html, "GrandQC GeoJSON", fixed = TRUE)
+  expect_match(html, "grandqcLoadAll", fixed = TRUE)
+  expect_match(html, "GrandQC artifacts", fixed = TRUE)
 })
 
 test_that("non-interactive viewer wrapper writes HTML without opening a browser", {
@@ -784,7 +902,7 @@ test_that("interactive viewer can be configured with a live R state endpoint", {
   expect_match(html, "annotationHistoryPayload", fixed = TRUE)
   expect_match(html, "Brush subtract", fixed = TRUE)
   expect_match(html, "Imported GeoJSON", fixed = TRUE)
-  expect_match(html, "Ran StarDist", fixed = TRUE)
+  expect_match(html, "Imported cell segmentation", fixed = TRUE)
 })
 
 test_that("live viewer sessions expose R-native helper methods and command queue", {
@@ -1145,7 +1263,7 @@ test_that("live viewer state payloads update R objects", {
       classification = list(name = "cell"),
       class = "cell",
       objectType = "detection",
-      source = "stardist",
+      source = "cellphenotyper",
       measurements = list(
         list(name = "DAB mean", value = 0.42),
         list(name = "Hematoxylin mean", value = 0.23)
@@ -1247,14 +1365,14 @@ test_that("live viewer state payloads update R objects", {
   payload$detail <- list(
     added = 1,
     crop = "roi_crop.png",
-    output = "stardist_cells.geojson",
+    output = "cellphenotyper_cells.geojson",
     status = "complete"
   )
   wsiTools:::wsi_viewer_state_apply(state, payload)
   snapshot <- wsi_viewer_state(state)
 
   expect_equal(snapshot$last_segmentation$crop, "roi_crop.png")
-  expect_equal(env$live_last_segmentation$output, "stardist_cells.geojson")
+  expect_equal(env$live_last_segmentation$output, "cellphenotyper_cells.geojson")
 })
 
 test_that("live viewer sessions sync IHC intensity measurements to R", {
@@ -1313,7 +1431,7 @@ test_that("live viewer sessions sync IHC intensity measurements to R", {
   expect_equal(env$live_last_event$event, "ihc_intensity_measured")
 })
 
-test_that("interactive viewer can be configured with a segmentation run endpoint", {
+test_that("interactive viewer keeps legacy segmentation endpoint without exposing a runner", {
   slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 500, levels = c(1, 4))
   output <- tempfile(fileext = ".html")
 
@@ -1328,11 +1446,11 @@ test_that("interactive viewer can be configured with a segmentation run endpoint
   expect_identical(result, output)
   html <- paste(readLines(output, warn = FALSE), collapse = "\n")
   expect_match(html, "http://127.0.0.1:8787/segment", fixed = TRUE)
-  expect_match(html, "fetch(url", fixed = TRUE)
-  expect_match(html, "segmentation_requested", fixed = TRUE)
-  expect_match(html, "Sending selected ROI to R", fixed = TRUE)
-  expect_match(html, "keepSelection:true", fixed = TRUE)
-  expect_match(html, "Running segmentation on selected ROI", fixed = TRUE)
+  expect_match(html, "showCellphenotyperSegmentationNotice", fixed = TRUE)
+  expect_match(html, "Cell segmentation is handled outside wsiTools", fixed = TRUE)
+  expect_match(html, "load its cell GeoJSON/CSV overlays", fixed = TRUE)
+  expect_false(grepl("Sending selected ROI to R", html, fixed = TRUE))
+  expect_false(grepl("Running segmentation on selected ROI", html, fixed = TRUE))
 })
 
 test_that("ROI-aware segmentation writes results into the live viewer state", {
@@ -1352,7 +1470,7 @@ test_that("ROI-aware segmentation writes results into the live viewer state", {
   ))
   centroids <- data.frame(cell_id = "cell-1", x = 25, y = 35)
   class(centroids) <- c("wsi_segmentation_centroids", "wsi_segmentation", class(centroids))
-  result <- wsiTools:::wsi_stardist_result(
+  result <- list(
     input = "roi_crop.png",
     output = "cells.csv",
     segmentation = centroids,
@@ -1366,7 +1484,7 @@ test_that("ROI-aware segmentation writes results into the live viewer state", {
     state,
     roi,
     event = "segmentation_requested",
-    detail = list(engine = "stardist")
+    detail = list(engine = "cellphenotyper")
   )
   wsiTools:::wsi_viewer_state_add_segmentation_result(state, result, cell_radius = 4)
   snapshot <- wsi_viewer_state(state)
@@ -1382,7 +1500,7 @@ test_that("ROI-aware segmentation writes results into the live viewer state", {
   expect_equal(env$live_last_segmentation$output, "cells.csv")
 })
 
-test_that("live viewer exposes a direct StarDist switch", {
+test_that("live viewer keeps legacy segmentation arguments without a public runner", {
   args <- names(formals(wsi_viewer_session))
 
   expect_true("stardist" %in% args)
@@ -1394,8 +1512,8 @@ test_that("live viewer exposes a direct StarDist switch", {
   expect_true("autosave" %in% args)
   expect_true("autosave_path" %in% args)
   expect_true("autosave_interval" %in% args)
-  expect_true("state" %in% names(formals(wsi_stardist_server)))
-  expect_identical(formals(wsi_viewer_stardist)$stardist, TRUE)
+  expect_false("wsi_viewer_stardist" %in% getNamespaceExports("wsiTools"))
+  expect_false("wsi_stardist_server" %in% getNamespaceExports("wsiTools"))
 })
 
 test_that("dynamic tile sources create OpenSeadragon-compatible URLs and cache files", {
@@ -1669,7 +1787,7 @@ test_that("viewer event validation allowlists live WebSocket events", {
   expected <- c(
     "roi_created", "roi_updated", "roi_deleted", "roi_selected",
     "brush_committed", "viewport_changed", "layer_updated",
-    "trajectory_area_created",
+    "trajectory_area_created", "trajectory_area_updated",
     "segmentation_started", "segmentation_progress",
     "segmentation_finished", "job_status", "project_image_reordered",
     "project_image_closed", "grandqc_loaded", "grandqc_cleared",
@@ -1727,7 +1845,7 @@ test_that("channel source API updates live viewer settings", {
   expect_true(any(vapply(commands, function(x) identical(x$type, "set_channel_settings"), logical(1))))
 })
 
-test_that("live viewer keeps StarDist optional when no command is available", {
+test_that("live viewer warns when legacy model-runner arguments are requested", {
   wsi_skip_if_no_httpuv_server()
   slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 500, levels = c(1, 4))
   session <- NULL
@@ -1749,16 +1867,15 @@ test_that("live viewer keeps StarDist optional when no command is available", {
     }
   )
 
-  expect_match(warning_message, "No StarDist command was found", fixed = TRUE)
-  expect_match(warning_message, "load a segmentation GeoJSON/CSV", fixed = TRUE)
-  expect_match(warning_message, "wsi_install_stardist(method = \"conda\")", fixed = TRUE)
+  expect_match(warning_message, "StarDist/Cellpose segmentation controls have been removed", fixed = TRUE)
+  expect_match(warning_message, "CellPhenotyper", fixed = TRUE)
   expect_s3_class(session, "wsi_viewer_session")
   expect_match(session$ws_url, "^ws://")
   expect_null(session$stardist_server)
   html <- paste(readLines(session$html, warn = FALSE), collapse = "\n")
   expect_match(html, session$ws_url, fixed = TRUE)
   expect_match(html, "WebSocket connected", fixed = TRUE)
-  expect_match(html, "Run segmentation", fixed = TRUE)
+  expect_false(grepl("Run segmentation", html, fixed = TRUE))
 })
 
 test_that("interactive viewer overlays GeoJSON ROI polygons", {
@@ -1887,7 +2004,7 @@ test_that("interactive tiled viewer writes Deep Zoom HTML when libvips is availa
   expect_match(html, "z-index:29", fixed = TRUE)
   expect_match(html, "requestDraw", fixed = TRUE)
   expect_match(html, "loadingTiles", fixed = TRUE)
-  expect_match(html, "Artifacts", fixed = TRUE)
+  expect_false(grepl("<summary title=\"Visualize GrandQC artifact GeoJSON annotations\">Artifacts</summary>", html, fixed = TRUE))
   expect_match(html, "osdBaseCanvas", fixed = TRUE)
   expect_match(html, "osdBaseCanvasCandidates", fixed = TRUE)
   expect_match(html, "stainOverlayCanvas", fixed = TRUE)
@@ -1942,6 +2059,10 @@ test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
   expect_match(html, "id=\"overlay\"", fixed = TRUE)
   expect_match(html, "id=\"multiViewGrid\"", fixed = TRUE)
   expect_match(html, "multiViewOsdOptions", fixed = TRUE)
+  expect_match(html, "multiViewProjectEntries", fixed = TRUE)
+  expect_match(html, "multiViewUsesProjectSources", fixed = TRUE)
+  expect_match(html, "multiViewTileSource", fixed = TRUE)
+  expect_match(html, "multiViewPaneLabel", fixed = TRUE)
   expect_match(html, "syncMultiViewFrom", fixed = TRUE)
   expect_match(html, "multi_view_layout_updated", fixed = TRUE)
   expect_match(html, "refreshMultiViewSources", fixed = TRUE)

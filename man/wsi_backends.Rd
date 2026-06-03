@@ -6,7 +6,6 @@
 \alias{wsi_has_vips}
 \alias{wsi_has_bioformats}
 \alias{wsi_has_czi_python}
-\alias{wsi_has_cellpose}
 \alias{wsi_has_imagemagick}
 \title{Check available WSI backends and optional runtime components}
 \usage{
@@ -20,8 +19,6 @@ wsi_has_bioformats()
 
 wsi_has_czi_python(python = NULL)
 
-wsi_has_cellpose(command = NULL)
-
 wsi_has_imagemagick()
 }
 \arguments{
@@ -29,8 +26,6 @@ wsi_has_imagemagick()
 preview bridge. When \code{NULL}, \code{WSITOOLS_CZI_PYTHON} and then \code{python3} are
 checked.}
 
-\item{command}{Optional command to check for command-backed helpers such as
-Cellpose.}
 }
 \value{
 A data frame with backend name, installation status, version,

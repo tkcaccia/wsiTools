@@ -1,15 +1,15 @@
 #' Link a Seurat spatial object to a high-resolution image
 #'
 #' `wsi_link_seurat_image()` extracts spatial spot coordinates and a dimensional
-#' reduction, usually PCA, from a Seurat object and maps the spots onto a
-#' high-resolution image. Seurat remains an optional dependency: when
+#' reduction from a Seurat object and maps the spots onto a high-resolution
+#' image. Seurat remains an optional dependency: when
 #' `SeuratObject` or `Seurat` is installed their accessors are used; otherwise
 #' the function falls back to Seurat-like object slots/lists.
 #'
 #' The linked object can be passed to [wsi_viewer_seurat()] to open the tissue
-#' image with a spot overlay and an interactive PCA scatter plot. The image is
-#' opened through the usual wsiTools backends and is not loaded fully into R
-#' memory by default.
+#' image with a spot overlay and one interactive plot button for each available
+#' dimensional reduction. The image is opened through the usual wsiTools
+#' backends and is not loaded fully into R memory by default.
 #'
 #' @param seurat A Seurat object, or a Seurat-like object with spatial
 #'   coordinates and reductions.
@@ -270,6 +270,39 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
   if (length(gene_value_items)) {
     plot_points$gene_values <- I(gene_value_items)
   }
+  plots <- wsi_spatial_reduction_plots(
+    object = seurat,
+    source_name = "Seurat",
+    spots = spots,
+    selected_embeddings = embeddings,
+    reduction = reduction,
+    dims = dims,
+    gene_value_items = gene_value_items
+  )
+  if (!length(plots)) {
+    plots <- list(wsi_spatial_reduction_plot(
+      embeddings = embeddings,
+      spots = spots,
+      reduction = reduction,
+      dims = dims,
+      source_name = "Seurat",
+      gene_value_items = gene_value_items
+    ))
+    plots <- plots[!vapply(plots, is.null, logical(1))]
+  }
+  primary_plot <- if (length(plots)) {
+    plots[[1L]]
+  } else {
+    list(
+      id = paste0("seurat_", wsi_safe_id(reduction, "reduction")),
+      label = paste0("Seurat ", toupper(reduction), " plot"),
+      reduction = reduction,
+      x_label = component_names[[1L]],
+      y_label = component_names[[2L]],
+      point_count = total,
+      points = plot_points
+    )
+  }
 
   if (is.null(spot_radius)) {
     spot_radius <- wsi_seurat_spot_radius(scale_factors = scale_factors, mapping = mapping)
@@ -293,15 +326,8 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
       object = seurat,
       spot_ids = as.character(spots$barcode %||% spots$id)
     ),
-    pca = list(
-      id = paste0("seurat_", wsi_safe_id(reduction, "reduction")),
-      label = paste0("Seurat ", toupper(reduction), " plot"),
-      reduction = reduction,
-      x_label = component_names[[1L]],
-      y_label = component_names[[2L]],
-      point_count = total,
-      points = plot_points
-    )
+    plots = plots,
+    pca = primary_plot
   )
   class(out) <- c("wsi_seurat_spatial", "list")
   out
@@ -310,10 +336,11 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
 #' Open a Seurat spatial object in the wsiTools viewer
 #'
 #' `wsi_viewer_seurat()` opens a high-resolution tissue image and overlays
-#' Seurat spatial spots. The top **Seurat** menu opens the PCA scatter plot and
-#' can show/hide or zoom to the spot overlay. In live mode, typing a gene in
-#' the Seurat menu retrieves only that selected gene from R; static HTML viewers
-#' use genes embedded with `spot_genes`.
+#' Seurat spatial spots. The top **Seurat** menu opens buttons for the
+#' dimensional reductions found in the object, and can show/hide or zoom to the
+#' spot overlay. In live mode, typing a gene in the Seurat menu retrieves only
+#' that selected gene from R; static HTML viewers use genes embedded with
+#' `spot_genes`.
 #'
 #' @param seurat A Seurat object.
 #' @param image Path to the high-resolution image, or a `wsi_slide` object.
@@ -390,6 +417,197 @@ wsi_viewer_seurat <- function(seurat, image, linked = NULL,
   do.call(wsi_viewer, dots)
 }
 
+#' Open a multi-tissue Seurat project in the wsiTools viewer
+#'
+#' `wsi_viewer_seurat_project()` links several Seurat spatial images to their
+#' corresponding high-resolution tissue images and opens them as one wsiTools
+#' project. Each tissue section keeps its own spatial spot overlay, available
+#' reduction plots, annotations, and trajectories. In tiled mode, Deep Zoom
+#' tiles are generated for each source image with libvips so zooming can reach
+#' the full available image resolution without loading the complete image into R
+#' memory.
+#'
+#' @param seurat A Seurat object, Seurat-like object, or a list of one object
+#'   per image. Ignored when `linked` is supplied.
+#' @param images Named character vector/list of high-resolution image paths or
+#'   `wsi_slide` objects. Names are used as Seurat spatial image names when
+#'   `image_names` is not supplied.
+#' @param linked Optional `wsi_seurat_spatial` object, or named list of objects
+#'   returned by [wsi_link_seurat_image()]. Supplying `linked` skips the
+#'   linking step.
+#' @param image_names Seurat spatial image names, one per image. For multiple
+#'   images, either `image_names` or names on `images` should be supplied.
+#' @param labels Optional labels shown in the Project panel.
+#' @inheritParams wsi_link_seurat_image
+#' @param mode Viewer mode. `"tiles"` uses prebuilt Deep Zoom tiles and is the
+#'   recommended mode for real WSI or high-resolution tissue images.
+#'   `"thumbnail"` is useful for quick tests and mock slides.
+#' @param output,open,overwrite,title Viewer output options.
+#' @param width,height Thumbnail/navigator size options passed to the viewer.
+#' @param tile_dir Directory where per-image Deep Zoom tile pyramids are stored.
+#' @param tile_size,tile_format,quality,rebuild,tile_overlap Deep Zoom tiling
+#'   options used in tiled mode.
+#' @param roi_class_presets ROI classes used by the annotation UI.
+#'
+#' @return The HTML viewer path.
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' images <- c(
+#'   anterior1 = "V1_Mouse_Brain_Sagittal_Anterior_image.tif",
+#'   anterior2 = "V1_Mouse_Brain_Sagittal_Anterior_Section_2_image.tif"
+#' )
+#'
+#' html <- wsi_viewer_seurat_project(
+#'   brain.merge,
+#'   images = images,
+#'   image_names = names(images),
+#'   output = "seurat_project.html",
+#'   mode = "tiles"
+#' )
+#' }
+wsi_viewer_seurat_project <- function(seurat = NULL, images = NULL, linked = NULL,
+                                      image_names = NULL, labels = NULL,
+                                      spatial_dir = NULL,
+                                      scalefactors_json = NULL,
+                                      tissue_positions = NULL,
+                                      reduction = "pca", dims = c(1L, 2L),
+                                      coordinate_scale = c("auto", "none", "fullres", "hires", "lowres", "seurat_image", "custom"),
+                                      scale_x = NULL, scale_y = NULL,
+                                      coordinate_flip = c("none", "vertical", "horizontal"),
+                                      coordinate_rotation = c(0, 90, 180, 270),
+                                      coordinate_transform = "none",
+                                      spot_genes = NULL, default_gene = NULL,
+                                      spot_radius = NULL, max_points = 100000L,
+                                      colour_by = c("component_1", "gene", "none"),
+                                      mode = c("tiles", "thumbnail"),
+                                      output = NULL, open = interactive(),
+                                      overwrite = FALSE,
+                                      title = "wsiTools Seurat project viewer",
+                                      width = 1600, height = NULL,
+                                      tile_dir = NULL, tile_size = 512,
+                                      tile_format = c("jpg", "png"),
+                                      quality = 90, rebuild = FALSE,
+                                      tile_overlap = NULL,
+                                      roi_class_presets = wsi_roi_class_presets()) {
+  mode <- match.arg(mode)
+  tile_format <- match.arg(tile_format)
+  coordinate_scale <- match.arg(coordinate_scale)
+  coordinate_flip <- wsi_seurat_coordinate_flip_arg(coordinate_flip)
+  coordinate_rotation <- wsi_seurat_coordinate_rotation_arg(coordinate_rotation)
+  colour_by <- match.arg(colour_by)
+  width <- as.integer(wsi_check_scalar_number(width, "width", allow_zero = FALSE))
+  if (!is.null(height)) {
+    height <- as.integer(wsi_check_scalar_number(height, "height", allow_zero = FALSE))
+  }
+  tile_size <- as.integer(wsi_check_scalar_number(tile_size, "tile_size", allow_zero = FALSE))
+  quality <- as.integer(wsi_check_scalar_number(quality, "quality", allow_zero = FALSE))
+  if (!is.null(tile_overlap)) {
+    tile_overlap <- as.integer(wsi_check_scalar_number(tile_overlap, "tile_overlap"))
+    if (tile_overlap >= tile_size) {
+      wsi_abort("`tile_overlap` must be smaller than `tile_size`.")
+    }
+  }
+
+  if (is.null(output)) {
+    output <- tempfile(fileext = ".html")
+    overwrite <- TRUE
+  }
+  output <- wsi_validate_output_path(output, overwrite = overwrite)
+
+  linked <- if (is.null(linked)) {
+    wsi_link_seurat_project_sections(
+      seurat = seurat,
+      images = images,
+      image_names = image_names,
+      spatial_dir = spatial_dir,
+      scalefactors_json = scalefactors_json,
+      tissue_positions = tissue_positions,
+      reduction = reduction,
+      dims = dims,
+      coordinate_scale = coordinate_scale,
+      scale_x = scale_x,
+      scale_y = scale_y,
+      coordinate_flip = coordinate_flip,
+      coordinate_rotation = coordinate_rotation,
+      coordinate_transform = coordinate_transform,
+      spot_genes = spot_genes,
+      default_gene = default_gene,
+      spot_radius = spot_radius,
+      max_points = max_points,
+      colour_by = colour_by
+    )
+  } else {
+    wsi_normalize_seurat_project_linked(linked)
+  }
+  if (!length(linked)) {
+    wsi_abort("No linked Seurat sections were supplied.")
+  }
+
+  labels <- wsi_seurat_project_labels(labels, linked)
+  names(linked) <- labels
+  records <- wsi_seurat_project_records(
+    linked,
+    output = output,
+    labels = labels,
+    mode = mode,
+    width = min(width, 768L),
+    height = height,
+    tile_dir = tile_dir,
+    tile_size = tile_size,
+    tile_format = tile_format,
+    quality = quality,
+    rebuild = rebuild,
+    tile_overlap = tile_overlap
+  )
+
+  first <- linked[[1L]]
+  first_record <- records[[1L]]
+  first_layer <- wsi_seurat_spots_layer(first)
+  first_layer$project_scoped <- TRUE
+
+  if (identical(mode, "thumbnail")) {
+    return(wsi_viewer(
+      first$slide,
+      width = width,
+      height = height,
+      output = output,
+      open = open,
+      title = title,
+      overwrite = TRUE,
+      mode = "thumbnail",
+      roi_class_presets = roi_class_presets,
+      project_images = records,
+      layers = list(first_layer),
+      seurat = first
+    ))
+  }
+
+  wsi_viewer(
+    first$slide,
+    width = width,
+    height = height,
+    output = output,
+    open = open,
+    title = title,
+    overwrite = TRUE,
+    mode = "tiles",
+    tile_size = first_record$tile_size %||% tile_size,
+    tile_format = first_record$tile_format %||% tile_format,
+    tile_url_base = first_record$tile_url_base,
+    tile_url_template = first_record$tile_url_template,
+    tile_url_style = first_record$tile_url_style %||% "deepzoom",
+    tile_overlap = first_record$tile_overlap %||% 1L,
+    max_level = first_record$max_level,
+    tile_source_label = "Seurat project Deep Zoom tiles",
+    roi_class_presets = roi_class_presets,
+    project_images = records,
+    layers = list(first_layer),
+    seurat = first
+  )
+}
+
 #' @export
 print.wsi_seurat_spatial <- function(x, ...) {
   source_name <- x$source_name %||% "Seurat"
@@ -458,6 +676,10 @@ wsi_viewer_seurat_config <- function(seurat = NULL) {
   if (!inherits(seurat, "wsi_seurat_spatial") && !inherits(seurat, "wsi_spatial_object")) {
     wsi_abort("`seurat` viewer configuration must be created by `wsi_link_seurat_image()` or another wsiTools spatial-object linker.")
   }
+  plots <- seurat$plots %||% list()
+  if (!length(plots) && !is.null(seurat$pca)) {
+    plots <- list(seurat$pca)
+  }
   list(
     enabled = TRUE,
     source_name = seurat$source_name %||% "Seurat",
@@ -470,7 +692,306 @@ wsi_viewer_seurat_config <- function(seurat = NULL) {
     displayed_spot_count = as.integer(seurat$displayed_spot_count),
     spot_radius = as.numeric(seurat$spot_radius),
     gene_expression = wsi_seurat_gene_expression_config(seurat$gene_expression),
-    plots = list(seurat$pca)
+    plots = plots
+  )
+}
+
+wsi_normalize_seurat_project_linked <- function(linked) {
+  if (inherits(linked, "wsi_seurat_spatial")) {
+    linked <- list(linked)
+  }
+  if (!is.list(linked) || inherits(linked, "data.frame")) {
+    wsi_abort("`linked` must be a `wsi_seurat_spatial` object or a list of them.")
+  }
+  if (!length(linked)) {
+    wsi_abort("`linked` must contain at least one linked Seurat section.")
+  }
+  for (i in seq_along(linked)) {
+    if (!inherits(linked[[i]], "wsi_seurat_spatial")) {
+      wsi_abort("Every entry in `linked` must be returned by `wsi_link_seurat_image()`.")
+    }
+  }
+  linked
+}
+
+wsi_link_seurat_project_sections <- function(seurat, images, image_names = NULL,
+                                             spatial_dir = NULL,
+                                             scalefactors_json = NULL,
+                                             tissue_positions = NULL,
+                                             reduction = "pca", dims = c(1L, 2L),
+                                             coordinate_scale = "auto",
+                                             scale_x = NULL, scale_y = NULL,
+                                             coordinate_flip = "none",
+                                             coordinate_rotation = 0,
+                                             coordinate_transform = "none",
+                                             spot_genes = NULL, default_gene = NULL,
+                                             spot_radius = NULL, max_points = 100000L,
+                                             colour_by = "component_1") {
+  if (is.null(seurat)) {
+    wsi_abort("`seurat` is required when `linked` is not supplied.")
+  }
+  images <- wsi_seurat_project_images(images)
+  n <- length(images)
+  image_names <- wsi_seurat_project_image_names(images, image_names)
+  objects <- wsi_seurat_project_objects(seurat, n)
+
+  linked <- vector("list", n)
+  for (i in seq_len(n)) {
+    image_name_i <- image_names[[i]]
+    if (is.na(image_name_i) || !nzchar(image_name_i)) {
+      image_name_i <- NULL
+    }
+    linked[[i]] <- wsi_link_seurat_image(
+      seurat = objects[[i]],
+      image = images[[i]],
+      image_name = image_name_i,
+      spatial_dir = wsi_seurat_project_index_value(spatial_dir, i, n, "spatial_dir"),
+      scalefactors_json = wsi_seurat_project_index_value(scalefactors_json, i, n, "scalefactors_json"),
+      tissue_positions = wsi_seurat_project_index_value(tissue_positions, i, n, "tissue_positions"),
+      reduction = reduction,
+      dims = dims,
+      coordinate_scale = coordinate_scale,
+      scale_x = scale_x,
+      scale_y = scale_y,
+      coordinate_flip = coordinate_flip,
+      coordinate_rotation = coordinate_rotation,
+      coordinate_transform = coordinate_transform,
+      spot_genes = spot_genes,
+      default_gene = default_gene,
+      spot_radius = spot_radius,
+      max_points = max_points,
+      colour_by = colour_by
+    )
+  }
+  if (length(image_names) == n && !anyNA(image_names)) {
+    names(linked) <- image_names
+  }
+  linked
+}
+
+wsi_seurat_project_images <- function(images) {
+  if (is.null(images) || !length(images)) {
+    wsi_abort("`images` must contain one or more image paths or `wsi_slide` objects.")
+  }
+  if (inherits(images, "wsi_slide")) {
+    return(list(images))
+  }
+  if (is.character(images)) {
+    if (anyNA(images) || any(!nzchar(images))) {
+      wsi_abort("`images` must not contain missing or empty paths.")
+    }
+    out <- as.list(images)
+    names(out) <- names(images)
+    return(out)
+  }
+  if (is.list(images) && !inherits(images, "data.frame")) {
+    for (i in seq_along(images)) {
+      item <- images[[i]]
+      ok <- inherits(item, "wsi_slide") ||
+        (is.character(item) && length(item) == 1L && !is.na(item) && nzchar(item))
+      if (!ok) {
+        wsi_abort("Each `images` entry must be a file path or a `wsi_slide` object.")
+      }
+    }
+    return(images)
+  }
+  wsi_abort("`images` must be a character vector, list, or `wsi_slide` object.")
+}
+
+wsi_seurat_project_image_names <- function(images, image_names = NULL) {
+  n <- length(images)
+  if (is.null(image_names)) {
+    image_names <- names(images)
+  }
+  if (is.null(image_names) || length(image_names) != n ||
+      anyNA(image_names) || any(!nzchar(image_names))) {
+    if (n == 1L) {
+      return(NA_character_)
+    }
+    wsi_abort("For multiple Seurat images, supply `image_names` or use a named `images` vector/list.")
+  }
+  as.character(image_names)
+}
+
+wsi_seurat_project_objects <- function(seurat, n) {
+  is_single <- isS4(seurat) ||
+    inherits(seurat, "Seurat") ||
+    (is.list(seurat) && any(c("images", "reductions", "assays") %in% names(seurat)))
+  if (is_single) {
+    return(rep(list(seurat), n))
+  }
+  if (is.list(seurat) && length(seurat) == n) {
+    return(seurat)
+  }
+  if (is.list(seurat) && length(seurat) == 1L) {
+    return(rep(seurat, n))
+  }
+  wsi_abort("`seurat` must be one object or a list with one object per image.")
+}
+
+wsi_seurat_project_index_value <- function(x, i, n, name) {
+  if (is.null(x)) {
+    return(NULL)
+  }
+  if (is.list(x) && !inherits(x, "data.frame")) {
+    if (length(x) == 1L) {
+      return(x[[1L]])
+    }
+    if (length(x) == n) {
+      return(x[[i]])
+    }
+    wsi_abort(sprintf("`%s` must have length 1 or match the number of images.", name))
+  }
+  if (length(x) == 1L) {
+    return(x[[1L]])
+  }
+  if (length(x) == n) {
+    return(x[[i]])
+  }
+  wsi_abort(sprintf("`%s` must have length 1 or match the number of images.", name))
+}
+
+wsi_seurat_project_labels <- function(labels = NULL, linked) {
+  n <- length(linked)
+  if (is.null(labels)) {
+    labels <- names(linked)
+    if (is.null(labels) || length(labels) != n) {
+      labels <- rep("", n)
+    }
+    fallback <- vapply(seq_along(linked), function(i) {
+      linked[[i]]$image_name %||%
+        tools::file_path_sans_ext(basename(linked[[i]]$image_path %||% "")) %||%
+        sprintf("Tissue %d", i)
+    }, character(1))
+    labels[is.na(labels) | !nzchar(labels)] <- fallback[is.na(labels) | !nzchar(labels)]
+    labels[is.na(labels) | !nzchar(labels)] <- sprintf("Tissue %d", which(is.na(labels) | !nzchar(labels)))
+    return(as.character(labels))
+  }
+  if (!is.character(labels) || length(labels) != n || anyNA(labels) || any(!nzchar(labels))) {
+    wsi_abort("`labels` must be `NULL` or a character vector with one label per linked section.")
+  }
+  labels
+}
+
+wsi_seurat_project_records <- function(linked, output, labels,
+                                       mode = c("tiles", "thumbnail"),
+                                       width = 768, height = NULL,
+                                       tile_dir = NULL, tile_size = 512,
+                                       tile_format = c("jpg", "png"),
+                                       quality = 90, rebuild = FALSE,
+                                       tile_overlap = NULL) {
+  mode <- match.arg(mode)
+  tile_format <- match.arg(tile_format)
+  if (identical(mode, "tiles")) {
+    tile_dir <- tile_dir %||% wsi_default_tile_dir(output)
+    if (!dir.exists(tile_dir)) {
+      dir.create(tile_dir, recursive = TRUE, showWarnings = FALSE)
+    }
+    if (!dir.exists(tile_dir)) {
+      wsi_abort(sprintf("Could not create tile directory: %s", tile_dir))
+    }
+  }
+
+  records <- vector("list", length(linked))
+  for (i in seq_along(linked)) {
+    item <- linked[[i]]
+    label <- labels[[i]]
+    slide <- item$slide
+    wsi_check_slide(slide)
+    layer <- wsi_seurat_spots_layer(item)
+    layer$project_scoped <- TRUE
+    record <- list(
+      id = paste0("seurat_project_", wsi_safe_id(label, paste0("section_", i))),
+      label = label,
+      path = if (!is.null(slide$path) && length(slide$path) == 1L && !is.na(slide$path)) slide$path else "",
+      backend = slide$backend,
+      type = "seurat_spatial_section",
+      status = sprintf("%s spatial spots", item$source_name %||% "Seurat"),
+      width = unname(as.numeric(slide$dimensions[["width"]])),
+      height = unname(as.numeric(slide$dimensions[["height"]])),
+      content_bbox = wsi_seurat_project_spot_bbox(item),
+      layers = list(layer),
+      seurat = wsi_viewer_seurat_config(item)
+    )
+
+    if (identical(mode, "thumbnail")) {
+      preview <- tryCatch(
+        wsi_viewer_thumbnail_data_uri(slide, width = width, height = height),
+        error = function(err) NULL
+      )
+      record$image_data_uri <- preview
+      record$navigator_image_data_uri <- preview
+    } else {
+      if (identical(slide$backend, "mock")) {
+        wsi_abort("Tiled Seurat project viewing is not available for mock slides; use `mode = \"thumbnail\"` for tests.")
+      }
+      section_dir <- file.path(tile_dir, sprintf("%02d_%s", i, wsi_safe_id(label, "section")))
+      requested_overlap <- tile_overlap %||% 1L
+      tiles <- wsi_create_deepzoom_tiles(
+        slide = slide,
+        tile_dir = section_dir,
+        tile_size = tile_size,
+        tile_overlap = requested_overlap,
+        tile_format = tile_format,
+        quality = quality,
+        rebuild = rebuild
+      )
+      record$tile_size <- as.integer(tile_size)
+      record$tile_format <- tile_format
+      record$tile_url_base <- wsi_seurat_project_tile_base_url(section_dir, output)
+      record$tile_url_template <- NULL
+      record$tile_url_style <- "deepzoom"
+      record$tile_overlap <- as.integer(tiles$overlap %||% requested_overlap)
+      record$min_level <- 0L
+      record$max_level <- wsi_dz_max_level(record$width, record$height)
+      record$navigator_image_data_uri <- wsi_viewer_navigator_data_uri(slide, width = 512)
+    }
+    records[[i]] <- record
+  }
+  records[[1L]]$active <- TRUE
+  records
+}
+
+wsi_seurat_project_tile_base_url <- function(tile_dir, output) {
+  tile_files <- file.path(tile_dir, "slide_files")
+  output_dir <- normalizePath(dirname(output), winslash = "/", mustWork = FALSE)
+  tile_files_norm <- normalizePath(tile_files, winslash = "/", mustWork = FALSE)
+  prefix <- paste0(gsub("/+$", "", output_dir), "/")
+  if (startsWith(tile_files_norm, prefix)) {
+    return(wsi_url_encode_path(substring(tile_files_norm, nchar(prefix) + 1L)))
+  }
+  wsi_file_url(tile_files)
+}
+
+wsi_seurat_project_spot_bbox <- function(linked, pad_fraction = 0.05) {
+  spots <- linked$spots
+  if (is.null(spots) || !nrow(spots) || !all(c("x", "y") %in% names(spots))) {
+    return(NULL)
+  }
+  x <- as.numeric(spots$x)
+  y <- as.numeric(spots$y)
+  keep <- is.finite(x) & is.finite(y)
+  if (!any(keep)) {
+    return(NULL)
+  }
+  x <- x[keep]
+  y <- y[keep]
+  slide <- linked$slide
+  width <- as.numeric(slide$dimensions[["width"]])
+  height <- as.numeric(slide$dimensions[["height"]])
+  xr <- range(x)
+  yr <- range(y)
+  pad <- max(
+    as.numeric(linked$spot_radius %||% 8) * 6,
+    diff(xr) * pad_fraction,
+    diff(yr) * pad_fraction,
+    1
+  )
+  list(
+    xmin = max(0, xr[[1L]] - pad),
+    ymin = max(0, yr[[1L]] - pad),
+    xmax = min(width, xr[[2L]] + pad),
+    ymax = min(height, yr[[2L]] + pad)
   )
 }
 
@@ -811,7 +1332,19 @@ wsi_seurat_fetch_gene_expression <- function(seurat, genes, spot_ids) {
 
 wsi_seurat_matrix_like <- function(x) {
   dims <- tryCatch(dim(x), error = function(e) NULL)
-  length(dims) == 2L && all(dims > 0)
+  if (length(dims) != 2L || any(dims <= 0)) {
+    return(FALSE)
+  }
+  if (is.matrix(x) || is.data.frame(x) || inherits(x, "Matrix")) {
+    return(TRUE)
+  }
+  tryCatch(
+    {
+      x[seq_len(min(1L, dims[[1L]])), seq_len(min(1L, dims[[2L]])), drop = FALSE]
+      TRUE
+    },
+    error = function(e) FALSE
+  )
 }
 
 wsi_seurat_collect_expression_matrices <- function(seurat) {
@@ -833,6 +1366,75 @@ wsi_seurat_collect_expression_matrices <- function(seurat) {
     }
     matrices[[length(matrices) + 1L]] <<- list(name = name, matrix = x)
     invisible(NULL)
+  }
+  visit_expression_container <- function(x, prefix = "expression", depth = 0L,
+                                         seen = character(), include_scaled = FALSE) {
+    if (is.null(x) || depth > 8L) {
+      return(invisible(NULL))
+    }
+    key <- tryCatch(
+      wsi_spatial_seen_key(x),
+      error = function(e) paste(prefix, typeof(x), length(x), sep = ":")
+    )
+    if (key %in% seen) {
+      return(invisible(NULL))
+    }
+    seen <- c(seen, key)
+    if (wsi_seurat_matrix_like(x)) {
+      add_matrix(x, prefix)
+      return(invisible(NULL))
+    }
+    children <- list()
+    if (isS4(x)) {
+      slots <- tryCatch(methods::slotNames(x), error = function(e) character())
+      for (slot_name in slots) {
+        value <- tryCatch(methods::slot(x, slot_name), error = function(e) NULL)
+        if (!is.null(value)) {
+          children[[slot_name]] <- value
+        }
+      }
+    }
+    if (is.list(x)) {
+      children <- c(children, x)
+    }
+    if (!length(children)) {
+      return(invisible(NULL))
+    }
+    nms <- names(children)
+    if (is.null(nms)) {
+      nms <- paste0("item", seq_along(children))
+    }
+    names(children) <- nms
+    preferred_names <- unique(c(
+      requested_assay_name %||% character(),
+      "normalized", "data", "logcounts", "normcounts",
+      "raw", "counts", "scaled", "scale.data", "scale_data",
+      "exprMat", "expression", "exprs", "rna", "RNA", "cell", "assays"
+    ))
+    ordered_names <- c(intersect(preferred_names, nms), setdiff(nms, preferred_names))
+    for (nm in ordered_names) {
+      if (!isTRUE(include_scaled) &&
+          nm %in% c("scaled", "scale.data", "scale_data") &&
+          !identical(nm, requested_assay_name)) {
+        next
+      }
+      visit_expression_container(
+        children[[nm]],
+        prefix = paste(prefix, nm, sep = "$"),
+        depth = depth + 1L,
+        seen = seen,
+        include_scaled = include_scaled
+      )
+    }
+    invisible(NULL)
+  }
+  expression_root <- wsi_seurat_slot(seurat, "expression")
+  if (!is.null(expression_root)) {
+    expression_count <- length(matrices)
+    visit_expression_container(expression_root, "expression", include_scaled = FALSE)
+    if (length(matrices) == expression_count) {
+      visit_expression_container(expression_root, "expression", include_scaled = TRUE)
+    }
   }
   if (requireNamespace("SummarizedExperiment", quietly = TRUE)) {
     se_assays <- tryCatch(SummarizedExperiment::assays(seurat), error = function(e) NULL)
@@ -1042,8 +1644,9 @@ wsi_seurat_live_gene_available <- function(seurat = NULL) {
 }
 
 wsi_seurat_dynamic_gene_payload <- function(linked, gene) {
+  source_name <- as.character(linked$source_name %||% "spatial object")
   if (!inherits(linked, "wsi_seurat_spatial")) {
-    wsi_abort("Dynamic Seurat gene lookup requires an object from `wsi_link_seurat_image()`.")
+    wsi_abort("Dynamic spatial gene lookup requires an object from a wsiTools spatial-image linker.")
   }
   gene <- wsi_seurat_default_gene_arg(gene)
   source <- linked$expression_source %||% list()
@@ -1051,25 +1654,26 @@ wsi_seurat_dynamic_gene_payload <- function(linked, gene) {
   if (is.null(object)) {
     wsi_abort(
       paste(
-        "This viewer was not created with a live Seurat expression source.",
-        "Reopen it with `wsi_viewer_seurat(..., live = TRUE)` or preload a small gene set with `spot_genes`."
+        sprintf("This viewer was not created with a live %s expression source.", source_name),
+        "Reopen it with `live = TRUE` or preload a small gene set with `spot_genes`."
       )
     )
   }
   spot_ids <- as.character(source$spot_ids %||% linked$spots$barcode %||% linked$spots$id)
   if (!length(spot_ids)) {
-    wsi_abort("No Seurat spot identifiers are available for dynamic gene lookup.")
+    wsi_abort(sprintf("No %s spot/cell identifiers are available for dynamic gene lookup.", source_name))
   }
   gene_expression <- wsi_seurat_gene_expression(
     object,
     genes = gene,
     spot_ids = spot_ids,
-    default_gene = gene
+    default_gene = gene,
+    object_label = source_name
   )
   actual_gene <- gene_expression$default_gene %||% gene_expression$genes[[1L]]
   idx <- wsi_seurat_gene_match(actual_gene, colnames(gene_expression$values))
   if (is.na(idx)) {
-    wsi_abort(sprintf("Gene `%s` was not found in the Seurat expression data.", gene))
+    wsi_abort(sprintf("Gene `%s` was not found in the %s expression data.", gene, source_name))
   }
   values <- suppressWarnings(as.numeric(gene_expression$values[, idx]))
   colours <- wsi_seurat_gene_colours(gene_expression, actual_gene)

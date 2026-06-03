@@ -440,7 +440,7 @@ wsi_async_job_args <- function(...) {
 #'
 #' @return A `wsi_job` object. Call `job$status()` to poll and `job$result()` to
 #'   collect the `wsi_stardist_result`.
-#' @export
+#' @keywords internal
 wsi_stardist_segment_roi_async <- function(image, roi, output_dir, ...) {
   wsi_run_async(
     "wsiTools::stardist_segment_roi",

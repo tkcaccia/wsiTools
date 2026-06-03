@@ -131,11 +131,10 @@ hematoxylin and HRP/DAB channels.}
 \item{hematoxylin_strength, hrp_strength}{Initial display gains for the
 hematoxylin and HRP/DAB channels.}
 
-\item{segmentation_run_url}{Optional HTTP endpoint used by the viewer's
-\verb{Run segmentation} button. The browser posts the selected ROI GeoJSON to
-this URL and expects either GeoJSON or JSON with a \code{geojson} field in
-response. Use
-\code{\link[=wsi_stardist_server]{wsi_stardist_server()}} to create a local endpoint.}
+\item{segmentation_run_url}{Legacy optional HTTP endpoint. The current
+viewer no longer exposes selected-ROI StarDist/Cellpose run controls;
+segmentation is expected to be produced outside wsiTools, for example by
+CellPhenotyper, and loaded as project cell overlays.}
 
 \item{viewer_state_url}{Optional HTTP endpoint used to sync annotations,
 measurements, segmentation overlays, and display state back to R. Use
@@ -167,10 +166,10 @@ bridge, or an explicitly enabled legacy Python bridge.}
 \code{\link[=wsi_channel_source]{wsi_channel_source()}}.}
 
 \item{layers}{Optional viewer overlay layers, for example point layers from
-CellPhenotyper/StarDist outputs.}
+CellPhenotyper outputs.}
 
 \item{seurat}{Optional object returned by \code{\link[=wsi_link_seurat_image]{wsi_link_seurat_image()}} used to
-enable the top \strong{Seurat} menu and PCA plot.}
+enable the top \strong{Seurat} menu and any available reduction plots.}
 
 \item{cellphenotyper}{Optional CellPhenotyper project metadata used to enable
 the top \strong{Cells} menu.}
@@ -186,7 +185,11 @@ The HTML viewer path, invisibly.
 Creates an HTML viewer for a slide without loading the full whole-slide image
 into R memory. The default \code{mode = "thumbnail"} writes a self-contained
 thumbnail preview. \code{mode = "tiles"} uses libvips to build Deep Zoom tiles on
-disk so zooming can reveal full-resolution detail in the browser.
+disk so zooming can reveal full-resolution detail in the browser. When
+\code{project_images} contains multiple images or sections and the caller has not
+explicitly selected a mode, wsiTools opens in tiled/OpenSeadragon mode
+automatically when a tile backend or explicit tile URL is available so the
+View menu can compare project images side by side.
 }
 \details{
 The viewer includes lightweight pathology-viewer controls inspired by tools
@@ -201,18 +204,18 @@ brush-style annotation painting with a brush-size slider,
 selected-ROI extension, platform-aware brush removal (\code{Alt} on Windows/Linux
 and \code{Command} on macOS), hole filling, selected-ROI vertex editing,
 name/class reassignment including custom annotation categories, 10-step
-\code{Ctrl+Z} undo and \code{Ctrl+Shift+Z}/\code{Ctrl+Y} redo for annotations and
-trajectories, selected-ROI StarDist export,
-optional selected-ROI segmentation runs, segmentation GeoJSON/CSV import,
+\code{Ctrl+Z} undo and \code{Ctrl+Shift+Z}/\code{Ctrl+Y} redo for annotations,
+trajectories, and closed project images, CellPhenotyper cell overlays,
 distance measurement in pixels and micrometres when MPP metadata is
 available, browser-based GeoJSON export, and a \code{Ctrl+K} command palette for
-common actions such as importing GeoJSON, exporting selected ROIs, running
-StarDist, showing a coordinate-only tile grid, and requesting a project save
+common actions such as importing GeoJSON, exporting selected ROIs, showing
+a coordinate-only tile grid, and requesting a project save
 from a live R session. A \verb{?} shortcut and Help menu show a compact viewer
 guide plus the keyboard map for pan, draw, brush, edit, measure, undo, redo,
 save, import, and export. The View menu can split tiled slides into 2, 4, or
-6 OpenSeadragon panes with linked or independent zoom/pan for comparing
-separate tissue regions.
+6 OpenSeadragon panes with linked or independent zoom/pan. In project
+viewers, the panes use different project images/sections when available;
+otherwise they compare separate tissue regions within the active image.
 Optional \code{stain = "ihc"} adds an RGB optical-density deconvolution display
 with simple original/all/show-only controls.
 \code{stain = "he"} uses hematoxylin, eosin, and residual H&E channels. Use

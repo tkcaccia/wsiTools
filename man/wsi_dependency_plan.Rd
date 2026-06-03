@@ -17,8 +17,8 @@ and ImageMagick.}
 \item{method}{Package manager to target. \code{"auto"} detects Homebrew, apt, dnf,
 winget, or conda when available.}
 
-\item{include_optional}{Whether to include Bio-Formats, StarDist, and
-Cellpose in the default \code{tools} set.}
+\item{include_optional}{Whether to include Bio-Formats and native CZI support
+in the default \code{tools} set.}
 }
 \value{
 A data frame with installation status and copyable commands.

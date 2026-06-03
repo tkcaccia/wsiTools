@@ -1,11 +1,11 @@
 wsi_setup_supported_tools <- function() {
-  c("openslide", "libvips", "imagemagick", "bioformats", "native_czi", "stardist", "cellpose")
+  c("openslide", "libvips", "imagemagick", "bioformats", "native_czi")
 }
 
 wsi_setup_default_tools <- function(include_optional = FALSE) {
   tools <- c("openslide", "libvips", "imagemagick")
   if (isTRUE(include_optional)) {
-    tools <- c(tools, "bioformats", "native_czi", "stardist", "cellpose")
+    tools <- c(tools, "bioformats", "native_czi")
   }
   tools
 }
@@ -58,8 +58,6 @@ wsi_setup_tool_installed <- function(tool) {
     imagemagick = wsi_has_imagemagick(),
     bioformats = wsi_has_bioformats(),
     native_czi = wsi_has_native_czi(),
-    stardist = wsi_has_stardist(),
-    cellpose = wsi_has_cellpose(),
     FALSE
   )
 }
@@ -100,8 +98,6 @@ wsi_setup_tool_packages <- function(tool, method) {
       libvips = "libvips",
       imagemagick = "imagemagick",
       bioformats = "bftools",
-      stardist = "stardist",
-      cellpose = "cellpose",
       character()
     ),
     manual = character(),
@@ -142,9 +138,6 @@ wsi_setup_tool_command <- function(tool, method) {
 }
 
 wsi_setup_manual_note <- function(tool, method = "manual") {
-  if (tool %in% c("stardist", "cellpose") && !identical(method, "conda")) {
-    return("Python segmentation tools are best installed in a dedicated conda/pip environment; configure the command path afterwards.")
-  }
   if (tool == "bioformats" && method %in% c("homebrew", "apt", "dnf", "manual")) {
     return("Install OME Bio-Formats command-line tools (`bftools.zip`) manually, or run `conda install --override-channels -c ome -c conda-forge bftools` and ensure `showinf`/`bfconvert` are on PATH.")
   }
@@ -154,7 +147,7 @@ wsi_setup_manual_note <- function(tool, method = "manual") {
   if (tool == "openslide" && identical(method, "winget")) {
     return("No reliable winget OpenSlide package is configured. Use conda-forge, MSYS2/vcpkg, or official OpenSlide binaries and add the tools to PATH.")
   }
-  if (tool %in% c("bioformats", "stardist", "cellpose") && identical(method, "winget")) {
+  if (tool == "bioformats" && identical(method, "winget")) {
     return("No winget command is configured for this optional backend. Use conda/pip or install manually.")
   }
   if (identical(method, "manual")) {
@@ -764,15 +757,12 @@ wsi_stardist_plan_rows <- function(method,
   out
 }
 
-#' Plan or install the optional StarDist command
+#' Legacy StarDist installer
 #'
-#' StarDist is a Python/TensorFlow tool and is intentionally not installed
-#' automatically during `install.packages()` or `R CMD INSTALL`. This helper is
-#' the explicit first-run setup for users who want the viewer's
-#' `Run segmentation` button to work. It installs StarDist into a dedicated
-#' conda environment or Python virtual environment, writes a small wrapper
-#' command in the user configuration directory, and makes wsiTools detect that
-#' wrapper automatically.
+#' StarDist/Cellpose model execution is no longer a wsiTools viewer feature.
+#' This legacy helper is kept internally for old scripts but is not part of the
+#' public setup workflow. Run cell segmentation separately with CellPhenotyper
+#' and open the resulting project/cell overlays in wsiTools.
 #'
 #' @param method Setup method. `"auto"` prefers conda/mamba when available,
 #'   otherwise a Python virtual environment via pip.
@@ -789,7 +779,7 @@ wsi_stardist_plan_rows <- function(method,
 #'
 #' @return A `wsi_stardist_installation` object with the command plan and
 #'   wrapper path.
-#' @export
+#' @keywords internal
 #'
 #' @examples
 #' plan <- wsi_install_stardist(method = "manual", install = FALSE)
@@ -803,6 +793,12 @@ wsi_install_stardist <- function(method = c("auto", "conda", "pip", "manual"),
                                  set_env = TRUE,
                                  venv = NULL,
                                  min_free_gb = 8) {
+  if (isTRUE(install)) {
+    wsi_abort(
+      "wsiTools no longer installs or launches StarDist/Cellpose. Run cell segmentation separately with CellPhenotyper, then open the resulting project/cell overlays in wsiTools.",
+      class = "wsi_deprecated_segmentation"
+    )
+  }
   method <- wsi_stardist_setup_method(method)
   envname <- as.character(envname %||% "wsitools-stardist")
   if (length(envname) != 1L || is.na(envname) || !nzchar(envname)) {
@@ -866,7 +862,7 @@ wsi_install_stardist <- function(method = c("auto", "conda", "pip", "manual"),
   invisible(out)
 }
 
-#' @export
+#' @keywords internal
 print.wsi_stardist_installation <- function(x, ...) {
   cat("<wsi_stardist_installation>\n")
   cat(sprintf("  method:    %s\n", x$method))
@@ -880,7 +876,7 @@ print.wsi_stardist_installation <- function(x, ...) {
     print(x$plan[, c("step", "command_line", "notes"), drop = FALSE], row.names = FALSE)
   }
   if (!isTRUE(x$installed)) {
-    cat("\nRun `wsi_install_stardist()` to install StarDist, or set `WSITOOLS_STARDIST_COMMAND` to an existing command.\n")
+    cat("\nStarDist/Cellpose model execution is no longer installed or launched by wsiTools.\n")
   }
   invisible(x)
 }
@@ -896,8 +892,8 @@ print.wsi_stardist_installation <- function(x, ...) {
 #'   and ImageMagick.
 #' @param method Package manager to target. `"auto"` detects Homebrew, apt, dnf,
 #'   winget, or conda when available.
-#' @param include_optional Whether to include Bio-Formats, StarDist, and
-#'   Cellpose in the default `tools` set.
+#' @param include_optional Whether to include Bio-Formats and native CZI support
+#'   in the default `tools` set.
 #'
 #' @return A data frame with installation status and copyable commands.
 #' @export
@@ -1008,8 +1004,8 @@ wsi_setup_install_r_packages <- function(plan, ask = interactive()) {
 #' @param r_packages Optional R packages to check.
 #' @param method Package manager target. `"auto"` detects Homebrew, apt, dnf,
 #'   winget, or conda when available.
-#' @param include_optional Whether to include Bio-Formats, StarDist, and
-#'   Cellpose in the default system-tool plan.
+#' @param include_optional Whether to include Bio-Formats and native CZI support
+#'   in the default system-tool plan.
 #' @param install Whether to run installation steps. Defaults to `FALSE` for
 #'   `wsi_setup()` and `TRUE` for installer wrappers.
 #' @param install_r_packages,install_system_tools Whether `install = TRUE`

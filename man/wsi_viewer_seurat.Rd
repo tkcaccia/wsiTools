@@ -44,10 +44,11 @@ mode.
 }
 \description{
 \code{wsi_viewer_seurat()} opens a high-resolution tissue image and overlays
-Seurat spatial spots. The top \strong{Seurat} menu opens the PCA scatter plot and
-can show/hide or zoom to the spot overlay. In live mode, typing a gene in
-the Seurat menu retrieves only that selected gene from R; static HTML viewers
-use genes embedded with \code{spot_genes}.
+Seurat spatial spots. The top \strong{Seurat} menu opens buttons for the
+dimensional reductions found in the object, and can show/hide or zoom to the
+spot overlay. In live mode, typing a gene in the Seurat menu retrieves only
+that selected gene from R; static HTML viewers use genes embedded with
+\code{spot_genes}.
 }
 \examples{
 \dontrun{

@@ -5,37 +5,13 @@ wsi_cli_usage <- function() {
     "Usage:",
     "  wsitools help",
     "  wsitools backends",
-    "  wsitools stardist-image --input crop.png --output cells.geojson [options]",
-    "  wsitools stardist-roi --image slide.svs --roi annotations.geojson --output-dir out [options]",
     "  wsitools translate-rois --input crop.geojson --output slide.geojson --dx 100 --dy 200 [--overwrite]",
     "",
-    "StarDist options:",
-    "  --command CMD          External StarDist command, for example python",
-    "  --arg VALUE            Repeatable command argument token. Placeholders are supported:",
-    "                         {input}, {output}, {model}, {prob_thresh}, {nms_thresh}",
-    "  --model NAME           StarDist model name, default 2D_versatile_he",
-    "  --output-type TYPE     auto, geojson, csv, or mask",
-    "  --prob-thresh VALUE    Optional StarDist probability threshold",
-    "  --nms-thresh VALUE     Optional StarDist NMS threshold",
-    "  --overwrite            Allow overwriting outputs",
-    "  --plan                 Export/print the command plan without running StarDist",
-    "",
-    "ROI StarDist options:",
-    "  --image PATH           WSI or large image path",
-    "  --roi PATH             GeoJSON annotations path",
-    "  --roi-id ID            ROI id to segment; defaults to the first ROI",
-    "  --output-dir DIR       Directory for ROI crop and StarDist output",
-    "  --level N              Pyramid level for crop export, default 0",
-    "  --crop-format FORMAT   png, tiff, or jpeg",
-    "  --backend BACKEND      auto, vips, or openslide",
-    "  --no-translate         Keep StarDist GeoJSON in crop-local coordinates",
-    "",
     "Examples:",
-    "  wsitools stardist-roi --image sample.svs --roi selected.geojson --output-dir stardist_roi \\",
-    "    --command python --arg run_stardist.py --arg {input} --arg {output} --arg {model}",
+    "  wsitools backends",
+    "  wsitools translate-rois --input crop.geojson --output slide.geojson --dx 100 --dy 200",
     "",
-    "  Rscript -e 'wsiTools::wsi_cli()' stardist-image --input crop.png --output cells.geojson \\",
-    "    --command python --arg run_stardist.py --arg {input} --arg {output}",
+    "Cell segmentation is expected to be run outside wsiTools, for example with CellPhenotyper.",
     sep = "\n"
   )
 }
@@ -211,8 +187,8 @@ wsi_cli_translate_rois <- function(opts) {
 #' Run the wsiTools command-line interface
 #'
 #' Provides a small dependency-free command-line interface around backend
-#' checks, StarDist ROI/image segmentation helpers, and GeoJSON coordinate
-#' translation. It is used by the installed `exec/wsitools` script and can also
+#' checks and GeoJSON coordinate translation. It is used by the installed
+#' `exec/wsitools` script and can also
 #' be called directly with `Rscript -e 'wsiTools::wsi_cli()' ...`.
 #'
 #' @param args Character vector of command-line arguments. Defaults to
@@ -239,8 +215,6 @@ wsi_cli <- function(args = commandArgs(trailingOnly = TRUE), quit = FALSE) {
         switch(
           command,
           backends = wsi_cli_backends(opts),
-          "stardist-image" = wsi_cli_stardist_image(opts),
-          "stardist-roi" = wsi_cli_stardist_roi(opts),
           "translate-rois" = wsi_cli_translate_rois(opts),
           {
             cat(wsi_cli_usage(), "\n", file = stderr())

@@ -25,7 +25,10 @@
 #' @param width Preview width used for openable files.
 #'   Larger values provide sharper zoomable previews, at the cost of a larger
 #'   self-contained HTML file. This is still a downsampled preview and does not
-#'   load the full source image into R.
+#'   load the full source image into R. The generated project viewer uses the
+#'   OpenSeadragon shell so the View menu can split multiple project
+#'   images/sections into side-by-side panes even when full-resolution tiles are
+#'   not yet available.
 #' @param height Optional preview height.
 #' @param title Viewer title.
 #' @param overwrite Overwrite `output` if it already exists.
@@ -76,7 +79,11 @@ wsi_viewer_project <- function(images, output = NULL, open = interactive(),
 
   config <- list(
     title = title,
-    subtitle = sprintf("%s image%s in project | preview mode", length(items), if (length(items) == 1L) "" else "s"),
+    subtitle = sprintf(
+      "%s image%s in project | OpenSeadragon preview mode",
+      length(items),
+      if (length(items) == 1L) "" else "s"
+    ),
     viewer_mode = "project",
     preference_key = "wsiTools.viewer.preferences.v1",
     slide_width = first_width,
@@ -84,20 +91,34 @@ wsi_viewer_project <- function(images, output = NULL, open = interactive(),
     mpp = NULL,
     image_data_uri = preview_uri,
     navigator_image_data_uri = preview_uri,
+    tile_size = 512L,
+    tile_format = "png",
+    tile_url_base = NULL,
+    tile_url_template = NULL,
+    tile_url_style = "deepzoom",
+    tile_overlap = 0L,
+    max_level = 0L,
     annotation_filename = paste0(tools::file_path_sans_ext(basename(output)), "_annotations.geojson"),
     roi_class_presets = wsi_viewer_class_presets_payload(roi_class_presets),
     segmentation_run_url = NULL,
     viewer_state_url = NULL,
+    viewer_state_ws_url = NULL,
+    viewer_transport = "polling",
     autosave_enabled = FALSE,
     autosave_interval_ms = 5000L,
     autosave_path = NULL,
     stain = list(enabled = FALSE, label = "none", channels = list(), basis = list()),
+    base_layer = list(id = "base_image", name = "Project image", visible = TRUE, opacity = 1),
     project = list(items = items, active_index = 0L),
+    channel_sources = list(),
+    tile_sources = list(),
     rois = list(),
-    layers = list()
+    layers = list(),
+    seurat = list(enabled = FALSE),
+    cellphenotyper = list(enabled = FALSE)
   )
 
-  writeLines(wsi_viewer_html(config), output, useBytes = TRUE)
+  writeLines(wsi_tiled_viewer_html(config), output, useBytes = TRUE)
   if (isTRUE(open)) {
     utils::browseURL(wsi_file_url(output))
     return(invisible(output))
@@ -599,7 +620,13 @@ wsi_viewer_project_item_from_record <- function(record, index = 1L, width = 768,
   if (length(record_path) != 1L || is.na(record_path)) {
     record_path <- ""
   }
-  if (nzchar(record_path)) {
+  has_explicit_source <- (
+    !is.null(record$image_data_uri) ||
+      !is.null(record$tile_url_base) ||
+      !is.null(record$tile_url_template) ||
+      length(record$sections %||% list()) > 0L
+  ) && !is.null(record$width) && !is.null(record$height)
+  if (nzchar(record_path) && !isTRUE(has_explicit_source)) {
     item <- wsi_viewer_project_item_from_path(record_path, index = index, width = width, height = height, czi_sections = czi_sections)
   } else {
     label <- as.character(record$label %||% record$name %||% sprintf("Image %d", index))

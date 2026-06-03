@@ -146,7 +146,8 @@ wsi_viewer_allowed_events <- function() {
     "annotations_dirty", "annotations_saved",
     "annotation_history_updated", "annotation_history_cleared",
     "measurement_added", "measurements_cleared",
-    "trajectory_added", "trajectory_area_created", "trajectories_cleared",
+    "trajectory_added", "trajectory_area_created", "trajectory_area_updated",
+    "trajectories_cleared",
     "stain_updated", "image_transform_updated",
     "layer_added", "layer_removed", "layer_updated", "layer_visibility_updated",
     "layer_opacity_updated", "tile_grid_toggled",
@@ -2037,7 +2038,7 @@ wsi_viewer_session_record_job_failure <- function(session, job, error, event = "
 
 wsi_viewer_session_add_segmentation_job_result <- function(session, result,
                                                            cell_radius = 8,
-                                                           name = "Async StarDist",
+                                                           name = "Async cell segmentation",
                                                            job = NULL,
                                                            service = TRUE) {
   segmentation <- NULL
@@ -2084,7 +2085,7 @@ wsi_viewer_session_add_segmentation_job_result <- function(session, result,
       job,
       status = "finished",
       progress = 100,
-      message = sprintf("StarDist completed; imported %s cell%s.", added, if (added == 1L) "" else "s")
+      message = sprintf("Imported %s cell%s.", added, if (added == 1L) "" else "s")
     )
   }
   wsi_viewer_state_record_event(session$state, "segmentation_finished", detail)
@@ -2153,8 +2154,6 @@ wsi_viewer_session_capabilities <- function(session) {
   )
   tiled_viewer <- file_backed && wsi_has_vips()
   dynamic_tile_server <- live_bridge <- inherits(session$state, "wsi_viewer_state") && !is.null(session$url)
-  stardist_endpoint <- !is.null(session$stardist_server)
-  stardist_ready <- wsi_has_stardist()
   httpuv_ready <- requireNamespace("httpuv", quietly = TRUE)
   async_ready <- wsi_has_callr()
 
@@ -2178,10 +2177,9 @@ wsi_viewer_session_capabilities <- function(session) {
       "annotation_editing",
       "r_controlled_layers",
       "channel_tile_layers",
+      "cellphenotyper_cell_overlays",
       "measurements",
-      "async_jobs",
-      "stardist_endpoint",
-      "stardist_async"
+      "async_jobs"
     ),
     available = c(
       TRUE,
@@ -2203,9 +2201,8 @@ wsi_viewer_session_capabilities <- function(session) {
       TRUE,
       TRUE,
       TRUE,
-      async_ready,
-      stardist_endpoint,
-      async_ready && region_read && stardist_ready
+      TRUE,
+      async_ready
     ),
     backend = c(
       "wsi_viewer_session",
@@ -2226,17 +2223,16 @@ wsi_viewer_session_capabilities <- function(session) {
       "viewer JavaScript",
       "viewer state bridge",
       "OpenSeadragon tiled layers",
+      "CellPhenotyper/imported cell tables",
       "base R",
-      "callr",
-      "httpuv + StarDist",
-      "callr + StarDist"
+      "callr"
     ),
     notes = c(
       "R methods expose get/add/list/callback/project operations.",
-      "A static HTML viewer can be written without OpenSlide, libvips, or StarDist.",
+      "A static HTML viewer can be written without OpenSlide or libvips.",
       "Browser edits can sync back into this R session when the live bridge is running.",
       "Live viewer state can be autosaved into a .wsiproject folder.",
-      "Local HTTP servicing for live viewer state and segmentation endpoints.",
+      "Local HTTP servicing for live viewer state and dynamic tile endpoints.",
       "Thumbnail mode is available for mock slides and file-backed slides.",
       "Deep Zoom tiled viewing requires a file-backed slide and libvips.",
       "Live on-demand tiles are served from cached region reads; static Deep Zoom remains available.",
@@ -2248,12 +2244,11 @@ wsi_viewer_session_capabilities <- function(session) {
       "Pyramidal TIFF/OME-TIFF export requires libvips.",
       "QuPath-compatible GeoJSON import/export is handled in R.",
       "Polygon drawing, brush editing, labels, colors, and manager controls are viewer-side features.",
-      "R can push ROI, segmentation, tile-grid, point, heatmap, mask, and image layers.",
+      "R can push ROI, CellPhenotyper cell, tile-grid, point, heatmap, mask, and image layers.",
       "R can push precomputed or live channel tile sources and update visibility/opacity/color/contrast.",
+      "Cell segmentation is expected to come from CellPhenotyper projects or R-supplied cell layers.",
       "Distance, ROI/cell/class summaries, and density tables are kept in R data frames.",
-      "Non-blocking jobs require the suggested callr package.",
-      "The viewer's Run segmentation button is wired when a StarDist endpoint is running.",
-      "Async selected-ROI StarDist requires callr, region export, and a StarDist command."
+      "Non-blocking jobs require the suggested callr package."
     ),
     stringsAsFactors = FALSE
   )
@@ -2827,44 +2822,9 @@ wsi_attach_viewer_session_methods <- function(session) {
                                              service = TRUE,
                                              update_viewer = TRUE,
                                              ...) {
-    selected <- wsi_viewer_session_selected_roi(self, roi = roi, service = service)
-    wsi_viewer_state_set_selected_roi(
-      self$state,
-      selected,
-      event = "segmentation_requested",
-      detail = list(engine = "stardist", async = TRUE)
+    wsi_abort(
+      "Selected-ROI StarDist/Cellpose segmentation has been removed from wsiTools. Run cell segmentation separately with CellPhenotyper and open the resulting project/cell overlays in the viewer."
     )
-    job <- wsi_stardist_segment_roi_async(
-      image = wsi_viewer_session_slide_input(self$slide),
-      roi = selected,
-      output_dir = output_dir,
-      ...
-    )
-    wsi_viewer_session_register_job(self, job)
-    wsi_viewer_state_record_event(
-      self$state,
-      "segmentation_started",
-      list(job_id = job$id, job_name = job$name, roi_id = selected$roi_id[[1L]] %||% NA_character_, async = TRUE)
-    )
-    if (isTRUE(update_viewer)) {
-      job$then(function(result, job) {
-        wsi_viewer_session_add_segmentation_job_result(
-          self,
-          result,
-          cell_radius = cell_radius,
-          name = "Async StarDist",
-          job = job,
-          service = service
-        )
-      })
-    }
-    job$catch(function(error, job) {
-      wsi_viewer_session_record_job_failure(self, job, error, event = "segmentation_failed", service = service)
-    })
-    if (isTRUE(service)) {
-      wsi_viewer_session_pump(self, 0L)
-    }
-    job
   }
   session$run_tiles_async <- function(roi = NULL,
                                       layer = TRUE,
@@ -3090,10 +3050,15 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 
   seurat_gene_response <- function(req) {
     method <- req$REQUEST_METHOD %||% "GET"
+    source_name <- if (!is.null(seurat) && inherits(seurat, "wsi_seurat_spatial")) {
+      as.character(seurat$source_name %||% "spatial object")
+    } else {
+      "spatial object"
+    }
     if (!wsi_seurat_live_gene_available(seurat)) {
       return(wsi_http_json_response(
         status = 404L,
-        body = list(error = "No live Seurat expression source is attached to this viewer.")
+        body = list(error = sprintf("No live %s expression source is attached to this viewer.", source_name))
       ))
     }
     gene <- NULL
@@ -3104,18 +3069,18 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
       body <- wsi_http_request_body(req)
       payload <- if (nzchar(body)) jsonlite::fromJSON(body, simplifyVector = FALSE) else list()
       if (!is.list(payload)) {
-        return(wsi_http_json_response(status = 400L, body = list(error = "Seurat gene request must be a JSON object.")))
+        return(wsi_http_json_response(status = 400L, body = list(error = "Spatial gene request must be a JSON object.")))
       }
       unknown <- setdiff(names(payload), c("gene", "q"))
       if (length(unknown)) {
         return(wsi_http_json_response(
           status = 400L,
-          body = list(error = sprintf("Unsupported Seurat gene request field%s: %s.", if (length(unknown) == 1L) "" else "s", paste(unknown, collapse = ", ")))
+          body = list(error = sprintf("Unsupported spatial gene request field%s: %s.", if (length(unknown) == 1L) "" else "s", paste(unknown, collapse = ", ")))
         ))
       }
       gene <- payload$gene %||% payload$q %||% NULL
     } else {
-      return(wsi_http_json_response(status = 405L, body = list(error = "Use GET or POST for Seurat gene expression lookup.")))
+      return(wsi_http_json_response(status = 405L, body = list(error = "Use GET or POST for spatial gene expression lookup.")))
     }
     if (is.null(gene) || !is.character(gene) || length(gene) != 1L || is.na(gene) || !nzchar(trimws(gene))) {
       return(wsi_http_json_response(status = 400L, body = list(error = "Provide a single non-empty `gene` value.")))
@@ -3252,14 +3217,14 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 #' `add_rois()`, `add_segmentation()`, `measure_ihc_intensity()`,
 #' `add_layer()`, `set_layer_visible()`, `preview_tiles()`,
 #' `extract_tile_preview()`, `list_jobs()`,
-#' `run_segmentation_async()`, `run_tiles_async()`,
+#' `run_tiles_async()`,
 #' `run_conversion_async()`, `run_pyramid_async()`, and `save_project()`.
 #' Async methods require the suggested `callr` package and return `wsi_job`
 #' objects with `status()` and `result()` methods. The state object
-#' is an environment, so it is updated in place as new events arrive. Set
-#' `stardist = TRUE` to also start a local selected-ROI StarDist endpoint, when
-#' a runnable command is available, and wire the viewer's `Run segmentation`
-#' button to it.
+#' is an environment, so it is updated in place as new events arrive. Selected
+#' ROI StarDist/Cellpose launching is no longer provided by wsiTools; run cell
+#' segmentation separately with CellPhenotyper and open the resulting project or
+#' cell overlays in the viewer.
 #'
 #' This live bridge is optional and requires the suggested `httpuv` package.
 #' The ordinary [wsi_viewer()] remains a static HTML viewer for file-only use.
@@ -3304,15 +3269,15 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 #' @param autosave_interval Seconds between browser-to-R autosave syncs.
 #' @param autosave_overwrite Whether autosave may update an existing
 #'   `.wsiproject` index and sidecar files.
-#' @param stardist If `TRUE`, try to start a local StarDist ROI endpoint for the
-#'   viewer's `Run segmentation` button. If no StarDist command is available,
-#'   the viewer still opens and selected ROIs can be exported/imported manually.
-#' @param stardist_output_dir Directory for ROI crops and StarDist outputs.
-#' @param stardist_host,stardist_port,stardist_path,stardist_max_tries Local
-#'   address used by the StarDist ROI endpoint.
+#' @param stardist Legacy logical retained for old scripts. If `TRUE`, wsiTools
+#'   warns that selected-ROI StarDist/Cellpose launching has been removed and
+#'   still opens the viewer.
+#' @param stardist_output_dir,stardist_host,stardist_port,stardist_path,stardist_max_tries
+#'   Legacy arguments retained for compatibility; ignored by the current
+#'   viewer.
 #' @param stardist_model,stardist_command,stardist_args,stardist_output_type,stardist_prob_thresh,stardist_nms_thresh,stardist_level,stardist_crop_format,stardist_backend,stardist_cell_radius,stardist_overwrite
-#'   Arguments passed through to [wsi_stardist_server()] and
-#'   [stardist_segment_roi()].
+#'   Legacy arguments retained for compatibility; ignored by the current
+#'   viewer.
 #'
 #' @return A `wsi_viewer_session` object, invisibly. The object keeps the
 #'   bridge fields (`url`, `html`, `state`) and provides live-session helper
@@ -3333,9 +3298,6 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 #' \dontrun{
 #' slide <- wsi_open("sample.svs")
 #' session <- wsi_viewer_live(slide, mode = "tiles", wait = FALSE)
-#'
-#' # With StarDist available on PATH:
-#' session <- wsi_viewer_live(slide, mode = "tiles", stardist = TRUE, wait = FALSE)
 #'
 #' # After drawing in the browser and stopping the live loop:
 #' session$get_rois()
@@ -3532,49 +3494,11 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   if (length(requested_channel_sources)) {
     dots$channel_sources <- wsi_live_channel_sources(requested_channel_sources, base_url = base_url)
   }
-  if (isTRUE(stardist) && is.null(dots$segmentation_run_url)) {
-    command <- wsi_default_stardist_command(stardist_command)
-    if (!nzchar(command) || !wsi_command_exists(command)) {
-      wsi_warn(
-        wsi_stardist_not_configured_message(command, context = "viewer"),
-        class = "wsi_backend_unavailable"
-      )
-    } else {
-      stardist_bridge <- tryCatch(
-        wsi_stardist_server(
-          image = slide,
-          output_dir = stardist_output_dir,
-          host = stardist_host,
-          port = stardist_port,
-          path = stardist_path,
-          max_tries = stardist_max_tries,
-          model = stardist_model,
-          command = stardist_command,
-          args = stardist_args,
-          output_type = stardist_output_type,
-          prob_thresh = stardist_prob_thresh,
-          nms_thresh = stardist_nms_thresh,
-          overwrite = stardist_overwrite,
-          level = stardist_level,
-          crop_format = stardist_crop_format,
-          backend = stardist_backend,
-          cell_radius = stardist_cell_radius,
-          state = state,
-          wait = FALSE
-        ),
-        error = function(err) {
-          wsi_warn(paste0(
-            "Could not start the StarDist segmentation endpoint: ",
-            conditionMessage(err),
-            ". The viewer will still open for ROI export/import."
-          ))
-          NULL
-        }
-      )
-      if (!is.null(stardist_bridge)) {
-        dots$segmentation_run_url <- stardist_bridge$url
-      }
-    }
+  if (isTRUE(stardist)) {
+    wsi_warn(
+      "Selected-ROI StarDist/Cellpose segmentation controls have been removed from wsiTools. Run cell segmentation separately with CellPhenotyper and open the resulting project/cell overlays in the viewer.",
+      class = "wsi_deprecated_segmentation"
+    )
   }
   dots$viewer_state_url <- bridge$url
   dots$viewer_state_ws_url <- if (identical(transport, "polling")) NULL else bridge$ws_url
@@ -3637,13 +3561,10 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
     message("Dynamic project tile sources active: ", length(dynamic_project_sources), " tissue/section source", if (length(dynamic_project_sources) == 1L) "" else "s")
   }
   if (!is.null(bridge$seurat_gene_url)) {
-    message("Live Seurat gene lookup active at ", bridge$seurat_gene_url)
+    source_name <- as.character((live_seurat %||% list())$source_name %||% "spatial")
+    message("Live ", source_name, " gene lookup active at ", bridge$seurat_gene_url)
   }
   message("Browser edits update `", name, "` and companion objects in the chosen R environment.")
-  if (!is.null(stardist_bridge)) {
-    message("Run segmentation is enabled for selected ROIs at ", stardist_bridge$url)
-  }
-
   if (isTRUE(wait)) {
     message("Press Ctrl+C or Esc to stop the live sync loop and return to R.")
     on.exit({
@@ -3672,7 +3593,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
 wsi_viewer_live <- wsi_viewer_session
 
 #' @rdname wsi_viewer_session
-#' @export
+#' @keywords internal
 wsi_viewer_stardist <- function(slide, ..., stardist = TRUE) {
   wsi_viewer_session(slide, ..., stardist = stardist)
 }
@@ -3815,7 +3736,7 @@ print.wsi_viewer_session <- function(x, ...) {
   if (!is.null(x$stardist_server)) {
     cat(sprintf("  stardist: %s\n", x$stardist_server$url))
   }
-  cat("  methods: capabilities(), on(), get_rois(), get_selected_roi(), get_selected_rois(), get_measurements(), get_trajectories(), get_roi_summary(), get_cell_summary(), get_ihc_summary(), get_segmentation(), get_layers(), get_channel_settings(), get_kodama_selection(), get_history(), get_tile_preview(), add_rois(), add_layer(), add_channel_source(), measure_ihc_intensity(), preview_tiles(), extract_tile_preview(), list_jobs(), run_segmentation_async(), run_tiles_async(), save_project(), autosave_start()\n")
+  cat("  methods: capabilities(), on(), get_rois(), get_selected_roi(), get_selected_rois(), get_measurements(), get_trajectories(), get_roi_summary(), get_cell_summary(), get_ihc_summary(), get_segmentation(), get_layers(), get_channel_settings(), get_kodama_selection(), get_history(), get_tile_preview(), add_rois(), add_layer(), add_channel_source(), measure_ihc_intensity(), preview_tiles(), extract_tile_preview(), list_jobs(), run_tiles_async(), save_project(), autosave_start()\n")
   cat("  stop with: wsi_viewer_stop(x)\n")
   invisible(x)
 }

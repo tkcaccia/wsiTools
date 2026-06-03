@@ -10,8 +10,8 @@ Description: A lightweight R toolkit for memory-efficient whole-slide image
     access and preprocessing through region-based reading, tiling, pyramidal
     image handling, conversion and export. The core uses light R dependencies
     plus a small native bridge for optional accelerated routines. OpenSlide,
-    libvips, ZEISS libCZI, StarDist, Cellpose, OME-Zarr pixel access, and
-    web-service integrations are optional runtime capabilities discovered
+    libvips, ZEISS libCZI, OME-Zarr pixel access, and web-service
+    integrations are optional runtime capabilities discovered
     through explicit backend checks. The package avoids loading complete
     whole-slide images into R memory by default.
 License: MIT + file LICENSE
@@ -40,8 +40,7 @@ Suggests:
     testthat (>= 3.0.0)
 SystemRequirements: None required for installation. Optional runtime tools:
     OpenSlide command-line tools; libvips command-line tools; Bio-Formats
-    command-line tools; external StarDist or Cellpose commands; optional ZEISS
-    libCZI for native CZI builds; optional local web services for interactive
-    workflows.
+    command-line tools; optional ZEISS libCZI for native CZI builds; optional
+    local web services for interactive workflows.
 Config/testthat/edition: 3
 VignetteBuilder: knitr

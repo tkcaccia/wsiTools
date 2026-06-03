@@ -134,26 +134,13 @@ test_that("setup rejects unknown tool names", {
   )
 })
 
-test_that("StarDist installer can return a CRAN-safe plan", {
-  plan <- wsi_install_stardist(method = "manual", install = FALSE)
-
-  expect_s3_class(plan, "wsi_stardist_installation")
-  expect_equal(plan$method, "manual")
-  expect_s3_class(plan$plan, "data.frame")
-  expect_named(plan$plan, c("step", "command", "command_line", "notes"))
-  expect_length(plan$command_output, 0)
-})
-
-test_that("StarDist conda setup plan uses a dedicated environment", {
-  plan <- wsi_install_stardist(
-    method = "conda",
-    envname = "wsitools-test-stardist",
-    install = FALSE
+test_that("setup no longer accepts model-execution backends", {
+  expect_error(
+    wsi_dependency_plan(tools = "stardist", method = "manual"),
+    "unsupported value"
   )
-
-  expect_s3_class(plan, "wsi_stardist_installation")
-  expect_equal(plan$method, "conda")
-  expect_true(any(grepl("wsitools-test-stardist", plan$plan$command_line, fixed = TRUE)))
-  expect_true(any(grepl("stardist", plan$plan$command_line, fixed = TRUE)))
-  expect_true(any(grepl("tensorflow", plan$plan$command_line, fixed = TRUE)))
+  expect_error(
+    wsi_dependency_plan(tools = "cellpose", method = "manual"),
+    "unsupported value"
+  )
 })

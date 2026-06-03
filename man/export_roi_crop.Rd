@@ -50,6 +50,6 @@ The output path, invisibly.
 }
 \description{
 Crops the bounding box of a selected ROI without loading the full slide into
-R memory. This is useful for sending a selected region to optional tools such
-as StarDist, Cellpose, or other external segmentation pipelines.
+R memory. This is useful for sending a selected region to CellPhenotyper or
+other external analysis pipelines.
 }

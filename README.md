@@ -47,11 +47,10 @@ install.packages(".", repos = NULL, type = "source")
 ```
 
 The current GitHub package is designed to install without OpenSlide, libvips,
-Python, StarDist, Cellpose, Bio-Formats, or OME-Zarr pixel readers. It now
-includes a small compiled native bridge so Windows source installs need the
-usual Rtools toolchain; OpenSlide, libvips, Bio-Formats, StarDist, Cellpose, and
-libCZI remain optional runtime capabilities rather than mandatory package
-dependencies.
+Python, Bio-Formats, or OME-Zarr pixel readers. It now includes a small
+compiled native bridge so Windows source installs need the usual Rtools
+toolchain; OpenSlide, libvips, Bio-Formats, and libCZI remain optional runtime
+capabilities rather than mandatory package dependencies.
 
 ### Windows clean reinstall
 
@@ -112,9 +111,9 @@ functions need the corresponding tools at runtime:
   are not used for first visualization of CZI files.
 - ZEISS libCZI/libCZIAPI for direct CZI first visualization without Python.
   Set `WSITOOLS_LIBCZIAPI` when the shared library is not already discoverable.
-- StarDist, Cellpose, or other segmentation engines remain external commands or
-  services; wsiTools can export ROI crops and import their outputs without
-  depending on Python.
+- Cell segmentation is expected to be performed outside wsiTools, for example
+  by CellPhenotyper. wsiTools can open CellPhenotyper projects and visualize
+  their cell overlays.
 - `httpuv`, `magick`, and `sf` are optional R packages used only for live viewer
   bridges, image previews, and polygon-aware ROI operations.
 - `callr` is optional and is used only when non-blocking background jobs are
@@ -405,24 +404,9 @@ On Windows, install libvips/OpenSlide with a system package manager such as
 winget, MSYS2, vcpkg, or the official binary distributions, then make sure the
 tool directories are on `PATH`. Re-run `wsi_backends()` afterwards.
 
-StarDist is a Python/TensorFlow tool, so it is not installed silently during
-`install.packages()` or `remotes::install_github()`. To enable the viewer's
-`Run segmentation` button, run the explicit first-time setup helper:
-
-```r
-wsi_install_stardist(method = "conda")
-```
-
-This creates or updates a dedicated `wsitools-stardist` environment, writes a
-small `stardist-predict2d` wrapper in the user wsiTools configuration
-directory, and makes `wsi_has_stardist()` detect it automatically. Use
-`wsi_install_stardist(install = FALSE)` to see the commands without running
-them. The helper checks free disk space first because the conda StarDist package
-can pull in a large TensorFlow stack.
-
-Other Python tools such as Cellpose are best installed in a dedicated conda/pip
-environment and then exposed to wsiTools through environment variables or
-function arguments.
+wsiTools no longer installs or launches StarDist/Cellpose. Run segmentation in
+CellPhenotyper, then open the CellPhenotyper project or push the resulting cell
+layer into the viewer from R.
 
 ## First-run guided example
 
@@ -722,10 +706,9 @@ session <- wsi_viewer_live(
 
 The interactive toolbar is organized into menus such as `Project`,
 `Annotations`, `Cells`, `Artifacts`, `Measure`, `Trajectories`, `Image`, `View`,
-`Stains`, and `Help`. Segmentation import and selected-ROI StarDist controls
-live inside `Annotations` beside the GeoJSON tools. Use the `Cells` menu for
-project-level CellPhenotyper/StarDist cell overlays loaded from an existing
-CellPhenotyper output directory. Use `Project` to reopen
+`Stains`, and `Help`. Use the `Cells` menu for project-level CellPhenotyper
+cell overlays loaded from an existing CellPhenotyper output directory. Use
+`Project` to reopen
 the left-side project panel, use `Add image` to append one or more ordinary
 browser-readable images or file references in formats such as CZI, SVS, NDPI,
 BTF, OME-TIFF, QPTIFF, MRXS, SCN, BIF, DICOM, PNG, JPEG and TIFF.
@@ -739,14 +722,19 @@ and pyramidal images should still be opened from R or prepared as tiled project
 sources; the project file preserves their paths/tile metadata rather than
 copying full pixel data into R memory. Pyramid levels are used internally for
 zooming and are not listed as project sections. The `Help` menu opens an
-in-viewer guide with image loading, navigation, project, ROI, stain/channel,
-analysis, saved-output, troubleshooting, and keyboard-shortcut notes for new
-users. The left-side panel stack can be resized by dragging its right edge, and
+in-viewer guide organized into `Quick Recommendations`, `Full Guide`, and
+`Keyboard Shortcuts`, covering image loading, navigation, project, ROI,
+stain/channel, analysis, saved-output, and troubleshooting notes for new users.
+The left-side panel stack can be resized by dragging its right edge, and
 each Project, Annotations, or History panel can be resized vertically from its
-lower grip. The `View` menu also provides a multi-view tissue display for tiled
-slides, with 2, 4, or 6 OpenSeadragon panes that can be linked for synchronized
-zoom/pan or left independent to compare separate ROIs, tumour and non-tumour
-regions, or different zoom levels. These menus group pan and annotation modes, fit and
+lower grip. The `View` menu also provides a multi-view tissue display for
+OpenSeadragon viewers, with 2, 4, or 6 panes that can be linked for
+synchronized zoom/pan or left independent. In project viewers, panes use
+different project images or sections when available; otherwise they compare
+separate ROIs, tumour and non-tumour regions, or different zoom levels within
+the active image. When multiple `project_images` are supplied and the caller
+does not explicitly request thumbnail mode, wsiTools switches to tiled mode
+automatically when a tile backend or explicit tile URL is available. These menus group pan and annotation modes, fit and
 1:1 zoom, ROI and label toggles, ROI opacity, previous/next ROI navigation, a
 side window listing all GeoJSON geometries, crosshair display, polygon drawing,
 and GeoJSON export. Use the annotation/GeoJSON tools
@@ -780,7 +768,9 @@ smoothed backbone, preview an adjustable-width corridor around it, and create a
 GeoJSON annotation area from that corridor while preserving the same class
 merge and different-class clipping rules used by brush annotations. Double-click,
 press Enter, or click `Finish` to save a trajectory and automatically return to
-pan mode. In a static browser viewer this opens the
+pan mode. After creating a trajectory area, use `Edit area` to select the area
+ROI for vertex editing or `Update area` to rebuild it with the current width.
+In a static browser viewer this opens the
 browser's normal save/download flow rather than silently writing to a server
 path.
 
@@ -788,15 +778,15 @@ path.
 
 CellPhenotyper output folders can be opened directly from their
 `00_execution/project_outputs.tsv` manifest. wsiTools resolves the local input
-image, reads the StarDist/cell-assignment centroid table when present, and adds
+image, reads the CellPhenotyper cell-assignment centroid table when present, and adds
 the cells as a viewer layer. When the manifest contains
 `03_gigatime/.../gigatime_probs.ome.tif`, wsiTools opens it as live tiled mIHC
 channel overlays on top of the H&E image. Channel names are read from
-`gigatime_channels.json` or `gigatime_metadata.json` when present. The large
-StarDist label mask remains on disk. If the manifest contains
+`gigatime_channels.json` or `gigatime_metadata.json` when present. Large
+cell-label masks remain on disk. If the manifest contains
 MedSAM-refined KODAMA GeoJSON outputs, for example in `18_cluster_geojson`,
-the viewer adds a top `KODAMA` menu so the refined regions can be visualized as
-editable GeoJSON annotations. KODAMA membership PNG plots, such as
+the viewer adds a top `CellPhenotyper` menu so the refined regions can be
+visualized as editable GeoJSON annotations. KODAMA membership PNG plots, such as
 `1927zoom_fine_cluster_kodama_membership.png`, are also discovered and can be
 opened in a floating KODAMA plot window. When the CellPhenotyper KODAMA RData
 and cluster CSV are available, the default plot view redraws the same KODAMA
@@ -829,13 +819,14 @@ viewer <- wsi_viewer_cellphenotyper(
 viewer$get_channel_settings()
 ```
 
-In the viewer, open the top `Cells` menu and click `StarDist cells` to show or
+In the viewer, open the top `Cells` menu and click `CellPhenotyper cells` to show or
 hide the CellPhenotyper segmentation. `Zoom cells` moves the viewport to the
 cell extent, while `Opacity` and `Cell size` adjust the overlay only. The H&E
 input image is the active base slide; the GigaTIME probability OME-TIFF appears
 as tiled colour channels in the top `Stains` menu, where each marker can be
-shown, hidden, recoloured, and blended over the H&E. Open the top `KODAMA` menu
-and click `Load all` or an individual refined GeoJSON file to overlay the
+shown, hidden, recoloured, and blended over the H&E. Open the top
+`CellPhenotyper` menu and click `Load all` or an individual refined GeoJSON
+file to overlay the
 MedSAM-refined KODAMA tissue regions; the imported regions also appear in the
 left annotation list and can be exported again as GeoJSON. In the same menu,
 click a KODAMA plot button to open the floating plot window using the same
@@ -897,9 +888,9 @@ session$on("segmentation_finished", function(cells) {
 session$add_rois(read_geojson("qupath_annotations.geojson"))
 session$add_segmentation(data.frame(cell_id = "cell_1", x = 1200, y = 900))
 session$add_layer("tumour ROIs", session$get_rois())
-session$add_layer("StarDist cells", session$get_segmentation())
+session$add_layer("CellPhenotyper cells", session$get_segmentation())
 session$add_layer("DAB intensity", matrix(runif(100), nrow = 10), opacity = 0.4)
-session$set_layer_visible("StarDist cells", TRUE)
+session$set_layer_visible("CellPhenotyper cells", TRUE)
 
 # Optional channel-tile layers can also be pushed from R:
 dab_tiles <- wsi_channel_source(
@@ -1324,73 +1315,26 @@ edited <- viewer$get_rois()
 write_geojson(edited, "edited_for_qupath.geojson", overwrite = TRUE)
 ```
 
-Optional external segmentation tools remain outside the dependency tree. Export
-an ROI crop for a tool such as StarDist or Cellpose, then import GeoJSON
-polygons, CSV/TSV centroids, or a mask image as an overlay. Centroid tables are
-drawn as cell markers in the viewer:
+Cell segmentation is handled outside wsiTools, preferably through a
+CellPhenotyper project. Existing GeoJSON polygons, CSV/TSV centroids, or mask
+images can still be imported as overlays when needed:
 
 ```r
 export_roi_crop(slide, rois, "roi_crop.png", roi_id = rois$roi_id[1])
 segmentation <- import_segmentation("model_output.geojson")
 viewer_add_segmentation(slide, segmentation, output = "segmentation.html")
 
-cells <- import_segmentation("stardist_centroids.csv")
-viewer_add_segmentation(slide, cells, output = "stardist_cells.html", cell_radius = 8)
+cells <- import_segmentation("cellphenotyper_centroids.csv")
+viewer_add_segmentation(slide, cells, output = "cellphenotyper_cells.html", cell_radius = 8)
 
 # Convert a model mask image into editable ROI annotations:
 mask_rois <- import_segmentation("model_mask.png", mask_as_rois = TRUE, threshold = 0.5)
 viewer$add_rois(mask_rois)
 ```
 
-For StarDist, `wsiTools` keeps Python optional but provides a first-run setup
-helper:
-
-```r
-wsi_install_stardist(method = "conda")
-```
-
-After that, `wsi_viewer_live(..., stardist = TRUE)` can wire the viewer's
-`Run segmentation` button automatically. In the interactive viewer, select or
-brush an ROI, open the `Annotations` menu, run StarDist on the ROI crop, then
-load or receive the result GeoJSON or CSV/TSV centroids back into the viewer.
-From R, the same workflow can be scripted with a user-supplied StarDist command:
-
-```r
-result <- stardist_segment_roi(
-  slide,
-  rois,
-  output_dir = "stardist_roi",
-  roi_id = rois$roi_id[1],
-  command = "python",
-  args = c("run_stardist.py", "{input}", "{output}", "{model}"),
-  model = "2D_versatile_he"
-)
-
-viewer_add_segmentation(slide, result$segmentation, output = "stardist_overlay.html")
-```
-
-The live viewer can also start segmentation directly on the selected ROI. Start
-the viewer with `stardist = TRUE`; when a StarDist command is available,
-wsiTools starts the local R endpoint and wires the `Run segmentation` button
-automatically:
-
-```r
-slide <- wsi_open("sample.svs")
-session <- wsi_viewer_live(
-  slide,
-  mode = "tiles",
-  stardist = TRUE,
-  stardist_command = "python",
-  stardist_args = c("run_stardist.py", "{input}", "{output}", "{model}"),
-  output = "slide_with_stardist_runner.html"
-)
-```
-
-In the viewer, select or brush an ROI, open `Annotations`, and press
-`Run segmentation`. The selected ROI is sent to the local endpoint, StarDist
-runs on only that ROI crop, and returned cell polygons or centroids are added
-as overlays. The selected ROI and imported cells are also written directly into
-the live R session, so the normal R-side result is:
+The live viewer does not launch StarDist or Cellpose. When a CellPhenotyper
+project is open, the viewer exposes its cell table through the `Cells` menu and
+keeps those cells available in the live R session:
 
 ```r
 cells <- session$get_segmentation()
@@ -1400,15 +1344,15 @@ roi_summary <- session$get_roi_summary()
 cell_summary <- session$get_cell_summary()
 ```
 
-The last run metadata, including crop/output paths, is available in
-`wsi_viewer_state(session)$last_segmentation` and the companion object
-`wsi_viewer_live_state_last_segmentation`. If `stardist-predict2d` is already
-on `PATH`, you can omit `stardist_command` and `stardist_args`. If no StarDist
-command is available, the viewer still opens and the segmentation controls in
-`Annotations` remain usable for selected-ROI export and result import.
+Segmentation provenance should be tracked in the CellPhenotyper project itself.
 
 Long-running work can also run as a non-blocking background job when the
 optional `callr` package is installed:
+
+In the live viewer, a compact status pill beside the top toolbar stays visible
+while you work:
+it reports `Sync off`, `Synced`, `Pending`, `Running`, `Completed`, or `Failed`
+at a glance.
 
 ```r
 # Preview candidate tiles in the open viewer without reading pixel data.
@@ -1422,14 +1366,6 @@ tiles <- session$extract_tile_preview(
   output_dir = "confirmed_tiles",
   format = "png"
 )
-
-job <- session$run_segmentation_async(
-  command = "python",
-  args = c("run_stardist.py", "{input}", "{output}", "{model}")
-)
-
-job$status()
-cells <- job$result()
 
 tile_job <- session$run_tiles_async(
   tile_size = 512,
@@ -1447,44 +1383,19 @@ convert_job <- session$run_conversion_async(
 convert_job$status()
 ```
 
-The same StarDist bridge is available from the command line. From a source
-checkout use `./exec/wsitools`; from an installed package you can resolve the
-script path with `system.file()`:
+The command-line helper remains available for backend checks and GeoJSON
+coordinate translation. From a source checkout use `./exec/wsitools`; from an
+installed package you can resolve the script path with `system.file()`:
 
 ```sh
 WSITOOLS_BIN="$(Rscript -e 'cat(system.file("exec", "wsitools", package = "wsiTools"))')"
-
-"$WSITOOLS_BIN" stardist-roi \
-  --image sample.svs \
-  --roi selected_roi.geojson \
-  --output-dir stardist_roi \
-  --command python \
-  --arg run_stardist.py \
-  --arg '{input}' \
-  --arg '{output}' \
-  --arg '{model}' \
-  --model 2D_versatile_he \
-  --overwrite
-```
-
-Other CLI commands include:
-
-```sh
 "$WSITOOLS_BIN" backends
-"$WSITOOLS_BIN" stardist-image --input roi_crop.png --output cells.geojson --command python --arg run_stardist.py --arg '{input}' --arg '{output}'
 "$WSITOOLS_BIN" translate-rois --input cells_crop.geojson --output cells_slide.geojson --dx 10000 --dy 20000 --overwrite
 ```
 
-A complete selected-ROI example is available at
-`inst/examples/stardist-selected-roi-cli.R`. It opens a slide, overlays the ROI
-GeoJSON, exports the ROI crop, optionally runs StarDist, and prints the
-equivalent `wsitools stardist-roi` command:
-
-```sh
-WSITOOLS_IMAGE="/path/to/slide.svs" \
-WSITOOLS_ROI_GEOJSON="/path/to/selected_roi.geojson" \
-Rscript inst/examples/stardist-selected-roi-cli.R
-```
+Run CellPhenotyper separately for cell segmentation, then open the project with
+`wsi_viewer_cellphenotyper()` or import the resulting GeoJSON/CSV overlays with
+`import_segmentation()`.
 
 For patch extraction, `extract_tiles()` accepts fixed tile size and stride. It
 returns coordinates without reading pixels unless `output_dir` is supplied:
@@ -1841,8 +1752,8 @@ Implemented:
 - ROI GeoJSON writing, class labels, and viewer overlay helpers
 - side-by-side comparison viewer
 - OME-Zarr metadata-backed opening
-- optional segmentation import/export bridge
-- StarDist polygon and centroid cell overlays in the HTML viewer
+- optional segmentation import/export bridge for CellPhenotyper or external outputs
+- CellPhenotyper polygon and centroid cell overlays in the HTML viewer
 - stride-based tile extraction wrapper
 - basic measurements, tissue class summaries, and affine ROI transforms
 - S3 print, summary, and plot methods

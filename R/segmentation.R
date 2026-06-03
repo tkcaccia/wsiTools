@@ -237,7 +237,7 @@ translate_rois <- wsi_translate_rois
 #' unchanged. Centroid tables are converted to small circular cell markers.
 #'
 #' @param segmentation A segmentation object returned by [import_segmentation()]
-#'   or `stardist_segment_*()$segmentation`.
+#'   or another object returned by [import_segmentation()].
 #' @param radius Radius, in slide pixels, for centroid cell markers.
 #' @param label Class label used for centroid cell markers.
 #'
@@ -294,7 +294,7 @@ segmentation_to_rois <- wsi_segmentation_to_rois
 #'   `stardist-predict2d` when present on `PATH`.
 #'
 #' @return `TRUE` or `FALSE`.
-#' @export
+#' @keywords internal
 wsi_has_stardist <- function(command = NULL) {
   command <- wsi_default_stardist_command(command)
   is.character(command) && length(command) == 1L && nzchar(command) && wsi_command_exists(command)
@@ -323,7 +323,7 @@ wsi_stardist_result <- function(input, output, segmentation = NULL,
   )
 }
 
-#' @export
+#' @keywords internal
 print.wsi_stardist_result <- function(x, ...) {
   cat("<wsi_stardist_result>\n")
   cat(sprintf("  status: %s\n", x$status %||% "unknown"))
@@ -366,7 +366,7 @@ print.wsi_stardist_result <- function(x, ...) {
 #' @param run If `FALSE`, return the command plan without running StarDist.
 #'
 #' @return A `wsi_stardist_result` object.
-#' @export
+#' @keywords internal
 stardist_segment_image <- function(input, output,
                                    model = "2D_versatile_he",
                                    command = NULL,
@@ -440,14 +440,14 @@ stardist_segment_image <- function(input, output,
 }
 
 #' @rdname stardist_segment_image
-#' @export
+#' @keywords internal
 wsi_stardist_segment_image <- stardist_segment_image
 
 #' Export an ROI crop for external analysis
 #'
 #' Crops the bounding box of a selected ROI without loading the full slide into
-#' R memory. This is useful for sending a selected region to optional tools such
-#' as StarDist, Cellpose, or other external segmentation pipelines.
+#' R memory. This is useful for sending a selected region to CellPhenotyper or
+#' other external analysis pipelines.
 #'
 #' @param image A `wsi_slide` object or a path that can be opened by
 #'   [wsi_open()].
@@ -522,7 +522,7 @@ wsi_export_roi_crop <- export_roi_crop
 #' @inheritParams export_roi_crop
 #'
 #' @return A `wsi_stardist_result` object.
-#' @export
+#' @keywords internal
 stardist_segment_roi <- function(image, roi, output_dir, roi_id = NULL,
                                  level = 0,
                                  crop_format = c("png", "tiff", "jpeg"),
@@ -630,7 +630,7 @@ stardist_segment_roi <- function(image, roi, output_dir, roi_id = NULL,
 }
 
 #' @rdname stardist_segment_roi
-#' @export
+#' @keywords internal
 wsi_stardist_segment_roi <- stardist_segment_roi
 
 #' Import external segmentation outputs
@@ -837,7 +837,7 @@ wsi_http_query_params <- function(query = NULL) {
 #' @param wait If `TRUE`, run the httpuv event loop until interrupted.
 #'
 #' @return A `wsi_stardist_server` object with the service URL.
-#' @export
+#' @keywords internal
 #'
 #' @examples
 #' \dontrun{
@@ -1000,7 +1000,7 @@ wsi_stardist_server <- function(image,
   out
 }
 
-#' @export
+#' @keywords internal
 print.wsi_stardist_server <- function(x, ...) {
   cat("<wsi_stardist_server>\n")
   cat(sprintf("  url: %s\n", x$url))
