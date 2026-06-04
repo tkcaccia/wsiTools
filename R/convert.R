@@ -72,7 +72,13 @@ wsi_convert <- function(input, output,
     wsi_abort("Only the libvips conversion backend is implemented in the first milestone.")
   }
   if (!wsi_has_vips()) {
-    wsi_abort("libvips backend is not installed. Install `vips` and `vipsheader`, then retry.", class = "wsi_backend_unavailable")
+    wsi_abort(
+      wsi_backend_action_message(
+        "libvips conversion could not start because the libvips backend is not installed.",
+        backend = "vips"
+      ),
+      class = "wsi_backend_unavailable"
+    )
   }
 
   target <- output

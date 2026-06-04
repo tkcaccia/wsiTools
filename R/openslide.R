@@ -51,7 +51,13 @@ wsi_openslide_associated_images <- function(properties) {
 
 wsi_openslide_open <- function(path) {
   if (!wsi_has_openslide()) {
-    wsi_abort("OpenSlide backend is not installed. Install OpenSlide command-line tools and retry.", class = "wsi_backend_unavailable")
+    wsi_abort(
+      wsi_backend_action_message(
+        "OpenSlide could not open the slide because the OpenSlide backend is not installed.",
+        backend = "openslide"
+      ),
+      class = "wsi_backend_unavailable"
+    )
   }
 
   properties <- wsi_openslide_properties(path)
@@ -79,7 +85,10 @@ wsi_openslide_open <- function(path) {
 wsi_openslide_read_region_file <- function(slide, region, output) {
   if (!wsi_command_exists("openslide-write-png")) {
     wsi_abort(
-      "OpenSlide region reading requires `openslide-write-png` on PATH for this milestone.",
+      wsi_backend_action_message(
+        "OpenSlide region reading requires `openslide-write-png` on PATH for this milestone.",
+        backend = "openslide"
+      ),
       class = "wsi_backend_unavailable"
     )
   }

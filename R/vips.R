@@ -31,7 +31,13 @@ wsi_vips_properties <- function(path) {
 
 wsi_vips_open <- function(path) {
   if (!wsi_has_vips()) {
-    wsi_abort("libvips backend is not installed. Install `vips` and `vipsheader`, then retry.", class = "wsi_backend_unavailable")
+    wsi_abort(
+      wsi_backend_action_message(
+        "libvips could not open the image because the libvips backend is not installed.",
+        backend = "vips"
+      ),
+      class = "wsi_backend_unavailable"
+    )
   }
 
   width <- suppressWarnings(as.numeric(wsi_vips_field(path, "width")))
@@ -71,7 +77,13 @@ wsi_vips_input_for_level <- function(path, level) {
 
 wsi_vips_read_region_file <- function(slide, region, output) {
   if (!wsi_has_vips()) {
-    wsi_abort("libvips backend is not installed. Install `vips` and `vipsheader`, then retry.", class = "wsi_backend_unavailable")
+    wsi_abort(
+      wsi_backend_action_message(
+        "libvips region export could not start because the libvips backend is not installed.",
+        backend = "vips"
+      ),
+      class = "wsi_backend_unavailable"
+    )
   }
 
   input <- wsi_vips_input_for_level(slide$path, region$level)

@@ -310,7 +310,13 @@ wsi_choose_open_backend <- function() {
     return("imagemagick")
   }
   wsi_abort(
-    "No WSI/image backend is available. Install OpenSlide, libvips, or ImageMagick, then retry.",
+    wsi_backend_failure_message(
+      path = "<no file selected>",
+      requested_backend = "auto",
+      candidates = character(),
+      errors = character(),
+      is_czi = FALSE
+    ),
     class = "wsi_backend_unavailable"
   )
 }

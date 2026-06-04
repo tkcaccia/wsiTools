@@ -42,10 +42,11 @@ wsi_bioformats_java_compile <- function(jar = NULL, class_dir = NULL) {
   jar <- wsi_bioformats_java_jar(jar)
   if (!nzchar(jar) || !file.exists(jar)) {
     wsi_abort(
-      paste(
+      wsi_backend_action_message(
         "Bio-Formats Java helper requires `bioformats_package.jar`.",
-        "Set `WSITOOLS_BIOFORMATS_JAR` to the full jar path, or set `WSITOOLS_BIOFORMATS_HOME` to the Bio-Formats folder.",
-        sep = "\n"
+        backend = "bioformats_java",
+        is_czi = TRUE,
+        details = "Set `WSITOOLS_BIOFORMATS_JAR` to the full jar path, or set `WSITOOLS_BIOFORMATS_HOME` to the Bio-Formats folder."
       ),
       class = "wsi_backend_unavailable"
     )
@@ -62,7 +63,12 @@ wsi_bioformats_java_compile <- function(jar = NULL, class_dir = NULL) {
   javac <- wsi_bioformats_javac_command()
   if (!wsi_command_exists(javac)) {
     wsi_abort(
-      "Compiling the Bio-Formats Java helper requires `javac`. Install a JDK, not only a JRE, then retry.",
+      wsi_backend_action_message(
+        "Compiling the Bio-Formats Java helper requires `javac`.",
+        backend = "bioformats_java",
+        is_czi = TRUE,
+        details = "Install a JDK, not only a JRE, then retry."
+      ),
       class = "wsi_backend_unavailable"
     )
   }
@@ -79,7 +85,14 @@ wsi_bioformats_java_run <- function(args, jar = NULL, java = NULL, class_dir = N
   jar <- wsi_bioformats_java_jar(jar)
   java <- wsi_bioformats_java_command(java)
   if (!wsi_command_exists(java)) {
-    wsi_abort("Bio-Formats Java helper requires `java` on PATH or `WSITOOLS_JAVA`.")
+    wsi_abort(
+      wsi_backend_action_message(
+        "Bio-Formats Java helper requires `java` on PATH or `WSITOOLS_JAVA`.",
+        backend = "bioformats_java",
+        is_czi = TRUE
+      ),
+      class = "wsi_backend_unavailable"
+    )
   }
   class_dir <- wsi_bioformats_java_compile(jar = jar, class_dir = class_dir)
   classpath <- paste(c(class_dir, jar), collapse = .Platform$path.sep)
@@ -155,7 +168,10 @@ wsi_bioformats_showinf <- function(path, omexml = TRUE) {
   showinf <- wsi_bioformats_command("showinf")
   if (!wsi_command_exists(showinf)) {
     wsi_abort(
-      "Bio-Formats metadata reading requires `showinf` on PATH. Install OME bftools, then retry.",
+      wsi_backend_action_message(
+        "Bio-Formats metadata reading requires `showinf` on PATH.",
+        backend = "bioformats"
+      ),
       class = "wsi_backend_unavailable"
     )
   }
@@ -312,10 +328,9 @@ wsi_bioformats_properties <- function(info) {
 wsi_bioformats_open <- function(path) {
   if (!wsi_has_bioformats()) {
     wsi_abort(
-      paste(
-        "Bio-Formats backend is not installed. Install OME bftools so `showinf` and `bfconvert` are on PATH, then retry.",
-        "From conda: `conda install -c ome bftools`.",
-        sep = "\n"
+      wsi_backend_action_message(
+        "Bio-Formats could not open the image because OME bftools are not installed.",
+        backend = "bioformats"
       ),
       class = "wsi_backend_unavailable"
     )
@@ -393,7 +408,11 @@ wsi_bioformats_preview_series <- function(path, series, output, width, height = 
   bfconvert <- wsi_bioformats_command("bfconvert")
   if (!wsi_command_exists(bfconvert)) {
     wsi_abort(
-      "Bio-Formats CZI preview generation requires `bfconvert` on PATH. Install OME bftools, then retry.",
+      wsi_backend_action_message(
+        "Bio-Formats CZI preview generation requires `bfconvert` on PATH.",
+        backend = "bioformats",
+        is_czi = TRUE
+      ),
       class = "wsi_backend_unavailable"
     )
   }
@@ -439,10 +458,10 @@ wsi_bioformats_java_project_preview <- function(path, width = 768, height = NULL
                                                 max_input_pixels = 2e7) {
   if (!wsi_has_bioformats_java()) {
     wsi_abort(
-      paste(
+      wsi_backend_action_message(
         "Bio-Formats Java preview requires Java and `bioformats_package.jar`.",
-        "Set `WSITOOLS_BIOFORMATS_JAR` to the jar path, then retry.",
-        sep = "\n"
+        backend = "bioformats_java",
+        is_czi = TRUE
       ),
       class = "wsi_backend_unavailable"
     )
@@ -525,13 +544,21 @@ wsi_bioformats_project_preview <- function(path, width = 768, height = NULL,
   }
   if (!wsi_has_bioformats()) {
     wsi_abort(
-      "Bio-Formats CZI preview generation requires `showinf` and `bfconvert` on PATH.",
+      wsi_backend_action_message(
+        "Bio-Formats CZI preview generation requires `showinf` and `bfconvert` on PATH.",
+        backend = "bioformats",
+        is_czi = TRUE
+      ),
       class = "wsi_backend_unavailable"
     )
   }
   if (!wsi_command_exists(wsi_bioformats_command("bfconvert"))) {
     wsi_abort(
-      "Bio-Formats metadata is available, but CZI preview generation also requires `bfconvert` on PATH.",
+      wsi_backend_action_message(
+        "Bio-Formats metadata is available, but CZI preview generation also requires `bfconvert` on PATH.",
+        backend = "bioformats",
+        is_czi = TRUE
+      ),
       class = "wsi_backend_unavailable"
     )
   }
@@ -591,7 +618,10 @@ wsi_bioformats_read_region_file <- function(slide, region, output) {
   bfconvert <- wsi_bioformats_command("bfconvert")
   if (!wsi_command_exists(bfconvert)) {
     wsi_abort(
-      "Bio-Formats region export requires `bfconvert` on PATH. Install OME bftools, then retry.",
+      wsi_backend_action_message(
+        "Bio-Formats region export requires `bfconvert` on PATH.",
+        backend = "bioformats"
+      ),
       class = "wsi_backend_unavailable"
     )
   }

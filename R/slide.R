@@ -217,6 +217,48 @@ wsi_backend_unavailable_reason <- function(backend) {
   )
 }
 
+wsi_backend_check_lines <- function(backend = NULL) {
+  lines <- c("wsi_backends()", "wsi_diagnose(live_test = FALSE)")
+  if (is.null(backend)) {
+    return(lines)
+  }
+  backend_check <- switch(
+    backend,
+    openslide = "wsi_has_openslide()",
+    vips = "wsi_has_vips()",
+    native_czi = "wsi_has_native_czi()",
+    bioformats_java = "wsi_has_bioformats_java()",
+    bioformats = "wsi_has_bioformats()",
+    imagemagick = "wsi_has_imagemagick()",
+    NULL
+  )
+  unique(c(lines, backend_check))
+}
+
+wsi_backend_action_message <- function(what_failed, backend, details = NULL, is_czi = FALSE) {
+  what_failed <- paste(wsi_clean_text(what_failed), collapse = "\n")
+  details <- if (is.null(details)) "" else paste(wsi_clean_text(details), collapse = "\n")
+  available <- wsi_backend_available(backend)
+  status <- if (isTRUE(available)) {
+    "available, but the backend command or operation failed"
+  } else {
+    paste0("unavailable - ", wsi_backend_unavailable_reason(backend))
+  }
+  paste(
+    what_failed,
+    sprintf("Backend tried: %s", backend),
+    sprintf("%s: %s", backend, status),
+    "",
+    "How to check:",
+    paste0("  ", wsi_backend_check_lines(backend), collapse = "\n"),
+    "",
+    "How to install or fix:",
+    paste0("  ", wsi_backend_fix_lines(is_czi = is_czi, requested_backend = backend), collapse = "\n"),
+    if (nzchar(details)) paste0("\nDetails:\n", details) else "",
+    sep = "\n"
+  )
+}
+
 wsi_backend_fix_lines <- function(is_czi, requested_backend) {
   if (isTRUE(is_czi)) {
     return(c(
@@ -227,6 +269,19 @@ wsi_backend_fix_lines <- function(is_czi, requested_backend) {
     ))
   }
 
+  if (identical(requested_backend, "native_czi")) {
+    return(c(
+      "wsi_install_native_czi(install = FALSE)",
+      "wsi_install_native_czi()  # after reviewing the install plan"
+    ))
+  }
+  if (identical(requested_backend, "bioformats_java")) {
+    return(c(
+      "wsi_install_backends(tools = \"bioformats\", install = FALSE)",
+      "Sys.setenv(WSITOOLS_BIOFORMATS_JAR = \"/path/to/bioformats_package.jar\")",
+      "wsi_has_bioformats_java()"
+    ))
+  }
   if (identical(requested_backend, "openslide")) {
     return(c(
       "wsi_install_backends(tools = \"openslide\", install = FALSE)",

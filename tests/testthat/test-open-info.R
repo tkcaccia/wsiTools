@@ -32,6 +32,22 @@ test_that("explicit backend open failures include check and fix commands", {
   expect_match(message, "wsi_install_backends(\"libvips\")", fixed = TRUE)
 })
 
+test_that("backend action diagnostics include check and install guidance", {
+  message <- wsiTools:::wsi_backend_action_message(
+    "libvips conversion could not start.",
+    backend = "vips",
+    details = "vipsheader was not found"
+  )
+
+  expect_match(message, "libvips conversion could not start.", fixed = TRUE)
+  expect_match(message, "Backend tried: vips", fixed = TRUE)
+  expect_match(message, "How to check:", fixed = TRUE)
+  expect_match(message, "wsi_has_vips()", fixed = TRUE)
+  expect_match(message, "wsi_diagnose(live_test = FALSE)", fixed = TRUE)
+  expect_match(message, "wsi_install_backends(\"libvips\")", fixed = TRUE)
+  expect_match(message, "Details:", fixed = TRUE)
+})
+
 test_that("CZI auto backend order gives OpenSlide and libvips first refusal", {
   candidates <- wsiTools:::wsi_auto_backend_candidates(
     is_czi = TRUE,

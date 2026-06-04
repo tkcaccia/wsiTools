@@ -49,7 +49,10 @@ wsi_viewer_thumbnail_data_uri <- function(slide, width, height = NULL) {
 
   if (!wsi_has_vips()) {
     wsi_abort(
-      "Interactive viewing requires libvips for real slides in this milestone. Install `vips` and `vipsheader`, then retry.",
+      wsi_backend_action_message(
+        "Interactive viewing requires libvips for real slides in this milestone.",
+        backend = "vips"
+      ),
       class = "wsi_backend_unavailable"
     )
   }
@@ -142,7 +145,10 @@ wsi_create_deepzoom_tiles <- function(slide, tile_dir, tile_size = 512,
   }
   if (!wsi_has_vips()) {
     wsi_abort(
-      "Full-resolution tiled viewing requires libvips. Install `vips` and `vipsheader`, then retry.",
+      wsi_backend_action_message(
+        "Full-resolution tiled viewing requires libvips.",
+        backend = "vips"
+      ),
       class = "wsi_backend_unavailable"
     )
   }

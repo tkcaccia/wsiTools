@@ -62,6 +62,25 @@ wsi_command_exists <- function(command) {
   nzchar(Sys.which(command))
 }
 
+wsi_command_backend <- function(command) {
+  command <- tolower(basename(as.character(command %||% "")))
+  command <- sub("\\.exe$", "", command)
+  switch(
+    command,
+    vips = "vips",
+    vipsheader = "vips",
+    "openslide-show-properties" = "openslide",
+    "openslide-write-png" = "openslide",
+    showinf = "bioformats",
+    bfconvert = "bioformats",
+    java = "bioformats_java",
+    javac = "bioformats_java",
+    magick = "imagemagick",
+    convert = "imagemagick",
+    NULL
+  )
+}
+
 wsi_system2_args <- function(args) {
   if (!length(args)) {
     return(character())
@@ -70,19 +89,33 @@ wsi_system2_args <- function(args) {
 }
 
 wsi_run_command <- function(command, args = character(), error_message = NULL) {
+  backend <- wsi_command_backend(command)
   if (!wsi_command_exists(command)) {
-    wsi_abort(sprintf("Required command-line tool `%s` is not installed or not on PATH.", command))
+    message <- sprintf("Required command-line tool `%s` is not installed or not on PATH.", command)
+    if (!is.null(backend)) {
+      message <- wsi_backend_action_message(message, backend = backend)
+    }
+    wsi_abort(message, class = "wsi_backend_unavailable")
   }
 
   output <- tryCatch(
     suppressWarnings(system2(command, args = wsi_system2_args(args), stdout = TRUE, stderr = TRUE)),
     error = function(err) {
-      wsi_abort(
-        sprintf(
-          "%s\nCommand failed before completion: %s",
-          error_message %||% sprintf("Command `%s` failed.", command),
-          conditionMessage(err)
+      message <- sprintf(
+        "%s\nCommand failed before completion: %s",
+        error_message %||% sprintf("Command `%s` failed.", command),
+        conditionMessage(err)
+      )
+      if (!is.null(backend)) {
+        message <- wsi_backend_action_message(
+          what_failed = error_message %||% sprintf("Command `%s` failed.", command),
+          backend = backend,
+          details = sprintf("Command failed before completion: %s", conditionMessage(err))
         )
+      }
+      wsi_abort(
+        message,
+        class = if (is.null(backend)) "wsi_error" else "wsi_backend_failed"
       )
     }
   )
@@ -100,11 +133,23 @@ wsi_run_command <- function(command, args = character(), error_message = NULL) {
         sep = "\n"
       )
     }
-    wsi_abort(
-      paste0(
-        error_message %||% sprintf("Command `%s` failed.", command),
-        if (nzchar(details)) paste0("\n", details) else ""
+    message <- paste0(
+      error_message %||% sprintf("Command `%s` failed.", command),
+      if (nzchar(details)) paste0("\n", details) else ""
+    )
+    if (!is.null(backend)) {
+      message <- wsi_backend_action_message(
+        what_failed = error_message %||% sprintf("Command `%s` failed.", command),
+        backend = backend,
+        details = paste0(
+          sprintf("Command: %s %s", command, paste(wsi_system2_args(args), collapse = " ")),
+          if (nzchar(details)) paste0("\n", details) else ""
+        )
       )
+    }
+    wsi_abort(
+      message,
+      class = if (is.null(backend)) "wsi_error" else "wsi_backend_failed"
     )
   }
 

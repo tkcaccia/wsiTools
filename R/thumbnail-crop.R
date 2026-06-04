@@ -42,7 +42,10 @@ wsi_thumbnail <- function(slide, width = 1024, height = NULL,
 
   if (!wsi_has_vips()) {
     wsi_abort(
-      "Thumbnail generation requires libvips for this milestone. Install `vips` and `vipsheader`, then retry.",
+      wsi_backend_action_message(
+        "Thumbnail generation requires libvips for this milestone.",
+        backend = "vips"
+      ),
       class = "wsi_backend_unavailable"
     )
   }

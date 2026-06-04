@@ -38,7 +38,10 @@ wsi_imagemagick_identify <- function(path) {
 wsi_imagemagick_open <- function(path) {
   if (!wsi_has_imagemagick()) {
     wsi_abort(
-      "ImageMagick backend is not installed. Install the `magick` command-line tool or the optional R package `magick`, then retry.",
+      wsi_backend_action_message(
+        "ImageMagick fallback could not open the image because ImageMagick is not installed.",
+        backend = "imagemagick"
+      ),
       class = "wsi_backend_unavailable"
     )
   }
