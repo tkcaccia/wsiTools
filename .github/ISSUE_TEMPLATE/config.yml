@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Installation guide
+    url: https://github.com/tkcaccia/wsiTools/blob/main/docs/installation.md
+    about: Start here for Windows, macOS, Ubuntu, and optional backend installation.
+  - name: Backend setup guide
+    url: https://github.com/tkcaccia/wsiTools/blob/main/docs/backends.md
+    about: Learn which runtime backend is needed for each image or analysis workflow.
+  - name: Troubleshooting guide
+    url: https://github.com/tkcaccia/wsiTools/blob/main/docs/troubleshooting.md
+    about: Common errors, including 00LOCK, Makeconf, missing Bio-Formats, slow images, and live sync failures.

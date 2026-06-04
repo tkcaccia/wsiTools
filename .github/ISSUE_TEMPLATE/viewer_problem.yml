@@ -1,0 +1,78 @@
+name: Viewer problem
+description: Report problems with the static or live browser viewer.
+title: "[Viewer]: "
+labels:
+  - viewer
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for viewer problems such as live synchronization, OpenSeadragon tiles, annotations, stains, overlays, spatial spots, project panels, screenshots, or browser behavior.
+
+  - type: dropdown
+    id: viewer_type
+    attributes:
+      label: Viewer type
+      options:
+        - Static viewer from wsi_viewer()
+        - Live viewer from wsi_viewer_live()
+        - Seurat/Giotto/SpatialExperiment viewer
+        - CellPhenotyper project viewer
+        - I am not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened in the viewer?
+      description: Describe what you clicked, what appeared, and what should have happened.
+      placeholder: "Example: The browser opened /viewer-state instead of the viewer page."
+    validations:
+      required: true
+
+  - type: textarea
+    id: code
+    attributes:
+      label: R code used to open the viewer
+      render: r
+      placeholder: |
+        library(wsiTools)
+        slide <- wsi_open("/path/to/image.svs")
+        viewer <- wsi_viewer_live(slide, tiled = TRUE)
+        viewer$open()
+    validations:
+      required: true
+
+  - type: textarea
+    id: browser
+    attributes:
+      label: Browser and URL
+      description: Paste the browser name and the URL shown in the address bar. For live mode it should usually start with http://127.0.0.1:<port>/.
+      placeholder: "Example: Firefox on Ubuntu, http://127.0.0.1:8794/viewer.html"
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Paste this output for live synchronization, tile, or backend issues.
+      render: r
+      value: |
+        sessionInfo()
+        wsi_backends()
+        wsi_diagnose()
+
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot or screen recording
+      description: Drag a screenshot here if it helps. Do not include patient-identifiable data.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I kept the R session running while the live viewer was open.
+        - label: I opened the viewer URL, not only `/viewer-state`.
+        - label: I checked whether the same image opens in tiled mode.

@@ -1,0 +1,83 @@
+name: Backend problem
+description: Report problems with OpenSlide, libvips, native CZI, Bio-Formats, StarDist, Mesmer, or other optional tools.
+title: "[Backend]: "
+labels:
+  - backend
+body:
+  - type: markdown
+    attributes:
+      value: |
+        wsiTools keeps heavy image and segmentation tools optional. This template helps diagnose runtime backend detection and file-opening problems.
+
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Backend or tool
+      options:
+        - libvips
+        - OpenSlide
+        - native CZI
+        - Bio-Formats
+        - ImageMagick
+        - StarDist
+        - Mesmer
+        - Cellpose
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is the backend problem?
+      description: Describe what fails and what you expected.
+      placeholder: "Example: wsi_has_vips() is FALSE even though vips is installed."
+    validations:
+      required: true
+
+  - type: textarea
+    id: code
+    attributes:
+      label: Code that shows the problem
+      render: r
+      placeholder: |
+        library(wsiTools)
+        wsi_backends()
+        wsi_open("/path/to/file.czi")
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Required diagnostics
+      description: Paste the output of all three commands.
+      render: r
+      value: |
+        sessionInfo()
+        wsi_backends()
+        wsi_diagnose()
+    validations:
+      required: true
+
+  - type: textarea
+    id: paths
+    attributes:
+      label: Executable paths and environment variables
+      description: Paste relevant paths if known.
+      render: r
+      value: |
+        Sys.which(c("vips", "vipsheader", "openslide-show-properties", "showinf", "bfconvert"))
+        Sys.getenv(c(
+          "WSITOOLS_STARDIST_COMMAND",
+          "WSITOOLS_MESMER_COMMAND",
+          "WSITOOLS_BIOFORMATS_PATH",
+          "WSITOOLS_CZI_PYTHON"
+        ))
+
+  - type: textarea
+    id: file_format
+    attributes:
+      label: File format
+      description: Include the format, scanner/software if known, and whether the file opens in QuPath/Fiji.
+      placeholder: "Example: Zeiss CZI, opens in QuPath 0.x, does not open through wsi_open()."

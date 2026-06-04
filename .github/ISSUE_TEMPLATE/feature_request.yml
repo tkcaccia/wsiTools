@@ -1,0 +1,62 @@
+name: Feature request
+description: Suggest a new workflow, viewer feature, backend, or analysis function.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Feature summary
+      description: Describe the feature in one or two sentences.
+      placeholder: "Example: Add a project-level export that writes ROI summaries and spot assignments to CSV."
+    validations:
+      required: true
+
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Intended workflow
+      description: Show how you would like to use the feature, ideally with R code or viewer steps.
+      render: r
+      placeholder: |
+        viewer <- wsi_viewer_live(slide, tiled = TRUE)
+        viewer$open()
+        viewer$new_feature(...)
+
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Why is this useful?
+      description: Explain the pathology, spatial omics, CellPhenotyper, ML, or conversion workflow this would improve.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Main area
+      options:
+        - Viewer and annotation
+        - Spatial omics
+        - CellPhenotyper integration
+        - Tile extraction
+        - Conversion or pyramids
+        - Backend support
+        - Documentation
+        - Other
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Mention related tools or workarounds such as QuPath, Fiji, Vitessce, CellPhenotyper, or custom scripts.
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Constraints
+      options:
+        - label: This feature should avoid loading whole-slide images fully into R memory.
+        - label: This feature can rely on optional runtime tools if needed.
+        - label: This feature should remain CRAN-safe in the core package.

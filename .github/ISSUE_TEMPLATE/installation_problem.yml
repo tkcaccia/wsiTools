@@ -1,0 +1,75 @@
+name: Installation problem
+description: Get help when installing wsiTools or optional runtime tools.
+title: "[Installation]: "
+labels:
+  - installation
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template when `remotes::install_github("tkcaccia/wsiTools")` fails or when optional tools such as OpenSlide, libvips, Bio-Formats, native CZI, StarDist, or Mesmer are not detected.
+
+  - type: textarea
+    id: install_command
+    attributes:
+      label: Installation command
+      description: Paste the exact command you ran.
+      render: r
+      value: |
+        remotes::install_github(
+          "tkcaccia/wsiTools",
+          upgrade = "never",
+          build_vignettes = FALSE
+        )
+    validations:
+      required: true
+
+  - type: textarea
+    id: install_output
+    attributes:
+      label: Full installation output
+      description: Paste the complete output, including compiler errors and warnings.
+      render: text
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Ubuntu/Linux
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Required diagnostics
+      description: After installation succeeds partially or if wsiTools can load, paste the output of these commands. If the package cannot load, paste `sessionInfo()` and the install output above.
+      render: r
+      value: |
+        sessionInfo()
+        wsi_backends()
+        wsi_diagnose()
+    validations:
+      required: true
+
+  - type: textarea
+    id: build_tools
+    attributes:
+      label: Build tools
+      description: On Windows or source installs, paste this output if available.
+      render: r
+      value: |
+        Sys.which(c("git", "make", "gcc", "g++"))
+        pkgbuild::has_build_tools(debug = TRUE)
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional notes
+      description: Mention firewall restrictions, Conda Terms of Service errors, Rtools status, or administrator limitations.

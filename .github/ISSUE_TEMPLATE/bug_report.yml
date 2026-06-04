@@ -1,0 +1,78 @@
+name: Bug report
+description: Report a reproducible problem in wsiTools.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please include enough detail to reproduce the problem without access to your private data.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the bug and what you expected to happen instead.
+      placeholder: "Example: wsi_viewer_live() opens, but annotations do not return to R."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal code to reproduce
+      description: Paste the smallest R example that triggers the issue.
+      render: r
+      placeholder: |
+        library(wsiTools)
+        slide <- wsi_open("/path/to/image.svs")
+        viewer <- wsi_viewer_live(slide, tiled = TRUE)
+        viewer$open()
+    validations:
+      required: true
+
+  - type: textarea
+    id: error
+    attributes:
+      label: Error message or console output
+      description: Paste the full error, warning, browser message, or R console output.
+      render: text
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Ubuntu/Linux
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Paste this output if the issue depends on installation, backends, or live viewer behavior.
+      render: r
+      value: |
+        sessionInfo()
+        wsi_backends()
+        wsi_diagnose()
+
+  - type: textarea
+    id: data
+    attributes:
+      label: Image or project type
+      description: Tell us the file format and whether the data can be shared. Do not upload patient-identifiable data.
+      placeholder: "Example: SVS from Aperio, CZI from Zeiss, OME-TIFF, CellPhenotyper project."
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I have tested with the latest GitHub version of wsiTools.
+        - label: I have not shared patient-identifiable data or private image files.
