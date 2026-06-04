@@ -1238,6 +1238,10 @@ wsi_viewer_cellphenotyper <- function(project, output = NULL, open = interactive
       dots$base_layer_name <- dots$base_layer_name %||% "H&E"
       dots$stain <- dots$stain %||% "none"
     }
+    dots$prediction_context <- dots$prediction_context %||%
+      wsi_prediction_context(cellphenotyper_project = project)
+    dots$proximity_context <- dots$proximity_context %||%
+      wsi_proximity_context(cellphenotyper_project = project)
     args <- c(
       list(
         slide = slide,

@@ -41,6 +41,9 @@ wsi_viewer(
   viewer_state_url = NULL,
   viewer_state_ws_url = NULL,
   seurat_gene_url = NULL,
+  spatial_tile_export_url = NULL,
+  prediction_url = NULL,
+  proximity_url = NULL,
   autosave_enabled = FALSE,
   autosave_interval = 5,
   autosave_path = NULL,
@@ -147,6 +150,18 @@ fallback when this is \code{NULL} or WebSockets are unavailable.}
 \item{seurat_gene_url}{Optional live HTTP endpoint used by the Seurat menu
 to retrieve one selected gene from R at a time. Static viewers ignore this
 unless a compatible endpoint is supplied manually.}
+
+\item{spatial_tile_export_url}{Optional live HTTP endpoint used by Seurat,
+Giotto, and SpatialExperiment menus to export spot-centered tiles from R.
+Static viewers can preview tile boxes but cannot write local image files.}
+
+\item{prediction_url}{Optional live HTTP endpoint used by the Prediction menu
+to run optional \code{fastPLS} PLS-LDA from annotation-defined training/test
+sets in the active R session.}
+
+\item{proximity_url}{Optional live HTTP endpoint used by the Trajectories menu
+to calculate nearest-neighbour proximity from spots/cells inside one
+annotation to spots/cells inside another annotation in the active R session.}
 
 \item{autosave_enabled}{Whether the viewer should periodically sync state to
 the live R bridge for project autosave. This is normally set by

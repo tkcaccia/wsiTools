@@ -204,6 +204,12 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
   mapping$transform_height <- transformed$height
   mapping$transform_rescale_x <- transformed$rescale_x
   mapping$transform_rescale_y <- transformed$rescale_y
+  scale_metadata <- wsi_spatial_scale_metadata(
+    slide = slide,
+    coordinates = coordinates,
+    scale_factors = scale_factors,
+    mapping = mapping
+  )
 
   component_values <- embeddings[, dims, drop = FALSE]
   component_names <- colnames(embeddings)[dims]
@@ -224,6 +230,7 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
     rep("#2B6CB0", nrow(component_values))
   }
   ids <- coordinates$barcode
+  cluster_values <- wsi_spatial_clusters(seurat, spot_ids = ids)
 
   spots <- data.frame(
     id = ids,
@@ -251,8 +258,11 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
     colours <- colours[idx]
     base_colours <- base_colours[idx]
     gene_expression <- wsi_seurat_subset_gene_expression(gene_expression, idx)
+    cluster_values <- wsi_spatial_subset_clusters(cluster_values, idx)
   }
+  spots <- wsi_spatial_add_cluster_columns(spots, cluster_values)
   gene_value_items <- wsi_seurat_gene_value_items(gene_expression)
+  cluster_value_items <- wsi_spatial_cluster_value_items(cluster_values)
 
   plot_points <- data.frame(
     label = spots$label,
@@ -270,6 +280,9 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
   if (length(gene_value_items)) {
     plot_points$gene_values <- I(gene_value_items)
   }
+  if (length(cluster_value_items)) {
+    plot_points$cluster_values <- I(cluster_value_items)
+  }
   plots <- wsi_spatial_reduction_plots(
     object = seurat,
     source_name = "Seurat",
@@ -277,7 +290,8 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
     selected_embeddings = embeddings,
     reduction = reduction,
     dims = dims,
-    gene_value_items = gene_value_items
+    gene_value_items = gene_value_items,
+    cluster_value_items = cluster_value_items
   )
   if (!length(plots)) {
     plots <- list(wsi_spatial_reduction_plot(
@@ -286,7 +300,8 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
       reduction = reduction,
       dims = dims,
       source_name = "Seurat",
-      gene_value_items = gene_value_items
+      gene_value_items = gene_value_items,
+      cluster_value_items = cluster_value_items
     ))
     plots <- plots[!vapply(plots, is.null, logical(1))]
   }
@@ -305,7 +320,11 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
   }
 
   if (is.null(spot_radius)) {
-    spot_radius <- wsi_seurat_spot_radius(scale_factors = scale_factors, mapping = mapping)
+    spot_radius <- wsi_seurat_spot_radius(
+      scale_factors = scale_factors,
+      mapping = mapping,
+      scale_metadata = scale_metadata
+    )
   }
   spot_radius <- as.numeric(wsi_check_scalar_number(spot_radius, "spot_radius", allow_zero = FALSE))
 
@@ -317,11 +336,17 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
     dims = dims,
     component_names = component_names,
     coordinate_mapping = mapping,
+    mpp = scale_metadata$mpp,
+    pixel_size = scale_metadata$mpp,
+    scale_metadata = scale_metadata,
     gene_expression = gene_expression,
     spot_radius = spot_radius,
     spot_count = total,
     displayed_spot_count = nrow(spots),
     spots = spots,
+    clusters = wsi_spatial_cluster_config(cluster_values),
+    cluster_fields = attr(cluster_values, "fields", exact = TRUE) %||% wsi_empty_spatial_cluster_fields(),
+    cluster_values = cluster_values,
     expression_source = list(
       object = seurat,
       spot_ids = as.character(spots$barcode %||% spots$id)
@@ -643,6 +668,7 @@ wsi_seurat_spots_layer <- function(linked, visible = TRUE, opacity = 0.85) {
     radius = linked$spot_radius
   )
   gene_values <- wsi_seurat_gene_value_items(linked$gene_expression)
+  cluster_values <- wsi_spatial_cluster_value_items(linked$cluster_values %||% data.frame())
   if (length(gene_values) && length(layer$items)) {
     n <- min(length(gene_values), length(layer$items))
     for (i in seq_len(n)) {
@@ -657,6 +683,12 @@ wsi_seurat_spots_layer <- function(linked, visible = TRUE, opacity = 0.85) {
       layer$items[[i]]$base_color <- layer$items[[i]]$base_colour
     }
   }
+  if (length(cluster_values) && length(layer$items)) {
+    n <- min(length(cluster_values), length(layer$items))
+    for (i in seq_len(n)) {
+      layer$items[[i]]$cluster_values <- cluster_values[[i]]
+    }
+  }
   layer$id <- "seurat_spots"
   layer$name <- paste(source_name, "spatial spots")
   layer$source_type <- "seurat_spots"
@@ -664,7 +696,9 @@ wsi_seurat_spots_layer <- function(linked, visible = TRUE, opacity = 0.85) {
     source_name = source_name,
     reduction = linked$reduction,
     image_name = linked$image_name,
-    coordinate_mapping = linked$coordinate_mapping
+    coordinate_mapping = linked$coordinate_mapping,
+    mpp = linked$mpp %||% linked$pixel_size %||% NULL,
+    scale_metadata = linked$scale_metadata %||% NULL
   )
   layer
 }
@@ -691,7 +725,11 @@ wsi_viewer_seurat_config <- function(seurat = NULL) {
     spot_count = as.integer(seurat$spot_count),
     displayed_spot_count = as.integer(seurat$displayed_spot_count),
     spot_radius = as.numeric(seurat$spot_radius),
+    mpp = seurat$mpp %||% seurat$pixel_size %||% NULL,
+    pixel_size = seurat$pixel_size %||% seurat$mpp %||% NULL,
+    scale_metadata = seurat$scale_metadata %||% NULL,
     gene_expression = wsi_seurat_gene_expression_config(seurat$gene_expression),
+    clusters = seurat$clusters %||% wsi_spatial_cluster_config(seurat$cluster_values %||% data.frame()),
     plots = plots
   )
 }
@@ -909,6 +947,8 @@ wsi_seurat_project_records <- function(linked, output, labels,
       status = sprintf("%s spatial spots", item$source_name %||% "Seurat"),
       width = unname(as.numeric(slide$dimensions[["width"]])),
       height = unname(as.numeric(slide$dimensions[["height"]])),
+      mpp = item$mpp %||% item$pixel_size %||% NULL,
+      pixel_size = item$pixel_size %||% item$mpp %||% NULL,
       content_bbox = wsi_seurat_project_spot_bbox(item),
       layers = list(layer),
       seurat = wsi_viewer_seurat_config(item)
@@ -2102,10 +2142,150 @@ wsi_seurat_coordinate_mapping <- function(coordinates, image_obj, slide,
   list(method = "auto_none", scale_x = 1, scale_y = 1)
 }
 
-wsi_seurat_spot_radius <- function(scale_factors, mapping) {
+wsi_spatial_scale_metadata <- function(slide, coordinates,
+                                       scale_factors = list(), mapping = NULL,
+                                       visium_center_spacing_um = 100,
+                                       visium_spot_diameter_um = 55) {
+  slide_mpp <- wsi_viewer_mpp_payload(tryCatch(wsi_mpp(slide), error = function(err) NULL))
+  if (!is.null(slide_mpp)) {
+    return(list(
+      mpp = slide_mpp,
+      pixel_size = slide_mpp,
+      source = "image_metadata",
+      inferred = FALSE
+    ))
+  }
+  inferred <- wsi_spatial_infer_visium_mpp(
+    coordinates = coordinates,
+    scale_factors = scale_factors,
+    mapping = mapping,
+    center_spacing_um = visium_center_spacing_um,
+    spot_diameter_um = visium_spot_diameter_um
+  )
+  if (!is.null(inferred)) {
+    inferred$pixel_size <- inferred$mpp
+    return(inferred)
+  }
+  list(
+    mpp = NULL,
+    pixel_size = NULL,
+    source = "unavailable",
+    inferred = FALSE
+  )
+}
+
+wsi_spatial_infer_visium_mpp <- function(coordinates, scale_factors = list(),
+                                         mapping = NULL,
+                                         center_spacing_um = 100,
+                                         spot_diameter_um = 55) {
+  spacing_px <- wsi_spatial_visium_center_spacing_pixels(coordinates)
+  if (!is.null(spacing_px)) {
+    mpp <- center_spacing_um / spacing_px$spacing_pixels
+    return(list(
+      mpp = list(x = unname(mpp), y = unname(mpp)),
+      source = "visium_center_spacing",
+      inferred = TRUE,
+      center_spacing_um = unname(center_spacing_um),
+      center_spacing_pixels = unname(spacing_px$spacing_pixels),
+      spacing_quality = spacing_px$quality,
+      spot_diameter_um = unname(spot_diameter_um)
+    ))
+  }
+
+  spot <- suppressWarnings(as.numeric(scale_factors$spot %||% scale_factors$spot_diameter_fullres %||% NA_real_))
+  if (length(spot) == 1L && is.finite(spot) && spot > 0 && !is.null(mapping)) {
+    sx <- suppressWarnings(as.numeric(mapping$scale_x %||% NA_real_))
+    sy <- suppressWarnings(as.numeric(mapping$scale_y %||% NA_real_))
+    scale <- mean(c(sx, sy), na.rm = TRUE)
+    if (is.finite(scale) && scale > 0) {
+      spot_px <- spot * scale
+      mpp <- spot_diameter_um / spot_px
+      return(list(
+        mpp = list(x = unname(mpp), y = unname(mpp)),
+        source = "visium_spot_diameter",
+        inferred = TRUE,
+        spot_diameter_um = unname(spot_diameter_um),
+        spot_diameter_pixels = unname(spot_px)
+      ))
+    }
+  }
+  NULL
+}
+
+wsi_spatial_visium_center_spacing_pixels <- function(coordinates, max_queries = 5000L) {
+  if (is.null(coordinates) || !all(c("x", "y") %in% names(coordinates))) {
+    return(NULL)
+  }
+  x <- suppressWarnings(as.numeric(coordinates$x))
+  y <- suppressWarnings(as.numeric(coordinates$y))
+  keep <- is.finite(x) & is.finite(y)
+  x <- x[keep]
+  y <- y[keep]
+  n <- length(x)
+  if (n < 3L) {
+    return(NULL)
+  }
+  candidate_idx <- if (n > 100000L) unique(round(seq(1, n, length.out = 50000L))) else seq_len(n)
+  candidate_x <- x[candidate_idx]
+  candidate_y <- y[candidate_idx]
+  query_n <- if (n > 15000L) min(1200L, n) else min(as.integer(max_queries), n)
+  query_idx <- if (n > query_n) unique(round(seq(1, n, length.out = query_n))) else seq_len(n)
+  query_n <- length(query_idx)
+  nearest <- rep(Inf, query_n)
+  chunk_size <- if (length(candidate_idx) > 50000L) 64L else 128L
+
+  for (start in seq(1L, query_n, by = chunk_size)) {
+    rows <- start:min(query_n, start + chunk_size - 1L)
+    idx <- query_idx[rows]
+    dx <- outer(x[idx], candidate_x, "-")
+    dy <- outer(y[idx], candidate_y, "-")
+    d2 <- dx * dx + dy * dy
+    self <- match(idx, candidate_idx)
+    self_rows <- which(!is.na(self))
+    if (length(self_rows)) {
+      d2[cbind(self_rows, self[self_rows])] <- Inf
+    }
+    nearest[rows] <- sqrt(apply(d2, 1L, min, na.rm = TRUE))
+  }
+
+  nearest <- nearest[is.finite(nearest) & nearest > sqrt(.Machine$double.eps)]
+  if (length(nearest) < 3L) {
+    return(NULL)
+  }
+  spacing <- stats::median(nearest, na.rm = TRUE)
+  if (!is.finite(spacing) || spacing <= 0) {
+    return(NULL)
+  }
+  q <- stats::quantile(nearest, c(0.25, 0.75), na.rm = TRUE, names = FALSE, type = 7)
+  robust_cv <- (q[[2L]] - q[[1L]]) / max(spacing, .Machine$double.eps)
+  if (!is.finite(robust_cv) || robust_cv > 0.25) {
+    return(NULL)
+  }
+  list(
+    spacing_pixels = unname(spacing),
+    quality = list(
+      nearest_count = length(nearest),
+      robust_cv = unname(robust_cv),
+      q25 = unname(q[[1L]]),
+      q75 = unname(q[[2L]])
+    )
+  )
+}
+
+wsi_seurat_spot_radius <- function(scale_factors, mapping, scale_metadata = NULL) {
   spot <- suppressWarnings(as.numeric(scale_factors$spot %||% scale_factors$spot_diameter_fullres %||% NA_real_))
   if (length(spot) == 1L && is.finite(spot) && spot > 0) {
     return(max(2, spot * mean(c(mapping$scale_x, mapping$scale_y)) / 2))
+  }
+  if (identical(scale_metadata$source %||% NULL, "visium_center_spacing")) {
+    spacing_px <- suppressWarnings(as.numeric(scale_metadata$center_spacing_pixels %||% NA_real_))
+    diameter_um <- suppressWarnings(as.numeric(scale_metadata$spot_diameter_um %||% 55))
+    spacing_um <- suppressWarnings(as.numeric(scale_metadata$center_spacing_um %||% 100))
+    if (length(spacing_px) == 1L && is.finite(spacing_px) && spacing_px > 0 &&
+        length(diameter_um) == 1L && is.finite(diameter_um) && diameter_um > 0 &&
+        length(spacing_um) == 1L && is.finite(spacing_um) && spacing_um > 0) {
+      return(max(2, spacing_px * diameter_um / spacing_um / 2))
+    }
   }
   max(6, 28 * mean(c(mapping$scale_x, mapping$scale_y)))
 }

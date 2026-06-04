@@ -151,7 +151,8 @@ wsi_spatial_has_field <- function(object, fields) {
 
 wsi_spatial_reduction_plots <- function(object, source_name, spots,
                                         selected_embeddings, reduction, dims,
-                                        gene_value_items = list()) {
+                                        gene_value_items = list(),
+                                        cluster_value_items = list()) {
   reduction <- wsi_seurat_check_scalar_character(reduction, "reduction")
   source_key <- gsub("[^a-z0-9]+", "", tolower(source_name))
   reduction_names <- switch(
@@ -198,7 +199,8 @@ wsi_spatial_reduction_plots <- function(object, source_name, spots,
       reduction = name,
       dims = dims,
       source_name = source_name,
-      gene_value_items = gene_value_items
+      gene_value_items = gene_value_items,
+      cluster_value_items = cluster_value_items
     )
     if (!is.null(plot)) {
       plots[[length(plots) + 1L]] <- plot
@@ -208,7 +210,8 @@ wsi_spatial_reduction_plots <- function(object, source_name, spots,
 }
 
 wsi_spatial_reduction_plot <- function(embeddings, spots, reduction, dims,
-                                       source_name, gene_value_items = list()) {
+                                       source_name, gene_value_items = list(),
+                                       cluster_value_items = list()) {
   if (is.null(embeddings) || is.null(spots) || !nrow(spots)) {
     return(NULL)
   }
@@ -252,6 +255,12 @@ wsi_spatial_reduction_plot <- function(embeddings, spots, reduction, dims,
     subset_gene_values <- gene_value_items[which(keep)]
     if (length(subset_gene_values)) {
       plot_points$gene_values <- I(subset_gene_values)
+    }
+  }
+  if (length(cluster_value_items)) {
+    subset_cluster_values <- cluster_value_items[which(keep)]
+    if (length(subset_cluster_values)) {
+      plot_points$cluster_values <- I(subset_cluster_values)
     }
   }
   list(
@@ -1009,6 +1018,12 @@ wsi_link_spatial_table_image <- function(object, image, source_name, image_name,
   mapping$transform_height <- transformed$height
   mapping$transform_rescale_x <- transformed$rescale_x
   mapping$transform_rescale_y <- transformed$rescale_y
+  scale_metadata <- wsi_spatial_scale_metadata(
+    slide = slide,
+    coordinates = coordinates,
+    scale_factors = list(),
+    mapping = mapping
+  )
 
   component_values <- embeddings[, dims, drop = FALSE]
   component_names <- colnames(embeddings)[dims]
@@ -1029,6 +1044,7 @@ wsi_link_spatial_table_image <- function(object, image, source_name, image_name,
     rep("#2B6CB0", nrow(component_values))
   }
   ids <- coordinates$barcode
+  cluster_values <- wsi_spatial_clusters(object, spot_ids = ids)
 
   spots <- data.frame(
     id = ids,
@@ -1056,8 +1072,11 @@ wsi_link_spatial_table_image <- function(object, image, source_name, image_name,
     colours <- colours[idx]
     base_colours <- base_colours[idx]
     gene_expression <- wsi_seurat_subset_gene_expression(gene_expression, idx)
+    cluster_values <- wsi_spatial_subset_clusters(cluster_values, idx)
   }
+  spots <- wsi_spatial_add_cluster_columns(spots, cluster_values)
   gene_value_items <- wsi_seurat_gene_value_items(gene_expression)
+  cluster_value_items <- wsi_spatial_cluster_value_items(cluster_values)
 
   plot_points <- data.frame(
     label = spots$label,
@@ -1075,6 +1094,9 @@ wsi_link_spatial_table_image <- function(object, image, source_name, image_name,
   if (length(gene_value_items)) {
     plot_points$gene_values <- I(gene_value_items)
   }
+  if (length(cluster_value_items)) {
+    plot_points$cluster_values <- I(cluster_value_items)
+  }
   plots <- wsi_spatial_reduction_plots(
     object = object,
     source_name = source_name,
@@ -1082,7 +1104,8 @@ wsi_link_spatial_table_image <- function(object, image, source_name, image_name,
     selected_embeddings = embeddings,
     reduction = reduction,
     dims = dims,
-    gene_value_items = gene_value_items
+    gene_value_items = gene_value_items,
+    cluster_value_items = cluster_value_items
   )
   if (!length(plots)) {
     plots <- list(wsi_spatial_reduction_plot(
@@ -1091,7 +1114,8 @@ wsi_link_spatial_table_image <- function(object, image, source_name, image_name,
       reduction = reduction,
       dims = dims,
       source_name = source_name,
-      gene_value_items = gene_value_items
+      gene_value_items = gene_value_items,
+      cluster_value_items = cluster_value_items
     ))
     plots <- plots[!vapply(plots, is.null, logical(1))]
   }
@@ -1110,7 +1134,11 @@ wsi_link_spatial_table_image <- function(object, image, source_name, image_name,
   }
 
   if (is.null(spot_radius)) {
-    spot_radius <- max(6, 28 * mean(c(mapping$scale_x, mapping$scale_y)))
+    spot_radius <- wsi_seurat_spot_radius(
+      scale_factors = list(),
+      mapping = mapping,
+      scale_metadata = scale_metadata
+    )
   }
   spot_radius <- as.numeric(wsi_check_scalar_number(spot_radius, "spot_radius", allow_zero = FALSE))
 
@@ -1123,11 +1151,17 @@ wsi_link_spatial_table_image <- function(object, image, source_name, image_name,
     dims = dims,
     component_names = component_names,
     coordinate_mapping = mapping,
+    mpp = scale_metadata$mpp,
+    pixel_size = scale_metadata$mpp,
+    scale_metadata = scale_metadata,
     gene_expression = gene_expression,
     spot_radius = spot_radius,
     spot_count = total,
     displayed_spot_count = nrow(spots),
     spots = spots,
+    clusters = wsi_spatial_cluster_config(cluster_values),
+    cluster_fields = attr(cluster_values, "fields", exact = TRUE) %||% wsi_empty_spatial_cluster_fields(),
+    cluster_values = cluster_values,
     expression_source = list(
       object = object,
       spot_ids = as.character(spots$barcode %||% spots$id)

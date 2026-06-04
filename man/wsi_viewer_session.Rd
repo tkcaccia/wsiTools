@@ -20,6 +20,11 @@ wsi_viewer_session(
   dynamic_tile_cache_dir = NULL,
   dynamic_tile_path = "/tiles",
   seurat_gene_path = "/seurat-gene",
+  spatial_tile_path = "/spatial-tiles",
+  prediction_path = "/prediction",
+  prediction_context = NULL,
+  proximity_path = "/proximity",
+  proximity_context = NULL,
   project_tile_sources = NULL,
   wait = interactive(),
   open = interactive(),
@@ -61,6 +66,11 @@ wsi_viewer_live(
   dynamic_tile_cache_dir = NULL,
   dynamic_tile_path = "/tiles",
   seurat_gene_path = "/seurat-gene",
+  spatial_tile_path = "/spatial-tiles",
+  prediction_path = "/prediction",
+  prediction_context = NULL,
+  proximity_path = "/proximity",
+  proximity_context = NULL,
   project_tile_sources = NULL,
   wait = interactive(),
   open = interactive(),
@@ -122,6 +132,25 @@ cache directory, and HTTP route for on-demand live tiles.}
 \item{seurat_gene_path}{Local HTTP route used by live Seurat viewers to
 retrieve one gene at a time from the active R session.}
 
+\item{spatial_tile_path}{Local HTTP route used by live Seurat, Giotto, and
+SpatialExperiment viewers to export spot-centered image tiles from R.}
+
+\item{prediction_path}{Local HTTP route used by live spatial and
+CellPhenotyper viewers to run optional \code{fastPLS} PLS-LDA prediction from
+selected annotation-defined training/test sets.}
+
+\item{prediction_context}{Internal live prediction sources. Advanced users
+can pass \code{wsi_prediction_context()}; ordinary Seurat/Giotto/
+SpatialExperiment and CellPhenotyper viewer helpers set this automatically.}
+
+\item{proximity_path}{Local HTTP route used by live spatial and
+CellPhenotyper viewers to calculate nearest-neighbour proximity from
+spots/cells inside one annotation to spots/cells inside another annotation.}
+
+\item{proximity_context}{Internal live proximity sources. Advanced users can
+pass \code{wsi_proximity_context()}; ordinary Seurat/Giotto/
+SpatialExperiment and CellPhenotyper viewer helpers set this automatically.}
+
 \item{project_tile_sources}{Optional dynamic tile sources used only by
 Project-panel image/section entries. These sources are served by the live
 tile server but are not exposed as Stains/channel layers.}
@@ -163,7 +192,7 @@ methods:
 \code{on()}, \code{off()}, \code{list_callbacks()}, \code{get_state()}, \code{get_rois()}, \code{get_selected_roi()}, \code{get_selected_rois()},
 \code{get_measurements()}, \code{get_roi_summary()}, \code{get_cell_summary()},
 \code{get_class_summary()}, \code{get_ihc_summary()}, \code{get_ihc_class_summary()},
-\code{get_segmentation()}, \code{get_layers()}, \code{get_history()}, \code{get_tile_preview()},
+\code{get_segmentation()}, \code{get_layers()}, \code{get_history()}, \code{get_tile_preview()}, \code{get_prediction()}, \code{get_proximity()},
 \code{list_layers()}, \code{get_events()}, \code{add_rois()}, \code{add_segmentation()},
 \code{add_layer()}, \code{set_layer_visible()}, \code{remove_layer()},
 \code{measure_ihc_intensity()},
@@ -182,7 +211,7 @@ state changes. The returned object is a live session with convenience methods
 such as \code{capabilities()}, \code{get_rois()}, \code{get_selected_roi()}, \code{get_selected_rois()},
 \code{get_measurements()}, \code{get_roi_summary()}, \code{get_cell_summary()}, \code{get_class_summary()},
 \code{get_ihc_summary()}, \code{get_ihc_class_summary()}, \code{get_segmentation()},
-\code{get_layers()}, \code{get_history()}, \code{get_tile_preview()},
+\code{get_layers()}, \code{get_history()}, \code{get_tile_preview()}, \code{get_prediction()}, \code{get_proximity()},
 \code{add_rois()}, \code{add_segmentation()}, \code{measure_ihc_intensity()},
 \code{add_layer()}, \code{set_layer_visible()}, \code{preview_tiles()},
 \code{extract_tile_preview()}, \code{list_jobs()},

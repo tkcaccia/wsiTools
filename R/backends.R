@@ -21,7 +21,8 @@ wsi_backends <- function() {
       "native_czi",
       "aicspylibczi",
       "httpuv",
-      "callr"
+      "callr",
+      "fastPLS"
     ),
     installed = c(
       wsi_has_openslide(),
@@ -32,7 +33,8 @@ wsi_backends <- function() {
       wsi_has_native_czi(),
       wsi_has_czi_python(),
       requireNamespace("httpuv", quietly = TRUE),
-      wsi_has_callr()
+      wsi_has_callr(),
+      wsi_has_fastpls()
     ),
     version = c(
       wsi_command_version("openslide-show-properties"),
@@ -43,7 +45,8 @@ wsi_backends <- function() {
       wsi_native_czi_version(),
       wsi_czi_python_version(),
       wsi_optional_package_version("httpuv"),
-      wsi_optional_package_version("callr")
+      wsi_optional_package_version("callr"),
+      wsi_optional_package_version(wsi_fastpls_package())
     ),
     capabilities = c(
       "metadata, pyramid levels, region reads via openslide-write-png when available",
@@ -54,7 +57,8 @@ wsi_backends <- function() {
       "optional native CZI region/tile reader through ZEISS libCZI",
       "optional CZI mosaic metadata and lightweight preview generation",
       "live R viewer bridge and browser-to-R events",
-      "non-blocking background jobs for tiling, conversion, pyramids, and project sync"
+      "non-blocking background jobs for tiling, conversion, pyramids, and project sync",
+      "optional PLS-LDA annotation prediction for live spatial and CellPhenotyper viewers"
     ),
     notes = c(
       "Requires OpenSlide command-line tools for this milestone; native C bindings are planned.",
@@ -65,7 +69,8 @@ wsi_backends <- function() {
       "Optional direct CZI backend. Install ZEISS libCZI/libCZIAPI and set WSITOOLS_LIBCZIAPI if it is not on the dynamic library path.",
       "Legacy optional fallback. Only used for CZI previews when WSITOOLS_CZI_ALLOW_PYTHON=true.",
       "Suggested R package; not required for static viewers or package installation.",
-      "Suggested R package; not required unless async jobs are requested."
+      "Suggested R package; not required unless async jobs are requested.",
+      "Optional GitHub package. Install with `remotes::install_github(\"tkcaccia/fastPLS\")` to enable the Prediction menu."
     ),
     stringsAsFactors = FALSE
   )

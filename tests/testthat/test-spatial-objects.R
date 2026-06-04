@@ -34,6 +34,54 @@ test_that("Giotto-like objects can be linked with explicit coordinates", {
   expect_true(linked$gene_expression$enabled)
 })
 
+test_that("Giotto and SpatialExperiment cluster metadata can be inspected", {
+  slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 800)
+  ids <- paste0("spot", 1:4)
+  coords <- data.frame(
+    cell_ID = ids,
+    sdimx = c(100, 200, 300, 400),
+    sdimy = c(150, 250, 350, 450)
+  )
+  embeddings <- data.frame(
+    cell_ID = ids,
+    PC_1 = c(-1, -0.5, 0.5, 1),
+    PC_2 = c(0.2, 0.4, 0.8, 1.2)
+  )
+  giotto_like <- list(
+    cell_metadata = data.frame(
+      cell_ID = ids,
+      leiden = c("0", "0", "1", "2"),
+      stringsAsFactors = FALSE
+    )
+  )
+
+  giotto_fields <- wsi_spatial_cluster_fields(giotto_like, spot_ids = ids)
+  expect_equal(giotto_fields$field, "leiden")
+  expect_equal(giotto_fields$storage, "cell_metadata")
+
+  linked <- wsi_link_giotto_image(
+    giotto_like,
+    slide,
+    coordinates = coords,
+    embeddings = embeddings
+  )
+  expect_true(linked$clusters$enabled)
+  expect_equal(linked$cluster_values$leiden, c("0", "0", "1", "2"))
+
+  spe_like <- list(
+    colData = data.frame(
+      barcode = ids,
+      cell_type = c("tumour", "stroma", "stroma", "normal"),
+      stringsAsFactors = FALSE
+    )
+  )
+  spe_fields <- wsi_spatial_cluster_fields(spe_like, spot_ids = ids)
+  expect_equal(spe_fields$field, "cell_type")
+  expect_equal(spe_fields$storage, "colData")
+  spe_clusters <- wsi_spatial_clusters(spe_like, spot_ids = ids, field = "cell_type")
+  expect_equal(spe_clusters$cell_type, c("tumour", "stroma", "stroma", "normal"))
+})
+
 test_that("Giotto slot-style coordinates with negative sdimy are mapped to image y", {
   slide <- wsiTools:::wsi_mock_slide(width = 500, height = 400)
   ids <- c("cell_a", "cell_b")
@@ -211,10 +259,76 @@ test_that("SpatialExperiment-like objects can be linked with explicit coordinate
 
   expect_s3_class(linked, "wsi_spatial_object")
   expect_equal(linked$source_name, "SpatialExperiment")
-  expect_equal(nrow(linked$spots), 3)
-  expect_equal(linked$component_names, c("UMAP_1", "UMAP_2"))
-})
+	  expect_equal(nrow(linked$spots), 3)
+	  expect_equal(linked$component_names, c("UMAP_1", "UMAP_2"))
+	})
 
+test_that("spatial-object spot tile previews are centered on spots and respect selected ROIs", {
+  slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 800, levels = c(1, 4))
+  linked <- list(
+    slide = slide,
+    source_name = "SpatialExperiment",
+    spots = data.frame(
+      barcode = c("spot_a", "spot_b", "edge"),
+      label = c("A", "B", "edge"),
+      x = c(100, 900, 20),
+      y = c(100, 700, 20),
+      stringsAsFactors = FALSE
+    )
+  )
+  class(linked) <- c("wsi_spatial_object", "list")
+
+  expect_warning(
+    grid <- wsiTools:::wsi_spatial_tile_grid(linked, tile_size = 100, units = "px"),
+    "Dropped 1 coordinate tile"
+  )
+
+  expect_s3_class(grid, "wsi_tile_preview")
+  expect_equal(nrow(grid), 2)
+  expect_equal(grid$spot_id, c("spot_a", "spot_b"))
+  expect_equal(grid$x, c(50L, 850L))
+  expect_equal(grid$y, c(50L, 650L))
+  expect_equal(grid$width, c(100L, 100L))
+  expect_equal(grid$height, c(100L, 100L))
+
+  expect_warning(
+    microns <- wsiTools:::wsi_spatial_tile_grid(linked, tile_size = 50, units = "um"),
+    "Dropped 1 coordinate tile"
+  )
+  expect_equal(microns$width, c(200L, 200L))
+  expect_equal(microns$height, c(200L, 200L))
+
+  geojson <- tempfile(fileext = ".geojson")
+  writeLines(
+    paste0(
+      '{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"name":"roi_a","classification":{"name":"tumour"}},',
+      '"geometry":{"type":"Polygon","coordinates":[[[0,0],[250,0],[250,250],[0,250],[0,0]]]}}]}'
+    ),
+    geojson
+  )
+  roi <- wsi_read_geojson(geojson)
+  expect_warning(
+    filtered <- wsiTools:::wsi_spatial_tile_grid(linked, tile_size = 100, units = "px", roi = roi),
+    "Dropped 1 coordinate tile"
+  )
+
+  expect_equal(nrow(filtered), 1)
+  expect_equal(filtered$spot_id, "spot_a")
+
+  payload_grid <- wsiTools:::wsi_spatial_tile_payload_grid(list(list(
+    tile_id = "spot_a",
+    x = 50,
+    y = 50,
+    width = 100,
+    height = 100,
+    tissue_fraction = NULL,
+    output_file = "spot_a.png"
+  )))
+  expect_s3_class(payload_grid, "wsi_tile_preview")
+  expect_equal(nrow(payload_grid), 1)
+  expect_true(is.na(payload_grid$tissue_fraction[[1]]))
+})
+	
 test_that("SpatialExperiment project viewer uses one scoped spot layer per section", {
   slide1 <- wsiTools:::wsi_mock_slide(width = 100, height = 90, levels = c(1, 2))
   slide2 <- wsiTools:::wsi_mock_slide(width = 120, height = 100, levels = c(1, 2))
@@ -309,6 +423,9 @@ test_that("SpatialExperiment project viewer uses one scoped spot layer per secti
   expect_match(text, "section2", fixed = TRUE)
   expect_match(text, "SpatialExperiment spatial spots", fixed = TRUE)
   expect_match(text, "UMAP_neighbors15", fixed = TRUE)
+  expect_match(text, "const radius=2.4;points.forEach", fixed = TRUE)
+  expect_false(grepl("140/Math.sqrt(points.length)", text, fixed = TRUE))
+  expect_false(grepl("radius*1.25", text, fixed = TRUE))
   expect_match(text, "\"managed_analysis_project\":true", fixed = TRUE)
   expect_false(grepl("id=\"projectOpenImage\"", text, fixed = TRUE))
   expect_false(grepl("id=\"projectImageFile\"", text, fixed = TRUE))

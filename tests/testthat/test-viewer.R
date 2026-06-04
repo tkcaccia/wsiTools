@@ -256,6 +256,13 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "handleViewerJobs", fixed = TRUE)
   expect_match(html, "job_update", fixed = TRUE)
   expect_match(html, "Sync off", fixed = TRUE)
+  expect_match(html, "#jobSyncIndicator{display:inline-flex;align-items:center;justify-content:flex-start;gap:6px;flex:0 0 158px;width:158px", fixed = TRUE)
+  expect_match(html, "#jobSyncIndicator{flex-basis:118px;width:118px", fixed = TRUE)
+  help_menu_pos <- regexpr("<summary title=\"Viewer guide and shortcuts\">Help</summary>", html, fixed = TRUE)
+  sync_indicator_pos <- regexpr("id=\"jobSyncIndicator\"", html, fixed = TRUE)
+  nav_dock_pos <- regexpr("<div id=\"navDock\"", html, fixed = TRUE)
+  expect_gt(sync_indicator_pos[[1]], help_menu_pos[[1]])
+  expect_lt(sync_indicator_pos[[1]], nav_dock_pos[[1]])
   expect_match(html, "pending", fixed = TRUE)
   expect_match(html, "running", fixed = TRUE)
   expect_match(html, "completed", fixed = TRUE)
@@ -305,6 +312,9 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "multiView2", fixed = TRUE)
   expect_match(html, "multiView4", fixed = TRUE)
   expect_match(html, "multiView6", fixed = TRUE)
+  expect_match(html, "multiViewCustomCount", fixed = TRUE)
+  expect_match(html, "multiViewCustom", fixed = TRUE)
+  expect_match(html, "Drag project images or sections onto a pane", fixed = TRUE)
   expect_match(html, "link zoom/pan", fixed = TRUE)
   expect_match(html, "bindMultiViewControls", fixed = TRUE)
   expect_match(html, "setMultiViewLayout", fixed = TRUE)
@@ -313,24 +323,26 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "Quick Recommendations", fixed = TRUE)
   expect_match(html, "Full Guide", fixed = TRUE)
   expect_match(html, "Keyboard Shortcuts", fixed = TRUE)
-  pos_help_quick_menu <- regexpr("<div class=\"menuTitle\">Quick Recommendations</div>", html, fixed = TRUE)[[1]]
+  pos_help_keyboard_menu <- regexpr("<button id=\"shortcutHelpKeyboard\"", html, fixed = TRUE)[[1]]
   pos_help_button <- regexpr("<button id=\"shortcutHelpButton\"", html, fixed = TRUE)[[1]]
   pos_help_quick_dialog <- regexpr("id=\"helpQuickRecommendations\"", html, fixed = TRUE)[[1]]
   pos_help_full_dialog <- regexpr("id=\"helpFullGuide\"", html, fixed = TRUE)[[1]]
   pos_help_shortcuts_dialog <- regexpr("id=\"helpKeyboardShortcuts\"", html, fixed = TRUE)[[1]]
   expect_true(all(c(
-    pos_help_quick_menu,
+    pos_help_keyboard_menu,
     pos_help_button,
     pos_help_quick_dialog,
     pos_help_full_dialog,
     pos_help_shortcuts_dialog
   ) > 0))
-  expect_lt(pos_help_quick_menu, pos_help_button)
-  expect_lt(pos_help_quick_dialog, pos_help_full_dialog)
-  expect_lt(pos_help_full_dialog, pos_help_shortcuts_dialog)
+  expect_lt(pos_help_keyboard_menu, pos_help_button)
+  expect_lt(pos_help_shortcuts_dialog, pos_help_full_dialog)
+  expect_lt(pos_help_full_dialog, pos_help_quick_dialog)
   expect_match(html, "helpQuickRecommendations", fixed = TRUE)
   expect_match(html, "helpFullGuide", fixed = TRUE)
   expect_match(html, "helpKeyboardShortcuts", fixed = TRUE)
+  expect_match(html, "openShortcutHelp('helpKeyboardShortcuts')", fixed = TRUE)
+  expect_match(html, "openShortcutHelp('helpFullGuide')", fixed = TRUE)
   expect_match(html, "quickRecommendationList", fixed = TRUE)
   expect_match(html, "Open images", fixed = TRUE)
   expect_match(html, "Zoom and pan", fixed = TRUE)
@@ -377,15 +389,29 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "trajectories:JSON.parse", fixed = TRUE)
   expect_match(html, "selectedTrajectory:typeof selectedTrajectory", fixed = TRUE)
   expect_match(html, "trajectory_count:typeof trajectories", fixed = TRUE)
+  expect_match(html, "selectedMeasure=-1", fixed = TRUE)
+  expect_match(html, "selectedLayerIndex=-1,selectedLayerItemIndex=-1", fixed = TRUE)
   expect_match(html, "clearSelectedTrajectory", fixed = TRUE)
   expect_match(html, "clearSelectedAnnotation", fixed = TRUE)
+  expect_match(html, "clearSelectedLayerObject", fixed = TRUE)
+  expect_match(html, "clearSelectedMeasure", fixed = TRUE)
   expect_match(html, "selectAnnotation", fixed = TRUE)
   expect_match(html, "selectTrajectory", fixed = TRUE)
+  expect_match(html, "selectLayerObject", fixed = TRUE)
+  expect_match(html, "selectMeasure", fixed = TRUE)
+  expect_match(html, "selectedObjectPayload", fixed = TRUE)
   expect_match(html, "enforceSingleObjectSelection", fixed = TRUE)
   expect_match(html, "clearSelectionAndPan", fixed = TRUE)
   expect_match(html, "selectObjectAtPoint", fixed = TRUE)
+  expect_match(html, "function selectObjectAtPoint(p,prefer='trajectory')", fixed = TRUE)
+  expect_match(html, "layerObjectAt", fixed = TRUE)
+  expect_match(html, "layerPointHit", fixed = TRUE)
+  expect_match(html, "measurementAt", fixed = TRUE)
   expect_match(html, "e.preventDefault();clearSelectionAndPan();", fixed = TRUE)
   expect_match(html, "trajectoryAt", fixed = TRUE)
+  expect_match(html, "dragStartX=0,dragStartY=0,dragMoved=false", fixed = TRUE)
+  expect_match(html, "wasClick&&mode==='pan'", fixed = TRUE)
+  expect_match(html, "selectObjectAtPoint(p,'trajectory')", fixed = TRUE)
   expect_match(html, "selectTrajectory(i,true);zoomToTrajectory", fixed = TRUE)
   expect_match(html, "selectTrajectory(trajectories.length-1,true)", fixed = TRUE)
   expect_match(html, "pushAnnotationUndo('trajectory_added')", fixed = TRUE)
@@ -411,6 +437,17 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "insertVertexAt", fixed = TRUE)
   expect_match(html, "deleteSelectedVertex", fixed = TRUE)
   expect_match(html, "deleteRoi", fixed = TRUE)
+  expect_match(html, "deleteSelectedObject", fixed = TRUE)
+  expect_match(html, "deleteSelectedLayerObject", fixed = TRUE)
+  expect_match(html, "deleteSelectedMeasure", fixed = TRUE)
+  expect_match(html, "layer_object_deleted", fixed = TRUE)
+  expect_match(html, "measurement_deleted", fixed = TRUE)
+  expect_match(html, "deleteSelectedTrajectory", fixed = TRUE)
+  expect_match(html, "trajectory_deleted", fixed = TRUE)
+  expect_match(html, "Delete the selected annotation, trajectory, marker, layer object, or measurement", fixed = TRUE)
+  expect_match(html, "Only one annotation, trajectory, marker, layer object, or measurement is selected at a time.", fixed = TRUE)
+  expect_match(html, "Click a saved trajectory path to select it, then press Delete", fixed = TRUE)
+  expect_match(html, "e.preventDefault();deleteSelectedObject();return;", fixed = TRUE)
   expect_match(html, "Delete selected", fixed = TRUE)
   expect_false(grepl("StarDist segmentation", html, fixed = TRUE))
   expect_false(grepl("id=\"exportSelectedRoi\"", html, fixed = TRUE))
@@ -452,14 +489,28 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_false(grepl("id=\"trajectoryResolution\"", html, fixed = TRUE))
   expect_false(grepl("trajectoryResolutionValue", html, fixed = TRUE))
   expect_match(html, "trajectoryAreaWidth", fixed = TRUE)
-  expect_match(html, "trajectoryAreaRoi", fixed = TRUE)
+  expect_false(grepl("id=\"trajectoryAreaRoi\"", html, fixed = TRUE))
+  expect_false(grepl("id:'trajectory_area'", html, fixed = TRUE))
+  expect_false(grepl("label:'Create trajectory area'", html, fixed = TRUE))
   expect_match(html, "editTrajectoryArea", fixed = TRUE)
+  expect_match(html, "Edit border", fixed = TRUE)
+  expect_match(html, "Trajectory border ready for editing", fixed = TRUE)
+  expect_match(html, "canEditBorder=trajectoryDraft.length>=2", fixed = TRUE)
+  expect_match(html, "Use Edit border first", fixed = TRUE)
   expect_match(html, "updateTrajectoryArea", fixed = TRUE)
   expect_match(html, "selectTrajectoryAreaRoi", fixed = TRUE)
   expect_match(html, "updateTrajectoryAreaRoi", fixed = TRUE)
   expect_match(html, "createTrajectoryAreaRoi", fixed = TRUE)
   expect_match(html, "applyTrajectoryAreaGeometry", fixed = TRUE)
   expect_match(html, "trajectoryAreaGeometry", fixed = TRUE)
+  expect_match(html, "drag a border dot and nearby dots move smoothly", fixed = TRUE)
+  expect_match(html, "flat-ended trajectory width preview", fixed = TRUE)
+  expect_match(html, "trajectoryFlatCapRing", fixed = TRUE)
+  expect_match(html, "trajectory_flat_caps", fixed = TRUE)
+  expect_match(html, "isTrajectoryAreaRoi", fixed = TRUE)
+  expect_match(html, "prepareVertexDrag", fixed = TRUE)
+  expect_match(html, "softMoveTrajectoryBorderVertex", fixed = TRUE)
+  expect_match(html, "trajectory_border_vertex_moved", fixed = TRUE)
   expect_match(html, "trajectoryPayload", fixed = TRUE)
   expect_match(html, "drawTrajectories", fixed = TRUE)
   expect_match(html, "bindTrajectoryControls", fixed = TRUE)
@@ -528,15 +579,26 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_false(grepl("id=\"resetImageTransform\"", html, fixed = TRUE))
   expect_match(html, "imageTransformPayload", fixed = TRUE)
   expect_match(html, "drawTransformedImage", fixed = TRUE)
+  expect_match(html, "osdDisplayPixelForOverlay", fixed = TRUE)
+  expect_match(html, "overlayPixelForOsdDisplay", fixed = TRUE)
   expect_match(html, "bindImageTransformControls", fixed = TRUE)
   expect_match(html, "beginScreenshotMode", fixed = TRUE)
   expect_match(html, "drawScreenshotSelection", fixed = TRUE)
   expect_match(html, "saveScreenshotPng", fixed = TRUE)
+  expect_match(html, "canvasIsReadable", fixed = TRUE)
+  expect_match(html, "Screenshot saved without base image", fixed = TRUE)
   expect_match(html, "image/png", fixed = TRUE)
   expect_match(html, "mpp", fixed = TRUE)
   expect_match(html, "id=\"scaleBar\"", fixed = TRUE)
   expect_match(html, "Micron scale bar", fixed = TRUE)
   expect_match(html, "updateScaleBar", fixed = TRUE)
+  expect_match(html, "showUnavailableScaleBar", fixed = TRUE)
+  expect_match(html, "scale unavailable", fixed = TRUE)
+  expect_match(html, "normalizeProjectMpp", fixed = TRUE)
+  expect_match(html, "applyProjectScaleMetadata", fixed = TRUE)
+  expect_match(html, "cfg.mpp=projectMppValue", fixed = TRUE)
+  expect_match(html, "#scaleBar.unavailable{opacity:.68;}", fixed = TRUE)
+  expect_false(grepl("#scaleBar.unavailable{display:none;}", html, fixed = TRUE))
   expect_match(html, "niceScaleLength", fixed = TRUE)
   expect_match(html, "Magnification", fixed = TRUE)
   expect_match(html, "magnificationSummary", fixed = TRUE)
@@ -554,6 +616,9 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "objective_power", fixed = TRUE)
   expect_match(html, "\\u00b5m", fixed = TRUE)
   expect_match(html, "saveGeojson", fixed = TRUE)
+  expect_match(html, "saveAnnotationSpotsCsv", fixed = TRUE)
+  expect_match(html, "annotationSpotAssociations", fixed = TRUE)
+  expect_match(html, "annotation_spots", fixed = TRUE)
   expect_match(html, "FeatureCollection", fixed = TRUE)
   expect_match(html, "crosshairToggle", fixed = TRUE)
   expect_false(grepl("Copy XY", html, fixed = TRUE))
@@ -935,6 +1000,7 @@ test_that("live viewer sessions expose R-native helper methods and command queue
   expect_true(is.function(session$get_ihc_class_summary))
   expect_true(is.function(session$get_segmentation))
   expect_true(is.function(session$get_layers))
+  expect_true(is.function(session$get_annotation_spots))
   expect_true(is.function(session$get_history))
   expect_true(is.function(session$get_tile_preview))
   expect_true(is.function(session$list_layers))
@@ -1208,6 +1274,7 @@ test_that("live viewer state validates events and payload fields strictly", {
     segmentation = list(type = "FeatureCollection", features = list()),
     measurements = list(),
     trajectories = list(),
+    annotation_spots = list(),
     view = list(mode = "pan"),
     annotations = list(dirty = FALSE),
     history = list(),
@@ -1319,6 +1386,20 @@ test_that("live viewer state payloads update R objects", {
       detail = list(id = "roi-1", name = "Tumour region")
     )),
     stain = list(enabled = FALSE),
+    annotation_spots = list(list(
+      annotation_index = 1,
+      annotation_id = "roi-1",
+      annotation_name = "Tumour region",
+      annotation_class = "tumour",
+      spot_id = "AAAC-1",
+      spot_label = "AAAC-1",
+      spot_x = 5,
+      spot_y = 4,
+      spot_layer_id = "seurat_spots",
+      spot_layer_name = "Spatial spots",
+      project_image = "section 1",
+      project_section = "anterior"
+    )),
     detail = list()
   )
 
@@ -1340,6 +1421,9 @@ test_that("live viewer state payloads update R objects", {
   expect_s3_class(snapshot$history, "data.frame")
   expect_equal(snapshot$history$label, "Created ROI")
   expect_equal(snapshot$history$detail[[1]]$id, "roi-1")
+  expect_s3_class(snapshot$annotation_spots, "wsi_annotation_spots")
+  expect_equal(snapshot$annotation_spots$annotation_id, "roi-1")
+  expect_equal(snapshot$annotation_spots$spot_id, "AAAC-1")
   expect_equal(snapshot$roi_summary$area_px2, 80)
   expect_equal(snapshot$roi_summary$cell_count, 1)
   expect_equal(snapshot$class_summary$class, "tumour")
@@ -1359,6 +1443,8 @@ test_that("live viewer state payloads update R objects", {
   expect_s3_class(env$live_cell_summary, "data.frame")
   expect_s3_class(env$live_class_summary, "data.frame")
   expect_equal(env$live_history$action, "roi_added")
+  expect_s3_class(env$live_annotation_spots, "wsi_annotation_spots")
+  expect_equal(env$live_annotation_spots$spot_label, "AAAC-1")
   expect_equal(env$live_last_event$event, "roi_added")
 
   payload$event <- "segmentation_added"
@@ -1504,9 +1590,10 @@ test_that("live viewer keeps legacy segmentation arguments without a public runn
   args <- names(formals(wsi_viewer_session))
 
   expect_true("stardist" %in% args)
-  expect_true("transport" %in% args)
-  expect_true("dynamic_tiles" %in% args)
-  expect_true("stardist_command" %in% args)
+	  expect_true("transport" %in% args)
+	  expect_true("dynamic_tiles" %in% args)
+	  expect_true("spatial_tile_path" %in% args)
+	  expect_true("stardist_command" %in% args)
   expect_true("stardist_args" %in% args)
   expect_true("stardist_output_dir" %in% args)
   expect_true("autosave" %in% args)
@@ -1787,11 +1874,11 @@ test_that("viewer event validation allowlists live WebSocket events", {
   expected <- c(
     "roi_created", "roi_updated", "roi_deleted", "roi_selected",
     "brush_committed", "viewport_changed", "layer_updated",
-    "trajectory_area_created", "trajectory_area_updated",
+    "trajectory_deleted", "trajectory_area_created", "trajectory_area_updated",
     "segmentation_started", "segmentation_progress",
     "segmentation_finished", "job_status", "project_image_reordered",
     "project_image_closed", "grandqc_loaded", "grandqc_cleared",
-    "kodama_cells_selected"
+    "kodama_cells_selected", "seurat_cluster_coloured"
   )
 
   expect_true(all(expected %in% wsiTools:::wsi_viewer_allowed_events()))
@@ -2016,6 +2103,26 @@ test_that("interactive tiled viewer writes Deep Zoom HTML when libvips is availa
   expect_match(html, "saveGeojson", fixed = TRUE)
 })
 
+test_that("project items carry slide scale metadata for the scale bar", {
+  slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 500, levels = c(1, 4))
+  item <- wsiTools:::wsi_viewer_project_item_from_slide(slide, include_preview = FALSE)
+
+  expect_equal(item$mpp, list(x = 0.25, y = 0.25))
+  expect_equal(item$objective_power, 40)
+  expect_equal(wsiTools:::wsi_viewer_project_mpp(item), list(x = 0.25, y = 0.25))
+  expect_equal(wsiTools:::wsi_viewer_project_objective_power(item), 40)
+})
+
+test_that("CZI metadata parser extracts micron scale from physical distances", {
+  xml <- paste0(
+    "<Metadata><Scaling><Items>",
+    "<Distance Id=\"X\"><Value>2.5e-007</Value></Distance>",
+    "<Distance Id=\"Y\"><Value>2.6e-007</Value></Distance>",
+    "</Items></Scaling></Metadata>"
+  )
+  expect_equal(wsiTools:::wsi_native_czi_mpp(xml), c(x = 0.25, y = 0.26))
+})
+
 test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
   html <- wsiTools:::wsi_tiled_viewer_html(list(
     title = "synthetic tiled viewer",
@@ -2063,6 +2170,14 @@ test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
   expect_match(html, "multiViewUsesProjectSources", fixed = TRUE)
   expect_match(html, "multiViewTileSource", fixed = TRUE)
   expect_match(html, "multiViewPaneLabel", fixed = TRUE)
+  expect_match(html, "multiViewAssignments", fixed = TRUE)
+  expect_match(html, "multiViewProjectEntryKey", fixed = TRUE)
+  expect_match(html, "bindMultiViewPaneDrop", fixed = TRUE)
+  expect_match(html, "replaceMultiViewPane", fixed = TRUE)
+  expect_match(html, "multi_view_pane_replaced", fixed = TRUE)
+  expect_match(html, "layoutCustom", fixed = TRUE)
+  expect_match(html, "projectEntryDragPayload", fixed = TRUE)
+  expect_match(html, "bindProjectSectionDrag", fixed = TRUE)
   expect_match(html, "syncMultiViewFrom", fixed = TRUE)
   expect_match(html, "multi_view_layout_updated", fixed = TRUE)
   expect_match(html, "refreshMultiViewSources", fixed = TRUE)

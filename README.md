@@ -942,6 +942,36 @@ viewer <- wsi_viewer_seurat(
 Static HTML viewers cannot ask R for new genes after the file is opened. For
 static export, pass a small preselected gene set with `spot_genes`.
 
+### Live annotation prediction with fastPLS
+
+For Seurat, Giotto, SpatialExperiment, and CellPhenotyper live viewers, the top
+**Prediction** menu can run optional PLS-LDA annotation prediction with the
+GitHub package `tkcaccia/fastPLS`. Draw or import annotations, choose which
+annotations define the training set, choose the test annotations or all
+non-training spots/cells, and click **Run PLS-LDA**. The browser sends only ROI
+IDs and model settings to R; raw expression matrices and cell feature tables
+stay in the R session.
+
+```r
+# Optional backend for the Prediction menu
+remotes::install_github("tkcaccia/fastPLS")
+
+viewer <- wsi_viewer_seurat(
+  brain,
+  "/Users/stefano/Downloads/V1_Mouse_Brain_Sagittal_Anterior_image.tif",
+  live = TRUE,
+  dynamic_tiles = TRUE,
+  wait = FALSE
+)
+
+# After running Prediction in the viewer:
+prediction <- viewer$get_prediction()
+head(prediction)
+```
+
+Use `wsi_backends()` or `wsi_has_fastpls()` to check whether prediction is
+available. If `fastPLS` is not installed, the rest of wsiTools still works.
+
 ### H&E plus mIHC channel overlays
 
 Use `wsi_viewer_he_mihc()` to open an H&E WSI as the base tiled image and

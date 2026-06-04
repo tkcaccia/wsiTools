@@ -66,6 +66,8 @@ wsi_viewer_project <- function(images, output = NULL, open = interactive(),
   roi_class_presets <- wsi_normalize_roi_class_presets(roi_class_presets)
   items <- wsi_viewer_project_items(images, width = width, height = height, czi_sections = czi_sections)
   first <- items[[1L]]
+  first_sections <- first$sections %||% list()
+  first_section <- if (length(first_sections)) first_sections[[1L]] else NULL
   preview_uri <- first$image_data_uri %||%
     wsi_viewer_placeholder_data_uri(
       label = first$label %||% "Project image",
@@ -88,7 +90,8 @@ wsi_viewer_project <- function(images, output = NULL, open = interactive(),
     preference_key = "wsiTools.viewer.preferences.v1",
     slide_width = first_width,
     slide_height = first_height,
-    mpp = NULL,
+    mpp = wsi_viewer_project_mpp(first, first_section),
+    objective_power = wsi_viewer_project_objective_power(first, first_section),
     image_data_uri = preview_uri,
     navigator_image_data_uri = preview_uri,
     tile_size = 512L,
@@ -302,7 +305,8 @@ wsi_viewer_czi_project_live <- function(images, output = NULL, open = interactiv
     preference_key = "wsiTools.viewer.preferences.v1",
     slide_width = first_section$width,
     slide_height = first_section$height,
-    mpp = NULL,
+    mpp = wsi_viewer_project_mpp(items[[1L]], first_section),
+    objective_power = wsi_viewer_project_objective_power(items[[1L]], first_section),
     image_data_uri = first_section$image_data_uri %||% first_section$navigator_image_data_uri %||% NULL,
     navigator_image_data_uri = first_section$navigator_image_data_uri %||% first_section$image_data_uri %||% NULL,
     tile_size = first_section$tile_size,
@@ -393,6 +397,7 @@ wsi_czi_live_project_item <- function(path, index = 1L, width = 1024,
                                       sections = TRUE, cache_dir = NULL,
                                       route = "/tiles") {
   info <- wsi_native_czi_info(path)
+  mpp <- wsi_viewer_mpp_payload(wsi_native_czi_mpp(info$metadata_xml %||% NA_character_))
   preview <- tryCatch(
     wsi_native_czi_project_preview(path, width = width, sections = sections),
     error = function(err) NULL
@@ -447,6 +452,7 @@ wsi_czi_live_project_item <- function(path, index = 1L, width = 1024,
       message = "Tiles are generated from native CZI region reads and cached on demand.",
       image_data_uri = preview_section$image_data_uri %||% placeholder,
       navigator_image_data_uri = preview_section$navigator_image_data_uri %||% preview_section$image_data_uri %||% placeholder,
+      mpp = preview_section$mpp %||% mpp,
       content_bbox = preview_section$content_bbox %||% NULL,
       tile_source_id = source$id
     )
@@ -465,6 +471,7 @@ wsi_czi_live_project_item <- function(path, index = 1L, width = 1024,
     message = "CZI scenes are shown as live OpenSeadragon tile sources.",
     image_data_uri = first$image_data_uri,
     navigator_image_data_uri = first$navigator_image_data_uri,
+    mpp = first$mpp %||% mpp,
     sections = item_sections,
     active = FALSE
   )
@@ -615,6 +622,45 @@ wsi_viewer_project_items <- function(images, width = 768, height = NULL, czi_sec
   wsi_abort("`images` must be a character vector, data frame, list, or `wsi_slide` object.")
 }
 
+wsi_viewer_mpp_payload <- function(mpp) {
+  if (is.null(mpp)) {
+    return(NULL)
+  }
+  if (is.list(mpp)) {
+    mpp <- unlist(mpp, use.names = TRUE)
+  }
+  if (!is.numeric(mpp) || !length(mpp)) {
+    return(NULL)
+  }
+  x <- suppressWarnings(as.numeric(mpp[["x"]] %||% mpp[[1L]] %||% NA_real_))
+  y <- suppressWarnings(as.numeric(mpp[["y"]] %||% mpp[[min(2L, length(mpp))]] %||% x))
+  if (!is.finite(x) || !is.finite(y) || x <= 0 || y <= 0) {
+    return(NULL)
+  }
+  list(x = unname(x), y = unname(y))
+}
+
+wsi_viewer_objective_power_payload <- function(objective_power) {
+  if (is.null(objective_power)) {
+    return(NULL)
+  }
+  objective_power <- suppressWarnings(as.numeric(objective_power[[1L]]))
+  if (!is.finite(objective_power) || objective_power <= 0) {
+    return(NULL)
+  }
+  unname(objective_power)
+}
+
+wsi_viewer_project_mpp <- function(item, section = NULL) {
+  wsi_viewer_mpp_payload(
+    (section$mpp %||% section$pixel_size) %||% (item$mpp %||% item$pixel_size)
+  )
+}
+
+wsi_viewer_project_objective_power <- function(item, section = NULL) {
+  wsi_viewer_objective_power_payload(section$objective_power %||% item$objective_power)
+}
+
 wsi_viewer_project_item_from_record <- function(record, index = 1L, width = 768, height = NULL, czi_sections = TRUE) {
   record_path <- as.character(record$path %||% "")
   if (length(record_path) != 1L || is.na(record_path)) {
@@ -656,7 +702,8 @@ wsi_viewer_project_item_from_record <- function(record, index = 1L, width = 768,
   extra_fields <- c(
     "tile_url_base", "tile_url_template", "tile_url_style", "tile_format",
     "tile_size", "tile_overlap", "min_level", "max_level", "content_bbox",
-    "layers", "seurat", "cellphenotyper", "channel_sources"
+    "layers", "seurat", "cellphenotyper", "channel_sources", "mpp",
+    "pixel_size", "objective_power"
   )
   for (field in intersect(extra_fields, names(record))) {
     if (!is.null(record[[field]])) {
@@ -680,6 +727,10 @@ wsi_viewer_project_item_from_slide <- function(slide, width = 768, height = NULL
       error = function(err) NULL
     )
   }
+  mpp <- wsi_viewer_mpp_payload(tryCatch(wsi_mpp(slide), error = function(err) NULL))
+  objective_power <- wsi_viewer_objective_power_payload(
+    tryCatch(wsi_objective_power(slide), error = function(err) NULL)
+  )
   list(
     id = paste0("project_slide_", wsi_project_id(label)),
     label = label,
@@ -693,6 +744,8 @@ wsi_viewer_project_item_from_slide <- function(slide, width = 768, height = NULL
     image_data_uri = preview,
     navigator_image_data_uri = preview,
     sections = list(),
+    mpp = mpp,
+    objective_power = objective_power,
     active = isTRUE(active)
   )
 }
@@ -761,6 +814,7 @@ wsi_viewer_project_item_from_czi <- function(path, index = 1L, width = 768, heig
       message = sprintf("CZI preview generated with optional %s; full-resolution pixels remain on disk.", backend),
       image_data_uri = first$image_data_uri,
       navigator_image_data_uri = first$image_data_uri,
+      mpp = first$mpp %||% czi_preview$mpp %||% NULL,
       sections = czi_preview$sections,
       active = FALSE
     ))

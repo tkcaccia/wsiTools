@@ -83,10 +83,12 @@ wsi_native_czi_project_preview <- function(path, width = 768, height = NULL, sec
   )
   preview_uri <- wsi_array_png_data_uri(preview)
   content_bbox <- wsi_array_content_bbox(preview, scene_width, scene_height)
+  mpp <- wsi_native_czi_mpp(info$metadata_xml %||% NA_character_)
   list(
     path = path,
     backend = "native_czi",
     info = info,
+    mpp = if (all(is.finite(mpp)) && all(mpp > 0)) as.list(mpp) else NULL,
     sections = list(list(
       id = "scene_0",
       label = sprintf("CZI native preview: %s x %s px", scene_width, scene_height),
@@ -99,6 +101,7 @@ wsi_native_czi_project_preview <- function(path, width = 768, height = NULL, sec
       preview_source = preview_plan$source,
       x = x,
       y = y,
+      mpp = if (all(is.finite(mpp)) && all(mpp > 0)) as.list(mpp) else NULL,
       content_bbox = content_bbox,
       status = "low-resolution preview",
       message = sprintf(
@@ -119,6 +122,8 @@ wsi_native_czi_scene_previews <- function(path, info, width = 768, height = NULL
   }
   scenes <- scenes[order(scenes$scene), , drop = FALSE]
   scene_meta <- wsi_native_czi_scene_metadata(info$metadata_xml %||% NA_character_)
+  mpp <- wsi_native_czi_mpp(info$metadata_xml %||% NA_character_)
+  mpp_payload <- if (all(is.finite(mpp)) && all(mpp > 0)) as.list(mpp) else NULL
   out <- vector("list", nrow(scenes))
   for (i in seq_len(nrow(scenes))) {
     scene <- scenes[i, , drop = FALSE]
@@ -166,6 +171,7 @@ wsi_native_czi_scene_previews <- function(path, info, width = 768, height = NULL
       preview_source = preview_plan$source,
       x = as.integer(scene$x[[1L]]),
       y = as.integer(scene$y[[1L]]),
+      mpp = mpp_payload,
       content_bbox = content_bbox,
       status = "low-resolution scene preview",
       message = sprintf(
@@ -228,6 +234,43 @@ wsi_native_czi_scene_metadata <- function(metadata_xml) {
   })
   out <- do.call(rbind, rows)
   out[is.finite(out$scene), , drop = FALSE]
+}
+
+wsi_native_czi_mpp <- function(metadata_xml) {
+  metadata_xml <- metadata_xml[[1L]] %||% NA_character_
+  if (is.na(metadata_xml) || !nzchar(metadata_xml)) {
+    return(c(x = NA_real_, y = NA_real_))
+  }
+  metadata_xml <- iconv(metadata_xml, from = "", to = "UTF-8", sub = "")
+  c(
+    x = wsi_native_czi_distance_um(metadata_xml, "X"),
+    y = wsi_native_czi_distance_um(metadata_xml, "Y")
+  )
+}
+
+wsi_native_czi_distance_um <- function(metadata_xml, axis) {
+  axis <- toupper(axis[[1L]])
+  block_pattern <- sprintf(
+    "(?is)<Distance\\b[^>]*\\bId=[\"']%s[\"'][^>]*>.*?</Distance>",
+    axis
+  )
+  block_match <- regexpr(block_pattern, metadata_xml, perl = TRUE)
+  if (identical(block_match[[1L]], -1L)) {
+    return(NA_real_)
+  }
+  block <- regmatches(metadata_xml, block_match)
+  value_match <- regexec("(?is)<Value\\b[^>]*>\\s*([^<]+?)\\s*</Value>", block, perl = TRUE)
+  parts <- regmatches(block, value_match)[[1L]]
+  if (length(parts) < 2L) {
+    return(NA_real_)
+  }
+  value <- suppressWarnings(as.numeric(parts[[2L]]))
+  if (!is.finite(value) || value <= 0) {
+    return(NA_real_)
+  }
+  # Zeiss CZI scaling values are normally stored in metres. If a backend has
+  # already returned microns, keep plausible micron-scale values unchanged.
+  if (value < 0.01) value * 1e6 else value
 }
 
 wsi_czi_project_preview <- function(path, width = 768, height = NULL, sections = TRUE) {
@@ -457,6 +500,7 @@ wsi_native_czi_open <- function(path) {
     backend_version = info$version %||% wsi_native_czi_version(),
     native_czi = info
   )
+  mpp <- wsi_native_czi_mpp(info$metadata_xml %||% NA_character_)
   props <- list(
     "czi.backend" = "native_czi",
     "czi.library" = info$library %||% NA_character_,
@@ -466,6 +510,12 @@ wsi_native_czi_open <- function(path) {
     "czi.pyramid_json" = info$pyramid_json %||% NA_character_,
     "czi.metadata_xml" = info$metadata_xml %||% NA_character_
   )
+  if (all(is.finite(mpp)) && all(mpp > 0)) {
+    props[["mpp-x"]] <- as.character(unname(mpp[["x"]]))
+    props[["mpp-y"]] <- as.character(unname(mpp[["y"]]))
+    props[["czi.mpp-x"]] <- as.character(unname(mpp[["x"]]))
+    props[["czi.mpp-y"]] <- as.character(unname(mpp[["y"]]))
+  }
   dims <- info$dimensions
   if (is.list(dims) && length(dims$dimension)) {
     for (i in seq_along(dims$dimension)) {

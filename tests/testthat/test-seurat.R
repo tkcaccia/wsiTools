@@ -41,6 +41,55 @@ test_that("Seurat spatial objects can be linked to high-resolution slide coordin
   expect_true(length(unique(vapply(layer$items, `[[`, character(1), "colour"))) > 1)
 })
 
+test_that("Seurat Visium spot spacing supplies scale when image metadata has no mpp", {
+  embeddings <- matrix(
+    c(-1, 0, 1, 0, 0, -1, 0, 1),
+    ncol = 2,
+    byrow = TRUE,
+    dimnames = list(c("spot_a", "spot_b", "spot_c", "spot_d"), c("PC_1", "PC_2"))
+  )
+  seurat_like <- list(
+    reductions = list(pca = list(cell.embeddings = embeddings)),
+    images = list(
+      anterior1 = list(
+        coordinates = data.frame(
+          barcode = c("spot_a", "spot_b", "spot_c", "spot_d"),
+          imagecol = c(100, 200, 100, 200),
+          imagerow = c(100, 100, 200, 200)
+        )
+      )
+    )
+  )
+  slide <- wsi_mock_slide(width = 400, height = 400, levels = c(1, 2))
+  slide$properties[["openslide.mpp-x"]] <- NULL
+  slide$properties[["openslide.mpp-y"]] <- NULL
+
+  linked <- wsi_link_seurat_image(seurat_like, slide)
+
+  expect_equal(wsi_mpp(slide), c(x = NA_real_, y = NA_real_))
+  expect_equal(linked$scale_metadata$source, "visium_center_spacing")
+  expect_true(linked$scale_metadata$inferred)
+  expect_equal(linked$scale_metadata$center_spacing_pixels, 100)
+  expect_equal(linked$mpp, list(x = 1, y = 1))
+  expect_equal(linked$spot_radius, 27.5)
+
+  config <- wsiTools:::wsi_viewer_seurat_config(linked)
+  expect_equal(config$mpp, list(x = 1, y = 1))
+
+  output <- tempfile(fileext = ".html")
+  wsi_viewer(
+    linked$slide,
+    mode = "thumbnail",
+    output = output,
+    open = FALSE,
+    overwrite = TRUE,
+    layers = list(wsiTools:::wsi_seurat_spots_layer(linked)),
+    seurat = linked
+  )
+  html <- paste(readLines(output, warn = FALSE), collapse = "\n")
+  expect_match(html, "\"mpp\":{\"x\":1,\"y\":1}", fixed = TRUE)
+})
+
 test_that("Seurat spots can be coloured by selected gene expression values", {
   embeddings <- matrix(
     c(-2, 0.5, 1, -0.5, 2, 1.5),
@@ -92,6 +141,57 @@ test_that("Seurat spots can be coloured by selected gene expression values", {
   config <- wsiTools:::wsi_viewer_seurat_config(linked)
   expect_true(config$gene_expression$enabled)
   expect_equal(config$gene_expression$default_gene, "Mbp")
+})
+
+test_that("Seurat clustering metadata is detected and exposed to the viewer", {
+  embeddings <- matrix(
+    c(-2, 0.5, 1, -0.5, 2, 1.5),
+    ncol = 2,
+    byrow = TRUE,
+    dimnames = list(c("spot_a", "spot_b", "spot_c"), c("PC_1", "PC_2"))
+  )
+  seurat_like <- list(
+    meta.data = data.frame(
+      seurat_clusters = c("stroma", "tumour", "stroma"),
+      row.names = c("spot_a", "spot_b", "spot_c")
+    ),
+    reductions = list(pca = list(cell.embeddings = embeddings)),
+    images = list(
+      anterior1 = list(
+        coordinates = data.frame(
+          barcode = c("spot_a", "spot_b", "spot_c"),
+          imagecol = c(10, 20, 30),
+          imagerow = c(5, 15, 25)
+        ),
+        image = array(0, dim = c(50, 100, 3)),
+        scale.factors = list(spot = 12)
+      )
+    )
+  )
+  slide <- wsi_mock_slide(width = 1000, height = 500, levels = c(1, 2))
+
+  fields <- wsi_spatial_cluster_fields(seurat_like, spot_ids = c("spot_a", "spot_b", "spot_c"))
+  expect_s3_class(fields, "wsi_spatial_cluster_fields")
+  expect_equal(fields$field, "seurat_clusters")
+  expect_equal(fields$storage, "meta.data")
+  expect_equal(fields$n_clusters, 2L)
+
+  clusters <- wsi_spatial_clusters(seurat_like, spot_ids = c("spot_a", "spot_b", "spot_c"))
+  expect_s3_class(clusters, "wsi_spatial_clusters")
+  expect_equal(clusters$seurat_clusters, c("stroma", "tumour", "stroma"))
+
+  linked <- wsi_link_seurat_image(seurat_like, slide)
+  expect_true(linked$clusters$enabled)
+  expect_equal(linked$clusters$default_field, "seurat_clusters")
+  expect_equal(linked$cluster_values$seurat_clusters, c("stroma", "tumour", "stroma"))
+  expect_equal(linked$pca$points$cluster_values[[2]]$seurat_clusters, "tumour")
+
+  layer <- wsiTools:::wsi_seurat_spots_layer(linked)
+  expect_equal(layer$items[[1]]$cluster_values$seurat_clusters, "stroma")
+
+  config <- wsiTools:::wsi_viewer_seurat_config(linked)
+  expect_true(config$clusters$enabled)
+  expect_equal(config$clusters$fields[[1]]$field, "seurat_clusters")
 })
 
 test_that("live Seurat gene payload fetches one selected gene without preloading all genes", {
@@ -434,6 +534,10 @@ test_that("missing scalefactors path can be recovered from a spatial directory",
     dimnames = list(c("a", "b"), c("PC_1", "PC_2"))
   )
   seurat_like <- list(
+    meta.data = data.frame(
+      seurat_clusters = c("0", "1"),
+      row.names = c("a", "b")
+    ),
     reductions = list(pca = list(cell.embeddings = embeddings)),
     images = list(slice = list(
       coordinates = data.frame(barcode = c("a", "b"), imagecol = c(20, 80), imagerow = c(30, 70)),
@@ -483,22 +587,32 @@ test_that("Seurat viewer exposes spot layer and reduction controls", {
     open = FALSE,
     overwrite = TRUE,
     mode = "thumbnail",
-    layers = list(wsiTools:::wsi_seurat_spots_layer(linked)),
-    seurat = linked,
-    seurat_gene_url = "http://127.0.0.1:8788/seurat-gene"
-  )
+	    layers = list(wsiTools:::wsi_seurat_spots_layer(linked)),
+	    seurat = linked,
+	    seurat_gene_url = "http://127.0.0.1:8788/seurat-gene",
+	    spatial_tile_export_url = "http://127.0.0.1:8788/spatial-tiles"
+	  )
   text <- paste(readLines(html, warn = FALSE), collapse = "\n")
 
   expect_match(text, "Seurat", fixed = TRUE)
   expect_match(text, "seurat_spots", fixed = TRUE)
-  expect_match(text, "seurat_gene_url", fixed = TRUE)
-  expect_match(text, "Type any gene name", fixed = TRUE)
+	  expect_match(text, "seurat_gene_url", fixed = TRUE)
+	  expect_match(text, "spatial_tile_export_url", fixed = TRUE)
+	  expect_match(text, "Type any gene name", fixed = TRUE)
   expect_match(text, "JSON.stringify({gene:String(gene||'').trim()})", fixed = TRUE)
   expect_match(text, "seuratPlotWindow", fixed = TRUE)
   expect_match(text, "Current tissue", fixed = TRUE)
   expect_match(text, "All tissues", fixed = TRUE)
   expect_match(text, "bindSeuratControls", fixed = TRUE)
   expect_match(text, "seuratGeneInput", fixed = TRUE)
+	  expect_match(text, "seuratClusterSelect", fixed = TRUE)
+	  expect_match(text, "Spot-centered tiles", fixed = TRUE)
+	  expect_match(text, "spatialTileWindow", fixed = TRUE)
+	  expect_match(text, "spatialTilePreview", fixed = TRUE)
+	  expect_match(text, "saveSpatialTiles", fixed = TRUE)
+	  expect_match(text, "spatial_spot_tile_preview", fixed = TRUE)
+	  expect_match(text, "Colour by cluster", fixed = TRUE)
+  expect_match(text, "seurat_cluster_coloured", fixed = TRUE)
   expect_match(text, "seuratSelectionPayload", fixed = TRUE)
   expect_match(text, "Draw a lasso around reduction points", fixed = TRUE)
   expect_match(text, "\"managed_analysis_project\":true", fixed = TRUE)
@@ -549,7 +663,7 @@ test_that("long reduction names are compacted in viewer controls", {
     byrow = TRUE,
     dimnames = list(c("a", "b", "c", "d"), c("RD_1", "RD_2"))
   )
-  long_reduction <- "very_long_dimensionality_reduction_for_testing"
+  long_reduction <- "TSNE_PERPLEXITY50"
   seurat_like <- list(
     reductions = setNames(list(list(cell.embeddings = embeddings)), long_reduction),
     images = list(slice1 = list(
@@ -562,7 +676,8 @@ test_that("long reduction names are compacted in viewer controls", {
   config <- list(seurat = wsiTools:::wsi_viewer_seurat_config(linked))
   controls <- wsiTools:::wsi_viewer_seurat_controls(config)
 
-  expect_match(controls, wsiTools:::wsi_middle_ellipsis(long_reduction), fixed = TRUE)
+  expect_equal(wsiTools:::wsi_reduction_display_label(long_reduction), "TSNE...TY50")
+  expect_match(controls, "TSNE...TY50", fixed = TRUE)
   expect_match(controls, paste0("Open the ", long_reduction, " reduction plot"), fixed = TRUE)
   expect_false(grepl(paste0(">", long_reduction, "<"), controls, fixed = TRUE))
 })
@@ -611,7 +726,16 @@ test_that("multi-image Seurat projects keep per-section overlays", {
   expect_match(text, "spatial spots", fixed = TRUE)
   expect_match(text, "applyProjectSeurat", fixed = TRUE)
   expect_match(text, "seuratAllTissuePlotPoints", fixed = TRUE)
+  expect_match(text, "seuratEffectivePlotScope", fixed = TRUE)
+  expect_match(text, "seuratSelectionProjectWide", fixed = TRUE)
+  expect_match(text, "refreshSeuratSelectionAfterProjectSwitch", fixed = TRUE)
+  expect_match(text, "updateSeuratSpotHighlights();return true;", fixed = TRUE)
+  expect_match(text, "requested_scope:seuratPlotScope", fixed = TRUE)
+  expect_match(text, "plotPanel&&plotPanel.classList.contains('open')", fixed = TRUE)
+  expect_match(text, "renderSeuratPlotWindow", fixed = TRUE)
   expect_match(text, "seurat_plot_scope_changed", fixed = TRUE)
+  expect_false(grepl("!allAvailable&&seuratPlotScope==='all'", text, fixed = TRUE))
+  expect_false(grepl("cfg.seurat=next||{enabled:false,plots:[],spot_count:0};if(typeof seuratSelectedLabels", text, fixed = TRUE))
   expect_match(text, "\"managed_analysis_project\":true", fixed = TRUE)
   expect_false(grepl("id=\"projectOpenImage\"", text, fixed = TRUE))
   expect_false(grepl("id=\"projectImageFile\"", text, fixed = TRUE))
@@ -678,4 +802,11 @@ test_that("Seurat selection events are accepted by the live bridge validator", {
     detail = list(gene = "Mbp")
   ))
   expect_equal(gene_payload$event, "seurat_gene_coloured")
+
+  cluster_payload <- wsiTools:::wsi_viewer_validate_state_payload(list(
+    event = "seurat_cluster_coloured",
+    sequence = 3,
+    detail = list(field = "seurat_clusters")
+  ))
+  expect_equal(cluster_payload$event, "seurat_cluster_coloured")
 })
