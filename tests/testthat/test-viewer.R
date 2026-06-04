@@ -953,6 +953,7 @@ test_that("interactive viewer can be configured with a live R state endpoint", {
   expect_match(html, "commands", fixed = TRUE)
   expect_match(html, "add_layer", fixed = TRUE)
   expect_match(html, "set_layer_visible", fixed = TRUE)
+  expect_match(html, "colour_spots_by_gene", fixed = TRUE)
   expect_match(html, "geojson_imported", fixed = TRUE)
   expect_match(html, "measurement_added", fixed = TRUE)
   expect_match(html, "segmentation_added", fixed = TRUE)
@@ -992,6 +993,8 @@ test_that("live viewer sessions expose R-native helper methods and command queue
   expect_true(is.function(session$get_selected_roi))
   expect_true(is.function(session$get_selected_rois))
   expect_true(is.function(session$get_selected_object))
+  expect_true(is.function(session$get_selected_spots))
+  expect_true(is.function(session$get_spot_annotation_table))
   expect_true(is.function(session$get_measurements))
   expect_true(is.function(session$get_trajectories))
   expect_true(is.function(session$get_roi_summary))
@@ -1009,6 +1012,8 @@ test_that("live viewer sessions expose R-native helper methods and command queue
   expect_true(is.function(session$off))
   expect_true(is.function(session$list_callbacks))
   expect_true(is.function(session$capabilities))
+  expect_true(is.function(session$colour_spots_by_gene))
+  expect_true(is.function(session$color_spots_by_gene))
   expect_true(is.function(session$add_rois))
   expect_true(is.function(session$add_segmentation))
   expect_true(is.function(session$add_layer))
@@ -1047,6 +1052,19 @@ test_that("live viewer sessions expose R-native helper methods and command queue
     capabilities$available[match("async_jobs", capabilities$capability)],
     wsi_has_callr()
   )
+
+  state$seurat_selection <- list(labels = c("spot_1", "spot_2"), count = 2L, matched_count = 1L)
+  selected_spots <- session$get_selected_spots(service = FALSE)
+  expect_s3_class(selected_spots, "wsi_selected_spots")
+  expect_equal(selected_spots$spot_id, c("spot_1", "spot_2"))
+  expect_equal(attr(selected_spots, "matched_count"), 1L)
+  expect_s3_class(session$get_spot_annotation_table(service = FALSE), "wsi_annotation_spots")
+
+  expect_error(session$colour_spots_by_gene("", service = FALSE), "`gene`")
+  session$colour_spots_by_gene("Mbp", service = FALSE)
+  response <- wsiTools:::wsi_viewer_state_response(state)
+  expect_equal(response$commands[[1]]$type, "colour_spots_by_gene")
+  expect_equal(response$commands[[1]]$payload$gene, "Mbp")
 
   rois <- wsiTools:::wsi_roi_from_geojson(list(
     type = "FeatureCollection",

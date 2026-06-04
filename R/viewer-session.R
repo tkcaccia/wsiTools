@@ -366,7 +366,7 @@ wsi_viewer_queue_command <- function(state, type, payload = list()) {
     "job_update", "add_rois", "add_segmentation", "add_layer",
     "set_layer_visible", "remove_layer", "annotations_saved",
     "add_channel_source", "remove_channel_source", "set_channel_settings",
-    "restore_project_state"
+    "colour_spots_by_gene", "restore_project_state"
   )
   if (!type %in% allowed) {
     wsi_abort(sprintf(
@@ -2571,6 +2571,25 @@ wsi_attach_viewer_session_methods <- function(session) {
   session$get_annotation_spots <- function(service = TRUE) {
     session$get_state(service = service)$annotation_spots
   }
+  session$get_spot_annotation_table <- function(service = TRUE) {
+    session$get_annotation_spots(service = service)
+  }
+  session$get_selected_spots <- function(service = TRUE) {
+    selection <- session$get_state(service = service)$seurat_selection %||%
+      list(labels = character(), count = 0L, matched_count = 0L)
+    labels <- as.character(selection$labels %||% character())
+    labels <- labels[nzchar(labels) & !is.na(labels)]
+    out <- data.frame(
+      spot_id = labels,
+      spot_label = labels,
+      selected = rep(TRUE, length(labels)),
+      stringsAsFactors = FALSE
+    )
+    attr(out, "count") <- as.integer(selection$count %||% length(labels))
+    attr(out, "matched_count") <- as.integer(selection$matched_count %||% NA_integer_)
+    class(out) <- c("wsi_selected_spots", class(out))
+    out
+  }
   session$list_layers <- function(service = TRUE) {
     wsi_viewer_layer_summary(session$get_layers(service = service))
   }
@@ -2589,6 +2608,25 @@ wsi_attach_viewer_session_methods <- function(session) {
   session$get_proximity <- function(service = TRUE) {
     session$get_state(service = service)$proximity
   }
+  session$colour_spots_by_gene <- function(gene, service = TRUE) {
+    if (!is.character(gene) || length(gene) != 1L || is.na(gene) || !nzchar(trimws(gene))) {
+      wsi_abort("`gene` must be a single non-empty gene name.")
+    }
+    gene <- trimws(gene)
+    self$state$last_event <- "r_colour_spots_by_gene"
+    self$state$last_sync <- Sys.time()
+    wsi_viewer_queue_command(
+      self$state,
+      "colour_spots_by_gene",
+      list(gene = gene)
+    )
+    wsi_assign_viewer_state(self$state)
+    if (isTRUE(service)) {
+      wsi_viewer_session_pump(self, 0L)
+    }
+    invisible(self)
+  }
+  session$color_spots_by_gene <- session$colour_spots_by_gene
   session$add_rois <- function(rois, name = "R session", service = TRUE) {
     rois <- wsi_viewer_coerce_rois(rois)
     if (!nrow(rois)) {
@@ -3568,10 +3606,12 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 #' tables are refreshed as ordinary R data frames whenever ROI or segmentation
 #' state changes. The returned object is a live session with convenience methods
 #' such as `capabilities()`, `get_rois()`, `get_selected_roi()`, `get_selected_rois()`,
-#' `get_selected_object()`,
+#' `get_selected_object()`, `get_selected_spots()`,
+#' `get_spot_annotation_table()`,
 #' `get_measurements()`, `get_roi_summary()`, `get_cell_summary()`, `get_class_summary()`,
 #' `get_ihc_summary()`, `get_ihc_class_summary()`, `get_segmentation()`,
 #' `get_layers()`, `get_annotation_spots()`, `get_history()`, `get_tile_preview()`,
+#' `colour_spots_by_gene()`,
 #' `add_rois()`, `add_segmentation()`, `measure_ihc_intensity()`,
 #' `add_layer()`, `set_layer_visible()`, `preview_tiles()`,
 #' `extract_tile_preview()`, `list_jobs()`,
@@ -4084,6 +4124,7 @@ wsi_viewer_state <- function(x) {
     channel_settings = state$channel_settings %||% wsi_empty_channel_settings(),
     tile_sources = state$tile_sources %||% list(),
     kodama_selection = state$kodama_selection %||% list(labels = character(), count = 0L, matched_count = 0L),
+    seurat_selection = state$seurat_selection %||% list(labels = character(), count = 0L, matched_count = 0L),
     annotation_spots = state$annotation_spots %||% wsi_empty_annotation_spots(),
     tile_preview = state$tile_preview %||% wsi_empty_tile_preview(),
     prediction = state$prediction %||% wsi_empty_prediction_result(),
@@ -4191,7 +4232,7 @@ print.wsi_viewer_session <- function(x, ...) {
   if (!is.null(x$stardist_server)) {
     cat(sprintf("  stardist: %s\n", x$stardist_server$url))
   }
-  cat("  methods: capabilities(), on(), get_rois(), get_selected_roi(), get_selected_rois(), get_selected_object(), get_measurements(), get_trajectories(), get_roi_summary(), get_cell_summary(), get_ihc_summary(), get_segmentation(), get_layers(), get_channel_settings(), get_kodama_selection(), get_annotation_spots(), get_history(), get_tile_preview(), get_prediction(), get_proximity(), add_rois(), add_layer(), add_channel_source(), measure_ihc_intensity(), preview_tiles(), extract_tile_preview(), list_jobs(), run_tiles_async(), save_project(), autosave_start()\n")
+  cat("  methods: capabilities(), on(), get_rois(), get_selected_roi(), get_selected_rois(), get_selected_object(), get_selected_spots(), get_spot_annotation_table(), get_measurements(), get_trajectories(), get_roi_summary(), get_cell_summary(), get_ihc_summary(), get_segmentation(), get_layers(), get_channel_settings(), get_kodama_selection(), get_annotation_spots(), get_history(), get_tile_preview(), get_prediction(), get_proximity(), colour_spots_by_gene(), add_rois(), add_layer(), add_channel_source(), measure_ihc_intensity(), preview_tiles(), extract_tile_preview(), list_jobs(), run_tiles_async(), save_project(), autosave_start()\n")
   cat("  stop with: wsi_viewer_stop(x)\n")
   invisible(x)
 }

@@ -88,6 +88,8 @@ For browser-to-R synchronization, remote desktops, SSH tunnels, and common live
 viewer mistakes such as opening `/viewer-state` instead of the HTML viewer, see
 the dedicated [live viewer guide](docs/live-viewer.md). For known installation,
 backend, and viewer errors, see [troubleshooting](docs/troubleshooting.md).
+For Seurat, Giotto, SpatialExperiment, and CellPhenotyper workflows, see
+[spatial omics](docs/spatial-omics.md).
 For optional selected-ROI StarDist, Mesmer, mask import, and cell export
 workflows, see [cell segmentation](docs/cell-segmentation.md).
 These pages cover

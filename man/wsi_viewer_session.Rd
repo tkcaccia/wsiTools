@@ -226,12 +226,12 @@ A \code{wsi_viewer_session} object, invisibly. The object keeps the
 bridge fields (\code{url}, \code{html}, \code{state}) and provides live-session helper
 methods:
 \code{on()}, \code{off()}, \code{list_callbacks()}, \code{get_state()}, \code{get_rois()}, \code{get_selected_roi()}, \code{get_selected_rois()},
-\code{get_selected_object()}, \code{get_measurements()}, \code{get_roi_summary()}, \code{get_cell_summary()},
+\code{get_selected_object()}, \code{get_selected_spots()}, \code{get_spot_annotation_table()}, \code{get_measurements()}, \code{get_roi_summary()}, \code{get_cell_summary()},
 \code{get_class_summary()}, \code{get_ihc_summary()}, \code{get_ihc_class_summary()},
-\code{get_segmentation()}, \code{get_layers()}, \code{get_history()}, \code{get_tile_preview()}, \code{get_prediction()}, \code{get_proximity()},
+\code{get_segmentation()}, \code{get_layers()}, \code{get_annotation_spots()}, \code{get_history()}, \code{get_tile_preview()}, \code{get_prediction()}, \code{get_proximity()},
 \code{list_layers()}, \code{get_events()}, \code{add_rois()}, \code{add_segmentation()},
 \code{add_layer()}, \code{set_layer_visible()}, \code{remove_layer()},
-\code{measure_ihc_intensity()},
+\code{colour_spots_by_gene()}, \code{measure_ihc_intensity()},
 \code{preview_tiles()}, \code{clear_tile_preview()}, \code{extract_tile_preview()}, \code{run_segmentation_async()},
 \code{save_project()},
 \code{service()}, and \code{stop()}.
@@ -245,10 +245,11 @@ session. ROI area, cell-density, cell, stain-measurement, and class-summary
 tables are refreshed as ordinary R data frames whenever ROI or segmentation
 state changes. The returned object is a live session with convenience methods
 such as \code{capabilities()}, \code{get_rois()}, \code{get_selected_roi()}, \code{get_selected_rois()},
-\code{get_selected_object()}, \code{get_measurements()}, \code{get_roi_summary()}, \code{get_cell_summary()}, \code{get_class_summary()},
+\code{get_selected_object()}, \code{get_selected_spots()}, \code{get_spot_annotation_table()},
+\code{get_measurements()}, \code{get_roi_summary()}, \code{get_cell_summary()}, \code{get_class_summary()},
 \code{get_ihc_summary()}, \code{get_ihc_class_summary()}, \code{get_segmentation()},
-\code{get_layers()}, \code{get_history()}, \code{get_tile_preview()}, \code{get_prediction()}, \code{get_proximity()},
-\code{add_rois()}, \code{add_segmentation()}, \code{measure_ihc_intensity()},
+\code{get_layers()}, \code{get_annotation_spots()}, \code{get_history()}, \code{get_tile_preview()}, \code{get_prediction()}, \code{get_proximity()},
+\code{colour_spots_by_gene()}, \code{add_rois()}, \code{add_segmentation()}, \code{measure_ihc_intensity()},
 \code{add_layer()}, \code{set_layer_visible()}, \code{preview_tiles()},
 \code{extract_tile_preview()}, \code{list_jobs()},
 \code{run_segmentation_async()}, \code{run_tiles_async()},
