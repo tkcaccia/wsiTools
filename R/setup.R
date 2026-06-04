@@ -1048,6 +1048,402 @@ wsi_setup <- function(tools = NULL,
   invisible(plan)
 }
 
+#' Print a read-only setup report for wsiTools
+#'
+#' `wsi_setup_report()` is the quickest command to paste into an issue or use
+#' during installation troubleshooting. It reports the package version, R/OS
+#' details, optional backends, key `wsi_has_*()` checks, optional R packages,
+#' copyable setup commands, and relevant environment variables. It never
+#' installs software or changes the user's system.
+#'
+#' @inheritParams wsi_setup
+#'
+#' @return Invisibly returns a list containing `version`, `session`,
+#'   `backends`, `helpers`, `r_packages`, `system_tools`, and `environment`.
+#' @export
+#'
+#' @examples
+#' wsi_setup_report(method = "manual")
+wsi_setup_report <- function(tools = NULL,
+                             r_packages = c("magick", "httpuv", "callr", "sf"),
+                             method = c("auto", "homebrew", "apt", "dnf", "winget", "conda", "manual"),
+                             include_optional = TRUE) {
+  method <- wsi_setup_method(method)
+  plan <- wsi_setup(
+    tools = tools,
+    r_packages = r_packages,
+    method = method,
+    include_optional = include_optional,
+    install = FALSE
+  )
+  helpers <- data.frame(
+    check = c(
+      "wsi_has_vips()",
+      "wsi_has_openslide()",
+      "wsi_has_native_czi()",
+      "wsi_has_stardist()",
+      "wsi_has_mesmer()"
+    ),
+    value = c(
+      wsi_has_vips(),
+      wsi_has_openslide(),
+      wsi_has_native_czi(),
+      wsi_has_stardist(),
+      wsi_has_mesmer()
+    ),
+    meaning = c(
+      "libvips command-line tools are available for conversion, pyramids, thumbnails, and fast tile generation.",
+      "OpenSlide command-line tools are available for many digital pathology WSI formats.",
+      "The optional native ZEISS CZI bridge can be loaded.",
+      "An external StarDist command is configured and discoverable.",
+      "An external Mesmer command is configured and discoverable."
+    ),
+    stringsAsFactors = FALSE
+  )
+  env_names <- c(
+    "WSITOOLS_LIBCZIAPI",
+    "WSITOOLS_BIOFORMATS_JAR",
+    "WSITOOLS_STARDIST_COMMAND",
+    "WSITOOLS_MESMER_COMMAND",
+    "WSITOOLS_CZI_ALLOW_PYTHON",
+    "WSITOOLS_DISABLE_NATIVE_CZI"
+  )
+  env <- data.frame(
+    variable = env_names,
+    value = vapply(env_names, Sys.getenv, character(1), unset = ""),
+    stringsAsFactors = FALSE
+  )
+  out <- list(
+    version = tryCatch(as.character(utils::packageVersion("wsiTools")), error = function(err) NA_character_),
+    session = utils::sessionInfo(),
+    backends = plan$backends,
+    helpers = helpers,
+    r_packages = plan$r_packages,
+    system_tools = plan$system_tools,
+    environment = env
+  )
+  class(out) <- "wsi_setup_report"
+  print(out)
+  invisible(out)
+}
+
+wsi_diagnose_executables <- function() {
+  commands <- c(
+    "openslide-show-properties",
+    "openslide-write-png",
+    "vips",
+    "vipsheader",
+    "magick",
+    "showinf",
+    "bfconvert",
+    "java",
+    "git",
+    "make",
+    "gcc",
+    "g++",
+    "cmake",
+    "conda"
+  )
+  paths <- Sys.which(commands)
+  out <- data.frame(
+    command = commands,
+    path = unname(paths),
+    available = nzchar(unname(paths)),
+    source = "PATH",
+    stringsAsFactors = FALSE
+  )
+  env_commands <- c(
+    stardist = Sys.getenv("WSITOOLS_STARDIST_COMMAND", unset = ""),
+    mesmer = Sys.getenv("WSITOOLS_MESMER_COMMAND", unset = ""),
+    libcziapi = Sys.getenv("WSITOOLS_LIBCZIAPI", unset = ""),
+    bioformats_jar = Sys.getenv("WSITOOLS_BIOFORMATS_JAR", unset = "")
+  )
+  if (length(env_commands)) {
+    out <- rbind(
+      out,
+      data.frame(
+        command = names(env_commands),
+        path = unname(env_commands),
+        available = nzchar(unname(env_commands)),
+        source = c("WSITOOLS_STARDIST_COMMAND", "WSITOOLS_MESMER_COMMAND", "WSITOOLS_LIBCZIAPI", "WSITOOLS_BIOFORMATS_JAR"),
+        stringsAsFactors = FALSE
+      )
+    )
+  }
+  out
+}
+
+wsi_diagnose_environment <- function() {
+  names <- c(
+    "PATH",
+    "R_LIBS_USER",
+    "WSITOOLS_LIBCZIAPI",
+    "WSITOOLS_BIOFORMATS_JAR",
+    "WSITOOLS_STARDIST_COMMAND",
+    "WSITOOLS_MESMER_COMMAND",
+    "WSITOOLS_CZI_ALLOW_PYTHON",
+    "WSITOOLS_DISABLE_NATIVE_CZI"
+  )
+  data.frame(
+    variable = names,
+    value = vapply(names, Sys.getenv, character(1), unset = ""),
+    stringsAsFactors = FALSE
+  )
+}
+
+wsi_diagnose_live_bridge <- function(host = "127.0.0.1",
+                                     port = 8794L,
+                                     max_tries = 20L,
+                                     sync_test = TRUE,
+                                     timeout = 5) {
+  checks <- data.frame(
+    check = c("httpuv_installed", "live_viewer_can_start", "browser_sync_self_test"),
+    value = c(requireNamespace("httpuv", quietly = TRUE), FALSE, NA),
+    details = c(
+      if (requireNamespace("httpuv", quietly = TRUE)) "httpuv is installed." else "Install optional package `httpuv` for live viewer sessions.",
+      "Not tested.",
+      "Not tested."
+    ),
+    stringsAsFactors = FALSE
+  )
+  if (!isTRUE(checks$value[[1L]])) {
+    checks$details[checks$check == "live_viewer_can_start"] <- "Cannot start live viewer service because `httpuv` is missing."
+    checks$details[checks$check == "browser_sync_self_test"] <- "Cannot test browser/R sync because `httpuv` is missing."
+    return(checks)
+  }
+
+  app <- list(
+    call = function(req) {
+      if (identical(req$PATH_INFO, "/wsi-diagnose")) {
+        return(list(
+          status = 200L,
+          headers = list("Content-Type" = "text/plain"),
+          body = "wsiTools diagnostic ok"
+        ))
+      }
+      list(
+        status = 404L,
+        headers = list("Content-Type" = "text/plain"),
+        body = "not found"
+      )
+    }
+  )
+
+  server <- NULL
+  bound_port <- NA_integer_
+  for (candidate in seq.int(as.integer(port), length.out = as.integer(max_tries))) {
+    server <- try(httpuv::startServer(host, candidate, app), silent = TRUE)
+    if (!inherits(server, "try-error")) {
+      bound_port <- candidate
+      break
+    }
+  }
+  if (inherits(server, "try-error") || is.null(server)) {
+    checks$details[checks$check == "live_viewer_can_start"] <- sprintf(
+      "Could not bind a local httpuv server on %s:%s-%s.",
+      host,
+      as.integer(port),
+      as.integer(port) + as.integer(max_tries) - 1L
+    )
+    checks$details[checks$check == "browser_sync_self_test"] <- "Skipped because the live service could not start."
+    return(checks)
+  }
+  on.exit(try(httpuv::stopServer(server), silent = TRUE), add = TRUE)
+  checks$value[checks$check == "live_viewer_can_start"] <- TRUE
+  checks$details[checks$check == "live_viewer_can_start"] <- sprintf(
+    "A temporary httpuv server started on http://%s:%s/wsi-diagnose.",
+    host,
+    bound_port
+  )
+
+  if (!isTRUE(sync_test)) {
+    checks$details[checks$check == "browser_sync_self_test"] <- "Skipped because `sync_test = FALSE`."
+    return(checks)
+  }
+  if (!requireNamespace("callr", quietly = TRUE)) {
+    checks$details[checks$check == "browser_sync_self_test"] <- "Skipped because optional package `callr` is not installed."
+    return(checks)
+  }
+
+  url <- sprintf("http://%s:%s/wsi-diagnose", host, bound_port)
+  proc <- callr::r_bg(function(url) {
+    readLines(url, warn = FALSE)
+  }, args = list(url))
+  deadline <- Sys.time() + as.difftime(timeout, units = "secs")
+  while (proc$is_alive() && Sys.time() < deadline) {
+    try(httpuv::service(50L), silent = TRUE)
+    Sys.sleep(0.02)
+  }
+  if (proc$is_alive()) {
+    try(proc$kill(), silent = TRUE)
+    checks$value[checks$check == "browser_sync_self_test"] <- FALSE
+    checks$details[checks$check == "browser_sync_self_test"] <- sprintf(
+      "Timed out after %s seconds while testing local browser/R sync.",
+      timeout
+    )
+    return(checks)
+  }
+  result <- try(proc$get_result(), silent = TRUE)
+  ok <- !inherits(result, "try-error") && any(grepl("wsiTools diagnostic ok", result, fixed = TRUE))
+  checks$value[checks$check == "browser_sync_self_test"] <- isTRUE(ok)
+  checks$details[checks$check == "browser_sync_self_test"] <- if (isTRUE(ok)) {
+    sprintf("A child R process successfully reached %s while the parent serviced httpuv.", url)
+  } else {
+    "The temporary httpuv server started, but the local sync request failed."
+  }
+  checks
+}
+
+wsi_diagnose_suggest_fixes <- function(backends, helpers, live_viewer) {
+  fix <- character()
+  helper_value <- function(name) {
+    value <- helpers$value[helpers$check == name]
+    if (length(value)) isTRUE(value[[1L]]) else FALSE
+  }
+  live_value <- function(name) {
+    value <- live_viewer$value[live_viewer$check == name]
+    if (length(value)) isTRUE(value[[1L]]) else FALSE
+  }
+  if (!helper_value("wsi_has_vips()")) {
+    fix <- c(fix, "Install libvips (`vips` and `vipsheader`) for conversion, pyramids, thumbnails, and fast tile generation.")
+  }
+  if (!helper_value("wsi_has_openslide()")) {
+    fix <- c(fix, "Install OpenSlide command-line tools for SVS/NDPI/SCN/MRXS-style pathology slides.")
+  }
+  if (!helper_value("wsi_has_native_czi()") && !("bioformats" %in% backends$backend[backends$installed])) {
+    fix <- c(fix, "For CZI files, configure native CZI (`WSITOOLS_LIBCZIAPI`) or Bio-Formats as a fallback.")
+  }
+  if (!helper_value("wsi_has_stardist()")) {
+    fix <- c(fix, "For StarDist, install/configure an external command and set `WSITOOLS_STARDIST_COMMAND` if it is not on PATH.")
+  }
+  if (!helper_value("wsi_has_mesmer()")) {
+    fix <- c(fix, "For Mesmer/DAPI mIHC segmentation, install/configure an external command and set `WSITOOLS_MESMER_COMMAND`.")
+  }
+  if (!live_value("httpuv_installed")) {
+    fix <- c(fix, "Install optional R package `httpuv` to use `wsi_viewer_live()`.")
+  } else if (!live_value("live_viewer_can_start")) {
+    fix <- c(fix, "Live viewer service could not start; check firewall/port conflicts or try a different `port` in `wsi_viewer_live()`.")
+  } else if (!live_value("browser_sync_self_test")) {
+    fix <- c(fix, "If live sync fails, open the printed `http://127.0.0.1:<port>` viewer URL, not a `file://` page or `/viewer-state`.")
+  }
+  if (!length(fix)) {
+    fix <- "No immediate setup fixes detected. If an image still fails, include the image format and exact error with this report."
+  }
+  data.frame(
+    fix_id = seq_along(fix),
+    suggestion = fix,
+    stringsAsFactors = FALSE
+  )
+}
+
+#' Diagnose a wsiTools installation for remote debugging
+#'
+#' `wsi_diagnose()` prints a read-only support report intended for GitHub
+#' issues, remote desktops, and difficult installation sessions. It reports the
+#' operating system, R version, package version, backend table, executable
+#' paths, relevant environment variables, live viewer startup status, a local
+#' browser/R synchronization self-test when possible, and suggested fixes.
+#'
+#' The live synchronization self-test starts a temporary local `httpuv` endpoint
+#' and, when the optional `callr` package is available, asks a child R process
+#' to request that endpoint while the parent services the event loop. It does
+#' not open a browser, install tools, or modify the system.
+#'
+#' @param method Package manager target used to build suggested backend setup
+#'   commands.
+#' @param include_optional Whether to include optional tools in the setup plan.
+#' @param live_test Whether to try starting a temporary `httpuv` server.
+#' @param sync_test Whether to run the local browser/R sync self-test. This
+#'   requires both `httpuv` and `callr`.
+#' @param host,port,max_tries Host, starting port, and retry count for the
+#'   temporary live-viewer self-test.
+#' @param timeout Timeout in seconds for the local sync self-test.
+#'
+#' @return Invisibly returns a `wsi_diagnose` list.
+#' @export
+#'
+#' @examples
+#' wsi_diagnose(live_test = FALSE)
+wsi_diagnose <- function(method = c("auto", "homebrew", "apt", "dnf", "winget", "conda", "manual"),
+                         include_optional = TRUE,
+                         live_test = TRUE,
+                         sync_test = TRUE,
+                         host = "127.0.0.1",
+                         port = 8794L,
+                         max_tries = 20L,
+                         timeout = 5) {
+  method <- wsi_setup_method(method)
+  setup <- wsi_setup(
+    method = method,
+    include_optional = include_optional,
+    r_packages = c("magick", "httpuv", "callr", "sf"),
+    install = FALSE
+  )
+  helpers <- data.frame(
+    check = c(
+      "wsi_has_vips()",
+      "wsi_has_openslide()",
+      "wsi_has_native_czi()",
+      "wsi_has_stardist()",
+      "wsi_has_mesmer()"
+    ),
+    value = c(
+      wsi_has_vips(),
+      wsi_has_openslide(),
+      wsi_has_native_czi(),
+      wsi_has_stardist(),
+      wsi_has_mesmer()
+    ),
+    stringsAsFactors = FALSE
+  )
+  live_viewer <- if (isTRUE(live_test)) {
+    wsi_diagnose_live_bridge(
+      host = host,
+      port = port,
+      max_tries = max_tries,
+      sync_test = sync_test,
+      timeout = timeout
+    )
+  } else {
+    data.frame(
+      check = c("httpuv_installed", "live_viewer_can_start", "browser_sync_self_test"),
+      value = c(requireNamespace("httpuv", quietly = TRUE), NA, NA),
+      details = c(
+        if (requireNamespace("httpuv", quietly = TRUE)) "httpuv is installed." else "Install optional package `httpuv` for live viewer sessions.",
+        "Skipped because `live_test = FALSE`.",
+        "Skipped because `live_test = FALSE`."
+      ),
+      stringsAsFactors = FALSE
+    )
+  }
+  os <- data.frame(
+    sysname = Sys.info()[["sysname"]] %||% NA_character_,
+    release = Sys.info()[["release"]] %||% NA_character_,
+    version = Sys.info()[["version"]] %||% NA_character_,
+    machine = Sys.info()[["machine"]] %||% NA_character_,
+    stringsAsFactors = FALSE
+  )
+  out <- list(
+    os = os,
+    r = list(
+      version = paste(R.version$major, R.version$minor, sep = "."),
+      platform = R.version$platform,
+      home = R.home()
+    ),
+    package_version = tryCatch(as.character(utils::packageVersion("wsiTools")), error = function(err) NA_character_),
+    backends = setup$backends,
+    helpers = helpers,
+    executables = wsi_diagnose_executables(),
+    environment = wsi_diagnose_environment(),
+    live_viewer = live_viewer,
+    setup_plan = setup$system_tools,
+    suggested_fixes = wsi_diagnose_suggest_fixes(setup$backends, helpers, live_viewer)
+  )
+  class(out) <- "wsi_diagnose"
+  print(out)
+  invisible(out)
+}
+
 #' @rdname wsi_setup
 #' @param ... Arguments passed from `wsi_install_deps()` to `wsi_setup()`.
 #' @export
@@ -1100,5 +1496,79 @@ print.wsi_setup_plan <- function(x, ...) {
   if (tool_missing || r_missing) {
     cat("\nNothing is installed unless you call `wsi_install_backends()`, `wsi_install_deps()`, or `wsi_setup(install = TRUE, ...)`.\n")
   }
+  invisible(x)
+}
+
+#' @export
+print.wsi_setup_report <- function(x, ...) {
+  cat("<wsi_setup_report>\n")
+  cat(sprintf("  wsiTools: %s\n", x$version %||% NA_character_))
+  cat(sprintf("  R:        %s\n", paste(R.version$major, R.version$minor, sep = ".")))
+  cat(sprintf("  platform: %s\n", R.version$platform))
+
+  cat("\nBackends:\n")
+  print(x$backends, row.names = FALSE)
+
+  cat("\nKey checks:\n")
+  print(x$helpers, row.names = FALSE)
+
+  if (nrow(x$r_packages)) {
+    cat("\nOptional R packages:\n")
+    print(x$r_packages, row.names = FALSE)
+  }
+
+  if (nrow(x$system_tools)) {
+    cat("\nSystem setup plan:\n")
+    display <- x$system_tools[, c("tool", "installed", "method", "command_line", "notes"), drop = FALSE]
+    print(display, row.names = FALSE)
+  }
+
+  env <- x$environment
+  if (nrow(env)) {
+    env$value[!nzchar(env$value)] <- "<unset>"
+    cat("\nRelevant environment variables:\n")
+    print(env, row.names = FALSE)
+  }
+
+  cat("\nThis report is read-only; it does not install or modify anything.\n")
+  invisible(x)
+}
+
+#' @export
+print.wsi_diagnose <- function(x, ...) {
+  cat("<wsi_diagnose>\n")
+  cat(sprintf("  OS:       %s %s (%s)\n", x$os$sysname[[1L]], x$os$release[[1L]], x$os$machine[[1L]]))
+  cat(sprintf("  R:        %s [%s]\n", x$r$version, x$r$platform))
+  cat(sprintf("  wsiTools: %s\n", x$package_version %||% NA_character_))
+
+  cat("\nBackends:\n")
+  print(x$backends, row.names = FALSE)
+
+  cat("\nKey checks:\n")
+  print(x$helpers, row.names = FALSE)
+
+  cat("\nExecutable paths:\n")
+  exec <- x$executables
+  exec$path[!nzchar(exec$path)] <- "<not found>"
+  print(exec, row.names = FALSE)
+
+  cat("\nRelevant environment variables:\n")
+  env <- x$environment
+  env$value[!nzchar(env$value)] <- "<unset>"
+  print(env, row.names = FALSE)
+
+  cat("\nLive viewer / browser sync:\n")
+  print(x$live_viewer, row.names = FALSE)
+
+  if (nrow(x$setup_plan)) {
+    cat("\nSuggested backend setup commands:\n")
+    display <- x$setup_plan[, c("tool", "installed", "method", "command_line", "notes"), drop = FALSE]
+    print(display, row.names = FALSE)
+  }
+
+  cat("\nSuggested fixes:\n")
+  print(x$suggested_fixes, row.names = FALSE)
+
+  cat("\nThis diagnostic is read-only; it does not install or modify anything.\n")
   invisible(x)
 }

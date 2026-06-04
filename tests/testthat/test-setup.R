@@ -113,6 +113,77 @@ test_that("setup reports missing dependencies without installing by default", {
   expect_true(any(grepl("Nothing is installed", printed, fixed = TRUE)))
 })
 
+test_that("setup report is read-only and includes diagnostic sections", {
+  setup_output <- capture.output(
+    report <- wsi_setup_report(
+      tools = c("openslide", "libvips"),
+      r_packages = "wsiToolsDefinitelyMissingPackage",
+      method = "manual",
+      include_optional = FALSE
+    )
+  )
+
+  expect_s3_class(report, "wsi_setup_report")
+  expect_named(
+    report,
+    c("version", "session", "backends", "helpers", "r_packages", "system_tools", "environment")
+  )
+  expect_s3_class(report$backends, "data.frame")
+  expect_equal(report$system_tools$tool, c("openslide", "libvips"))
+  expect_true(all(c("wsi_has_vips()", "wsi_has_openslide()", "wsi_has_native_czi()", "wsi_has_stardist()", "wsi_has_mesmer()") %in% report$helpers$check))
+
+  printed <- capture.output(print(report))
+  expect_true(any(grepl("<wsi_setup_report>", setup_output, fixed = TRUE)))
+  expect_true(any(grepl("This report is read-only", printed, fixed = TRUE)))
+})
+
+test_that("diagnose report includes remote-debugging sections", {
+  diagnose_output <- capture.output(
+    report <- wsi_diagnose(
+      method = "manual",
+      include_optional = FALSE,
+      live_test = FALSE
+    )
+  )
+
+  expect_s3_class(report, "wsi_diagnose")
+  expect_named(
+    report,
+    c(
+      "os", "r", "package_version", "backends", "helpers", "executables",
+      "environment", "live_viewer", "setup_plan", "suggested_fixes"
+    )
+  )
+  expect_s3_class(report$backends, "data.frame")
+  expect_s3_class(report$executables, "data.frame")
+  expect_s3_class(report$environment, "data.frame")
+  expect_s3_class(report$live_viewer, "data.frame")
+  expect_s3_class(report$suggested_fixes, "data.frame")
+  expect_true("vips" %in% report$executables$command)
+  expect_true("PATH" %in% report$environment$variable)
+  expect_true("browser_sync_self_test" %in% report$live_viewer$check)
+  expect_true(any(grepl("<wsi_diagnose>", diagnose_output, fixed = TRUE)))
+})
+
+test_that("diagnose can self-test the local httpuv bridge", {
+  skip_on_cran()
+  skip_if_not_installed("httpuv")
+  skip_if_not_installed("callr")
+
+  report <- wsi_diagnose(
+    method = "manual",
+    include_optional = FALSE,
+    live_test = TRUE,
+    sync_test = TRUE,
+    port = sample(20000:45000, 1),
+    max_tries = 5,
+    timeout = 5
+  )
+
+  expect_true(isTRUE(report$live_viewer$value[report$live_viewer$check == "live_viewer_can_start"]))
+  expect_true(isTRUE(report$live_viewer$value[report$live_viewer$check == "browser_sync_self_test"]))
+})
+
 test_that("backend installer can return a setup plan without running commands", {
   plan <- wsi_install_backends(
     tools = "libvips",

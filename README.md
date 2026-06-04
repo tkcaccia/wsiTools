@@ -9,10 +9,39 @@ backend metadata, pyramid levels, explicit region reads, tile manifests, and
 streaming conversion. It does not load complete level-0 slides into R memory by
 default.
 
-For runnable workflows, see the separate [examples page](EXAMPLES.md). For
-browser-to-R synchronization, remote desktops, SSH tunnels, and common live
+## Start here
+
+```r
+remotes::install_github("tkcaccia/wsiTools", upgrade = "never")
+
+library(wsiTools)
+wsi_backends()
+
+slide <- wsi_open("sample.svs")
+wsi_viewer(slide)
+```
+
+- Static viewer: writes an HTML viewer, but does not send automatic feedback
+  back to R.
+- Live viewer: opens a browser connected to the active R session through
+  `httpuv`, so annotations, selections, measurements, and other events can be
+  retrieved from R.
+- Full-resolution viewing: use tiled mode through OpenSeadragon; the browser
+  needs image tiles rather than raw SVS, CZI, or OME-TIFF pixels.
+- Optional tools: StarDist, Mesmer, OpenSlide, libvips, Bio-Formats, and
+  libCZI are runtime capabilities. They are not installed silently with the
+  core R package.
+
+For the shortest image-opening workflow, see [open one image](docs/open-one-image.md).
+For copy-paste workflows, see the [examples gallery](docs/examples.md); the
+older [examples page](EXAMPLES.md) contains longer notes. For
+installation on Windows, macOS, Ubuntu, and optional runtime tools, see the
+[installation guide](docs/installation.md) and [backend setup guide](docs/backends.md).
+For browser-to-R synchronization, remote desktops, SSH tunnels, and common live
 viewer mistakes such as opening `/viewer-state` instead of the HTML viewer, see
-the dedicated [live viewer guide](LIVE_VIEWER.md). These pages cover
+the dedicated [live viewer guide](docs/live-viewer.md). For known installation,
+backend, and viewer errors, see [troubleshooting](docs/troubleshooting.md).
+These pages cover
 single-image viewing, CZI projects, H&E/mIHC overlays, CellPhenotyper,
 Seurat/Visium PCA, annotation round trips, tile extraction, conversion, and
 troubleshooting.
@@ -37,6 +66,7 @@ remotes::install_github(
 library(wsiTools)
 packageVersion("wsiTools")
 wsi_backends()
+wsi_diagnose(live_test = FALSE)
 ```
 
 The current GitHub package version is `0.1.23`. Avoid installing old commit
@@ -851,7 +881,7 @@ HTTP polling is kept as a fallback.
 
 For detailed instructions, including RStudio, `Rscript`, remote Ubuntu/Firefox,
 SSH tunnel setup, and the difference between the viewer HTML and the
-`/viewer-state` JSON endpoint, read the [live viewer guide](LIVE_VIEWER.md).
+`/viewer-state` JSON endpoint, read the [live viewer guide](docs/live-viewer.md).
 
 Minimal RStudio workflow:
 
