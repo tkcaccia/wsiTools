@@ -3,6 +3,7 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  workflow_dispatch:
 
 name: R-CMD-check
 
@@ -11,11 +12,33 @@ permissions:
 
 jobs:
   R-CMD-check:
-    runs-on: ubuntu-latest
+    name: ${{ matrix.config.os }} (R ${{ matrix.config.r }})
+    runs-on: ${{ matrix.config.os }}
+    continue-on-error: ${{ matrix.config.r == 'devel' }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - { os: ubuntu-latest, r: release }
+          - { os: ubuntu-latest, r: devel }
+          - { os: macos-latest, r: release }
+          - { os: macos-latest, r: devel }
+          - { os: windows-latest, r: release }
+          - { os: windows-latest, r: devel }
 
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
+      NOT_CRAN: false
+      _R_CHECK_FORCE_SUGGESTS_: false
+      # Runtime image/segmentation backends are optional. CI checks that the
+      # package builds and tests cleanly when those tools are absent.
+      WSITOOLS_TEST_SAPC0052_SVS: ""
+      WSITOOLS_CZI_ALLOW_PYTHON: "false"
+      WSITOOLS_STARDIST_COMMAND: ""
+      WSITOOLS_MESMER_COMMAND: ""
+      WSITOOLS_CELLPOSE_COMMAND: ""
 
     steps:
       - uses: actions/checkout@v5
@@ -24,6 +47,7 @@ jobs:
 
       - uses: r-lib/actions/setup-r@v2
         with:
+          r-version: ${{ matrix.config.r }}
           use-public-rspm: true
 
       - uses: r-lib/actions/setup-r-dependencies@v2
@@ -31,6 +55,23 @@ jobs:
           extra-packages: any::rcmdcheck
           needs: check
 
+      - name: Report optional runtime tools
+        shell: Rscript {0}
+        run: |
+          cat("Optional runtime executables on PATH:\n")
+          print(Sys.which(c(
+            "vips",
+            "vipsheader",
+            "openslide-show-properties",
+            "showinf",
+            "bfconvert",
+            "magick",
+            "java"
+          )))
+          cat("\nR session:\n")
+          print(sessionInfo())
+
       - uses: r-lib/actions/check-r-package@v2
         with:
           upload-snapshots: true
+          args: 'c("--no-manual", "--as-cran")'

@@ -1,5 +1,7 @@
 # wsiTools
 
+[![R-CMD-check](https://github.com/tkcaccia/wsiTools/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/tkcaccia/wsiTools/actions/workflows/R-CMD-check.yaml)
+
 wsiTools is an R toolkit for memory-efficient WSI access and preprocessing
 through region-based reading, tiling, pyramidal image handling, conversion and
 export.
