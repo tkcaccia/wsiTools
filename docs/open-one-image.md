@@ -4,6 +4,13 @@ This is the shortest practical workflow for opening one whole-slide image in
 wsiTools. It uses live tiled viewing so the browser can request image tiles
 without loading the full slide into R memory.
 
+No image file yet? Run:
+
+```r
+demo <- wsi_demo_viewer(open = TRUE)
+demo$path
+```
+
 ## Minimal Live Viewer
 
 ```r

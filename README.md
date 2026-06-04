@@ -21,6 +21,13 @@ slide <- wsi_open("sample.svs")
 wsi_viewer(slide)
 ```
 
+No sample slide yet? Run the lightweight built-in demo:
+
+```r
+demo <- wsi_demo_viewer(open = TRUE)
+demo$path
+```
+
 - Static viewer: writes an HTML viewer, but does not send automatic feedback
   back to R.
 - Live viewer: opens a browser connected to the active R session through

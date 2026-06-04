@@ -227,6 +227,13 @@ wsi_setup_report()
 wsi_diagnose(live_test = FALSE)
 ```
 
+If you do not have a slide yet, test the UI with the built-in synthetic demo:
+
+```r
+demo <- wsi_demo_viewer(open = TRUE)
+demo$path
+```
+
 Then test one image:
 
 ```r

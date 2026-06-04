@@ -13,6 +13,31 @@ wsi_backends()
 wsi_setup_report()
 ```
 
+## Open The Built-In Demo
+
+Use this when you do not have an SVS, CZI, OME-TIFF, Seurat object, or
+CellPhenotyper project available yet:
+
+```r
+library(wsiTools)
+
+demo <- wsi_demo_viewer(open = TRUE)
+
+demo$path
+demo$viewer
+demo$files
+```
+
+The generated demo directory contains:
+
+- mock slide metadata;
+- a tiny PNG and tiny TIFF;
+- fake ROI GeoJSON;
+- fake cell centroids CSV;
+- fake tile grid CSV;
+- fake spatial spots, expression, and PCA files;
+- an HTML viewer with annotations, cells, and spatial spots.
+
 ## Open SVS
 
 ```r
