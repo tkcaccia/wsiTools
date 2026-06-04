@@ -13,6 +13,7 @@ wsi_viewer(
   title = NULL,
   overwrite = FALSE,
   mode = c("thumbnail", "tiles"),
+  tiled = NULL,
   tile_dir = NULL,
   tile_size = 512,
   tile_format = c("jpg", "png"),
@@ -74,6 +75,9 @@ wsi_viewer(
 
 \item{mode}{Viewer mode. Use \code{"thumbnail"} for a small self-contained
 preview or \code{"tiles"} for a full-resolution Deep Zoom viewer.}
+
+\item{tiled}{Optional logical shortcut for \code{mode = "tiles"} when \code{TRUE} and
+\code{mode = "thumbnail"} when \code{FALSE}.}
 
 \item{tile_dir}{Directory for Deep Zoom files when \code{mode = "tiles"}.}
 

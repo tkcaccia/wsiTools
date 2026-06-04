@@ -1,8 +1,9 @@
 # Open One Image
 
 This is the shortest practical workflow for opening one whole-slide image in
-wsiTools. It uses live tiled viewing so the browser can request image tiles
-without loading the full slide into R memory.
+wsiTools. The friendly entry point chooses the backend, static/live viewer,
+tiled/thumbnail mode, and browser launch behavior without loading the full
+slide into R memory.
 
 No image file yet? Run:
 
@@ -11,11 +12,37 @@ demo <- wsi_demo_viewer(open = TRUE)
 demo$path
 ```
 
-## Minimal Live Viewer
+## Minimal Viewer
 
 ```r
 library(wsiTools)
 
+viewer <- wsi_open_viewer("/path/to/image.svs")
+```
+
+If live mode is available, this returns a `wsi_viewer_session`. If live mode is
+not available, it returns the static HTML viewer path.
+
+For a static viewer only:
+
+```r
+html <- wsi_open_viewer(
+  "/path/to/image.svs",
+  live = "no",
+  open = TRUE
+)
+```
+
+If the live viewer prints a `http://127.0.0.1:<port>` URL, open that viewer URL.
+Do not open `/viewer-state` directly; that endpoint is for browser-to-R
+synchronization, not for viewing the slide.
+
+## Manual Control
+
+Use the lower-level functions when you want to keep explicit control of the
+slide object:
+
+```r
 slide <- wsi_open("/path/to/image.svs")
 
 viewer <- wsi_viewer_live(
@@ -25,10 +52,6 @@ viewer <- wsi_viewer_live(
 
 viewer$open()
 ```
-
-Open the `http://127.0.0.1:<port>` URL printed by R. Do not open
-`/viewer-state` directly; that endpoint is for browser-to-R synchronization,
-not for viewing the slide.
 
 ## Check Metadata
 
@@ -78,9 +101,7 @@ viewer$open()
 If you closed the slide object, reopen it from the file path:
 
 ```r
-slide <- wsi_open("/path/to/image.svs")
-viewer <- wsi_viewer_live(slide, tiled = TRUE)
-viewer$open()
+viewer <- wsi_open_viewer("/path/to/image.svs")
 ```
 
 ## Static Viewer

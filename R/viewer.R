@@ -3267,6 +3267,8 @@ wsi_tiled_viewer_html <- function(config) {
 #' @param overwrite Whether to overwrite `output` when it already exists.
 #' @param mode Viewer mode. Use `"thumbnail"` for a small self-contained
 #'   preview or `"tiles"` for a full-resolution Deep Zoom viewer.
+#' @param tiled Optional logical shortcut for `mode = "tiles"` when `TRUE` and
+#'   `mode = "thumbnail"` when `FALSE`.
 #' @param tile_dir Directory for Deep Zoom files when `mode = "tiles"`.
 #' @param tile_size Deep Zoom tile size in pixels.
 #' @param tile_format Tile image format for `mode = "tiles"`.
@@ -3363,7 +3365,8 @@ wsi_tiled_viewer_html <- function(config) {
 #' }
 wsi_viewer <- function(slide, width = 1600, height = NULL, output = NULL,
                        open = interactive(), title = NULL, overwrite = FALSE,
-                       mode = c("thumbnail", "tiles"), tile_dir = NULL,
+                       mode = c("thumbnail", "tiles"), tiled = NULL,
+                       tile_dir = NULL,
                        tile_size = 512, tile_format = c("jpg", "png"),
                        quality = 90, rebuild = FALSE,
                        tile_overlap = NULL,
@@ -3406,6 +3409,13 @@ wsi_viewer <- function(slide, width = 1600, height = NULL, output = NULL,
   wsi_check_slide(slide)
   mode_missing <- missing(mode)
   mode <- match.arg(mode)
+  if (!is.null(tiled)) {
+    if (!is.logical(tiled) || length(tiled) != 1L || is.na(tiled)) {
+      wsi_abort("`tiled` must be `NULL`, `TRUE`, or `FALSE`.")
+    }
+    mode <- if (isTRUE(tiled)) "tiles" else "thumbnail"
+    mode_missing <- FALSE
+  }
   tile_format <- match.arg(tile_format)
   tile_url_style <- match.arg(tile_url_style)
   viewer_transport <- match.arg(viewer_transport)

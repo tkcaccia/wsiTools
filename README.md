@@ -62,8 +62,7 @@ library(wsiTools)
 wsi_start()
 wsi_backends()
 
-slide <- wsi_open("sample.svs")
-wsi_viewer(slide)
+viewer <- wsi_open_viewer("sample.svs")
 ```
 
 No sample slide yet? Run the lightweight built-in demo:

@@ -73,19 +73,13 @@ The generated demo directory contains:
 ```r
 library(wsiTools)
 
-slide <- wsi_open("/path/to/sample.svs")
-
-viewer <- wsi_viewer_live(
-  slide,
-  tiled = TRUE
-)
-
-viewer$open()
+viewer <- wsi_open_viewer("/path/to/sample.svs")
 ```
 
 Inspect metadata:
 
 ```r
+slide <- wsi_open("/path/to/sample.svs")
 wsi_info(slide)
 wsi_levels(slide)
 wsi_mpp(slide)

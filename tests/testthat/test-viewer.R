@@ -19,6 +19,49 @@ wsi_skip_if_no_httpuv_server <- function(port = 8788L) {
   skip(sprintf("httpuv cannot start a local test server: %s", last_error))
 }
 
+test_that("wsi_open_viewer opens a static viewer with one command", {
+  slide <- wsiTools:::wsi_mock_slide(width = 800, height = 400, levels = c(1, 4))
+  output <- tempfile(fileext = ".html")
+
+  result <- wsi_open_viewer(
+    slide,
+    live = "no",
+    open = FALSE,
+    output = output,
+    quiet = TRUE
+  )
+
+  expect_identical(result, normalizePath(output, winslash = "/", mustWork = FALSE))
+  expect_true(file.exists(output))
+  html <- paste(readLines(output, warn = FALSE), collapse = "\n")
+  expect_match(html, "wsiTools viewer", fixed = TRUE)
+  expect_match(html, "thumbnail preview, full slide not loaded into R", fixed = TRUE)
+})
+
+test_that("wsi_open_viewer accepts friendly flag aliases", {
+  expect_equal(wsiTools:::wsi_open_viewer_flag(TRUE, "live"), "yes")
+  expect_equal(wsiTools:::wsi_open_viewer_flag(FALSE, "live"), "no")
+  expect_equal(wsiTools:::wsi_open_viewer_flag("static", "live", no_alias = "static"), "no")
+  expect_equal(wsiTools:::wsi_open_viewer_flag("tiles", "tiled", yes_alias = "tiles"), "yes")
+})
+
+test_that("wsi_viewer accepts tiled as a logical mode shortcut", {
+  slide <- wsiTools:::wsi_mock_slide(width = 800, height = 400, levels = c(1, 4))
+  output <- tempfile(fileext = ".html")
+
+  wsi_viewer(slide, output = output, open = FALSE, tiled = FALSE)
+
+  html <- paste(readLines(output, warn = FALSE), collapse = "\n")
+  expect_match(html, '"viewer_mode":"thumbnail"', fixed = TRUE)
+})
+
+test_that("wsi_open_viewer explains missing httpuv for forced live mode", {
+  expect_error(
+    wsiTools:::wsi_open_viewer_use_live("yes", httpuv_ready = FALSE),
+    "install.packages\\(\"httpuv\"\\)"
+  )
+})
+
 test_that("interactive viewer writes a self-contained HTML file for mock slides", {
   slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 500, levels = c(1, 4))
   output <- tempfile(fileext = ".html")

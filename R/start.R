@@ -88,15 +88,12 @@ wsi_start_next_command <- function(backends, live_viewer) {
 
   if (isTRUE(live_can_start)) {
     return(c(
-      "slide <- wsi_open(\"/path/to/slide.svs\")",
-      "viewer <- wsi_viewer_live(slide, tiled = TRUE)",
-      "viewer$open()"
+      "viewer <- wsi_open_viewer(\"/path/to/slide.svs\")"
     ))
   }
 
   c(
-    "slide <- wsi_open(\"/path/to/slide.svs\")",
-    "wsi_viewer(slide)"
+    "html <- wsi_open_viewer(\"/path/to/slide.svs\", live = \"no\")"
   )
 }
 
