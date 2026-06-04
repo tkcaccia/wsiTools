@@ -9,6 +9,20 @@ backend metadata, pyramid levels, explicit region reads, tile manifests, and
 streaming conversion. It does not load complete level-0 slides into R memory by
 default.
 
+## What wsiTools is / is not
+
+wsiTools is:
+
+- an R toolkit for memory-efficient WSI access and preprocessing;
+- a live R-connected pathology viewer;
+- a bridge between WSI, annotations, spatial omics, and CellPhenotyper.
+
+wsiTools is not:
+
+- a package that loads whole-slide images fully into R memory;
+- a replacement for all QuPath functionality;
+- a package that bundles every external backend automatically.
+
 ## Start here
 
 ```r
