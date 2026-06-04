@@ -81,12 +81,15 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "Navigation controls", fixed = TRUE)
   expect_match(html, "screenshotTool", fixed = TRUE)
   expect_match(html, "Select screenshot area", fixed = TRUE)
+  expect_match(html, "PNG or SVG screenshot", fixed = TRUE)
   expect_match(html, "zoomIn", fixed = TRUE)
   expect_match(html, "zoomOut", fixed = TRUE)
   expect_match(html, "oneToOne", fixed = TRUE)
   expect_false(grepl("<button id=\"toolSelect\"", html, fixed = TRUE))
   expect_match(html, "toolDraw", fixed = TRUE)
   expect_match(html, "toolBrush", fixed = TRUE)
+  expect_match(html, "setMode('draw');closeMenuAfterToolAction", fixed = TRUE)
+  expect_match(html, "setMode('brush');closeMenuAfterToolAction", fixed = TRUE)
   expect_false(grepl("<button id=\"newRoi\"", html, fixed = TRUE))
   expect_match(html, "toolEdit", fixed = TRUE)
   expect_false(grepl("<button id=\"finishRoi\"", html, fixed = TRUE))
@@ -138,7 +141,20 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "viewerPreferenceKey", fixed = TRUE)
   expect_match(html, "wsiTools.viewer.preferences.v1", fixed = TRUE)
   expect_match(html, "applyViewerPreferences", fixed = TRUE)
-  expect_match(html, "return 'pan';", fixed = TRUE)
+  expect_match(html, "return validToolMode(prefs.tool_mode)||'pan';", fixed = TRUE)
+  expect_match(html, "savePreferences", fixed = TRUE)
+  expect_match(html, "Save prefs", fixed = TRUE)
+  expect_match(html, "saveCurrentViewerPreferences", fixed = TRUE)
+  expect_match(html, "currentViewerPreferencePatch", fixed = TRUE)
+  expect_match(html, "currentAnnotationPreferencePatch", fixed = TRUE)
+  expect_match(html, "currentDisplayPreferencePatch", fixed = TRUE)
+  expect_match(html, "show_rois:!!showRois", fixed = TRUE)
+  expect_match(html, "show_labels:!!showLabels", fixed = TRUE)
+  expect_match(html, "show_crosshair:!!showCrosshair", fixed = TRUE)
+  expect_match(html, "screenshot_format", fixed = TRUE)
+  expect_match(html, "simplify_tolerance", fixed = TRUE)
+  expect_match(html, "trajectory_area_width", fixed = TRUE)
+  expect_match(html, "Viewer preferences saved in this browser", fixed = TRUE)
   expect_match(html, "stableClassColour", fixed = TRUE)
   expect_match(html, "roiClassKey", fixed = TRUE)
   expect_match(html, "annotationIndicesShareClass", fixed = TRUE)
@@ -161,6 +177,7 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_false(grepl("<button id=\"splitRoi\"", html, fixed = TRUE))
   expect_match(html, "startBrush", fixed = TRUE)
   expect_match(html, "finishBrush", fixed = TRUE)
+  expect_match(html, "if(typeof closeAllToolMenus==='function')closeAllToolMenus();draw();return;", fixed = TRUE)
   expect_match(html, "startNewAnnotation", fixed = TRUE)
   expect_match(html, "deselectAnnotation", fixed = TRUE)
   expect_match(html, "pointNearRoi", fixed = TRUE)
@@ -172,9 +189,16 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "Pathology class for the next drawn or painted annotation", fixed = TRUE)
   expect_match(html, "Next class <select id=\"roiClassSelect\"", fixed = TRUE)
   expect_match(html, "Selected class <select id=\"annotationClassSelect\"", fixed = TRUE)
+  expect_match(html, "Selected label <select id=\"selectedRoiClassSelect\"", fixed = TRUE)
+  expect_match(html, "Apply selected label", fixed = TRUE)
   expect_match(html, "Set next class", fixed = TRUE)
   expect_match(html, "Next annotation class:", fixed = TRUE)
+  expect_match(html, "Click Apply to relabel selected annotation", fixed = TRUE)
   expect_match(html, "setRoiNameForClassAssignment", fixed = TRUE)
+  expect_match(html, "selectedRoiRelabelClassValue", fixed = TRUE)
+  expect_match(html, "applySelectedRoiLabelSwap", fixed = TRUE)
+  expect_match(html, "roi_label_updated", fixed = TRUE)
+  expect_match(html, "Annotation label changed:", fixed = TRUE)
   expect_match(html, "annotationNameLooksAutomatic", fixed = TRUE)
   expect_match(html, "automatic_name:!!roi.automatic_name", fixed = TRUE)
   expect_match(html, "nextRoiNameDirty=false", fixed = TRUE)
@@ -363,6 +387,10 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "setMultiViewLayout", fixed = TRUE)
   expect_match(html, "shortcutHelp", fixed = TRUE)
   expect_match(html, "Viewer Help", fixed = TRUE)
+  expect_match(html, "shortcutHelpTabs", fixed = TRUE)
+  expect_match(html, "role=\"tablist\"", fixed = TRUE)
+  expect_match(html, "shortcutHelpTabKeyboard", fixed = TRUE)
+  expect_match(html, "shortcutHelpTabFull", fixed = TRUE)
   expect_match(html, "Quick Recommendations", fixed = TRUE)
   expect_match(html, "Full Guide", fixed = TRUE)
   expect_match(html, "Keyboard Shortcuts", fixed = TRUE)
@@ -384,6 +412,11 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "helpQuickRecommendations", fixed = TRUE)
   expect_match(html, "helpFullGuide", fixed = TRUE)
   expect_match(html, "helpKeyboardShortcuts", fixed = TRUE)
+  expect_match(html, "setShortcutHelpSection", fixed = TRUE)
+  expect_match(html, "part.hidden=!show", fixed = TRUE)
+  expect_match(html, "sectionId==='helpFullGuide'&&id==='helpQuickRecommendations'", fixed = TRUE)
+  expect_match(html, "Keyboard shortcuts only", fixed = TRUE)
+  expect_match(html, "Full viewer guide and quick recommendations", fixed = TRUE)
   expect_match(html, "openShortcutHelp('helpKeyboardShortcuts')", fixed = TRUE)
   expect_match(html, "openShortcutHelp('helpFullGuide')", fixed = TRUE)
   expect_match(html, "quickRecommendationList", fixed = TRUE)
@@ -516,6 +549,7 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "Measure", fixed = TRUE)
   expect_match(html, "toolMeasure", fixed = TRUE)
   expect_match(html, "clearMeasures", fixed = TRUE)
+  expect_match(html, "setMode('measure');closeMenuAfterToolAction", fixed = TRUE)
   expect_match(html, "measureSummary", fixed = TRUE)
   expect_match(html, "measureList", fixed = TRUE)
   expect_match(html, "measurePixelSize", fixed = TRUE)
@@ -525,6 +559,7 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "Trajectories", fixed = TRUE)
   expect_match(html, "toolTrajectory", fixed = TRUE)
   expect_match(html, "finishTrajectory", fixed = TRUE)
+  expect_match(html, "finishTrajectory(true);closeMenuAfterToolAction", fixed = TRUE)
   expect_match(html, "saved; trajectory drawing off", fixed = TRUE)
   expect_match(html, "if(e.detail===1)addTrajectoryPoint", fixed = TRUE)
   expect_match(html, "returns to pan mode", fixed = TRUE)
@@ -558,7 +593,8 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "drawTrajectories", fixed = TRUE)
   expect_match(html, "bindTrajectoryControls", fixed = TRUE)
   expect_match(html, "Project", fixed = TRUE)
-  expect_match(html, "projectOpenPanel", fixed = TRUE)
+  expect_false(grepl("projectOpenPanel", html, fixed = TRUE))
+  expect_match(html, "projectPanelToggle", fixed = TRUE)
   expect_match(html, "projectOpenImage", fixed = TRUE)
   expect_match(html, "Add image", fixed = TRUE)
   expect_match(html, "add_project_image", fixed = TRUE)
@@ -627,10 +663,31 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "bindImageTransformControls", fixed = TRUE)
   expect_match(html, "beginScreenshotMode", fixed = TRUE)
   expect_match(html, "drawScreenshotSelection", fixed = TRUE)
+  expect_match(html, "screenshotFormat", fixed = TRUE)
+  expect_match(html, "saveScreenshot", fixed = TRUE)
   expect_match(html, "saveScreenshotPng", fixed = TRUE)
+  expect_match(html, "svgBlobFromCanvas", fixed = TRUE)
+  expect_match(html, "screenshotBlobFromCanvas", fixed = TRUE)
+  expect_match(html, "screenshotOsdInternalCanvases", fixed = TRUE)
+  expect_match(html, "screenshotBaseElements", fixed = TRUE)
+  expect_match(html, "drawPreviewBaseIntoScreenshot", fixed = TRUE)
+  expect_match(html, "_wsiScreenshotBaseIncluded", fixed = TRUE)
+  expect_match(html, "_wsiScreenshotPreviewFallback", fixed = TRUE)
+  expect_match(html, "using preview-resolution tissue plus overlays", fixed = TRUE)
+  expect_match(html, "tissue image could not be captured", fixed = TRUE)
   expect_match(html, "canvasIsReadable", fixed = TRUE)
-  expect_match(html, "Screenshot saved without base image", fixed = TRUE)
+  expect_match(html, "without base image", fixed = TRUE)
   expect_match(html, "image/png", fixed = TRUE)
+  expect_match(html, "image/svg+xml", fixed = TRUE)
+  expect_match(html, ".svg", fixed = TRUE)
+  expect_match(html, "Screenshot saved as '+label", fixed = TRUE)
+  expect_match(html, "exportImageRegion", fixed = TRUE)
+  expect_match(html, "imageExportUrl", fixed = TRUE)
+  expect_match(html, "exportViewTiff", fixed = TRUE)
+  expect_match(html, "exportSelectedRoiTiff", fixed = TRUE)
+  expect_match(html, "Save view TIFF", fixed = TRUE)
+  expect_match(html, "Save ROI TIFF", fixed = TRUE)
+  expect_match(html, "TIFF export needs a live R viewer", fixed = TRUE)
   expect_match(html, "mpp", fixed = TRUE)
   expect_match(html, "id=\"scaleBar\"", fixed = TRUE)
   expect_match(html, "Micron scale bar", fixed = TRUE)
@@ -740,6 +797,8 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "selectedRoiAreaValue", fixed = TRUE)
   expect_match(html, "annotationNameInput", fixed = TRUE)
   expect_match(html, "annotationClassSelect", fixed = TRUE)
+  expect_match(html, "selectedRoiClassSelect", fixed = TRUE)
+  expect_match(html, "applySelectedRoiLabel", fixed = TRUE)
   expect_match(html, "annotationColorInput", fixed = TRUE)
   expect_match(html, "annotationVisible", fixed = TRUE)
   expect_match(html, "annotationLock", fixed = TRUE)
@@ -764,6 +823,9 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_false(grepl("content:'v'", html, fixed = TRUE))
   expect_match(html, "border-right:1.6px solid", fixed = TRUE)
   expect_match(html, ".toolMenu[open] summary::after", fixed = TRUE)
+  expect_match(html, "closeAllToolMenus", fixed = TRUE)
+  expect_match(html, "document.querySelectorAll('.toolMenu[open]')", fixed = TRUE)
+  expect_match(html, "closeMenuAfterToolAction", fixed = TRUE)
   expect_match(html, "bindExclusiveMenus", fixed = TRUE)
   expect_match(html, "syncViewerState", fixed = TRUE)
   expect_match(html, "scheduleViewerStateSync", fixed = TRUE)
@@ -791,6 +853,7 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "R sync", fixed = TRUE)
   expect_match(html, "querySelectorAll('.toolMenu')", fixed = TRUE)
   expect_match(html, "closeOtherMenus", fixed = TRUE)
+  expect_match(html, "setTimeout(closeAllToolMenus,0)", fixed = TRUE)
   expect_match(html, "pointerdown", fixed = TRUE)
   expect_match(html, "closest('.toolMenu')", fixed = TRUE)
   expect_match(html, "menu!==active", fixed = TRUE)
@@ -970,12 +1033,14 @@ test_that("interactive viewer can be configured with a live R state endpoint", {
     width = 256,
     output = output,
     open = FALSE,
-    viewer_state_url = "http://127.0.0.1:8788/viewer-state"
+    viewer_state_url = "http://127.0.0.1:8788/viewer-state",
+    image_export_url = "http://127.0.0.1:8788/image-export"
   )
 
   expect_identical(result, output)
   html <- paste(readLines(output, warn = FALSE), collapse = "\n")
   expect_match(html, "http://127.0.0.1:8788/viewer-state", fixed = TRUE)
+  expect_match(html, "http://127.0.0.1:8788/image-export", fixed = TRUE)
   expect_match(html, "viewerStatePayload", fixed = TRUE)
   expect_match(html, "roiGeojsonObject", fixed = TRUE)
   expect_match(html, "measurements:measures", fixed = TRUE)
@@ -1001,6 +1066,21 @@ test_that("interactive viewer can be configured with a live R state endpoint", {
   expect_match(html, "measurement_added", fixed = TRUE)
   expect_match(html, "segmentation_added", fixed = TRUE)
   expect_match(html, "annotationHistory", fixed = TRUE)
+  expect_match(html, "historyPanelToggle", fixed = TRUE)
+  expect_match(html, "historyPanelMinimizeState", fixed = TRUE)
+  expect_match(html, "historyPanelIsClosed", fixed = TRUE)
+  expect_match(html, "ensureHistoryWorkspaceVisible", fixed = TRUE)
+  expect_match(html, "openHistoryPanel", fixed = TRUE)
+  expect_match(html, "closeHistoryPanel", fixed = TRUE)
+  expect_match(html, "panel.style.display=closed?'none':''", fixed = TRUE)
+  expect_match(html, "viewerLogPanelToggle", fixed = TRUE)
+  expect_match(html, "Troubleshooting logs", fixed = TRUE)
+  expect_match(html, "downloadViewerLogFile", fixed = TRUE)
+  expect_match(html, "copyViewerLogText", fixed = TRUE)
+  expect_match(html, "viewerLogPayload", fixed = TRUE)
+  expect_match(html, "bindViewerLogCapture", fixed = TRUE)
+  expect_match(html, "window.addEventListener('unhandledrejection'", fixed = TRUE)
+  expect_match(html, "logs:(typeof viewerLogPayload==='function'?viewerLogPayload():[])", fixed = TRUE)
   expect_match(html, "maximizeAnnotationHistory", fixed = TRUE)
   expect_match(html, "annotationSectionBackdrop", fixed = TRUE)
   expect_match(html, "setAnnotationSectionMaximized", fixed = TRUE)
@@ -1012,6 +1092,40 @@ test_that("interactive viewer can be configured with a live R state endpoint", {
   expect_match(html, "Brush subtract", fixed = TRUE)
   expect_match(html, "Imported GeoJSON", fixed = TRUE)
   expect_match(html, "Imported cell segmentation", fixed = TRUE)
+})
+
+test_that("live viewer image export payloads are validated", {
+  slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 500, levels = c(1, 4))
+  payload <- list(
+    scope = "selected_roi",
+    format = "tiff",
+    region = list(x = 10, y = 20, width = 128, height = 64, level = 0)
+  )
+
+  region <- wsiTools:::wsi_viewer_image_export_region(payload, slide)
+  expect_equal(region$x, 10L)
+  expect_equal(region$y, 20L)
+  expect_equal(region$width, 128L)
+  expect_equal(region$height, 64L)
+  expect_equal(region$level, 0L)
+  expect_match(
+    wsiTools:::wsi_viewer_image_export_filename(payload, image_format = "tiff", scope = "selected_roi"),
+    "[.]tif$"
+  )
+  expect_error(
+    wsiTools:::wsi_viewer_image_export_region(c(payload, list(code = "rm -rf /")), slide),
+    "Unsupported image export field"
+  )
+  expect_error(
+    wsiTools:::wsi_viewer_image_export_response(
+      slide,
+      payload,
+      output_dir = tempdir(),
+      max_pixels = 100
+    ),
+    "too large",
+    class = "wsi_error"
+  )
 })
 
 test_that("live viewer sessions expose R-native helper methods and command queue", {
@@ -1049,6 +1163,7 @@ test_that("live viewer sessions expose R-native helper methods and command queue
   expect_true(is.function(session$get_layers))
   expect_true(is.function(session$get_annotation_spots))
   expect_true(is.function(session$get_history))
+  expect_true(is.function(session$get_logs))
   expect_true(is.function(session$get_tile_preview))
   expect_true(is.function(session$list_layers))
   expect_true(is.function(session$on))
@@ -1341,6 +1456,7 @@ test_that("live viewer state validates events and payload fields strictly", {
     view = list(mode = "pan"),
     annotations = list(dirty = FALSE),
     history = list(),
+    logs = list(),
     detail = list()
   )
 
@@ -1463,6 +1579,14 @@ test_that("live viewer state payloads update R objects", {
       label = "Created ROI",
       detail = list(id = "roi-1", name = "Tumour region")
     )),
+    logs = list(list(
+      id = "log_1",
+      time = "2026-05-18T12:00:02Z",
+      level = "warning",
+      message = "Tiles did not load",
+      source = "toast",
+      detail = list(timeout = 7200)
+    )),
     stain = list(enabled = FALSE),
     annotation_spots = list(list(
       annotation_index = 1,
@@ -1499,6 +1623,10 @@ test_that("live viewer state payloads update R objects", {
   expect_s3_class(snapshot$history, "data.frame")
   expect_equal(snapshot$history$label, "Created ROI")
   expect_equal(snapshot$history$detail[[1]]$id, "roi-1")
+  expect_s3_class(snapshot$logs, "wsi_viewer_logs")
+  expect_equal(snapshot$logs$level, "warning")
+  expect_equal(snapshot$logs$message, "Tiles did not load")
+  expect_equal(snapshot$logs$detail[[1]]$timeout, 7200)
   expect_s3_class(snapshot$annotation_spots, "wsi_annotation_spots")
   expect_equal(snapshot$annotation_spots$annotation_id, "roi-1")
   expect_equal(snapshot$annotation_spots$spot_id, "AAAC-1")
@@ -1525,6 +1653,8 @@ test_that("live viewer state payloads update R objects", {
   expect_s3_class(env$live_cell_summary, "data.frame")
   expect_s3_class(env$live_class_summary, "data.frame")
   expect_equal(env$live_history$action, "roi_added")
+  expect_s3_class(env$live_logs, "wsi_viewer_logs")
+  expect_equal(env$live_logs$message, "Tiles did not load")
   expect_s3_class(env$live_annotation_spots, "wsi_annotation_spots")
   expect_equal(env$live_annotation_spots$spot_label, "AAAC-1")
   expect_equal(env$live_last_event$event, "roi_added")
@@ -1924,6 +2054,7 @@ test_that("live viewer can use dynamic tiles with polling transport", {
   expect_equal(session$transport, "polling")
   expect_false(grepl(session$ws_url, html, fixed = TRUE))
   expect_match(html, "/tiles/wsi_viewer_live_state/{level}/{x}/{y}.{format}", fixed = TRUE)
+  expect_match(html, "/image-export", fixed = TRUE)
   expect_match(html, "dynamic tile server", fixed = TRUE)
   expect_true(dir.exists(cache_dir))
 
@@ -1966,7 +2097,8 @@ test_that("viewer event validation allowlists live WebSocket events", {
     "segmentation_started", "segmentation_progress",
     "segmentation_finished", "job_status", "project_image_reordered",
     "project_image_closed", "grandqc_loaded", "grandqc_cleared",
-    "kodama_cells_selected", "seurat_cluster_coloured"
+    "kodama_cells_selected", "seurat_cluster_coloured",
+    "viewer_log_updated", "viewer_log_cleared", "viewer_log_exported"
   )
 
   expect_true(all(expected %in% wsiTools:::wsi_viewer_allowed_events()))
@@ -2257,11 +2389,19 @@ test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
   expect_match(html, "multiViewPaneLabel", fixed = TRUE)
   expect_match(html, "multiViewAssignments", fixed = TRUE)
   expect_match(html, "multiViewProjectEntryKey", fixed = TRUE)
+  expect_match(html, "multiViewEntryFromPayload", fixed = TRUE)
+  expect_match(html, "entries.find(entry=>entry.itemIndex===itemIndex)", fixed = TRUE)
   expect_match(html, "bindMultiViewPaneDrop", fixed = TRUE)
+  expect_match(html, "multiViewDroppedFiles", fixed = TRUE)
+  expect_match(html, "multiViewReadableFile", fixed = TRUE)
+  expect_match(html, "loadMultiViewDroppedFile", fixed = TRUE)
+  expect_match(html, "addProjectImageDataUri(dataUri,file.name,img.naturalWidth,img.naturalHeight,{activate:false,apply:false})", fixed = TRUE)
   expect_match(html, "replaceMultiViewPane", fixed = TRUE)
+  expect_match(html, "refreshOpenedMultiViewPane", fixed = TRUE)
   expect_match(html, "multi_view_pane_replaced", fixed = TRUE)
   expect_match(html, "layoutCustom", fixed = TRUE)
   expect_match(html, "projectEntryDragPayload", fixed = TRUE)
+  expect_match(html, "projectDragSectionIndex", fixed = TRUE)
   expect_match(html, "bindProjectSectionDrag", fixed = TRUE)
   expect_match(html, "syncMultiViewFrom", fixed = TRUE)
   expect_match(html, "multi_view_layout_updated", fixed = TRUE)

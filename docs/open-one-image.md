@@ -122,6 +122,27 @@ Static viewers are convenient for sharing or simple inspection. They do not
 push annotations, selections, measurements, or viewer state back to R
 automatically. For more detail, see the [live viewer guide](live-viewer.md).
 
+## Export A TIFF Crop
+
+In a live viewer, use **View > Save view TIFF** to export the visible slide
+region, or **Annotations > Save ROI TIFF** to export the selected annotation
+bounding box. These exports are written by R in the R working directory unless
+you enter another output directory in the viewer.
+
+For scripted workflows, use the same backend export directly:
+
+```r
+wsi_export_region(
+  slide,
+  x = 10000,
+  y = 20000,
+  width = 2048,
+  height = 2048,
+  output = "region.tif",
+  format = "tiff"
+)
+```
+
 ## Export Tiles
 
 Generate a tile grid without reading tiles:

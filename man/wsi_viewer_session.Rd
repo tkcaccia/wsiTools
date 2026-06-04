@@ -21,6 +21,9 @@ wsi_viewer_session(
   dynamic_tile_path = "/tiles",
   seurat_gene_path = "/seurat-gene",
   spatial_tile_path = "/spatial-tiles",
+  image_export_path = "/image-export",
+  image_export_dir = getwd(),
+  image_export_max_pixels = 5e+07,
   prediction_path = "/prediction",
   prediction_context = NULL,
   proximity_path = "/proximity",
@@ -79,6 +82,9 @@ wsi_viewer_live(
   dynamic_tile_path = "/tiles",
   seurat_gene_path = "/seurat-gene",
   spatial_tile_path = "/spatial-tiles",
+  image_export_path = "/image-export",
+  image_export_dir = getwd(),
+  image_export_max_pixels = 5e+07,
   prediction_path = "/prediction",
   prediction_context = NULL,
   proximity_path = "/proximity",
@@ -131,7 +137,7 @@ objects named \verb{<name>_rois}, \verb{<name>_measurements},
 \verb{<name>_roi_summary}, \verb{<name>_cell_summary}, \verb{<name>_class_summary},
 \verb{<name>_ihc_summary}, \verb{<name>_ihc_class_summary},
 \verb{<name>_segmentation}, \verb{<name>_layers}, \verb{<name>_selected_roi},
-\verb{<name>_selected_rois}, \verb{<name>_selected_object}, \verb{<name>_history}, \verb{<name>_tile_preview},
+\verb{<name>_selected_rois}, \verb{<name>_selected_object}, \verb{<name>_history}, \verb{<name>_logs}, \verb{<name>_tile_preview},
 \verb{<name>_last_segmentation}, and \verb{<name>_last_event} are refreshed after
 every browser sync or R-side measurement update.}
 
@@ -158,6 +164,11 @@ retrieve one gene at a time from the active R session.}
 
 \item{spatial_tile_path}{Local HTTP route used by live Seurat, Giotto, and
 SpatialExperiment viewers to export spot-centered image tiles from R.}
+
+\item{image_export_path, image_export_dir, image_export_max_pixels}{Local HTTP
+route, default output directory, and maximum region size for viewer image
+export. The viewer can export the visible viewport or selected annotation
+bounding box as PNG/JPEG/TIFF through R.}
 
 \item{prediction_path}{Local HTTP route used by live spatial and
 CellPhenotyper viewers to run optional \code{fastPLS} PLS-LDA prediction from
@@ -228,7 +239,7 @@ methods:
 \code{on()}, \code{off()}, \code{list_callbacks()}, \code{get_state()}, \code{get_rois()}, \code{get_selected_roi()}, \code{get_selected_rois()},
 \code{get_selected_object()}, \code{get_selected_spots()}, \code{get_spot_annotation_table()}, \code{get_measurements()}, \code{get_roi_summary()}, \code{get_cell_summary()},
 \code{get_class_summary()}, \code{get_ihc_summary()}, \code{get_ihc_class_summary()},
-\code{get_segmentation()}, \code{get_layers()}, \code{get_annotation_spots()}, \code{get_history()}, \code{get_tile_preview()}, \code{get_prediction()}, \code{get_proximity()},
+\code{get_segmentation()}, \code{get_layers()}, \code{get_annotation_spots()}, \code{get_history()}, \code{get_logs()}, \code{get_tile_preview()}, \code{get_prediction()}, \code{get_proximity()},
 \code{list_layers()}, \code{get_events()}, \code{add_rois()}, \code{add_segmentation()},
 \code{add_layer()}, \code{set_layer_visible()}, \code{remove_layer()},
 \code{colour_spots_by_gene()}, \code{measure_ihc_intensity()},
@@ -248,7 +259,7 @@ such as \code{capabilities()}, \code{get_rois()}, \code{get_selected_roi()}, \co
 \code{get_selected_object()}, \code{get_selected_spots()}, \code{get_spot_annotation_table()},
 \code{get_measurements()}, \code{get_roi_summary()}, \code{get_cell_summary()}, \code{get_class_summary()},
 \code{get_ihc_summary()}, \code{get_ihc_class_summary()}, \code{get_segmentation()},
-\code{get_layers()}, \code{get_annotation_spots()}, \code{get_history()}, \code{get_tile_preview()}, \code{get_prediction()}, \code{get_proximity()},
+\code{get_layers()}, \code{get_annotation_spots()}, \code{get_history()}, \code{get_logs()}, \code{get_tile_preview()}, \code{get_prediction()}, \code{get_proximity()},
 \code{colour_spots_by_gene()}, \code{add_rois()}, \code{add_segmentation()}, \code{measure_ihc_intensity()},
 \code{add_layer()}, \code{set_layer_visible()}, \code{preview_tiles()},
 \code{extract_tile_preview()}, \code{list_jobs()},
@@ -279,6 +290,7 @@ session$get_class_summary()
 session$get_ihc_summary()
 session$get_layers()
 session$get_history()
+session$get_logs()
 session$save_project("case_001.wsiproject")
 
 # Autosave the viewer state every 5 seconds:

@@ -67,6 +67,7 @@ wsi_new_viewer_state <- function(name = "wsi_viewer_live_state", envir = parent.
   state$annotation_spots <- wsi_empty_annotation_spots()
   state$annotations <- list(dirty = FALSE, dirty_reason = "")
   state$history <- wsi_empty_annotation_history()
+  state$logs <- wsi_empty_viewer_logs()
   state$jobs <- list()
   state$autosave <- list(enabled = FALSE)
   state$events <- list()
@@ -149,6 +150,7 @@ wsi_viewer_allowed_events <- function() {
     "geojson_imported", "class_export_rules_updated",
     "annotations_dirty", "annotations_saved",
     "annotation_history_updated", "annotation_history_cleared",
+    "viewer_log_updated", "viewer_log_cleared", "viewer_log_exported",
     "annotation_spots_exported", "annotation_spots_updated",
     "measurement_added", "measurements_cleared",
     "trajectory_added", "trajectory_deleted", "trajectory_area_created", "trajectory_area_updated",
@@ -186,7 +188,7 @@ wsi_viewer_allowed_payload_fields <- function() {
     "event", "time", "sequence", "slide", "project", "selected_index",
     "selected_roi", "selected_rois", "selected_object", "rois",
     "segmentation", "layers", "measurements", "trajectories",
-    "artifacts", "view", "annotations", "history", "stain",
+    "artifacts", "view", "annotations", "history", "logs", "stain",
     "channel_sources", "channel_settings",
     "tile_sources", "kodama_selection", "seurat_selection",
     "annotation_spots", "detail"
@@ -1105,6 +1107,64 @@ wsi_annotation_history_from_payload <- function(history) {
   out
 }
 
+wsi_empty_viewer_logs <- function() {
+  out <- data.frame(
+    id = character(),
+    time = character(),
+    level = character(),
+    message = character(),
+    source = character(),
+    stringsAsFactors = FALSE
+  )
+  out$detail <- I(list())
+  class(out) <- c("wsi_viewer_logs", class(out))
+  out
+}
+
+wsi_viewer_logs_from_payload <- function(logs) {
+  if (is.null(logs) || !length(logs)) {
+    return(wsi_empty_viewer_logs())
+  }
+  if (is.data.frame(logs)) {
+    out <- as.data.frame(logs, stringsAsFactors = FALSE)
+    for (column in c("id", "time", "level", "message", "source")) {
+      if (!column %in% names(out)) {
+        out[[column]] <- NA_character_
+      }
+      out[[column]] <- as.character(out[[column]])
+    }
+    if (!"detail" %in% names(out)) {
+      out$detail <- I(rep(list(list()), nrow(out)))
+    } else if (!inherits(out$detail, "AsIs")) {
+      out$detail <- I(as.list(out$detail))
+    }
+    out <- out[, c("id", "time", "level", "message", "source", "detail"), drop = FALSE]
+    class(out) <- c("wsi_viewer_logs", setdiff(class(out), "wsi_viewer_logs"))
+    return(out)
+  }
+  entries <- if (is.list(logs)) logs else as.list(logs)
+  rows <- lapply(seq_along(entries), function(i) {
+    entry <- entries[[i]]
+    if (!is.list(entry)) {
+      entry <- list(message = as.character(entry))
+    }
+    data.frame(
+      id = as.character(entry$id %||% sprintf("log_%d", i)),
+      time = as.character(entry$time %||% NA_character_),
+      level = as.character(entry$level %||% "info"),
+      message = as.character(entry$message %||% ""),
+      source = as.character(entry$source %||% "viewer"),
+      stringsAsFactors = FALSE
+    )
+  })
+  out <- do.call(rbind, rows)
+  out$detail <- I(lapply(entries, function(entry) {
+    if (is.list(entry)) entry$detail %||% list() else list()
+  }))
+  class(out) <- c("wsi_viewer_logs", class(out))
+  out
+}
+
 wsi_empty_annotation_spots <- function() {
   out <- data.frame(
     annotation_index = integer(),
@@ -1357,6 +1417,7 @@ wsi_assign_viewer_state <- function(state) {
   assign(paste0(name, "_proximity"), state$proximity %||% wsi_empty_proximity_result(), envir = envir)
   assign(paste0(name, "_annotations"), state$annotations, envir = envir)
   assign(paste0(name, "_history"), state$history, envir = envir)
+  assign(paste0(name, "_logs"), state$logs %||% wsi_empty_viewer_logs(), envir = envir)
   assign(paste0(name, "_autosave"), wsi_viewer_autosave_status(state), envir = envir)
   assign(paste0(name, "_jobs"), wsi_viewer_jobs_table(state$jobs), envir = envir)
   assign(paste0(name, "_selected_roi"), state$selected_roi, envir = envir)
@@ -1427,6 +1488,7 @@ wsi_viewer_state_apply <- function(state, payload) {
   state$annotation_spots <- wsi_annotation_spots_from_payload(payload[["annotation_spots", exact = TRUE]])
   state$annotations <- payload[["annotations", exact = TRUE]] %||% list(dirty = FALSE, dirty_reason = "")
   state$history <- wsi_annotation_history_from_payload(payload[["history", exact = TRUE]])
+  state$logs <- wsi_viewer_logs_from_payload(payload[["logs", exact = TRUE]])
   wsi_viewer_update_measurement_tables(state)
   state$last_event <- as.character(payload[["event", exact = TRUE]] %||% "viewer_state")
   if (identical(state$last_event, "prediction_cleared")) {
@@ -1452,6 +1514,7 @@ wsi_viewer_state_apply <- function(state, payload) {
     roi_summary_count = nrow(state$roi_summary),
     cell_summary_count = nrow(state$cell_summary),
     history_count = nrow(state$history),
+    log_count = nrow(state$logs %||% wsi_empty_viewer_logs()),
     annotation_spot_count = nrow(state$annotation_spots %||% wsi_empty_annotation_spots()),
     tile_preview_count = nrow(state$tile_preview %||% wsi_empty_tile_preview()),
     prediction_count = nrow(state$prediction %||% wsi_empty_prediction_result()),
@@ -2599,6 +2662,9 @@ wsi_attach_viewer_session_methods <- function(session) {
   session$get_history <- function(service = TRUE) {
     session$get_state(service = service)$history
   }
+  session$get_logs <- function(service = TRUE) {
+    session$get_state(service = service)$logs
+  }
   session$get_tile_preview <- function(service = TRUE) {
     session$get_state(service = service)$tile_preview
   }
@@ -3289,6 +3355,145 @@ wsi_attach_viewer_session_methods <- function(session) {
   session
 }
 
+wsi_viewer_image_export_region <- function(payload, slide) {
+  if (!is.list(payload)) {
+    wsi_abort("Image export payload must be a JSON object.")
+  }
+  unknown <- setdiff(names(payload), c(
+    "scope", "format", "region", "output_dir", "filename", "overwrite",
+    "selected_roi", "annotation_count", "viewport"
+  ))
+  if (length(unknown)) {
+    wsi_abort(sprintf(
+      "Unsupported image export field%s: %s.",
+      if (length(unknown) == 1L) "" else "s",
+      paste(unknown, collapse = ", ")
+    ))
+  }
+  region <- payload$region %||% NULL
+  if (!is.list(region)) {
+    wsi_abort("Image export requires a `region` object with x, y, width, height, and optional level.")
+  }
+  unknown_region <- setdiff(names(region), c("x", "y", "width", "height", "level"))
+  if (length(unknown_region)) {
+    wsi_abort(sprintf(
+      "Unsupported image export region field%s: %s.",
+      if (length(unknown_region) == 1L) "" else "s",
+      paste(unknown_region, collapse = ", ")
+    ))
+  }
+  level <- region$level %||% 0
+  wsi_validate_region(
+    slide,
+    x = region$x,
+    y = region$y,
+    width = region$width,
+    height = region$height,
+    level = level
+  )
+}
+
+wsi_viewer_image_export_filename <- function(payload, image_format, scope = "viewport") {
+  ext <- wsi_format_extension(image_format)
+  filename <- payload$filename %||% NULL
+  if (is.null(filename) || !is.character(filename) || length(filename) != 1L ||
+      is.na(filename) || !nzchar(trimws(filename))) {
+    stamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+    filename <- sprintf("wsiTools_%s_%s.%s", wsi_safe_id(scope, "export"), stamp, ext)
+  }
+  filename <- basename(trimws(filename))
+  if (!grepl(sprintf("\\.%s$", ext), filename, ignore.case = TRUE)) {
+    filename <- paste0(tools::file_path_sans_ext(filename), ".", ext)
+  }
+  filename
+}
+
+wsi_viewer_image_export_response <- function(slide, payload, state = NULL,
+                                             output_dir = getwd(),
+                                             max_pixels = 50000000) {
+  wsi_check_slide(slide)
+  region <- wsi_viewer_image_export_region(payload, slide)
+  format <- as.character(payload$format %||% "tiff")
+  if (identical(format, "jpg")) {
+    format <- "jpeg"
+  }
+  format <- match.arg(format, c("png", "jpeg", "tiff"))
+  scope <- as.character(payload$scope %||% "viewport")
+  if (!identical(scope, "selected_roi") && !identical(scope, "viewport")) {
+    wsi_abort("`scope` must be `viewport` or `selected_roi` for image export.")
+  }
+  max_pixels <- as.numeric(wsi_check_scalar_number(max_pixels, "image_export_max_pixels", allow_zero = FALSE))
+  pixels <- as.numeric(region$width) * as.numeric(region$height)
+  if (is.finite(max_pixels) && pixels > max_pixels) {
+    wsi_abort(sprintf(
+      "Image export region is too large (%s pixels). Zoom in, select a smaller ROI, or increase `image_export_max_pixels` in `wsi_viewer_live()`.",
+      base::format(round(pixels), big.mark = ",", scientific = FALSE, trim = TRUE)
+    ))
+  }
+  payload_dir <- payload$output_dir %||% NULL
+  if (is.character(payload_dir) && length(payload_dir) == 1L &&
+      !is.na(payload_dir) && nzchar(trimws(payload_dir))) {
+    output_dir <- trimws(payload_dir)
+  }
+  if (!is.character(output_dir) || length(output_dir) != 1L ||
+      is.na(output_dir) || !nzchar(output_dir)) {
+    wsi_abort("`image_export_dir` must be a single non-empty directory path.")
+  }
+  output_dir <- path.expand(output_dir)
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+  }
+  if (!dir.exists(output_dir)) {
+    wsi_abort(sprintf("Could not create image export directory: %s", output_dir))
+  }
+  overwrite <- isTRUE(payload$overwrite)
+  filename <- wsi_viewer_image_export_filename(payload, image_format = format, scope = scope)
+  output <- file.path(output_dir, filename)
+  output <- wsi_validate_output_path(output, overwrite = overwrite)
+  wsi_export_region(
+    slide,
+    x = region$x,
+    y = region$y,
+    width = region$width,
+    height = region$height,
+    level = region$level,
+    output = output,
+    format = format,
+    overwrite = overwrite
+  )
+  output <- normalizePath(output, winslash = "/", mustWork = FALSE)
+  result <- list(
+    ok = TRUE,
+    file = output,
+    output_dir = normalizePath(output_dir, winslash = "/", mustWork = FALSE),
+    format = format,
+    scope = scope,
+    region = list(
+      x = region$x,
+      y = region$y,
+      width = region$width,
+      height = region$height,
+      level = region$level,
+      downsample = region$downsample
+    )
+  )
+  if (inherits(state, "wsi_viewer_state")) {
+    wsi_viewer_state_record_event(
+      state,
+      "image_exported",
+      list(
+        file = output,
+        format = format,
+        scope = scope,
+        width = region$width,
+        height = region$height,
+        level = region$level
+      )
+    )
+  }
+  result
+}
+
 wsi_start_viewer_state_server <- function(state, slide = NULL,
                                           host = "127.0.0.1", port = 8788,
                                           path = "/viewer-state", max_tries = 20L,
@@ -3297,6 +3502,9 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	                                          seurat = NULL,
 	                                          seurat_gene_path = "/seurat-gene",
 	                                          spatial_tile_path = "/spatial-tiles",
+	                                          image_export_path = "/image-export",
+	                                          image_export_dir = getwd(),
+	                                          image_export_max_pixels = 50000000,
 	                                          prediction_context = NULL,
 	                                          prediction_path = "/prediction",
 	                                          proximity_context = NULL,
@@ -3317,6 +3525,9 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	  }
 	  if (!startsWith(spatial_tile_path, "/")) {
 	    spatial_tile_path <- paste0("/", spatial_tile_path)
+	  }
+	  if (!startsWith(image_export_path, "/")) {
+	    image_export_path <- paste0("/", image_export_path)
 	  }
 	  if (!startsWith(prediction_path, "/")) {
 	    prediction_path <- paste0("/", prediction_path)
@@ -3421,6 +3632,32 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	    })
 	  }
 
+	  image_export_response <- function(req) {
+	    method <- req$REQUEST_METHOD %||% "GET"
+	    if (!identical(method, "POST")) {
+	      return(wsi_http_json_response(status = 405L, body = list(error = "Use POST for viewer image export.")))
+	    }
+	    if (is.null(slide)) {
+	      return(wsi_http_json_response(status = 404L, body = list(error = "No slide is attached to this live viewer session.")))
+	    }
+	    tryCatch({
+	      body <- wsi_http_request_body(req)
+	      payload <- if (nzchar(body)) jsonlite::fromJSON(body, simplifyVector = FALSE) else list()
+	      result <- wsi_viewer_image_export_response(
+	        slide,
+	        payload,
+	        state = state,
+	        output_dir = image_export_dir,
+	        max_pixels = image_export_max_pixels
+	      )
+	      response <- wsi_viewer_state_response(state)
+	      response$image_export <- result
+	      wsi_http_json_response(body = response)
+	    }, error = function(err) {
+	      wsi_http_json_response(status = 500L, body = list(ok = FALSE, error = conditionMessage(err)))
+	    })
+	  }
+
 	  prediction_response <- function(req) {
 	    method <- req$REQUEST_METHOD %||% "GET"
 	    if (!identical(method, "POST")) {
@@ -3485,6 +3722,9 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	      }
 	      if (identical(request_path, spatial_tile_path)) {
 	        return(spatial_tile_response(req))
+	      }
+	      if (identical(request_path, image_export_path)) {
+	        return(image_export_response(req))
 	      }
 	      if (identical(request_path, prediction_path)) {
 	        return(prediction_response(req))
@@ -3582,10 +3822,12 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	        tile_path = tile_path,
 	        seurat_gene_path = seurat_gene_path,
 	        spatial_tile_path = spatial_tile_path,
+	        image_export_path = image_export_path,
 	        prediction_path = prediction_path,
 	        proximity_path = proximity_path,
 	        seurat_gene_url = if (wsi_seurat_live_gene_available(seurat)) sprintf("http://%s:%d%s", host, candidate, seurat_gene_path) else NULL,
 	        spatial_tile_export_url = sprintf("http://%s:%d%s", host, candidate, spatial_tile_path),
+	        image_export_url = if (!is.null(slide)) sprintf("http://%s:%d%s", host, candidate, image_export_path) else NULL,
 	        prediction_url = if (wsi_prediction_context_enabled(prediction_context %||% list(spatial = seurat))) sprintf("http://%s:%d%s", host, candidate, prediction_path) else NULL,
 	        proximity_url = if (wsi_prediction_context_enabled(proximity_context %||% prediction_context %||% list(spatial = seurat))) sprintf("http://%s:%d%s", host, candidate, proximity_path) else NULL,
 	        tile_sources = tile_sources
@@ -3610,7 +3852,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 #' `get_spot_annotation_table()`,
 #' `get_measurements()`, `get_roi_summary()`, `get_cell_summary()`, `get_class_summary()`,
 #' `get_ihc_summary()`, `get_ihc_class_summary()`, `get_segmentation()`,
-#' `get_layers()`, `get_annotation_spots()`, `get_history()`, `get_tile_preview()`,
+#' `get_layers()`, `get_annotation_spots()`, `get_history()`, `get_logs()`, `get_tile_preview()`,
 #' `colour_spots_by_gene()`,
 #' `add_rois()`, `add_segmentation()`, `measure_ihc_intensity()`,
 #' `add_layer()`, `set_layer_visible()`, `preview_tiles()`,
@@ -3636,7 +3878,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 #'   `<name>_segmentation`, `<name>_layers`, `<name>_selected_roi`,
 #'   `<name>_selected_rois`, `<name>_selected_object`,
 #'   `<name>_annotation_spots`,
-#'   `<name>_history`, `<name>_tile_preview`,
+#'   `<name>_history`, `<name>_logs`, `<name>_tile_preview`,
 #'   `<name>_last_segmentation`, and `<name>_last_event` are refreshed after
 #'   every browser sync or R-side measurement update.
 #' @param envir Environment where live state objects are assigned.
@@ -3655,6 +3897,10 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 #'   retrieve one gene at a time from the active R session.
 #' @param spatial_tile_path Local HTTP route used by live Seurat, Giotto, and
 #'   SpatialExperiment viewers to export spot-centered image tiles from R.
+#' @param image_export_path,image_export_dir,image_export_max_pixels Local HTTP
+#'   route, default output directory, and maximum region size for viewer image
+#'   export. The viewer can export the visible viewport or selected annotation
+#'   bounding box as PNG/JPEG/TIFF through R.
 #' @param prediction_path Local HTTP route used by live spatial and
 #'   CellPhenotyper viewers to run optional `fastPLS` PLS-LDA prediction from
 #'   selected annotation-defined training/test sets.
@@ -3709,7 +3955,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 #'   `get_measurements()`, `get_roi_summary()`, `get_cell_summary()`,
 #'   `get_class_summary()`, `get_ihc_summary()`, `get_ihc_class_summary()`,
 #'   `get_segmentation()`, `get_layers()`, `get_annotation_spots()`,
-#'   `get_history()`, `get_tile_preview()`, `get_prediction()`, `get_proximity()`,
+#'   `get_history()`, `get_logs()`, `get_tile_preview()`, `get_prediction()`, `get_proximity()`,
 #'   `list_layers()`, `get_events()`, `add_rois()`, `add_segmentation()`,
 #'   `add_layer()`, `set_layer_visible()`, `remove_layer()`,
 #'   `measure_ihc_intensity()`,
@@ -3733,6 +3979,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 #' session$get_ihc_summary()
 #' session$get_layers()
 #' session$get_history()
+#' session$get_logs()
 #' session$save_project("case_001.wsiproject")
 #'
 #' # Autosave the viewer state every 5 seconds:
@@ -3773,6 +4020,9 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
 	                               dynamic_tile_path = "/tiles",
 	                               seurat_gene_path = "/seurat-gene",
 	                               spatial_tile_path = "/spatial-tiles",
+	                               image_export_path = "/image-export",
+	                               image_export_dir = getwd(),
+	                               image_export_max_pixels = 50000000,
 	                               prediction_path = "/prediction",
 	                               prediction_context = NULL,
 	                               proximity_path = "/proximity",
@@ -3910,6 +4160,9 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
 	    seurat = live_seurat,
 	    seurat_gene_path = seurat_gene_path,
 	    spatial_tile_path = spatial_tile_path,
+	    image_export_path = image_export_path,
+	    image_export_dir = image_export_dir,
+	    image_export_max_pixels = image_export_max_pixels,
 	    prediction_context = live_prediction_context,
 	    prediction_path = prediction_path,
 	    proximity_context = live_proximity_context,
@@ -3991,6 +4244,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
 	  dots$viewer_transport <- transport
 	  dots$seurat_gene_url <- bridge$seurat_gene_url %||% NULL
 	  dots$spatial_tile_export_url <- bridge$spatial_tile_export_url %||% NULL
+	  dots$image_export_url <- bridge$image_export_url %||% NULL
 	  dots$prediction_url <- bridge$prediction_url %||% NULL
 	  dots$proximity_url <- bridge$proximity_url %||% NULL
   if (!is.null(dots$channel_sources)) {
@@ -4052,6 +4306,9 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   if (!is.null(bridge$seurat_gene_url)) {
     source_name <- as.character((live_seurat %||% list())$source_name %||% "spatial")
     message("Live ", source_name, " gene lookup active at ", bridge$seurat_gene_url)
+  }
+  if (!is.null(bridge$image_export_url)) {
+    message("Live viewport/ROI image export active at ", bridge$image_export_url)
   }
   message("Browser edits update `", name, "` and companion objects in the chosen R environment.")
   if (isTRUE(wait)) {
@@ -4137,6 +4394,7 @@ wsi_viewer_state <- function(x) {
     stain = state$stain,
     annotations = state$annotations %||% list(dirty = FALSE, dirty_reason = ""),
     history = state$history %||% wsi_empty_annotation_history(),
+    logs = state$logs %||% wsi_empty_viewer_logs(),
     autosave = wsi_viewer_autosave_status(state),
     jobs = wsi_viewer_jobs_table(state$jobs),
     job_details = state$jobs %||% list(),
@@ -4232,7 +4490,7 @@ print.wsi_viewer_session <- function(x, ...) {
   if (!is.null(x$stardist_server)) {
     cat(sprintf("  stardist: %s\n", x$stardist_server$url))
   }
-  cat("  methods: capabilities(), on(), get_rois(), get_selected_roi(), get_selected_rois(), get_selected_object(), get_selected_spots(), get_spot_annotation_table(), get_measurements(), get_trajectories(), get_roi_summary(), get_cell_summary(), get_ihc_summary(), get_segmentation(), get_layers(), get_channel_settings(), get_kodama_selection(), get_annotation_spots(), get_history(), get_tile_preview(), get_prediction(), get_proximity(), colour_spots_by_gene(), add_rois(), add_layer(), add_channel_source(), measure_ihc_intensity(), preview_tiles(), extract_tile_preview(), list_jobs(), run_tiles_async(), save_project(), autosave_start()\n")
+  cat("  methods: capabilities(), on(), get_rois(), get_selected_roi(), get_selected_rois(), get_selected_object(), get_selected_spots(), get_spot_annotation_table(), get_measurements(), get_trajectories(), get_roi_summary(), get_cell_summary(), get_ihc_summary(), get_segmentation(), get_layers(), get_channel_settings(), get_kodama_selection(), get_annotation_spots(), get_history(), get_logs(), get_tile_preview(), get_prediction(), get_proximity(), colour_spots_by_gene(), add_rois(), add_layer(), add_channel_source(), measure_ihc_intensity(), preview_tiles(), extract_tile_preview(), list_jobs(), run_tiles_async(), save_project(), autosave_start()\n")
   cat("  stop with: wsi_viewer_stop(x)\n")
   invisible(x)
 }

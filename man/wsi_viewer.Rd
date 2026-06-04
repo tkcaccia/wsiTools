@@ -45,6 +45,7 @@ wsi_viewer(
   viewer_state_ws_url = NULL,
   seurat_gene_url = NULL,
   spatial_tile_export_url = NULL,
+  image_export_url = NULL,
   prediction_url = NULL,
   proximity_url = NULL,
   autosave_enabled = FALSE,
@@ -162,6 +163,10 @@ unless a compatible endpoint is supplied manually.}
 \item{spatial_tile_export_url}{Optional live HTTP endpoint used by Seurat,
 Giotto, and SpatialExperiment menus to export spot-centered tiles from R.
 Static viewers can preview tile boxes but cannot write local image files.}
+
+\item{image_export_url}{Optional live HTTP endpoint used by the viewer to
+export the current viewport or selected annotation bounding box as
+PNG/JPEG/TIFF through R.}
 
 \item{prediction_url}{Optional live HTTP endpoint used by the Prediction menu
 to run optional \code{fastPLS} PLS-LDA from annotation-defined training/test
