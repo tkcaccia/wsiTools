@@ -23,6 +23,30 @@ wsiTools is not:
 - a replacement for all QuPath functionality;
 - a package that bundles every external backend automatically.
 
+## Format support
+
+Format support depends on the installed backend, the exact file variant, and the
+metadata written by the scanner or converter. wsiTools reports backend
+availability and should fail with informative errors rather than claiming that
+every WSI or microscopy format is guaranteed to work.
+
+| Format | Recommended backend | Status |
+| --- | --- | --- |
+| SVS | OpenSlide/libvips | supported when backend available |
+| NDPI | OpenSlide | backend-dependent |
+| SCN | OpenSlide | backend-dependent |
+| MRXS | OpenSlide | backend-dependent |
+| OME-TIFF | libvips/Bio-Formats | backend-dependent |
+| CZI | native CZI/Bio-Formats | improving |
+| DICOM WSI | backend-dependent | experimental |
+
+Check your machine with:
+
+```r
+wsi_backends()
+wsi_diagnose(live_test = FALSE)
+```
+
 ## Start here
 
 ```r
