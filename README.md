@@ -88,6 +88,8 @@ For browser-to-R synchronization, remote desktops, SSH tunnels, and common live
 viewer mistakes such as opening `/viewer-state` instead of the HTML viewer, see
 the dedicated [live viewer guide](docs/live-viewer.md). For known installation,
 backend, and viewer errors, see [troubleshooting](docs/troubleshooting.md).
+For optional selected-ROI StarDist, Mesmer, mask import, and cell export
+workflows, see [cell segmentation](docs/cell-segmentation.md).
 These pages cover
 single-image viewing, CZI projects, H&E/mIHC overlays, CellPhenotyper,
 Seurat/Visium PCA, annotation round trips, tile extraction, conversion, and

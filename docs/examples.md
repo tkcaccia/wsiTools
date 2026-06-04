@@ -13,6 +13,9 @@ wsi_backends()
 wsi_setup_report()
 ```
 
+For the full selected-ROI StarDist, Mesmer, mask import, and cell export
+workflow, see [cell segmentation](cell-segmentation.md).
+
 ## Open The Built-In Demo
 
 Use this when you do not have an SVS, CZI, OME-TIFF, Seurat object, or
