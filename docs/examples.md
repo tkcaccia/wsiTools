@@ -17,6 +17,8 @@ For the full selected-ROI StarDist, Mesmer, mask import, and cell export
 workflow, see [cell segmentation](cell-segmentation.md).
 For Seurat, Giotto, SpatialExperiment, and CellPhenotyper workflows, see
 [spatial omics](spatial-omics.md).
+For the `.wsiproject` directory layout and reproducible project state, see
+[project format](projects.md).
 
 ## Open The Built-In Demo
 

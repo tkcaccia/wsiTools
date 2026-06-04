@@ -76,6 +76,9 @@ viewer$save_project("case_01.wsiproject")
 viewer$capabilities()
 ```
 
+For what is stored in a `.wsiproject` directory, see
+[project format](projects.md).
+
 ## Static Viewer Versus Live Viewer
 
 | Viewer | Function | Opens As | Automatic Feedback To R |
