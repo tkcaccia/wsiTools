@@ -107,7 +107,7 @@ objects named \verb{<name>_rois}, \verb{<name>_measurements},
 \verb{<name>_roi_summary}, \verb{<name>_cell_summary}, \verb{<name>_class_summary},
 \verb{<name>_ihc_summary}, \verb{<name>_ihc_class_summary},
 \verb{<name>_segmentation}, \verb{<name>_layers}, \verb{<name>_selected_roi},
-\verb{<name>_selected_rois}, \verb{<name>_history}, \verb{<name>_tile_preview},
+\verb{<name>_selected_rois}, \verb{<name>_selected_object}, \verb{<name>_history}, \verb{<name>_tile_preview},
 \verb{<name>_last_segmentation}, and \verb{<name>_last_event} are refreshed after
 every browser sync or R-side measurement update.}
 
@@ -190,7 +190,7 @@ A \code{wsi_viewer_session} object, invisibly. The object keeps the
 bridge fields (\code{url}, \code{html}, \code{state}) and provides live-session helper
 methods:
 \code{on()}, \code{off()}, \code{list_callbacks()}, \code{get_state()}, \code{get_rois()}, \code{get_selected_roi()}, \code{get_selected_rois()},
-\code{get_measurements()}, \code{get_roi_summary()}, \code{get_cell_summary()},
+\code{get_selected_object()}, \code{get_measurements()}, \code{get_roi_summary()}, \code{get_cell_summary()},
 \code{get_class_summary()}, \code{get_ihc_summary()}, \code{get_ihc_class_summary()},
 \code{get_segmentation()}, \code{get_layers()}, \code{get_history()}, \code{get_tile_preview()}, \code{get_prediction()}, \code{get_proximity()},
 \code{list_layers()}, \code{get_events()}, \code{add_rois()}, \code{add_segmentation()},
@@ -209,7 +209,7 @@ session. ROI area, cell-density, cell, stain-measurement, and class-summary
 tables are refreshed as ordinary R data frames whenever ROI or segmentation
 state changes. The returned object is a live session with convenience methods
 such as \code{capabilities()}, \code{get_rois()}, \code{get_selected_roi()}, \code{get_selected_rois()},
-\code{get_measurements()}, \code{get_roi_summary()}, \code{get_cell_summary()}, \code{get_class_summary()},
+\code{get_selected_object()}, \code{get_measurements()}, \code{get_roi_summary()}, \code{get_cell_summary()}, \code{get_class_summary()},
 \code{get_ihc_summary()}, \code{get_ihc_class_summary()}, \code{get_segmentation()},
 \code{get_layers()}, \code{get_history()}, \code{get_tile_preview()}, \code{get_prediction()}, \code{get_proximity()},
 \code{add_rois()}, \code{add_segmentation()}, \code{measure_ihc_intensity()},

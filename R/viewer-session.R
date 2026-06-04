@@ -54,6 +54,7 @@ wsi_new_viewer_state <- function(name = "wsi_viewer_live_state", envir = parent.
   state$proximity <- wsi_empty_proximity_result()
   state$selected_roi <- NULL
   state$selected_rois <- wsi_empty_roi()
+  state$selected_object <- NULL
   state$last_segmentation <- NULL
   state$pixel_size <- NULL
   state$view <- list()
@@ -183,12 +184,44 @@ wsi_viewer_allowed_events <- function() {
 wsi_viewer_allowed_payload_fields <- function() {
   c(
     "event", "time", "sequence", "slide", "project", "selected_index",
-    "selected_roi", "selected_rois", "rois", "segmentation", "layers",
-    "measurements", "trajectories", "artifacts", "view", "annotations",
-    "history", "stain", "channel_sources", "channel_settings",
+    "selected_roi", "selected_rois", "selected_object", "rois",
+    "segmentation", "layers", "measurements", "trajectories",
+    "artifacts", "view", "annotations", "history", "stain",
+    "channel_sources", "channel_settings",
     "tile_sources", "kodama_selection", "seurat_selection",
     "annotation_spots", "detail"
   )
+}
+
+wsi_viewer_validate_selected_object <- function(selected_object) {
+  if (is.null(selected_object)) {
+    return(invisible(NULL))
+  }
+  if (!is.list(selected_object) || is.data.frame(selected_object)) {
+    wsi_abort("Viewer state payload `selected_object` must be a JSON object or null when supplied.")
+  }
+  object_type <- selected_object[["type", exact = TRUE]]
+  if (!is.null(object_type)) {
+    allowed_types <- c("annotation", "trajectory", "layer_object", "measurement")
+    if (!is.character(object_type) || length(object_type) != 1L ||
+        is.na(object_type) || !object_type %in% allowed_types) {
+      wsi_abort(sprintf(
+        "Viewer state payload `selected_object$type` must be one of: %s.",
+        paste(allowed_types, collapse = ", ")
+      ))
+    }
+  }
+  for (field in c("index", "layer_index", "item_index")) {
+    value <- selected_object[[field, exact = TRUE]]
+    if (!is.null(value) &&
+        (!is.numeric(value) || length(value) != 1L || is.na(value))) {
+      wsi_abort(sprintf(
+        "Viewer state payload `selected_object$%s` must be a single number when supplied.",
+        field
+      ))
+    }
+  }
+  invisible(NULL)
 }
 
 wsi_viewer_validate_event <- function(event) {
@@ -248,6 +281,7 @@ wsi_viewer_validate_state_payload <- function(payload) {
       !identical(selected$type, "Feature")) {
     wsi_abort("Viewer state payload `selected_roi` must be a GeoJSON Feature when supplied.")
   }
+  wsi_viewer_validate_selected_object(payload[["selected_object", exact = TRUE]])
   payload
 }
 
@@ -1327,6 +1361,7 @@ wsi_assign_viewer_state <- function(state) {
   assign(paste0(name, "_jobs"), wsi_viewer_jobs_table(state$jobs), envir = envir)
   assign(paste0(name, "_selected_roi"), state$selected_roi, envir = envir)
   assign(paste0(name, "_selected_rois"), state$selected_rois, envir = envir)
+  assign(paste0(name, "_selected_object"), state$selected_object %||% NULL, envir = envir)
   assign(paste0(name, "_last_segmentation"), state$last_segmentation, envir = envir)
   assign(paste0(name, "_kodama_selection"), state$kodama_selection %||% list(labels = character(), count = 0L, matched_count = 0L), envir = envir)
   assign(paste0(name, "_seurat_selection"), state$seurat_selection %||% list(labels = character(), count = 0L, matched_count = 0L), envir = envir)
@@ -1371,6 +1406,7 @@ wsi_viewer_state_apply <- function(state, payload) {
     payload[["selected_rois", exact = TRUE]],
     payload[["selected_roi", exact = TRUE]]
   )
+  state$selected_object <- payload[["selected_object", exact = TRUE]] %||% NULL
   state$view <- payload[["view", exact = TRUE]] %||% list()
   state$stain <- payload[["stain", exact = TRUE]] %||% NULL
   if (!is.null(payload[["channel_sources", exact = TRUE]])) {
@@ -1453,6 +1489,7 @@ wsi_viewer_state_record_event <- function(state, event, detail = list()) {
     } else {
       NULL
     },
+    selected_object = state$selected_object %||% NULL,
     detail = detail %||% list()
   )
   state$last_event <- event
@@ -1497,6 +1534,12 @@ wsi_viewer_state_set_selected_roi <- function(state, roi, event = "segmentation_
   class(selected) <- unique(c("wsi_roi", class(selected)))
   state$selected_roi <- selected
   state$selected_rois <- selected
+  state$selected_object <- list(
+    type = "annotation",
+    index = 0,
+    id = selected$roi_id[[1L]] %||% NA_character_,
+    name = selected$name[[1L]] %||% selected$roi_id[[1L]] %||% NA_character_
+  )
   wsi_viewer_state_record_event(
     state,
     event,
@@ -2483,6 +2526,9 @@ wsi_attach_viewer_session_methods <- function(session) {
   }
   session$get_selected_rois <- function(service = TRUE) {
     session$get_state(service = service)$selected_rois
+  }
+  session$get_selected_object <- function(service = TRUE) {
+    session$get_state(service = service)$selected_object
   }
   session$get_measurements <- function(service = TRUE) {
     session$get_state(service = service)$measurements
@@ -3471,6 +3517,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 #' tables are refreshed as ordinary R data frames whenever ROI or segmentation
 #' state changes. The returned object is a live session with convenience methods
 #' such as `capabilities()`, `get_rois()`, `get_selected_roi()`, `get_selected_rois()`,
+#' `get_selected_object()`,
 #' `get_measurements()`, `get_roi_summary()`, `get_cell_summary()`, `get_class_summary()`,
 #' `get_ihc_summary()`, `get_ihc_class_summary()`, `get_segmentation()`,
 #' `get_layers()`, `get_annotation_spots()`, `get_history()`, `get_tile_preview()`,
@@ -3496,7 +3543,8 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 #'   `<name>_roi_summary`, `<name>_cell_summary`, `<name>_class_summary`,
 #'   `<name>_ihc_summary`, `<name>_ihc_class_summary`,
 #'   `<name>_segmentation`, `<name>_layers`, `<name>_selected_roi`,
-#'   `<name>_selected_rois`, `<name>_annotation_spots`,
+#'   `<name>_selected_rois`, `<name>_selected_object`,
+#'   `<name>_annotation_spots`,
 #'   `<name>_history`, `<name>_tile_preview`,
 #'   `<name>_last_segmentation`, and `<name>_last_event` are refreshed after
 #'   every browser sync or R-side measurement update.
@@ -3558,6 +3606,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 #'   bridge fields (`url`, `html`, `state`) and provides live-session helper
 #'   methods:
 #'   `on()`, `off()`, `list_callbacks()`, `get_state()`, `get_rois()`, `get_selected_roi()`, `get_selected_rois()`,
+#'   `get_selected_object()`,
 #'   `get_measurements()`, `get_roi_summary()`, `get_cell_summary()`,
 #'   `get_class_summary()`, `get_ihc_summary()`, `get_ihc_class_summary()`,
 #'   `get_segmentation()`, `get_layers()`, `get_annotation_spots()`,
@@ -3900,8 +3949,9 @@ wsi_viewer_stardist <- function(slide, ..., stardist = TRUE) {
 #' @param x A `wsi_viewer_session` or `wsi_viewer_state` object.
 #'
 #' @return A list containing ROIs, distance measurements, ROI/cell/class summary
-#'   tables, trajectories, segmentation overlays, selected ROI(s), R-controlled
-#'   viewer layers, previewed tile coordinates, last segmentation run metadata,
+#'   tables, trajectories, segmentation overlays, selected ROI(s), the selected
+#'   viewer object, R-controlled viewer layers, previewed tile coordinates,
+#'   last segmentation run metadata,
 #'   KODAMA selected-cell labels, annotation history, view/stain settings,
 #'   autosave status, and event history.
 #' @export
@@ -3937,6 +3987,7 @@ wsi_viewer_state <- function(x) {
     proximity = state$proximity %||% wsi_empty_proximity_result(),
     selected_roi = state$selected_roi,
     selected_rois = state$selected_rois,
+    selected_object = state$selected_object %||% NULL,
     last_segmentation = state$last_segmentation,
     view = state$view,
     stain = state$stain,
@@ -4037,7 +4088,7 @@ print.wsi_viewer_session <- function(x, ...) {
   if (!is.null(x$stardist_server)) {
     cat(sprintf("  stardist: %s\n", x$stardist_server$url))
   }
-  cat("  methods: capabilities(), on(), get_rois(), get_selected_roi(), get_selected_rois(), get_measurements(), get_trajectories(), get_roi_summary(), get_cell_summary(), get_ihc_summary(), get_segmentation(), get_layers(), get_channel_settings(), get_kodama_selection(), get_annotation_spots(), get_history(), get_tile_preview(), get_prediction(), get_proximity(), add_rois(), add_layer(), add_channel_source(), measure_ihc_intensity(), preview_tiles(), extract_tile_preview(), list_jobs(), run_tiles_async(), save_project(), autosave_start()\n")
+  cat("  methods: capabilities(), on(), get_rois(), get_selected_roi(), get_selected_rois(), get_selected_object(), get_measurements(), get_trajectories(), get_roi_summary(), get_cell_summary(), get_ihc_summary(), get_segmentation(), get_layers(), get_channel_settings(), get_kodama_selection(), get_annotation_spots(), get_history(), get_tile_preview(), get_prediction(), get_proximity(), add_rois(), add_layer(), add_channel_source(), measure_ihc_intensity(), preview_tiles(), extract_tile_preview(), list_jobs(), run_tiles_async(), save_project(), autosave_start()\n")
   cat("  stop with: wsi_viewer_stop(x)\n")
   invisible(x)
 }

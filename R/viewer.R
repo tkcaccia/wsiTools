@@ -1437,7 +1437,7 @@ wsi_viewer_chrome <- function(config, loading_message, tiled = FALSE) {
         "</div>",
         "<label class=\"control wide\" title=\"Custom number of multi-view panes, from 1 to 12\">custom <input id=\"multiViewCustomCount\" type=\"number\" min=\"1\" max=\"12\" step=\"1\" value=\"3\"><button id=\"multiViewCustom\" type=\"button\">Apply</button></label>",
         "<label class=\"control\" title=\"Synchronize zoom and pan across all multi-view panes\"><input id=\"multiViewSync\" type=\"checkbox\">link zoom/pan</label>",
-        "<div id=\"multiViewSummary\" class=\"menuHint\">Single view. Use 2, 4, 6, or custom views. Drag project images or sections onto a pane to replace that pane.</div>",
+        "<div id=\"multiViewSummary\" class=\"menuHint\">Single view. Use 2, 4, 6, or custom views to compare project images/sections side by side. Drag project images or sections onto a pane to replace that pane.</div>",
         "<div id=\"syncSummary\" class=\"menuHint\"></div>"
       )
     ),

@@ -991,6 +991,7 @@ test_that("live viewer sessions expose R-native helper methods and command queue
   expect_true(is.function(session$get_rois))
   expect_true(is.function(session$get_selected_roi))
   expect_true(is.function(session$get_selected_rois))
+  expect_true(is.function(session$get_selected_object))
   expect_true(is.function(session$get_measurements))
   expect_true(is.function(session$get_trajectories))
   expect_true(is.function(session$get_roi_summary))
@@ -1271,6 +1272,7 @@ test_that("live viewer state validates events and payload fields strictly", {
     sequence = 1,
     rois = list(type = "FeatureCollection", features = list()),
     selected_rois = list(type = "FeatureCollection", features = list()),
+    selected_object = list(type = "trajectory", index = 0, id = "trajectory_1", name = "Trajectory 1"),
     segmentation = list(type = "FeatureCollection", features = list()),
     measurements = list(),
     trajectories = list(),
@@ -1302,6 +1304,20 @@ test_that("live viewer state validates events and payload fields strictly", {
   expect_error(
     wsiTools:::wsi_viewer_state_apply(state, bad_geojson),
     "FeatureCollection"
+  )
+
+  bad_selected_object <- payload
+  bad_selected_object$selected_object <- "roi-1"
+  expect_error(
+    wsiTools:::wsi_viewer_state_apply(state, bad_selected_object),
+    "selected_object"
+  )
+
+  bad_selected_object_type <- payload
+  bad_selected_object_type$selected_object <- list(type = "r_code", index = 0)
+  expect_error(
+    wsiTools:::wsi_viewer_state_apply(state, bad_selected_object_type),
+    "selected_object\\$type"
   )
 })
 
@@ -1348,6 +1364,7 @@ test_that("live viewer state payloads update R objects", {
     time = "2026-05-18T12:00:00Z",
     selected_index = 0,
     selected_roi = feature,
+    selected_object = list(type = "annotation", index = 0, id = "roi-1", name = "Tumour region"),
     rois = list(type = "FeatureCollection", features = list(feature)),
     segmentation = list(type = "FeatureCollection", features = list(cell_feature)),
     measurements = list(list(
@@ -1434,9 +1451,13 @@ test_that("live viewer state payloads update R objects", {
   expect_equal(snapshot$selected_roi$name, "Tumour region")
   expect_s3_class(snapshot$selected_rois, "wsi_roi")
   expect_equal(snapshot$selected_rois$roi_id, "roi-1")
+  expect_equal(snapshot$selected_object$type, "annotation")
+  expect_equal(snapshot$selected_object$id, "roi-1")
   expect_identical(env$live, state)
   expect_s3_class(env$live_rois, "wsi_roi")
   expect_s3_class(env$live_selected_rois, "wsi_roi")
+  expect_equal(env$live_selected_object$type, "annotation")
+  expect_equal(env$live_selected_object$id, "roi-1")
   expect_equal(env$live_measurements$id, "measure_1")
   expect_equal(env$live_trajectories$id, "trajectory_1")
   expect_s3_class(env$live_roi_summary, "data.frame")
@@ -1894,6 +1915,10 @@ test_that("viewer event validation allowlists live WebSocket events", {
   expect_silent(wsiTools:::wsi_viewer_validate_state_payload(list(
     event = "kodama_cells_selected",
     kodama_selection = list(labels = c("1", "2"), count = 2L, matched_count = 2L)
+  )))
+  expect_silent(wsiTools:::wsi_viewer_validate_state_payload(list(
+    event = "roi_selected",
+    selected_object = list(type = "annotation", index = 0, id = "roi-1", name = "Tumour 1")
   )))
 })
 

@@ -14,8 +14,9 @@ viewer_state(x)
 }
 \value{
 A list containing ROIs, distance measurements, ROI/cell/class summary
-tables, trajectories, segmentation overlays, selected ROI(s), R-controlled
-viewer layers, previewed tile coordinates, last segmentation run metadata,
+tables, trajectories, segmentation overlays, selected ROI(s), the selected
+viewer object, R-controlled viewer layers, previewed tile coordinates,
+last segmentation run metadata,
 KODAMA selected-cell labels, annotation history, view/stain settings,
 autosave status, and event history.
 }
