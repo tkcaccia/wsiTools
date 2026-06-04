@@ -468,7 +468,9 @@ viewer <- wsi_viewer_seurat(
 ## Selected-ROI StarDist Workflow
 
 StarDist is optional and external. wsiTools should still install and open
-without it. A typical workflow is:
+without it. A live viewer can launch StarDist only on the selected ROI crop
+when a command is configured. Use tiled StarDist arguments for large ROIs so the
+model does not allocate one huge prediction tile.
 
 ```r
 slide <- wsi_open("sample.svs")
@@ -476,21 +478,35 @@ slide <- wsi_open("sample.svs")
 viewer <- wsi_viewer_live(
   slide,
   mode = "tiles",
+  dynamic_tiles = TRUE,
+  stardist = TRUE,
+  stardist_args = c(
+    "--input", "{input}",
+    "--output", "{output}",
+    "--model", "{model}",
+    "--tiles", "{tiles_y}", "{tiles_x}",
+    "--min-area", "{min_area}"
+  ),
+  segmentation_tiles_x = 32,
+  segmentation_tiles_y = 32,
+  segmentation_min_area = 120,
   open = TRUE,
   wait = FALSE
 )
 
-# Draw/select an ROI in the browser, then return to R:
+# Draw/select an ROI in the browser.
+# Then either click Cells > Run selected ROI, or run from R:
 roi <- viewer$get_selected_rois()
-
-crop_file <- export_roi_crop(
-  slide,
+job <- viewer$run_segmentation_async(
   roi = roi,
-  file = "selected_roi_for_stardist.tif"
+  engine = "stardist_he",
+  tiles_x = 32,
+  tiles_y = 32
 )
+result <- job$result()
+viewer$add_segmentation(result$segmentation)
 
-# Run external segmentation only if configured.
-# Then import results and push them back into the viewer.
+# You can still import model outputs created elsewhere.
 cells <- import_segmentation("stardist_output.geojson")
 viewer$add_segmentation(cells)
 
@@ -551,15 +567,18 @@ legacy Python CZI path is disabled unless you explicitly opt in.
 
 ### StarDist button is disabled or reports not configured
 
-StarDist is not mandatory. Configure it only when you need segmentation:
+StarDist is not mandatory. Configure it only when you need selected-ROI
+segmentation from the live viewer:
 
 ```r
 wsi_install_stardist(install = FALSE)
+wsi_install_stardist(method = "conda")
 ```
 
-Then install/configure the external command and rerun:
+Or point wsiTools to an existing command or wrapper:
 
 ```r
+Sys.setenv(WSITOOLS_STARDIST_COMMAND = "/path/to/stardist_wrapper")
 wsi_has_stardist()
 ```
 

@@ -48,7 +48,19 @@ wsi_viewer_session(
   stardist_crop_format = c("png", "tiff", "jpeg"),
   stardist_backend = c("auto", "vips", "openslide"),
   stardist_cell_radius = 8,
-  stardist_overwrite = TRUE
+  stardist_overwrite = TRUE,
+  segmentation_engines = c("stardist_he", "stardist_ihc", "mesmer_dapi"),
+  segmentation_default_engine = "stardist_he",
+  stardist_ihc_model = NULL,
+  mesmer_command = NULL,
+  mesmer_args = NULL,
+  segmentation_tiles_x = NULL,
+  segmentation_tiles_y = NULL,
+  segmentation_min_area = NULL,
+  segmentation_nuclear_channel = "DAPI",
+  segmentation_membrane_channel = NULL,
+  segmentation_keras_home = NULL,
+  segmentation_pretrained_zip = NULL
 )
 
 wsi_viewer_live(
@@ -94,7 +106,19 @@ wsi_viewer_live(
   stardist_crop_format = c("png", "tiff", "jpeg"),
   stardist_backend = c("auto", "vips", "openslide"),
   stardist_cell_radius = 8,
-  stardist_overwrite = TRUE
+  stardist_overwrite = TRUE,
+  segmentation_engines = c("stardist_he", "stardist_ihc", "mesmer_dapi"),
+  segmentation_default_engine = "stardist_he",
+  stardist_ihc_model = NULL,
+  mesmer_command = NULL,
+  mesmer_args = NULL,
+  segmentation_tiles_x = NULL,
+  segmentation_tiles_y = NULL,
+  segmentation_min_area = NULL,
+  segmentation_nuclear_channel = "DAPI",
+  segmentation_membrane_channel = NULL,
+  segmentation_keras_home = NULL,
+  segmentation_pretrained_zip = NULL
 )
 }
 \arguments{
@@ -173,17 +197,29 @@ to the console; synced objects remain in \code{envir}.}
 \item{autosave_overwrite}{Whether autosave may update an existing
 \code{.wsiproject} index and sidecar files.}
 
-\item{stardist}{Legacy logical retained for old scripts. If \code{TRUE}, wsiTools
-warns that selected-ROI StarDist/Cellpose launching has been removed and
-still opens the viewer.}
+\item{stardist}{Logical retained for old scripts. If \code{TRUE}, wsiTools
+starts an optional selected-ROI cell-segmentation endpoint for StarDist H&E,
+StarDist IHC, and Mesmer DAPI presets.}
 
-\item{stardist_output_dir}{Legacy argument retained for compatibility; ignored
-by the current viewer.}
+\item{stardist_output_dir, stardist_host, stardist_port, stardist_path, stardist_max_tries}{Segmentation endpoint settings.}
 
-\item{stardist_host, stardist_port, stardist_path, stardist_max_tries}{Local
-legacy arguments retained for compatibility; ignored by the current viewer.}
+\item{stardist_model, stardist_command, stardist_args, stardist_output_type, stardist_prob_thresh, stardist_nms_thresh, stardist_level, stardist_crop_format, stardist_backend, stardist_cell_radius, stardist_overwrite}{StarDist defaults for selected-ROI segmentation.}
 
-\item{stardist_model, stardist_command, stardist_args, stardist_output_type, stardist_prob_thresh, stardist_nms_thresh, stardist_level, stardist_crop_format, stardist_backend, stardist_cell_radius, stardist_overwrite}{Legacy arguments retained for compatibility; ignored by the current viewer.}
+\item{segmentation_engines, segmentation_default_engine}{Engine presets shown
+in the viewer Cells menu when \code{stardist = TRUE}.}
+
+\item{stardist_ihc_model}{Optional StarDist model for IHC segmentation.}
+
+\item{mesmer_command, mesmer_args}{Optional Mesmer command and arguments.}
+
+\item{segmentation_tiles_x, segmentation_tiles_y, segmentation_min_area}{Optional
+command-template placeholders used by tiled external wrappers to reduce RAM.}
+
+\item{segmentation_nuclear_channel, segmentation_membrane_channel}{Channel
+placeholders for mIHC/DAPI wrappers.}
+
+\item{segmentation_keras_home, segmentation_pretrained_zip}{Optional model
+cache/model placeholders for external wrappers.}
 }
 \value{
 A \code{wsi_viewer_session} object, invisibly. The object keeps the
@@ -196,7 +232,7 @@ methods:
 \code{list_layers()}, \code{get_events()}, \code{add_rois()}, \code{add_segmentation()},
 \code{add_layer()}, \code{set_layer_visible()}, \code{remove_layer()},
 \code{measure_ihc_intensity()},
-\code{preview_tiles()}, \code{clear_tile_preview()}, \code{extract_tile_preview()},
+\code{preview_tiles()}, \code{clear_tile_preview()}, \code{extract_tile_preview()}, \code{run_segmentation_async()},
 \code{save_project()},
 \code{service()}, and \code{stop()}.
 }
@@ -215,14 +251,13 @@ such as \code{capabilities()}, \code{get_rois()}, \code{get_selected_roi()}, \co
 \code{add_rois()}, \code{add_segmentation()}, \code{measure_ihc_intensity()},
 \code{add_layer()}, \code{set_layer_visible()}, \code{preview_tiles()},
 \code{extract_tile_preview()}, \code{list_jobs()},
-\code{run_tiles_async()},
+\code{run_segmentation_async()}, \code{run_tiles_async()},
 \code{run_conversion_async()}, \code{run_pyramid_async()}, and \code{save_project()}.
 Async methods require the suggested \code{callr} package and return \code{wsi_job}
 objects with \code{status()} and \code{result()} methods. The state object
-is an environment, so it is updated in place as new events arrive. Selected
-ROI StarDist/Cellpose launching is no longer provided by wsiTools; run cell
-segmentation separately with CellPhenotyper and open the resulting project or
-cell overlays in the viewer.
+is an environment, so it is updated in place as new events arrive. Selected-ROI
+cell segmentation remains optional: wsiTools crops only the selected ROI and
+calls configured external StarDist or Mesmer commands when requested.
 }
 \details{
 This live bridge is optional and requires the suggested \code{httpuv} package.

@@ -114,9 +114,10 @@ functions need the corresponding tools at runtime:
   are not used for first visualization of CZI files.
 - ZEISS libCZI/libCZIAPI for direct CZI first visualization without Python.
   Set `WSITOOLS_LIBCZIAPI` when the shared library is not already discoverable.
-- Cell segmentation is expected to be performed outside wsiTools, for example
-  by CellPhenotyper. wsiTools can open CellPhenotyper projects and visualize
-  their cell overlays.
+- Cell segmentation model stacks remain optional. wsiTools can open
+  CellPhenotyper projects and visualize their cell overlays; live viewers can
+  also orchestrate configured external StarDist/Mesmer commands on selected
+  ROI crops.
 - `httpuv`, `magick`, and `sf` are optional R packages used only for live viewer
   bridges, image previews, and polygon-aware ROI operations.
 - `callr` is optional and is used only when non-blocking background jobs are
@@ -407,9 +408,11 @@ On Windows, install libvips/OpenSlide with a system package manager such as
 winget, MSYS2, vcpkg, or the official binary distributions, then make sure the
 tool directories are on `PATH`. Re-run `wsi_backends()` afterwards.
 
-wsiTools no longer installs or launches StarDist/Cellpose. Run segmentation in
-CellPhenotyper, then open the CellPhenotyper project or push the resulting cell
-layer into the viewer from R.
+wsiTools does not install StarDist, DeepCell/Mesmer, or Cellpose as package
+dependencies. For live sessions, it can optionally launch configured external
+StarDist or Mesmer-style commands on only the selected ROI crop, then import
+the resulting GeoJSON, CSV/TSV, or mask overlay. For full production pipelines,
+CellPhenotyper remains the recommended place to run and record segmentation.
 
 ## First-run guided example
 
@@ -1318,9 +1321,62 @@ edited <- viewer$get_rois()
 write_geojson(edited, "edited_for_qupath.geojson", overwrite = TRUE)
 ```
 
-Cell segmentation is handled outside wsiTools, preferably through a
-CellPhenotyper project. Existing GeoJSON polygons, CSV/TSV centroids, or mask
-images can still be imported as overlays when needed:
+Cell segmentation model stacks stay optional. The most robust production path
+is still to run segmentation in CellPhenotyper and open the resulting project,
+but wsiTools can also orchestrate an already-configured external StarDist or
+Mesmer-style command from a live viewer. In all cases, process a selected ROI
+crop, not the full WSI.
+
+```r
+# Live viewer with a Cells menu. Draw/select one ROI, then use:
+# Cells > Engine > StarDist H&E / StarDist IHC / Mesmer DAPI > Run selected ROI
+session <- wsi_viewer_live(
+  slide,
+  mode = "tiles",
+  dynamic_tiles = TRUE,
+  stardist = TRUE,
+  stardist_command = Sys.getenv("WSITOOLS_STARDIST_COMMAND"),
+  stardist_args = c(
+    "--input", "{input}",
+    "--output", "{output}",
+    "--model", "{model}",
+    "--tiles", "{tiles_y}", "{tiles_x}",
+    "--min-area", "{min_area}"
+  ),
+  segmentation_tiles_x = 32,
+  segmentation_tiles_y = 32,
+  segmentation_min_area = 120,
+  wait = TRUE
+)
+
+cells <- session$get_segmentation()
+last_run <- session$get_state()$last_segmentation
+```
+
+The same selected-ROI workflow can be run directly from R:
+
+```r
+roi <- session$get_selected_roi()
+result <- wsi_cell_segment_roi(
+  slide,
+  roi,
+  output_dir = "roi_cells",
+  engine = "stardist_he",
+  args = c(
+    "--input", "{input}",
+    "--output", "{output}",
+    "--model", "{model}",
+    "--tiles", "{tiles_y}", "{tiles_x}"
+  ),
+  tiles_x = 32,
+  tiles_y = 32
+)
+
+session$add_segmentation(result$segmentation)
+```
+
+Existing GeoJSON polygons, CSV/TSV centroids, or mask images can also be
+imported as overlays when needed:
 
 ```r
 export_roi_crop(slide, rois, "roi_crop.png", roi_id = rois$roi_id[1])
@@ -1335,9 +1391,8 @@ mask_rois <- import_segmentation("model_mask.png", mask_as_rois = TRUE, threshol
 viewer$add_rois(mask_rois)
 ```
 
-The live viewer does not launch StarDist or Cellpose. When a CellPhenotyper
-project is open, the viewer exposes its cell table through the `Cells` menu and
-keeps those cells available in the live R session:
+When a CellPhenotyper project is open, the viewer exposes its cell table through
+the same `Cells` menu and keeps those cells available in the live R session:
 
 ```r
 cells <- session$get_segmentation()
@@ -1347,7 +1402,9 @@ roi_summary <- session$get_roi_summary()
 cell_summary <- session$get_cell_summary()
 ```
 
-Segmentation provenance should be tracked in the CellPhenotyper project itself.
+Segmentation provenance is stored in `session$get_state()$last_segmentation`
+for live viewer runs. For end-to-end production processing, keep the full model
+provenance in the CellPhenotyper project itself.
 
 Long-running work can also run as a non-blocking background job when the
 optional `callr` package is installed:

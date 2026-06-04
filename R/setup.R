@@ -757,12 +757,12 @@ wsi_stardist_plan_rows <- function(method,
   out
 }
 
-#' Legacy StarDist installer
+#' Optional StarDist installer
 #'
-#' StarDist/Cellpose model execution is no longer a wsiTools viewer feature.
-#' This legacy helper is kept internally for old scripts but is not part of the
-#' public setup workflow. Run cell segmentation separately with CellPhenotyper
-#' and open the resulting project/cell overlays in wsiTools.
+#' Installs or configures an optional StarDist command wrapper for selected-ROI
+#' segmentation. This helper is never run during package installation; call it
+#' explicitly when you want wsiTools live viewers to launch StarDist on ROI
+#' crops.
 #'
 #' @param method Setup method. `"auto"` prefers conda/mamba when available,
 #'   otherwise a Python virtual environment via pip.
@@ -779,7 +779,7 @@ wsi_stardist_plan_rows <- function(method,
 #'
 #' @return A `wsi_stardist_installation` object with the command plan and
 #'   wrapper path.
-#' @keywords internal
+#' @export
 #'
 #' @examples
 #' plan <- wsi_install_stardist(method = "manual", install = FALSE)

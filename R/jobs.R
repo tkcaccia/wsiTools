@@ -443,9 +443,30 @@ wsi_async_job_args <- function(...) {
 #' @keywords internal
 wsi_stardist_segment_roi_async <- function(image, roi, output_dir, ...) {
   wsi_run_async(
-    "wsiTools::stardist_segment_roi",
+    "wsiTools::wsi_cell_segment_roi",
     args = c(list(image = image, roi = roi, output_dir = output_dir), wsi_async_job_args(...)),
-    name = "StarDist ROI segmentation",
+    name = "Cell ROI segmentation",
+    packages = "wsiTools"
+  )
+}
+
+#' Run optional ROI cell segmentation asynchronously
+#'
+#' Runs [wsi_cell_segment_roi()] in a background R process. External engines
+#' such as StarDist or Mesmer remain optional and must be configured in that R
+#' process through arguments or environment variables.
+#'
+#' @inheritParams wsi_cell_segment_roi
+#' @param ... Additional arguments forwarded to [wsi_cell_segment_roi()].
+#'
+#' @return A `wsi_job` object. Call `job$status()` to poll and `job$result()` to
+#'   collect the `wsi_cell_segmentation_result`.
+#' @export
+wsi_cell_segment_roi_async <- function(image, roi, output_dir, ...) {
+  wsi_run_async(
+    "wsiTools::wsi_cell_segment_roi",
+    args = c(list(image = image, roi = roi, output_dir = output_dir), wsi_async_job_args(...)),
+    name = "Cell ROI segmentation",
     packages = "wsiTools"
   )
 }

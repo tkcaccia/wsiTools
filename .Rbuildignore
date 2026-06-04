@@ -9,6 +9,7 @@
 ^pkgdown$
 ^README\.Rmd$
 ^EXAMPLES\.md$
+^LIVE_VIEWER\.md$
 ^scripts$
 ^manuscript$
 ^Data$

@@ -294,19 +294,147 @@ segmentation_to_rois <- wsi_segmentation_to_rois
 #'   `stardist-predict2d` when present on `PATH`.
 #'
 #' @return `TRUE` or `FALSE`.
-#' @keywords internal
+#' @export
 wsi_has_stardist <- function(command = NULL) {
   command <- wsi_default_stardist_command(command)
   is.character(command) && length(command) == 1L && nzchar(command) && wsi_command_exists(command)
+}
+
+wsi_default_mesmer_command <- function(command = NULL) {
+  if (!is.null(command)) {
+    return(command)
+  }
+  env_command <- Sys.getenv("WSITOOLS_MESMER_COMMAND", unset = "")
+  if (nzchar(env_command)) {
+    return(env_command)
+  }
+  for (candidate in c("deepcell-mesmer", "mesmer-predict", "mesmer")) {
+    if (wsi_command_exists(candidate)) {
+      return(candidate)
+    }
+  }
+  ""
+}
+
+#' Check optional cell segmentation engines
+#'
+#' These checks report whether optional external segmentation commands are
+#' available. They do not install or load StarDist, DeepCell, or Mesmer.
+#'
+#' @param command Optional command path/name to check.
+#'
+#' @return `TRUE` or `FALSE`.
+#' @export
+wsi_has_mesmer <- function(command = NULL) {
+  command <- wsi_default_mesmer_command(command)
+  is.character(command) && length(command) == 1L && nzchar(command) && wsi_command_exists(command)
+}
+
+wsi_cell_segmentation_engine <- function(engine = c("stardist_he", "stardist_ihc", "mesmer_dapi")) {
+  engine <- match.arg(engine)
+  engine
+}
+
+#' List optional cell segmentation engine presets
+#'
+#' Returns the lightweight presets that wsiTools can orchestrate from R or the
+#' live viewer. The engines are optional external commands; wsiTools crops the
+#' selected ROI and imports GeoJSON, CSV/TSV, or mask outputs without requiring
+#' the Python model stacks at package installation time.
+#'
+#' @return A data frame of engine presets and availability.
+#' @export
+wsi_cell_segmentation_engines <- function() {
+  data.frame(
+    engine = c("stardist_he", "stardist_ihc", "mesmer_dapi"),
+    label = c("StarDist H&E", "StarDist IHC", "Mesmer DAPI"),
+    backend = c("stardist", "stardist", "mesmer"),
+    installed = c(wsi_has_stardist(), wsi_has_stardist(), wsi_has_mesmer()),
+    default_model = c(
+      Sys.getenv("WSITOOLS_STARDIST_HE_MODEL", unset = "2D_versatile_he"),
+      Sys.getenv("WSITOOLS_STARDIST_IHC_MODEL", unset = "2D_versatile_he"),
+      NA_character_
+    ),
+    notes = c(
+      "Runs StarDist on an exported selected-ROI crop. Use tiled StarDist args for large ROIs.",
+      "Runs StarDist on an exported selected-ROI IHC crop. Configure model/args for the stain.",
+      "Runs an external DeepCell/Mesmer-style command on a selected-ROI crop; configure command/args."
+    ),
+    stringsAsFactors = FALSE
+  )
+}
+
+wsi_mesmer_not_configured_message <- function(command = NULL) {
+  requested <- if (!is.null(command) && nzchar(command)) {
+    sprintf("\nRequested command: `%s`.", command)
+  } else {
+    ""
+  }
+  paste0(
+    "No Mesmer command was found. Install/configure DeepCell/Mesmer, ",
+    "or load a cell mask/GeoJSON/CSV instead.",
+    requested,
+    "\nCopyable R command suggestion:\n",
+    "  Sys.setenv(WSITOOLS_MESMER_COMMAND = \"/path/to/your/mesmer_wrapper\")\n",
+    "  wsi_cell_segment_roi(slide, roi, \"cells\", engine = \"mesmer_dapi\", ",
+    "args = c(\"{input}\", \"{output}\"))"
+  )
+}
+
+wsi_cell_segmentation_output_path <- function(output_dir, stem, engine, output_type) {
+  ext <- switch(
+    output_type,
+    csv = "csv",
+    mask = "tif",
+    geojson = "geojson",
+    "geojson"
+  )
+  file.path(output_dir, sprintf("%s_%s.%s", stem, engine, ext))
+}
+
+wsi_cell_segmentation_default_model <- function(engine, model = NULL) {
+  if (!is.null(model) && nzchar(as.character(model))) {
+    return(as.character(model))
+  }
+  switch(
+    engine,
+    stardist_he = Sys.getenv("WSITOOLS_STARDIST_HE_MODEL", unset = "2D_versatile_he"),
+    stardist_ihc = Sys.getenv("WSITOOLS_STARDIST_IHC_MODEL", unset = "2D_versatile_he"),
+    mesmer_dapi = NA_character_
+  )
+}
+
+wsi_cell_segmentation_template_values <- function(engine, output_dir = NULL,
+                                                  tiles_x = NULL, tiles_y = NULL,
+                                                  min_area = NULL,
+                                                  nuclear_channel = "DAPI",
+                                                  membrane_channel = NULL,
+                                                  keras_home = NULL,
+                                                  pretrained_zip = NULL,
+                                                  extra = list()) {
+  values <- list(
+    engine = engine,
+    output_dir = output_dir,
+    tiles_x = tiles_x,
+    tiles_y = tiles_y,
+    min_area = min_area,
+    nuclear_channel = nuclear_channel,
+    membrane_channel = membrane_channel,
+    keras_home = keras_home,
+    pretrained_zip = pretrained_zip
+  )
+  utils::modifyList(values, extra %||% list(), keep.null = TRUE)
 }
 
 wsi_stardist_result <- function(input, output, segmentation = NULL,
                                 command = NULL, args = character(),
                                 command_output = character(), crop = NULL,
                                 slide_output = NULL, roi_id = NULL,
-                                bbox = NULL, status = "complete") {
+                                bbox = NULL, status = "complete",
+                                engine = "stardist") {
   structure(
     list(
+      engine = engine,
       input = input,
       crop = crop,
       output = output,
@@ -319,13 +447,14 @@ wsi_stardist_result <- function(input, output, segmentation = NULL,
       bbox = bbox,
       status = status
     ),
-    class = "wsi_stardist_result"
+    class = unique(c("wsi_cell_segmentation_result", "wsi_stardist_result"))
   )
 }
 
 #' @keywords internal
 print.wsi_stardist_result <- function(x, ...) {
   cat("<wsi_stardist_result>\n")
+  cat(sprintf("  engine: %s\n", x$engine %||% "stardist"))
   cat(sprintf("  status: %s\n", x$status %||% "unknown"))
   if (!is.null(x$crop)) {
     cat(sprintf("  crop:   %s\n", x$crop))
@@ -374,6 +503,7 @@ stardist_segment_image <- function(input, output,
                                    output_type = c("auto", "geojson", "csv", "mask"),
                                    prob_thresh = NULL,
                                    nms_thresh = NULL,
+                                   template_values = list(),
                                    overwrite = FALSE,
                                    run = TRUE) {
   input <- wsi_validate_input_path(input)
@@ -392,12 +522,16 @@ stardist_segment_image <- function(input, output,
   }
   args <- wsi_template_args(
     args,
-    list(
+    utils::modifyList(
+      list(
       input = input,
       output = output,
       model = model,
       prob_thresh = prob_thresh,
       nms_thresh = nms_thresh
+      ),
+      template_values %||% list(),
+      keep.null = TRUE
     )
   )
 
@@ -407,7 +541,8 @@ stardist_segment_image <- function(input, output,
       output = output,
       command = command,
       args = args,
-      status = "planned"
+      status = "planned",
+      engine = "stardist"
     ))
   }
 
@@ -435,7 +570,8 @@ stardist_segment_image <- function(input, output,
     command = command,
     args = args,
     command_output = command_output,
-    status = "complete"
+    status = "complete",
+    engine = "stardist"
   )
 }
 
@@ -533,6 +669,7 @@ stardist_segment_roi <- function(image, roi, output_dir, roi_id = NULL,
                                  output_type = c("auto", "geojson", "csv", "mask"),
                                  prob_thresh = NULL,
                                  nms_thresh = NULL,
+                                 template_values = list(),
                                  translate_geojson = TRUE,
                                  overwrite = FALSE,
                                  run = TRUE,
@@ -581,6 +718,11 @@ stardist_segment_roi <- function(image, roi, output_dir, roi_id = NULL,
     output_type = output_type,
     prob_thresh = prob_thresh,
     nms_thresh = nms_thresh,
+    template_values = utils::modifyList(
+      list(output_dir = output_dir, roi_id = roi_label),
+      template_values %||% list(),
+      keep.null = TRUE
+    ),
     overwrite = overwrite,
     run = run
   )
@@ -632,6 +774,263 @@ stardist_segment_roi <- function(image, roi, output_dir, roi_id = NULL,
 #' @rdname stardist_segment_roi
 #' @keywords internal
 wsi_stardist_segment_roi <- stardist_segment_roi
+
+wsi_cell_segment_image <- function(input, output,
+                                   engine = c("mesmer_dapi"),
+                                   command = NULL,
+                                   args = NULL,
+                                   output_type = c("auto", "geojson", "csv", "mask"),
+                                   mask_as_rois = TRUE,
+                                   template_values = list(),
+                                   overwrite = FALSE,
+                                   run = TRUE,
+                                   ...) {
+  input <- wsi_validate_input_path(input)
+  engine <- match.arg(engine)
+  output_type <- match.arg(output_type)
+  if (identical(output_type, "auto")) {
+    output_type <- "mask"
+  }
+  output <- wsi_validate_output_path(output, overwrite = overwrite)
+  command <- wsi_default_mesmer_command(command)
+  args <- args %||% c("{input}", "{output}")
+  args <- wsi_template_args(
+    args,
+    utils::modifyList(
+      list(input = input, output = output, engine = engine),
+      template_values %||% list(),
+      keep.null = TRUE
+    )
+  )
+
+  if (!isTRUE(run)) {
+    return(wsi_stardist_result(
+      input = input,
+      output = output,
+      command = command,
+      args = args,
+      status = "planned",
+      engine = engine
+    ))
+  }
+
+  if (!nzchar(command) || !wsi_command_exists(command)) {
+    wsi_abort(
+      wsi_mesmer_not_configured_message(command),
+      class = "wsi_backend_unavailable"
+    )
+  }
+
+  command_output <- wsi_run_command(
+    command,
+    args = args,
+    error_message = "Cell segmentation failed."
+  )
+  if (!file.exists(output)) {
+    wsi_abort(sprintf("Cell segmentation completed but did not create the expected output file: %s", output))
+  }
+  segmentation <- import_segmentation(
+    output,
+    type = output_type,
+    mask_as_rois = mask_as_rois,
+    ...
+  )
+  wsi_stardist_result(
+    input = input,
+    output = output,
+    segmentation = segmentation,
+    command = command,
+    args = args,
+    command_output = command_output,
+    status = "complete",
+    engine = engine
+  )
+}
+
+#' Run optional cell segmentation on a selected ROI
+#'
+#' Exports only the selected ROI bounding box, runs an optional external
+#' segmentation command, imports the result, and maps crop-local cells back to
+#' slide coordinates. This is designed for memory-safe viewer workflows:
+#' StarDist/Mesmer should process a crop or a tiled crop, never the full WSI
+#' loaded into R memory.
+#'
+#' @param image A `wsi_slide` object or image path accepted by [wsi_open()].
+#' @param roi A `wsi_roi` object. When multiple ROIs are supplied, `roi_id`
+#'   selects one; otherwise the first ROI is used.
+#' @param output_dir Directory for crops and segmentation outputs.
+#' @param engine One of `"stardist_he"`, `"stardist_ihc"`, or
+#'   `"mesmer_dapi"`.
+#' @param roi_id Optional ROI id.
+#' @param level Pyramid level used for ROI crop export.
+#' @param crop_format Crop image format.
+#' @param model StarDist model name for StarDist engines.
+#' @param command External command. StarDist engines use
+#'   `WSITOOLS_STARDIST_COMMAND` when this is `NULL`; Mesmer uses
+#'   `WSITOOLS_MESMER_COMMAND`.
+#' @param args Command arguments with placeholders such as `{input}`,
+#'   `{output}`, `{model}`, `{tiles_x}`, `{tiles_y}`, `{min_area}`,
+#'   `{nuclear_channel}`, `{membrane_channel}`, `{keras_home}`, and
+#'   `{pretrained_zip}`.
+#' @param output Optional expected model output path.
+#' @param output_type Output type for [import_segmentation()]. Mesmer defaults
+#'   to `"mask"` when `"auto"` is supplied.
+#' @param tiles_x,tiles_y Optional tiling values passed only through command
+#'   placeholders. Use these with a wrapper that supports tiled StarDist/Mesmer
+#'   prediction to avoid high RAM use on large ROI crops.
+#' @param min_area Optional minimum cell area passed through `{min_area}`.
+#' @param nuclear_channel,membrane_channel Channel names/indices passed through
+#'   command placeholders for mIHC/DAPI workflows.
+#' @param keras_home,pretrained_zip Optional StarDist cache/model locations
+#'   passed through command placeholders.
+#' @param mask_as_rois For mask outputs, convert connected components to cell
+#'   ROI polygons.
+#' @inheritParams stardist_segment_roi
+#'
+#' @return A `wsi_cell_segmentation_result` object.
+#' @export
+wsi_cell_segment_roi <- function(image, roi, output_dir,
+                                 engine = c("stardist_he", "stardist_ihc", "mesmer_dapi"),
+                                 roi_id = NULL,
+                                 level = 0,
+                                 crop_format = c("png", "tiff", "jpeg"),
+                                 model = NULL,
+                                 command = NULL,
+                                 args = NULL,
+                                 output = NULL,
+                                 output_type = c("auto", "geojson", "csv", "mask"),
+                                 prob_thresh = NULL,
+                                 nms_thresh = NULL,
+                                 tiles_x = NULL,
+                                 tiles_y = NULL,
+                                 min_area = NULL,
+                                 nuclear_channel = "DAPI",
+                                 membrane_channel = NULL,
+                                 keras_home = NULL,
+                                 pretrained_zip = NULL,
+                                 mask_as_rois = TRUE,
+                                 translate_geojson = TRUE,
+                                 overwrite = FALSE,
+                                 run = TRUE,
+                                 backend = c("auto", "vips", "openslide"),
+                                 ...) {
+  engine <- wsi_cell_segmentation_engine(engine)
+  crop_format <- match.arg(crop_format)
+  output_type <- match.arg(output_type)
+  backend <- match.arg(backend)
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+  }
+  if (!dir.exists(output_dir)) {
+    wsi_abort(sprintf("Could not create output directory: %s", output_dir))
+  }
+  region <- wsi_roi_bbox(roi, roi_id = roi_id)
+  idx <- if (is.null(roi_id)) 1L else match(as.character(roi_id), roi$roi_id)
+  roi_label <- roi$roi_id[[idx]]
+  stem <- gsub("[^A-Za-z0-9_.-]+", "_", roi_label)
+  if (!nzchar(stem)) {
+    stem <- "roi"
+  }
+  template_values <- wsi_cell_segmentation_template_values(
+    engine = engine,
+    output_dir = output_dir,
+    tiles_x = tiles_x,
+    tiles_y = tiles_y,
+    min_area = min_area,
+    nuclear_channel = nuclear_channel,
+    membrane_channel = membrane_channel,
+    keras_home = keras_home,
+    pretrained_zip = pretrained_zip,
+    extra = list(roi_id = roi_label)
+  )
+
+  if (engine %in% c("stardist_he", "stardist_ihc")) {
+    model <- wsi_cell_segmentation_default_model(engine, model)
+    if (is.null(output)) {
+      output <- wsi_cell_segmentation_output_path(output_dir, stem, engine, if (identical(output_type, "auto")) "geojson" else output_type)
+    }
+    result <- stardist_segment_roi(
+      image = image,
+      roi = roi,
+      output_dir = output_dir,
+      roi_id = roi_id,
+      level = level,
+      crop_format = crop_format,
+      model = model,
+      command = command,
+      args = args,
+      output = output,
+      output_type = output_type,
+      prob_thresh = prob_thresh,
+      nms_thresh = nms_thresh,
+      template_values = template_values,
+      translate_geojson = translate_geojson,
+      overwrite = overwrite,
+      run = run,
+      backend = backend
+    )
+    result$engine <- engine
+    class(result) <- unique(c("wsi_cell_segmentation_result", class(result)))
+    return(result)
+  }
+
+  if (is.null(output)) {
+    output <- wsi_cell_segmentation_output_path(output_dir, stem, engine, if (identical(output_type, "auto")) "mask" else output_type)
+  }
+  crop_file <- file.path(output_dir, sprintf("%s_crop.%s", stem, wsi_format_extension(crop_format)))
+  export_roi_crop(
+    image = image,
+    roi = roi,
+    file = crop_file,
+    roi_id = roi_label,
+    level = level,
+    format = crop_format,
+    overwrite = overwrite,
+    backend = backend
+  )
+  if (identical(output_type, "auto")) {
+    output_type <- "mask"
+  }
+  result <- wsi_cell_segment_image(
+    input = crop_file,
+    output = output,
+    engine = "mesmer_dapi",
+    command = command,
+    args = args,
+    output_type = output_type,
+    mask_as_rois = mask_as_rois,
+    template_values = template_values,
+    overwrite = overwrite,
+    run = run,
+    origin = c(x = 0, y = 0),
+    class_map = c("1" = "cell", "TRUE" = "cell"),
+    prefix = "cell",
+    ...
+  )
+  result$crop <- crop_file
+  result$roi_id <- roi_label
+  result$bbox <- region
+  if (isTRUE(run) && isTRUE(translate_geojson) && inherits(result$segmentation, "wsi_roi")) {
+    translated <- wsi_translate_rois(
+      result$segmentation,
+      dx = unname(region[["x"]]),
+      dy = unname(region[["y"]])
+    )
+    slide_output <- file.path(output_dir, sprintf("%s_%s_slide.geojson", stem, engine))
+    write_geojson(translated, slide_output, overwrite = TRUE)
+    class(translated) <- unique(c("wsi_segmentation_rois", "wsi_segmentation", class(translated)))
+    attr(translated, "source_file") <- slide_output
+    result$slide_output <- slide_output
+    result$segmentation <- translated
+  }
+  result$engine <- engine
+  class(result) <- unique(c("wsi_cell_segmentation_result", class(result)))
+  result
+}
+
+#' @rdname wsi_cell_segment_roi
+#' @export
+cell_segment_roi <- wsi_cell_segment_roi
 
 #' Import external segmentation outputs
 #'
@@ -727,11 +1126,14 @@ wsi_named_numeric_list <- function(x) {
 }
 
 wsi_stardist_response_body <- function(result, cell_radius = 8) {
+  engine <- as.character(result$engine %||% "stardist")
   metadata <- list(
     message = sprintf(
-      "StarDist completed for ROI %s.",
+      "%s completed for ROI %s.",
+      engine,
       result$roi_id %||% "selected ROI"
     ),
+    engine = engine,
     crop = result$crop %||% result$input %||% NULL,
     output = result$output %||% NULL,
     slide_output = result$slide_output %||% NULL,
@@ -809,26 +1211,34 @@ wsi_http_query_params <- function(query = NULL) {
   values
 }
 
-#' Start a local StarDist ROI segmentation endpoint
+#' Start a local ROI cell-segmentation endpoint
 #'
-#' Starts an optional local HTTP endpoint for the interactive viewer's
-#' `Run segmentation` button. The viewer posts the selected ROI GeoJSON to the
-#' endpoint. The endpoint crops that ROI, runs [stardist_segment_roi()], converts
-#' polygon or centroid segmentation output to GeoJSON cell overlays, and returns
-#' the result and run metadata to the browser.
+#' Starts an optional local HTTP endpoint for the interactive viewer's Cells
+#' menu. The viewer posts a selected ROI GeoJSON, optionally with an engine
+#' name. The endpoint crops that ROI, runs [wsi_cell_segment_roi()], converts
+#' polygon, centroid, or mask outputs to GeoJSON cell overlays, and returns the
+#' result and run metadata to the browser.
 #'
-#' This function requires the optional `httpuv` package and an external StarDist
-#' command or script. It is not required for installing or loading wsiTools.
+#' This function requires the optional `httpuv` package and an external
+#' StarDist or Mesmer command/script. It is not required for installing or
+#' loading wsiTools.
 #'
 #' @param image A `wsi_slide` object or slide path accepted by [wsi_open()].
 #' @param output_dir Directory for ROI crops and StarDist outputs.
 #' @param host,port Local host and first port to try for the endpoint.
 #' @param path URL path used for segmentation requests.
 #' @param max_tries Number of subsequent ports to try if `port` is busy.
+#' @param engines Engine presets accepted by the endpoint.
+#' @param default_engine Engine used when the browser posts plain GeoJSON.
 #' @param model,command,args,output_type,prob_thresh,nms_thresh,overwrite,level
-#'   Arguments passed to [stardist_segment_roi()].
-#' @param crop_format Crop image format passed to [stardist_segment_roi()].
-#' @param backend Region export backend passed to [stardist_segment_roi()].
+#'   StarDist defaults passed to [wsi_cell_segment_roi()].
+#' @param stardist_ihc_model Optional model used for `engine = "stardist_ihc"`.
+#' @param mesmer_command,mesmer_args Optional Mesmer command and arguments.
+#' @param tiles_x,tiles_y,min_area,nuclear_channel,membrane_channel,keras_home,pretrained_zip
+#'   Placeholder values forwarded to external command arguments. Use tiled
+#'   StarDist/Mesmer wrappers for large selected ROIs to reduce RAM pressure.
+#' @param crop_format Crop image format passed to [wsi_cell_segment_roi()].
+#' @param backend Region export backend passed to [wsi_cell_segment_roi()].
 #' @param cell_radius Radius used when returning centroid outputs as cell
 #'   GeoJSON overlays.
 #' @param state Optional live viewer state. When supplied, the endpoint records
@@ -861,12 +1271,24 @@ wsi_stardist_server <- function(image,
                                 port = 8787,
                                 path = "/segment",
                                 max_tries = 20L,
+                                engines = c("stardist_he", "stardist_ihc", "mesmer_dapi"),
+                                default_engine = "stardist_he",
                                 model = "2D_versatile_he",
                                 command = NULL,
                                 args = NULL,
+                                stardist_ihc_model = NULL,
+                                mesmer_command = NULL,
+                                mesmer_args = NULL,
                                 output_type = c("auto", "geojson", "csv", "mask"),
                                 prob_thresh = NULL,
                                 nms_thresh = NULL,
+                                tiles_x = NULL,
+                                tiles_y = NULL,
+                                min_area = NULL,
+                                nuclear_channel = "DAPI",
+                                membrane_channel = NULL,
+                                keras_home = NULL,
+                                pretrained_zip = NULL,
                                 overwrite = TRUE,
                                 level = 0,
                                 crop_format = c("png", "tiff", "jpeg"),
@@ -883,6 +1305,16 @@ wsi_stardist_server <- function(image,
   output_type <- match.arg(output_type)
   crop_format <- match.arg(crop_format)
   backend <- match.arg(backend)
+  engines <- unique(as.character(engines %||% character()))
+  engines <- engines[nzchar(engines) & !is.na(engines)]
+  if (!length(engines)) {
+    wsi_abort("`engines` must include at least one cell-segmentation engine.")
+  }
+  engines <- vapply(engines, wsi_cell_segmentation_engine, character(1))
+  default_engine <- wsi_cell_segmentation_engine(default_engine)
+  if (!default_engine %in% engines) {
+    wsi_abort("`default_engine` must be included in `engines`.")
+  }
   cell_radius <- wsi_check_scalar_number(cell_radius, "cell_radius", allow_zero = FALSE)
   port <- as.integer(wsi_check_scalar_number(port, "port", allow_zero = FALSE))
   max_tries <- as.integer(wsi_check_scalar_number(max_tries, "max_tries", allow_zero = TRUE))
@@ -918,30 +1350,63 @@ wsi_stardist_server <- function(image,
         if (!nzchar(body)) {
           wsi_abort("Request body did not contain selected ROI GeoJSON.")
         }
+        parsed <- tryCatch(
+          jsonlite::fromJSON(body, simplifyVector = FALSE),
+          error = function(err) NULL
+        )
+        engine <- default_engine
+        roi_payload <- parsed
+        if (is.list(parsed) && !identical(parsed$type %||% NULL, "FeatureCollection")) {
+          requested_engine <- parsed$engine %||% default_engine
+          engine <- wsi_cell_segmentation_engine(requested_engine)
+          if (!engine %in% engines) {
+            wsi_abort(sprintf(
+              "Cell segmentation engine `%s` is not enabled for this viewer.",
+              engine
+            ))
+          }
+          roi_payload <- parsed$roi %||% parsed$geojson %||% parsed$feature_collection %||% NULL
+        }
+        if (is.null(roi_payload)) {
+          wsi_abort("Request body did not contain a selected ROI GeoJSON FeatureCollection.")
+        }
+        roi_text <- if (identical(roi_payload, parsed) && is.character(body) && nzchar(body)) {
+          body
+        } else {
+          jsonlite::toJSON(roi_payload, auto_unbox = TRUE, null = "null")
+        }
         roi_file <- tempfile(fileext = ".geojson")
         on.exit(unlink(roi_file), add = TRUE)
-        writeLines(body, roi_file, useBytes = TRUE)
+        writeLines(roi_text, roi_file, useBytes = TRUE)
         roi <- read_geojson(roi_file)
         if (!is.null(state)) {
           wsi_viewer_state_set_selected_roi(
             state,
             roi,
             event = "segmentation_requested",
-            detail = list(engine = "stardist", output_dir = output_dir)
+            detail = list(engine = engine, output_dir = output_dir)
           )
         }
-        result <- stardist_segment_roi(
+        result <- wsi_cell_segment_roi(
           image = image,
           roi = roi,
           output_dir = output_dir,
+          engine = engine,
           level = level,
           crop_format = crop_format,
-          model = model,
-          command = command,
-          args = args,
+          model = if (identical(engine, "stardist_ihc")) stardist_ihc_model %||% model else model,
+          command = if (identical(engine, "mesmer_dapi")) mesmer_command else command,
+          args = if (identical(engine, "mesmer_dapi")) mesmer_args else args,
           output_type = output_type,
           prob_thresh = prob_thresh,
           nms_thresh = nms_thresh,
+          tiles_x = tiles_x,
+          tiles_y = tiles_y,
+          min_area = min_area,
+          nuclear_channel = nuclear_channel,
+          membrane_channel = membrane_channel,
+          keras_home = keras_home,
+          pretrained_zip = pretrained_zip,
           translate_geojson = TRUE,
           overwrite = overwrite,
           run = TRUE,
@@ -980,20 +1445,29 @@ wsi_stardist_server <- function(image,
   }
   if (is.null(server)) {
     wsi_abort(sprintf(
-      "Could not start StarDist endpoint near port %d: %s",
+      "Could not start cell segmentation endpoint near port %d: %s",
       port,
       last_error %||% "unknown error"
     ))
   }
   url <- sprintf("http://%s:%d%s", host, used_port, path)
   out <- structure(
-    list(server = server, url = url, host = host, port = used_port, path = path, state = state),
+    list(
+      server = server,
+      url = url,
+      host = host,
+      port = used_port,
+      path = path,
+      state = state,
+      engines = engines,
+      default_engine = default_engine
+    ),
     class = "wsi_stardist_server"
   )
-  message("wsiTools StarDist endpoint listening at ", url)
+  message("wsiTools cell segmentation endpoint listening at ", url)
   message("Create the viewer with `segmentation_run_url = \"", url, "\"`.")
   if (isTRUE(wait)) {
-    message("Press Ctrl+C or Esc to stop the segmentation endpoint.")
+    message("Press Ctrl+C or Esc to stop the cell segmentation endpoint.")
     on.exit(httpuv::stopServer(server), add = TRUE)
     repeat httpuv::service(100)
   }

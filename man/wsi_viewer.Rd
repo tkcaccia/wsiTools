@@ -38,6 +38,8 @@ wsi_viewer(
   hematoxylin_strength = 1,
   hrp_strength = 1,
   segmentation_run_url = NULL,
+  segmentation_engines = c("stardist_he", "stardist_ihc", "mesmer_dapi"),
+  segmentation_default_engine = "stardist_he",
   viewer_state_url = NULL,
   viewer_state_ws_url = NULL,
   seurat_gene_url = NULL,
@@ -134,10 +136,12 @@ hematoxylin and HRP/DAB channels.}
 \item{hematoxylin_strength, hrp_strength}{Initial display gains for the
 hematoxylin and HRP/DAB channels.}
 
-\item{segmentation_run_url}{Legacy optional HTTP endpoint. The current
-viewer no longer exposes selected-ROI StarDist/Cellpose run controls;
-segmentation is expected to be produced outside wsiTools, for example by
-CellPhenotyper, and loaded as project cell overlays.}
+\item{segmentation_run_url}{Optional live HTTP endpoint used by the Cells
+menu to run selected-ROI cell segmentation.}
+
+\item{segmentation_engines, segmentation_default_engine}{Optional Cells-menu
+engine presets. Supported values are \code{"stardist_he"}, \code{"stardist_ihc"},
+and \code{"mesmer_dapi"}.}
 
 \item{viewer_state_url}{Optional HTTP endpoint used to sync annotations,
 measurements, segmentation overlays, and display state back to R. Use

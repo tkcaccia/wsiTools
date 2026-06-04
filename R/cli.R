@@ -11,7 +11,7 @@ wsi_cli_usage <- function() {
     "  wsitools backends",
     "  wsitools translate-rois --input crop.geojson --output slide.geojson --dx 100 --dy 200",
     "",
-    "Cell segmentation is expected to be run outside wsiTools, for example with CellPhenotyper.",
+    "Cell segmentation engines are optional; use selected-ROI crops, CellPhenotyper outputs, or imported masks/GeoJSON.",
     sep = "\n"
   )
 }

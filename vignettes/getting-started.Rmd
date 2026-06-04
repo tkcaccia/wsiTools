@@ -759,12 +759,33 @@ write_geojson(mask_rois, "tumour_mask_annotations.geojson", overwrite = TRUE)
 
 Optional external segmentation tools remain outside wsiTools dependencies. A
 typical workflow is to export an ROI crop, run an external model, import its
-output, and display the result as an overlay.
+output, and display the result as an overlay. Live viewers can also orchestrate
+configured StarDist or Mesmer-style commands on the selected ROI crop; the
+model stack itself is still optional and external.
 
 ```{r, eval=FALSE, purl=FALSE}
 export_roi_crop(slide, roi, "roi_crop.png", roi_id = roi$roi_id[1])
 segmentation <- import_segmentation("model_output.geojson")
 viewer_add_segmentation(slide, segmentation, output = "segmentation_overlay.html")
+
+viewer <- wsi_viewer_live(
+  slide,
+  mode = "tiles",
+  stardist = TRUE,
+  stardist_args = c(
+    "--input", "{input}",
+    "--output", "{output}",
+    "--model", "{model}",
+    "--tiles", "{tiles_y}", "{tiles_x}"
+  ),
+  segmentation_tiles_x = 32,
+  segmentation_tiles_y = 32,
+  wait = FALSE
+)
+
+# After drawing/selecting one ROI in the browser:
+job <- viewer$run_segmentation_async(engine = "stardist_he", tiles_x = 32, tiles_y = 32)
+cells <- job$result()
 ```
 
 For live sessions, long-running operations can run in a background R process
@@ -912,9 +933,10 @@ libvips is used for efficient thumbnails, cropping, conversion, and pyramidal
 TIFF/OME-TIFF export. OME-TIFF behavior depends on the installed libvips
 version and its TIFF writer capabilities.
 
-Cell segmentation should remain outside the package: run the model in
-CellPhenotyper or another pipeline, then import masks, centroids, polygons, or
-GeoJSON back into wsiTools. OME-Zarr metadata reads are lightweight; full chunked pixel access is
+Cell segmentation model stacks should remain optional: run the model in
+CellPhenotyper or another pipeline, or configure a live selected-ROI
+StarDist/Mesmer command, then import masks, centroids, polygons, or GeoJSON
+back into wsiTools. OME-Zarr metadata reads are lightweight; full chunked pixel access is
 best treated as an optional backend rather than a mandatory dependency.
 
 Always check:

@@ -1567,6 +1567,7 @@ wsi_viewer_state_add_segmentation_result <- function(state, result, cell_radius 
   wsi_viewer_update_measurement_tables(state)
   detail <- list(
     added = added,
+    engine = result$engine %||% NULL,
     crop = result$crop %||% result$input %||% NULL,
     output = result$output %||% NULL,
     slide_output = result$slide_output %||% NULL,
@@ -2254,6 +2255,7 @@ wsi_viewer_session_add_segmentation_job_result <- function(session, result,
 
   detail <- list(
     added = added,
+    engine = result$engine %||% NULL,
     crop = result$crop %||% result$input %||% NULL,
     output = result$output %||% NULL,
     slide_output = result$slide_output %||% NULL,
@@ -3020,13 +3022,62 @@ wsi_attach_viewer_session_methods <- function(session) {
   }
   session$run_segmentation_async <- function(roi = NULL,
                                              output_dir = "wsi_stardist_viewer_async",
+                                             engine = c("stardist_he", "stardist_ihc", "mesmer_dapi"),
                                              cell_radius = 8,
                                              service = TRUE,
                                              update_viewer = TRUE,
                                              ...) {
-    wsi_abort(
-      "Selected-ROI StarDist/Cellpose segmentation has been removed from wsiTools. Run cell segmentation separately with CellPhenotyper and open the resulting project/cell overlays in the viewer."
+    engine <- wsi_cell_segmentation_engine(engine)
+    selected <- wsi_viewer_session_selected_rois(self, roi = roi, service = service)
+    if (is.null(selected) || !inherits(selected, "wsi_roi") || !nrow(selected)) {
+      wsi_abort("No selected ROI is available for cell segmentation. Draw/select an ROI or pass `roi`.")
+    }
+    job <- wsi_cell_segment_roi_async(
+      image = wsi_viewer_session_slide_input(self$slide),
+      roi = selected,
+      output_dir = output_dir,
+      engine = engine,
+      ...
     )
+    wsi_viewer_session_register_job(self, job)
+    wsi_viewer_state_record_event(
+      self$state,
+      "segmentation_started",
+      list(
+        job_id = job$id,
+        job_name = job$name,
+        engine = engine,
+        roi_count = nrow(selected),
+        async = TRUE
+      )
+    )
+    job$then(function(result, job) {
+      if (isTRUE(update_viewer)) {
+        wsi_viewer_session_add_segmentation_job_result(
+          self,
+          result,
+          cell_radius = cell_radius,
+          job = job,
+          service = service
+        )
+      } else {
+        wsi_viewer_session_record_async_result(
+          self,
+          "segmentation_finished",
+          job,
+          result,
+          detail = list(engine = result$engine %||% engine, async = TRUE),
+          service = service
+        )
+      }
+    })
+    job$catch(function(error, job) {
+      wsi_viewer_session_record_job_failure(self, job, error, event = "segmentation_failed", service = service)
+    })
+    if (isTRUE(service)) {
+      wsi_viewer_session_pump(self, 0L)
+    }
+    job
   }
   session$run_tiles_async <- function(roi = NULL,
                                       layer = TRUE,
@@ -3592,15 +3643,23 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 #' @param autosave_interval Seconds between browser-to-R autosave syncs.
 #' @param autosave_overwrite Whether autosave may update an existing
 #'   `.wsiproject` index and sidecar files.
-#' @param stardist Legacy logical retained for old scripts. If `TRUE`, wsiTools
-#'   warns that selected-ROI StarDist/Cellpose launching has been removed and
-#'   still opens the viewer.
+#' @param stardist Logical retained for old scripts. If `TRUE`, wsiTools starts
+#'   an optional selected-ROI cell-segmentation endpoint for StarDist H&E,
+#'   StarDist IHC, and Mesmer DAPI presets.
 #' @param stardist_output_dir,stardist_host,stardist_port,stardist_path,stardist_max_tries
-#'   Legacy arguments retained for compatibility; ignored by the current
-#'   viewer.
+#'   Segmentation endpoint settings.
 #' @param stardist_model,stardist_command,stardist_args,stardist_output_type,stardist_prob_thresh,stardist_nms_thresh,stardist_level,stardist_crop_format,stardist_backend,stardist_cell_radius,stardist_overwrite
-#'   Legacy arguments retained for compatibility; ignored by the current
-#'   viewer.
+#'   StarDist defaults for selected-ROI segmentation.
+#' @param segmentation_engines,segmentation_default_engine Engine presets shown
+#'   in the viewer Cells menu when `stardist = TRUE`.
+#' @param stardist_ihc_model Optional StarDist model for IHC segmentation.
+#' @param mesmer_command,mesmer_args Optional Mesmer command and arguments.
+#' @param segmentation_tiles_x,segmentation_tiles_y,segmentation_min_area Optional
+#'   command-template placeholders used by tiled external wrappers to reduce RAM.
+#' @param segmentation_nuclear_channel,segmentation_membrane_channel Channel
+#'   placeholders for mIHC/DAPI wrappers.
+#' @param segmentation_keras_home,segmentation_pretrained_zip Optional model
+#'   cache/model placeholders for external wrappers.
 #'
 #' @return A `wsi_viewer_session` object, invisibly. The object keeps the
 #'   bridge fields (`url`, `html`, `state`) and provides live-session helper
@@ -3701,7 +3760,19 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
                                stardist_crop_format = c("png", "tiff", "jpeg"),
                                stardist_backend = c("auto", "vips", "openslide"),
                                stardist_cell_radius = 8,
-                               stardist_overwrite = TRUE) {
+                               stardist_overwrite = TRUE,
+                               segmentation_engines = c("stardist_he", "stardist_ihc", "mesmer_dapi"),
+                               segmentation_default_engine = "stardist_he",
+                               stardist_ihc_model = NULL,
+                               mesmer_command = NULL,
+                               mesmer_args = NULL,
+                               segmentation_tiles_x = NULL,
+                               segmentation_tiles_y = NULL,
+                               segmentation_min_area = NULL,
+                               segmentation_nuclear_channel = "DAPI",
+                               segmentation_membrane_channel = NULL,
+                               segmentation_keras_home = NULL,
+                               segmentation_pretrained_zip = NULL) {
   if (!is.logical(stardist) || length(stardist) != 1L || is.na(stardist)) {
     wsi_abort("`stardist` must be `TRUE` or `FALSE`.")
   }
@@ -3838,10 +3909,42 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
     dots$channel_sources <- wsi_live_channel_sources(requested_channel_sources, base_url = base_url)
   }
   if (isTRUE(stardist)) {
-    wsi_warn(
-      "Selected-ROI StarDist/Cellpose segmentation controls have been removed from wsiTools. Run cell segmentation separately with CellPhenotyper and open the resulting project/cell overlays in the viewer.",
-      class = "wsi_deprecated_segmentation"
+    stardist_bridge <- wsi_stardist_server(
+      image = slide,
+      output_dir = stardist_output_dir,
+      host = stardist_host,
+      port = stardist_port,
+      path = stardist_path,
+      max_tries = stardist_max_tries,
+      engines = segmentation_engines,
+      default_engine = segmentation_default_engine,
+      model = stardist_model,
+      command = stardist_command,
+      args = stardist_args,
+      stardist_ihc_model = stardist_ihc_model,
+      mesmer_command = mesmer_command,
+      mesmer_args = mesmer_args,
+      output_type = stardist_output_type,
+      prob_thresh = stardist_prob_thresh,
+      nms_thresh = stardist_nms_thresh,
+      tiles_x = segmentation_tiles_x,
+      tiles_y = segmentation_tiles_y,
+      min_area = segmentation_min_area,
+      nuclear_channel = segmentation_nuclear_channel,
+      membrane_channel = segmentation_membrane_channel,
+      keras_home = segmentation_keras_home,
+      pretrained_zip = segmentation_pretrained_zip,
+      overwrite = stardist_overwrite,
+      level = stardist_level,
+      crop_format = stardist_crop_format,
+      backend = stardist_backend,
+      cell_radius = stardist_cell_radius,
+      state = state,
+      wait = FALSE
     )
+    dots$segmentation_run_url <- stardist_bridge$url
+    dots$segmentation_engines <- segmentation_engines
+    dots$segmentation_default_engine <- segmentation_default_engine
   }
   dots$viewer_state_url <- bridge$url
   dots$viewer_state_ws_url <- if (identical(transport, "polling")) NULL else bridge$ws_url

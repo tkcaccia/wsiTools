@@ -1041,12 +1041,30 @@ wsi_viewer_artifact_controls <- function(config) {
 
 wsi_viewer_cell_controls <- function(config) {
   cellphenotyper <- config$cellphenotyper %||% list(enabled = FALSE)
-  if (!isTRUE(cellphenotyper$enabled)) {
+  segmentation <- config$segmentation %||% list(enabled = FALSE)
+  if (!isTRUE(cellphenotyper$enabled) && !isTRUE(segmentation$enabled)) {
     return("")
   }
-  wsi_viewer_menu(
-    "Cells",
-    "CellPhenotyper cell overlays",
+  engines <- segmentation$engines %||% list()
+  engine_options <- if (length(engines)) {
+    paste0(
+      vapply(engines, function(engine) {
+        value <- as.character(engine$engine %||% "")
+        label <- as.character(engine$label %||% value)
+        paste0(
+          "<option value=\"", wsi_html_escape(value), "\"",
+          if (identical(value, as.character(segmentation$default_engine %||% ""))) " selected" else "",
+          ">",
+          wsi_html_escape(label),
+          "</option>"
+        )
+      }, character(1)),
+      collapse = ""
+    )
+  } else {
+    "<option value=\"stardist_he\">StarDist H&amp;E</option>"
+  }
+  cellphenotyper_section <- if (isTRUE(cellphenotyper$enabled)) {
     paste0(
       "<div class=\"menuTitle\">CellPhenotyper cells</div>",
       "<div class=\"menuGrid\">",
@@ -1056,6 +1074,46 @@ wsi_viewer_cell_controls <- function(config) {
       "<label class=\"control\" title=\"Cell overlay opacity\">Opacity <input id=\"cellOpacity\" type=\"range\" min=\"0\" max=\"1\" step=\"0.05\" value=\"0.75\"></label>",
       "<label class=\"control\" title=\"Cell marker radius in slide pixels\">Cell size <input id=\"cellRadius\" type=\"range\" min=\"1\" max=\"40\" step=\"1\" value=\"6\"><span id=\"cellRadiusValue\">6 px</span></label>",
       "<div id=\"cellSummary\" class=\"menuHint\">No CellPhenotyper cells loaded.</div>"
+    )
+  } else {
+    "<div id=\"cellSummary\" class=\"menuHint\">No CellPhenotyper cell table is attached.</div>"
+  }
+  segmentation_section <- paste0(
+    "<div class=\"menuTitle\">Selected ROI segmentation</div>",
+    "<label class=\"control\" title=\"External engine used by the live R endpoint\">Engine <select id=\"segmentationEngine\"",
+    if (isTRUE(segmentation$enabled)) "" else " disabled",
+    ">",
+    engine_options,
+    "</select></label>",
+    "<div class=\"menuGrid\">",
+    "<button id=\"startSegmentation\" title=\"Run segmentation on the selected ROI through the live R endpoint\"",
+    if (isTRUE(segmentation$enabled)) "" else " disabled",
+    ">Run selected ROI</button>",
+    "<button id=\"exportSelectedRoi\" title=\"Export selected ROI GeoJSON for external analysis\">Export ROI</button>",
+    "<button id=\"loadSegmentation\" title=\"Load cell polygons from GeoJSON\">Load GeoJSON</button>",
+    "<button id=\"loadSegmentationCsv\" title=\"Load cell centroids from CSV or TSV\">Load CSV</button>",
+    "<button id=\"loadSegmentationMask\" title=\"Load a browser-readable cell mask image as cell ROIs\">Load mask</button>",
+    "<button id=\"clearSegmentation\" title=\"Remove loaded cell overlays\">Clear cells</button>",
+    "</div>",
+    "<label class=\"control\" title=\"Use selected ROI origin when imported output coordinates are crop-local\"><input id=\"segLocalCoords\" type=\"checkbox\"> crop-local coordinates</label>",
+    "<label class=\"control\" title=\"Radius used for centroid tables loaded as cell markers\">Centroid size <input id=\"segCellRadius\" type=\"range\" min=\"1\" max=\"40\" step=\"1\" value=\"8\"><span id=\"segCellRadiusValue\">8 px</span></label>",
+    "<input id=\"segmentationFile\" type=\"file\" accept=\".geojson,.json,application/geo+json,application/json\" style=\"display:none\">",
+    "<input id=\"segmentationTableFile\" type=\"file\" accept=\".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain\" style=\"display:none\">",
+    "<input id=\"segmentationMaskFile\" type=\"file\" accept=\"image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp,.tif,.tiff\" style=\"display:none\">",
+    "<div id=\"segmentationSummary\" class=\"menuHint\">",
+    if (isTRUE(segmentation$enabled)) {
+      "Select or draw one ROI, then run StarDist/Mesmer on that crop or load cells from GeoJSON/CSV/mask."
+    } else {
+      "Open a live viewer with `stardist = TRUE` to run selected-ROI segmentation from R, or load existing cell GeoJSON/CSV/mask outputs."
+    },
+    "</div>"
+  )
+  wsi_viewer_menu(
+    "Cells",
+    "Cell overlays and optional selected-ROI segmentation",
+    paste0(
+      cellphenotyper_section,
+      segmentation_section
     )
   )
 }
@@ -2761,6 +2819,9 @@ wsi_viewer_trajectory_js <- function() {
 wsi_viewer_segmentation_js <- function() {
   paste0(
     "function segmentationStatus(msg,type='info',toast=false){const box=el('segmentationSummary');if(box)box.textContent=msg||'';if(msg&&toast)notify(msg,type);}\n",
+    "function segmentationConfig(){return cfg.segmentation||{};}\n",
+    "function segmentationRunUrl(){const seg=segmentationConfig();return String(seg.run_url||cfg.segmentation_run_url||'');}\n",
+    "function segmentationSelectedEngine(){const select=el('segmentationEngine'),seg=segmentationConfig();return String((select&&select.value)||seg.default_engine||'stardist_he');}\n",
     "function selectedRoiFeatureText(){if(selectedRoi<0||!rois[selectedRoi])return null;const feature=roiFeature(rois[selectedRoi],selectedRoi);if(!feature)return null;return JSON.stringify({type:'FeatureCollection',features:[feature]},null,2);}\n",
     "function exportSelectedRoiForSegmentation(){const text=selectedRoiFeatureText();if(!text){segmentationStatus('Select an ROI before exporting the selected region.','warning',true);return;}const roi=rois[selectedRoi],name=(roi.id||roi.name||'selected_roi').replace(/[^A-Za-z0-9_.-]+/g,'_');downloadText(text,name+'_roi.geojson');segmentationStatus('Exported selected ROI GeoJSON. Run cell segmentation outside wsiTools, then load the resulting GeoJSON or centroid table.');notify('GeoJSON exported','success');}\n",
     "function segmentationOffset(){const local=!!(el('segLocalCoords')&&el('segLocalCoords').checked),base=(local&&selectedRoi>=0&&rois[selectedRoi])?roiBounds(rois[selectedRoi]):null;return base?{x:base.xmin,y:base.ymin}:{x:0,y:0};}\n",
@@ -2777,10 +2838,13 @@ wsi_viewer_segmentation_js <- function() {
     "function addSegmentationCentroidTable(text,fileName){const table=parseDelimitedTable(text),headers=table.headers,rows=table.rows,xi=headerIndex(headers,['x','centroid_x','center_x','centre_x']),yi=headerIndex(headers,['y','centroid_y','center_y','centre_y']);if(xi<0||yi<0){segmentationStatus('CSV/TSV must contain x/y or centroid_x/centroid_y columns.','warning',true);return;}const idIdx=headerIndex(headers,['cell_id','id','object_id','label']),offset=segmentationOffset(),radius=segmentationCellRadius(),colour=classColour('cell','#38bdf8');let added=0;rows.forEach((row,i)=>{const x=Number(row[xi]),y=Number(row[yi]);if(!Number.isFinite(x)||!Number.isFinite(y))return;const p={x:x+offset.x,y:y+offset.y},ring=cellRing(p,radius),id=String((idIdx>=0&&row[idIdx])?row[idIdx]:('cellphenotyper_cell_'+(i+1))),roi={id:id,name:id,label:id,class:'cell',geometry_type:'Polygon',source:'cellphenotyper',drawable:true,point_count:ring.length-1,area:polygonArea([ring]),bbox:boundsFromRing(ring),colour:colour,original_colour:colour,fill:hexToRgba(colour,0.12),rings:[ring],edited:true,centroid:{x:p.x,y:p.y},source_file:fileName||''};refreshRoiGeometry(roi);rois.push(roi);added++;});if(!added){segmentationStatus('No numeric cell centroids were found in the table.','warning',true);return;}selectedRoi=rois.length-1;showRois=true;buildRoiList();updateButtons();draw();const detail={added:added,type:'centroids',file:fileName||null};recordAnnotationHistory('segmentation_imported',detail);scheduleViewerStateSync('segmentation_added',detail);segmentationStatus('Loaded '+countText(added)+' CellPhenotyper centroid cell marker'+(added===1?'':'s')+'.');notify('Cells loaded: '+countText(added)+' cell'+(added===1?'':'s'),'success',3600);}\n",
     "function segmentationResultDetail(result){if(!result||result.type==='FeatureCollection'||result.type==='Feature')return {};const keys=['message','crop','output','slide_output','roi_id','bbox','status','segmentation_type'];const detail={};keys.forEach(k=>{if(Object.prototype.hasOwnProperty.call(result,k))detail[k]=result[k];});return detail;}\n",
     "function copyViewerText(text){if(navigator.clipboard&&navigator.clipboard.writeText)return navigator.clipboard.writeText(text);return new Promise((resolve,reject)=>{try{const area=document.createElement('textarea');area.value=text;area.setAttribute('readonly','');area.style.position='fixed';area.style.left='-9999px';document.body.appendChild(area);area.select();const ok=document.execCommand('copy');document.body.removeChild(area);ok?resolve():reject(new Error('copy failed'));}catch(e){reject(e);}});}\n",
-    "function showCellphenotyperSegmentationNotice(){const message='Cell segmentation is handled outside wsiTools. Run CellPhenotyper, then load its cell GeoJSON/CSV overlays here.';segmentationStatus(message,'warning',true);notify(message,'warning',5200);}\n",
-    "async function startSegmentationForSelectedRoi(){showCellphenotyperSegmentationNotice();}\n",
+    "function showSegmentationNotConfiguredNotice(){const message='No live cell-segmentation endpoint is configured. Reopen with wsi_viewer_live(slide, stardist = TRUE), or load an existing cell GeoJSON/CSV/mask file.';segmentationStatus(message,'warning',true);notify(message,'warning',6200);}\n",
+    "async function startSegmentationForSelectedRoi(){const url=segmentationRunUrl(),text=selectedRoiFeatureText(),engine=segmentationSelectedEngine();if(!url){showSegmentationNotConfiguredNotice();return;}if(!text){segmentationStatus('Select or draw one ROI before running cell segmentation.','warning',true);return;}let roiObj;try{roiObj=JSON.parse(text);}catch(e){segmentationStatus('Could not serialize the selected ROI: '+e.message,'warning',true);return;}segmentationStatus('Running '+engine+' on selected ROI...','info',true);scheduleViewerStateSync('segmentation_started',{engine:engine,async:false});try{const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({engine:engine,roi:roiObj})});let result=null;try{result=await res.json();}catch(e){result={error:await res.text()};}if(!res.ok||result.error)throw new Error(result.error||('HTTP '+res.status));const detail=segmentationResultDetail(result);detail.engine=result.engine||engine;if(result.geojson){addSegmentationGeojson(result.geojson,{local:false,keepSelection:true,detail:detail});segmentationStatus(result.message||('Finished '+engine+'.'),'success',true);scheduleViewerStateSync('segmentation_finished',detail);return;}if(result.type==='FeatureCollection'||result.type==='Feature'){addSegmentationGeojson(result,{local:false,keepSelection:true,detail:detail});segmentationStatus('Finished '+engine+'.','success',true);scheduleViewerStateSync('segmentation_finished',detail);return;}segmentationStatus(result.message||('Finished '+engine+', but no viewer overlay was returned.'),'warning',true);scheduleViewerStateSync('segmentation_finished',detail);}catch(e){const detail={engine:engine,message:e.message};segmentationStatus('Cell segmentation failed: '+e.message,'warning',true);scheduleViewerStateSync('segmentation_failed',detail);}}\n",
+    "function maskComponentsFromCanvas(canvas,minArea=3){const ctx=canvas.getContext('2d',{willReadFrequently:true}),w=canvas.width,h=canvas.height,img=ctx.getImageData(0,0,w,h).data,seen=new Uint8Array(w*h),components=[];function fg(i){const r=img[i*4],g=img[i*4+1],b=img[i*4+2],a=img[i*4+3];return a>0&&(r+g+b)>12;}for(let p=0;p<w*h;p++){if(seen[p]||!fg(p)){seen[p]=1;continue;}let stack=[p],xmin=w,ymin=h,xmax=0,ymax=0,count=0;seen[p]=1;while(stack.length){const q=stack.pop(),x=q%w,y=Math.floor(q/w);count++;if(x<xmin)xmin=x;if(x>xmax)xmax=x;if(y<ymin)ymin=y;if(y>ymax)ymax=y;const ns=[q-1,q+1,q-w,q+w];for(const n of ns){if(n<0||n>=w*h||seen[n])continue;const nx=n%w;if((n===q-1&&nx>x)||(n===q+1&&nx<x))continue;if(fg(n)){seen[n]=1;stack.push(n);}else seen[n]=1;}}if(count>=minArea)components.push({xmin:xmin,ymin:ymin,xmax:xmax+1,ymax:ymax+1,count:count});}return components;}\n",
+    "function addSegmentationMaskImage(img,fileName){const canvas=document.createElement('canvas');canvas.width=img.naturalWidth||img.width;canvas.height=img.naturalHeight||img.height;const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(img,0,0,canvas.width,canvas.height);const comps=maskComponentsFromCanvas(canvas,3),scaleX=Number(cfg.slide_width||canvas.width)/canvas.width,scaleY=Number(cfg.slide_height||canvas.height)/canvas.height,features=[];comps.forEach((c,i)=>{const x0=c.xmin*scaleX,y0=c.ymin*scaleY,x1=c.xmax*scaleX,y1=c.ymax*scaleY;features.push({type:'Feature',id:'mask_cell_'+(i+1),properties:{name:'mask cell '+(i+1),class:'cell',classification:{name:'cell'},source:'external_segmentation',source_file:fileName||'',mask_area_px:c.count},geometry:{type:'Polygon',coordinates:[[[x0,y0],[x1,y0],[x1,y1],[x0,y1],[x0,y0]]]}});});if(!features.length){segmentationStatus('Mask image contained no non-background components.','warning',true);return;}addSegmentationGeojson({type:'FeatureCollection',features:features},{local:false,detail:{type:'mask',file:fileName||'',added:features.length}});}\n",
+    "function loadSegmentationMaskFile(file){const ext=String(file&&file.name||'').toLowerCase().split('.').pop();if(ext==='tif'||ext==='tiff'){segmentationStatus('Browser TIFF mask decoding is not portable. Load TIFF masks from R with import_segmentation(file, mask_as_rois = TRUE) and viewer$add_segmentation().','warning',true);return;}const reader=new FileReader();reader.onload=()=>{const img=new Image();img.onload=()=>{try{addSegmentationMaskImage(img,file.name);}catch(e){segmentationStatus('Could not convert mask image: '+e.message,'warning',true);}};img.onerror=()=>segmentationStatus('Could not decode mask image in the browser. Try PNG/JPEG/WebP or load it from R.','warning',true);img.src=reader.result;};reader.readAsDataURL(file);}\n",
     "function clearSegmentationOverlays(){const before=rois.length;for(let i=rois.length-1;i>=0;i--){if(rois[i].source==='cellphenotyper'||rois[i].source==='external_segmentation')rois.splice(i,1);}if(selectedRoi>=rois.length)selectedRoi=rois.length-1;buildRoiList();updateButtons();draw();scheduleViewerStateSync('segmentation_cleared',{});segmentationStatus('Removed '+countText(before-rois.length)+' cell overlay'+(before-rois.length===1?'':'s')+'.');notify('Segmentation cleared','success');}\n",
-    "function bindSegmentationControls(){const exportButton=el('exportSelectedRoi'),startButton=el('startSegmentation'),loadButton=el('loadSegmentation'),loadCsvButton=el('loadSegmentationCsv'),clearButton=el('clearSegmentation'),file=el('segmentationFile'),tableFile=el('segmentationTableFile'),radius=el('segCellRadius');if(exportButton)exportButton.onclick=exportSelectedRoiForSegmentation;if(startButton)startButton.onclick=startSegmentationForSelectedRoi;if(loadButton&&file)loadButton.onclick=()=>{file.value='';file.click();};if(loadCsvButton&&tableFile)loadCsvButton.onclick=()=>{tableFile.value='';tableFile.click();};if(clearButton)clearButton.onclick=clearSegmentationOverlays;if(radius){radius.oninput=()=>segmentationCellRadius();segmentationCellRadius();}if(file){file.onchange=()=>{const picked=file.files&&file.files[0];if(!picked)return;const reader=new FileReader();reader.onload=()=>{try{addSegmentationGeojson(JSON.parse(reader.result));}catch(e){segmentationStatus('Could not read cell GeoJSON: '+e.message);}};reader.readAsText(picked);};}if(tableFile){tableFile.onchange=()=>{const picked=tableFile.files&&tableFile.files[0];if(!picked)return;const reader=new FileReader();reader.onload=()=>{try{addSegmentationCentroidTable(reader.result,picked.name);}catch(e){segmentationStatus('Could not read cell centroid table: '+e.message);}};reader.readAsText(picked);};}segmentationStatus('');}\n"
+    "function bindSegmentationControls(){const exportButton=el('exportSelectedRoi'),startButton=el('startSegmentation'),loadButton=el('loadSegmentation'),loadCsvButton=el('loadSegmentationCsv'),loadMaskButton=el('loadSegmentationMask'),clearButton=el('clearSegmentation'),file=el('segmentationFile'),tableFile=el('segmentationTableFile'),maskFile=el('segmentationMaskFile'),radius=el('segCellRadius');if(exportButton)exportButton.onclick=exportSelectedRoiForSegmentation;if(startButton)startButton.onclick=startSegmentationForSelectedRoi;if(loadButton&&file)loadButton.onclick=()=>{file.value='';file.click();};if(loadCsvButton&&tableFile)loadCsvButton.onclick=()=>{tableFile.value='';tableFile.click();};if(loadMaskButton&&maskFile)loadMaskButton.onclick=()=>{maskFile.value='';maskFile.click();};if(clearButton)clearButton.onclick=clearSegmentationOverlays;if(radius){radius.oninput=()=>segmentationCellRadius();segmentationCellRadius();}if(file){file.onchange=()=>{const picked=file.files&&file.files[0];if(!picked)return;const reader=new FileReader();reader.onload=()=>{try{addSegmentationGeojson(JSON.parse(reader.result));}catch(e){segmentationStatus('Could not read cell GeoJSON: '+e.message);}};reader.readAsText(picked);};}if(tableFile){tableFile.onchange=()=>{const picked=tableFile.files&&tableFile.files[0];if(!picked)return;const reader=new FileReader();reader.onload=()=>{try{addSegmentationCentroidTable(reader.result,picked.name);}catch(e){segmentationStatus('Could not read cell centroid table: '+e.message);}};reader.readAsText(picked);};}if(maskFile){maskFile.onchange=()=>{const picked=maskFile.files&&maskFile.files[0];if(!picked)return;loadSegmentationMaskFile(picked);};}segmentationStatus('');}\n"
   )
 }
 
@@ -3238,10 +3302,11 @@ wsi_tiled_viewer_html <- function(config) {
 #'   hematoxylin and HRP/DAB channels.
 #' @param hematoxylin_strength,hrp_strength Initial display gains for the
 #'   hematoxylin and HRP/DAB channels.
-#' @param segmentation_run_url Legacy optional HTTP endpoint. The current
-#'   viewer no longer exposes selected-ROI StarDist/Cellpose run controls;
-#'   segmentation is expected to be produced outside wsiTools, for example by
-#'   CellPhenotyper, and loaded as project cell overlays.
+#' @param segmentation_run_url Optional live HTTP endpoint used by the Cells
+#'   menu to run selected-ROI cell segmentation.
+#' @param segmentation_engines,segmentation_default_engine Optional Cells-menu
+#'   engine presets. Supported values are `"stardist_he"`, `"stardist_ihc"`,
+#'   and `"mesmer_dapi"`.
 #' @param viewer_state_url Optional HTTP endpoint used to sync annotations,
 #'   measurements, segmentation overlays, and display state back to R. Use
 #'   [wsi_viewer_live()] or [wsi_viewer_session()] to create this endpoint.
@@ -3315,6 +3380,8 @@ wsi_viewer <- function(slide, width = 1600, height = NULL, output = NULL,
                        hematoxylin_strength = 1,
                        hrp_strength = 1,
                        segmentation_run_url = NULL,
+                       segmentation_engines = c("stardist_he", "stardist_ihc", "mesmer_dapi"),
+                       segmentation_default_engine = "stardist_he",
 	                       viewer_state_url = NULL,
 	                       viewer_state_ws_url = NULL,
 	                       seurat_gene_url = NULL,
@@ -3357,6 +3424,16 @@ wsi_viewer <- function(slide, width = 1600, height = NULL, output = NULL,
         is.na(segmentation_run_url) || !nzchar(segmentation_run_url)) {
       wsi_abort("`segmentation_run_url` must be `NULL` or a single non-empty URL.")
     }
+  }
+  segmentation_engines <- unique(as.character(segmentation_engines %||% character()))
+  segmentation_engines <- segmentation_engines[nzchar(segmentation_engines) & !is.na(segmentation_engines)]
+  if (!length(segmentation_engines)) {
+    segmentation_engines <- c("stardist_he")
+  }
+  segmentation_engines <- vapply(segmentation_engines, wsi_cell_segmentation_engine, character(1))
+  segmentation_default_engine <- wsi_cell_segmentation_engine(segmentation_default_engine)
+  if (!segmentation_default_engine %in% segmentation_engines) {
+    segmentation_default_engine <- segmentation_engines[[1L]]
   }
   if (!is.null(viewer_state_url)) {
     if (!is.character(viewer_state_url) || length(viewer_state_url) != 1L ||
@@ -3485,6 +3562,23 @@ wsi_viewer <- function(slide, width = 1600, height = NULL, output = NULL,
     mpp_config <- wsi_viewer_mpp_payload(seurat_config$mpp %||% seurat_config$pixel_size %||% NULL)
   }
   cellphenotyper_config <- wsi_viewer_cellphenotyper_config(cellphenotyper)
+  segmentation_config <- list(
+    enabled = !is.null(segmentation_run_url),
+    run_url = segmentation_run_url,
+    engines = lapply(segmentation_engines, function(engine) {
+      list(
+        engine = engine,
+        label = switch(
+          engine,
+          stardist_he = "StarDist H&E",
+          stardist_ihc = "StarDist IHC",
+          mesmer_dapi = "Mesmer DAPI",
+          engine
+        )
+      )
+    }),
+    default_engine = segmentation_default_engine
+  )
   prediction_config <- wsi_prediction_config(seurat_config, cellphenotyper_config)
   proximity_config <- wsi_proximity_config(seurat_config, cellphenotyper_config)
   managed_analysis_project <- wsi_viewer_managed_analysis_project(
@@ -3521,6 +3615,7 @@ wsi_viewer <- function(slide, width = 1600, height = NULL, output = NULL,
       autosave_path = autosave_path,
       stain = stain_config,
       base_layer = base_layer_config,
+      segmentation = segmentation_config,
       project = project_config,
       channel_sources = wsi_channel_sources_payload(channel_sources),
       tile_sources = tile_sources %||% list(),
@@ -3585,6 +3680,7 @@ wsi_viewer <- function(slide, width = 1600, height = NULL, output = NULL,
       autosave_path = autosave_path,
       stain = stain_config,
       base_layer = base_layer_config,
+      segmentation = segmentation_config,
       project = project_config,
       channel_sources = wsi_channel_sources_payload(channel_sources),
       tile_sources = tile_sources %||% list(),

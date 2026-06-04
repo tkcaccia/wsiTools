@@ -1538,7 +1538,7 @@ test_that("live viewer sessions sync IHC intensity measurements to R", {
   expect_equal(env$live_last_event$event, "ihc_intensity_measured")
 })
 
-test_that("interactive viewer keeps legacy segmentation endpoint without exposing a runner", {
+test_that("interactive viewer exposes Cells controls when a segmentation endpoint is supplied", {
   slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 500, levels = c(1, 4))
   output <- tempfile(fileext = ".html")
 
@@ -1553,11 +1553,14 @@ test_that("interactive viewer keeps legacy segmentation endpoint without exposin
   expect_identical(result, output)
   html <- paste(readLines(output, warn = FALSE), collapse = "\n")
   expect_match(html, "http://127.0.0.1:8787/segment", fixed = TRUE)
-  expect_match(html, "showCellphenotyperSegmentationNotice", fixed = TRUE)
-  expect_match(html, "Cell segmentation is handled outside wsiTools", fixed = TRUE)
-  expect_match(html, "load its cell GeoJSON/CSV overlays", fixed = TRUE)
-  expect_false(grepl("Sending selected ROI to R", html, fixed = TRUE))
-  expect_false(grepl("Running segmentation on selected ROI", html, fixed = TRUE))
+  expect_match(html, "id=\"segmentationEngine\"", fixed = TRUE)
+  expect_match(html, "StarDist H&amp;E", fixed = TRUE)
+  expect_match(html, "StarDist IHC", fixed = TRUE)
+  expect_match(html, "Mesmer DAPI", fixed = TRUE)
+  expect_match(html, "id=\"startSegmentation\"", fixed = TRUE)
+  expect_match(html, "id=\"loadSegmentationMask\"", fixed = TRUE)
+  expect_match(html, "segmentationRunUrl", fixed = TRUE)
+  expect_match(html, "fetch(url", fixed = TRUE)
 })
 
 test_that("ROI-aware segmentation writes results into the live viewer state", {
@@ -1607,7 +1610,7 @@ test_that("ROI-aware segmentation writes results into the live viewer state", {
   expect_equal(env$live_last_segmentation$output, "cells.csv")
 })
 
-test_that("live viewer keeps legacy segmentation arguments without a public runner", {
+test_that("live viewer keeps selected-ROI cell segmentation arguments", {
   args <- names(formals(wsi_viewer_session))
 
   expect_true("stardist" %in% args)
@@ -1617,6 +1620,9 @@ test_that("live viewer keeps legacy segmentation arguments without a public runn
 	  expect_true("stardist_command" %in% args)
   expect_true("stardist_args" %in% args)
   expect_true("stardist_output_dir" %in% args)
+  expect_true("segmentation_engines" %in% args)
+  expect_true("mesmer_command" %in% args)
+  expect_true("segmentation_tiles_x" %in% args)
   expect_true("autosave" %in% args)
   expect_true("autosave_path" %in% args)
   expect_true("autosave_interval" %in% args)
@@ -1957,37 +1963,30 @@ test_that("channel source API updates live viewer settings", {
   expect_true(any(vapply(commands, function(x) identical(x$type, "set_channel_settings"), logical(1))))
 })
 
-test_that("live viewer warns when legacy model-runner arguments are requested", {
+test_that("live viewer can start the optional cell segmentation endpoint", {
   wsi_skip_if_no_httpuv_server()
   slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 500, levels = c(1, 4))
   session <- NULL
-  warning_message <- NULL
   on.exit(if (inherits(session, "wsi_viewer_session")) wsi_viewer_stop(session), add = TRUE)
 
-  withCallingHandlers(
-    session <- wsi_viewer_live(
-      slide,
-      width = 128,
-      open = FALSE,
-      wait = FALSE,
-      stardist = TRUE,
-      stardist_command = "missing-wsitools-stardist-command"
-    ),
-    warning = function(w) {
-      warning_message <<- conditionMessage(w)
-      invokeRestart("muffleWarning")
-    }
+  session <- wsi_viewer_live(
+    slide,
+    width = 128,
+    open = FALSE,
+    wait = FALSE,
+    stardist = TRUE,
+    stardist_command = "missing-wsitools-stardist-command"
   )
 
-  expect_match(warning_message, "StarDist/Cellpose segmentation controls have been removed", fixed = TRUE)
-  expect_match(warning_message, "CellPhenotyper", fixed = TRUE)
   expect_s3_class(session, "wsi_viewer_session")
   expect_match(session$ws_url, "^ws://")
-  expect_null(session$stardist_server)
+  expect_s3_class(session$stardist_server, "wsi_stardist_server")
+  expect_match(session$stardist_server$url, "/segment", fixed = TRUE)
   html <- paste(readLines(session$html, warn = FALSE), collapse = "\n")
   expect_match(html, session$ws_url, fixed = TRUE)
   expect_match(html, "WebSocket connected", fixed = TRUE)
-  expect_false(grepl("Run segmentation", html, fixed = TRUE))
+  expect_match(html, "id=\"startSegmentation\"", fixed = TRUE)
+  expect_match(html, session$stardist_server$url, fixed = TRUE)
 })
 
 test_that("interactive viewer overlays GeoJSON ROI polygons", {

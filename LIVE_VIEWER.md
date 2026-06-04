@@ -99,8 +99,56 @@ viewer$get_proximity()
 viewer$get_channel_settings()
 viewer$add_rois(read_geojson("annotations.geojson"))
 viewer$add_layer("my spots", spots)
+viewer$run_segmentation_async(engine = "stardist_he")
 viewer$save_project("case_001.wsiproject")
 viewer$capabilities()
+```
+
+## Optional Selected-ROI Cell Segmentation
+
+The live viewer can expose a top `Cells` menu for selected-ROI segmentation.
+StarDist and Mesmer remain external optional tools; wsiTools crops only the
+selected ROI and imports the resulting GeoJSON, CSV/TSV, or mask output.
+
+```r
+viewer <- wsi_viewer_live(
+  slide,
+  mode = "tiles",
+  dynamic_tiles = TRUE,
+  stardist = TRUE,
+  stardist_args = c(
+    "--input", "{input}",
+    "--output", "{output}",
+    "--model", "{model}",
+    "--tiles", "{tiles_y}", "{tiles_x}"
+  ),
+  segmentation_tiles_x = 32,
+  segmentation_tiles_y = 32,
+  wait = FALSE
+)
+```
+
+In the browser, draw/select one ROI and use `Cells > Run selected ROI`. From R,
+the same workflow is:
+
+```r
+roi <- viewer$get_selected_roi()
+job <- viewer$run_segmentation_async(
+  roi = roi,
+  engine = "stardist_he",
+  tiles_x = 32,
+  tiles_y = 32
+)
+result <- job$result()
+viewer$add_segmentation(result$segmentation)
+```
+
+The `Cells` menu can also load existing cell GeoJSON, CSV/TSV centroids, or
+PNG/JPEG/WebP masks. For TIFF masks, use R:
+
+```r
+cells <- import_segmentation("cell_mask.tif", mask_as_rois = TRUE, threshold = 0.5)
+viewer$add_segmentation(cells)
 ```
 
 ## Rscript Workflow
@@ -622,6 +670,25 @@ remotes::install_github("tkcaccia/fastPLS")
 ```
 
 Then reopen the live viewer.
+
+### Cells run button says StarDist or Mesmer is not configured
+
+Install or configure the external model command only when you need live
+selected-ROI segmentation:
+
+```r
+wsi_install_stardist(install = FALSE)
+wsi_install_stardist(method = "conda")
+
+# Or point to an existing wrapper:
+Sys.setenv(WSITOOLS_STARDIST_COMMAND = "/path/to/stardist_wrapper")
+Sys.setenv(WSITOOLS_MESMER_COMMAND = "/path/to/mesmer_wrapper")
+
+wsi_cell_segmentation_engines()
+```
+
+For low RAM use, keep the workflow ROI-aware and pass tiled model arguments,
+for example `{tiles_y}` and `{tiles_x}` set to 32.
 
 ## Checklist
 

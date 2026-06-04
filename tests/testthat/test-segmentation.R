@@ -145,3 +145,50 @@ test_that("CellPhenotyper-style centroid tables can become viewer cell overlays"
   expect_equal(rois$roi_id, "cell-1")
   expect_equal(rois$class, "cell")
 })
+
+test_that("cell segmentation engine presets are optional runtime capabilities", {
+  engines <- wsi_cell_segmentation_engines()
+
+  expect_s3_class(engines, "data.frame")
+  expect_true(all(c("engine", "label", "backend", "installed", "default_model", "notes") %in% names(engines)))
+  expect_true(all(c("stardist_he", "stardist_ihc", "mesmer_dapi") %in% engines$engine))
+  expect_type(wsi_has_stardist(), "logical")
+  expect_type(wsi_has_mesmer(), "logical")
+})
+
+test_that("cell segmentation command plans support tiled low-memory placeholders", {
+  input <- tempfile(fileext = ".png")
+  output <- tempfile(fileext = ".geojson")
+  writeBin(charToRaw("mock crop"), input)
+
+  plan <- wsiTools:::stardist_segment_image(
+    input = input,
+    output = output,
+    command = "stardist-predict2d",
+    args = c("--input", "{input}", "--output", "{output}", "--model", "{model}", "--tiles", "{tiles_y}", "{tiles_x}", "--min-area", "{min_area}"),
+    model = "2D_versatile_he",
+    template_values = list(tiles_x = 32, tiles_y = 32, min_area = 120),
+    run = FALSE
+  )
+
+  expect_s3_class(plan, "wsi_cell_segmentation_result")
+  expect_equal(plan$status, "planned")
+  expect_true("--tiles" %in% plan$args)
+  expect_true("32" %in% plan$args)
+  expect_true("120" %in% plan$args)
+
+  mesmer_output <- tempfile(fileext = ".tif")
+  mesmer_plan <- wsiTools:::wsi_cell_segment_image(
+    input = input,
+    output = mesmer_output,
+    engine = "mesmer_dapi",
+    command = "mesmer",
+    args = c("--nuclear-channel", "{nuclear_channel}", "{input}", "{output}"),
+    template_values = list(nuclear_channel = "DAPI"),
+    run = FALSE
+  )
+
+  expect_s3_class(mesmer_plan, "wsi_cell_segmentation_result")
+  expect_equal(mesmer_plan$engine, "mesmer_dapi")
+  expect_true("DAPI" %in% mesmer_plan$args)
+})
