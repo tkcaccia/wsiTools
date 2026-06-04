@@ -9,6 +9,11 @@ wsiTools is designed for memory-efficient image access. The examples below use
 metadata, thumbnails, tiles, dynamic tile endpoints, and region reads. They do
 not intentionally load complete level-0 whole-slide images into R memory.
 
+For exhaustive live viewer instructions, including RStudio versus `Rscript`,
+remote Ubuntu/Firefox sessions, local-browser SSH tunnels, and how to avoid
+opening `/viewer-state` instead of the HTML viewer, see the
+[live viewer guide](LIVE_VIEWER.md).
+
 ## Before Running Examples
 
 Start every new machine with:

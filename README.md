@@ -9,8 +9,11 @@ backend metadata, pyramid levels, explicit region reads, tile manifests, and
 streaming conversion. It does not load complete level-0 slides into R memory by
 default.
 
-For runnable workflows, see the separate [examples page](EXAMPLES.md). It
-covers single-image viewing, CZI projects, H&E/mIHC overlays, CellPhenotyper,
+For runnable workflows, see the separate [examples page](EXAMPLES.md). For
+browser-to-R synchronization, remote desktops, SSH tunnels, and common live
+viewer mistakes such as opening `/viewer-state` instead of the HTML viewer, see
+the dedicated [live viewer guide](LIVE_VIEWER.md). These pages cover
+single-image viewing, CZI projects, H&E/mIHC overlays, CellPhenotyper,
 Seurat/Visium PCA, annotation round trips, tile extraction, conversion, and
 troubleshooting.
 
@@ -842,6 +845,10 @@ Use `wsi_viewer()` for a static HTML viewer. Use `wsi_viewer_live()` when edits
 made in the browser should come back automatically to the current R session.
 Live mode starts a local `httpuv` bridge; WebSocket is used when available and
 HTTP polling is kept as a fallback.
+
+For detailed instructions, including RStudio, `Rscript`, remote Ubuntu/Firefox,
+SSH tunnel setup, and the difference between the viewer HTML and the
+`/viewer-state` JSON endpoint, read the [live viewer guide](LIVE_VIEWER.md).
 
 Minimal RStudio workflow:
 
