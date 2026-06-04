@@ -19,19 +19,22 @@
 wsi_open <- function(path, backend = c("auto", "openslide", "vips", "native_czi", "bioformats", "omezarr", "imagemagick")) {
   backend <- match.arg(backend)
   path <- wsi_validate_input_path(path)
+  is_czi <- wsi_is_czi_path(path)
 
   if (backend == "auto") {
     if (wsi_is_omezarr_path(path)) {
-      return(open_omezarr(path))
+      return(wsi_open_backend_or_abort(path, "omezarr", requested_backend = "auto", is_czi = is_czi))
     }
-    is_czi <- wsi_is_czi_path(path)
     candidates <- wsi_auto_backend_candidates(is_czi = is_czi)
     if (!length(candidates)) {
-      if (is_czi) {
-        wsi_abort(wsi_czi_backend_message(path), class = "wsi_backend_unavailable")
-      }
       wsi_abort(
-        "No WSI/image backend is available. Install OpenSlide, libvips, or ImageMagick, then retry.",
+        wsi_backend_failure_message(
+          path = path,
+          requested_backend = "auto",
+          candidates = candidates,
+          errors = character(),
+          is_czi = is_czi
+        ),
         class = "wsi_backend_unavailable"
       )
     }
@@ -58,14 +61,39 @@ wsi_open <- function(path, backend = c("auto", "openslide", "vips", "native_czi"
     }
 
     wsi_abort(
-      paste(
-        "No available backend could open this file.",
-        paste(sprintf("%s: %s", names(errors), errors), collapse = "\n"),
-        if (is_czi) paste0("\n", wsi_czi_backend_message(path)) else ""
-      )
+      wsi_backend_failure_message(
+        path = path,
+        requested_backend = "auto",
+        candidates = candidates,
+        errors = errors,
+        is_czi = is_czi
+      ),
+      class = "wsi_backend_unavailable"
     )
   }
 
+  wsi_open_backend_or_abort(path, backend, requested_backend = backend, is_czi = is_czi)
+}
+
+wsi_open_backend_or_abort <- function(path, backend, requested_backend = backend, is_czi = wsi_is_czi_path(path)) {
+  tryCatch(
+    wsi_open_backend(path, backend),
+    error = function(err) {
+      wsi_abort(
+        wsi_backend_failure_message(
+          path = path,
+          requested_backend = requested_backend,
+          candidates = backend,
+          errors = stats::setNames(conditionMessage(err), backend),
+          is_czi = is_czi
+        ),
+        class = "wsi_backend_unavailable"
+      )
+    }
+  )
+}
+
+wsi_open_backend <- function(path, backend) {
   switch(
     backend,
     openslide = wsi_openslide_open(path),
@@ -90,6 +118,151 @@ wsi_auto_backend_candidates <- function(is_czi,
     if (isTRUE(is_czi) && isTRUE(has_bioformats)) "bioformats",
     if (!isTRUE(is_czi) && isTRUE(has_imagemagick)) "imagemagick"
   )
+}
+
+wsi_backend_failure_message <- function(path, requested_backend, candidates = character(),
+                                        errors = character(), is_czi = FALSE) {
+  file_type <- if (isTRUE(is_czi)) "CZI" else "Image"
+  candidate_lines <- wsi_backend_candidate_lines(
+    path = path,
+    requested_backend = requested_backend,
+    candidates = candidates,
+    errors = errors,
+    is_czi = is_czi
+  )
+  paste(
+    sprintf("%s could not be opened.", file_type),
+    sprintf("File: %s", normalizePath(path, winslash = "/", mustWork = FALSE)),
+    sprintf("Requested backend: %s", requested_backend),
+    "",
+    "Backends tried or considered:",
+    paste0("  - ", candidate_lines, collapse = "\n"),
+    "",
+    "How to check:",
+    "  wsi_backends()",
+    "  wsi_diagnose(live_test = FALSE)",
+    "",
+    "How to install or fix:",
+    paste0("  ", wsi_backend_fix_lines(is_czi = is_czi, requested_backend = requested_backend), collapse = "\n"),
+    if (isTRUE(is_czi)) paste0("\n", wsi_czi_backend_message(path)) else "",
+    sep = "\n"
+  )
+}
+
+wsi_backend_candidate_lines <- function(path, requested_backend, candidates, errors, is_czi) {
+  backend_order <- if (identical(requested_backend, "auto")) {
+    if (isTRUE(is_czi)) {
+      c("openslide", "vips", "native_czi", "bioformats_java", "bioformats", "imagemagick")
+    } else {
+      c("openslide", "vips", "imagemagick")
+    }
+  } else {
+    requested_backend
+  }
+
+  backend_order <- unique(c(backend_order, names(errors), candidates))
+  backend_order <- backend_order[nzchar(backend_order)]
+  vapply(
+    backend_order,
+    function(backend) wsi_backend_candidate_line(backend, candidates, errors, is_czi),
+    character(1)
+  )
+}
+
+wsi_backend_candidate_line <- function(backend, candidates, errors, is_czi) {
+  if (backend %in% names(errors)) {
+    return(sprintf("%s: failed - %s", backend, wsi_first_error_line(errors[[backend]])))
+  }
+  if (identical(backend, "imagemagick") && isTRUE(is_czi)) {
+    if (wsi_has_imagemagick()) {
+      return("imagemagick: available, but not used for CZI because ImageMagick commonly has no CZI delegate")
+    }
+    return("imagemagick: unavailable, and not a CZI backend")
+  }
+  available <- wsi_backend_available(backend)
+  if (isTRUE(available)) {
+    if (backend %in% candidates) {
+      return(sprintf("%s: available but did not open the file", backend))
+    }
+    return(sprintf("%s: available but not selected for this file", backend))
+  }
+  sprintf("%s: unavailable - %s", backend, wsi_backend_unavailable_reason(backend))
+}
+
+wsi_backend_available <- function(backend) {
+  switch(
+    backend,
+    openslide = wsi_has_openslide(),
+    vips = wsi_has_vips(),
+    native_czi = wsi_has_native_czi(),
+    bioformats_java = wsi_has_bioformats_java(),
+    bioformats = wsi_has_bioformats(),
+    imagemagick = wsi_has_imagemagick(),
+    omezarr = TRUE,
+    FALSE
+  )
+}
+
+wsi_backend_unavailable_reason <- function(backend) {
+  switch(
+    backend,
+    openslide = "install OpenSlide command-line tools so `openslide-show-properties` is on PATH",
+    vips = "install libvips command-line tools so `vips` and `vipsheader` are on PATH",
+    native_czi = "install/configure ZEISS libCZI/libCZIAPI, then check `wsi_has_native_czi()`",
+    bioformats_java = "install Java plus `bioformats_package.jar`, set `WSITOOLS_BIOFORMATS_JAR`, then check `wsi_has_bioformats_java()`",
+    bioformats = "install OME Bio-Formats command-line tools so `showinf`/`bfconvert` are on PATH",
+    imagemagick = "install ImageMagick CLI or the optional R package `magick`",
+    omezarr = "input was not recognized as an OME-Zarr directory",
+    "backend is not available"
+  )
+}
+
+wsi_backend_fix_lines <- function(is_czi, requested_backend) {
+  if (isTRUE(is_czi)) {
+    return(c(
+      "wsi_install_native_czi(install = FALSE)",
+      "wsi_install_backends(tools = \"bioformats\", install = FALSE)",
+      "wsi_install_backends(\"bioformats\")  # after reviewing the install plan",
+      "Sys.setenv(WSITOOLS_BIOFORMATS_JAR = \"/path/to/bioformats_package.jar\")"
+    ))
+  }
+
+  if (identical(requested_backend, "openslide")) {
+    return(c(
+      "wsi_install_backends(tools = \"openslide\", install = FALSE)",
+      "wsi_install_backends(\"openslide\")  # after reviewing the install plan"
+    ))
+  }
+  if (identical(requested_backend, "vips")) {
+    return(c(
+      "wsi_install_backends(tools = \"libvips\", install = FALSE)",
+      "wsi_install_backends(\"libvips\")  # after reviewing the install plan"
+    ))
+  }
+  if (identical(requested_backend, "imagemagick")) {
+    return(c(
+      "wsi_install_backends(tools = \"imagemagick\", install = FALSE)",
+      "wsi_install_backends(\"imagemagick\")  # after reviewing the install plan"
+    ))
+  }
+  if (identical(requested_backend, "bioformats")) {
+    return(c(
+      "wsi_install_backends(tools = \"bioformats\", install = FALSE)",
+      "wsi_install_backends(\"bioformats\")  # after reviewing the install plan"
+    ))
+  }
+
+  c(
+    "wsi_install_backends(tools = c(\"openslide\", \"libvips\", \"imagemagick\"), install = FALSE)",
+    "wsi_install_backends(\"libvips\")  # example: install one needed backend after reviewing the plan"
+  )
+}
+
+wsi_first_error_line <- function(x) {
+  lines <- strsplit(wsi_clean_text(x), "\n", fixed = TRUE)[[1L]]
+  lines <- trimws(lines)
+  lines <- lines[nzchar(lines)]
+  if (length(lines)) lines[[1L]] else "backend returned an empty error message"
 }
 
 #' Close a slide handle

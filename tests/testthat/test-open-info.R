@@ -5,11 +5,31 @@ test_that("wsi_open errors on missing files", {
 test_that("wsi_open gives CZI-specific guidance instead of falling through to ImageMagick", {
   path <- tempfile("sample_", fileext = ".czi")
   writeBin(as.raw(1:8), path)
-  expect_error(
-    wsi_open(path, backend = "auto"),
-    "CZI files are not readable through the ImageMagick fallback backend",
-    fixed = TRUE
-  )
+  err <- expect_error(wsi_open(path, backend = "auto"))
+  message <- conditionMessage(err)
+
+  expect_match(message, "CZI could not be opened", fixed = TRUE)
+  expect_match(message, "Requested backend: auto", fixed = TRUE)
+  expect_match(message, "native_czi:", fixed = TRUE)
+  expect_match(message, "bioformats_java:", fixed = TRUE)
+  expect_match(message, "imagemagick:", fixed = TRUE)
+  expect_match(message, "wsi_backends()", fixed = TRUE)
+  expect_match(message, "wsi_diagnose(live_test = FALSE)", fixed = TRUE)
+  expect_match(message, "wsi_install_backends(\"bioformats\")", fixed = TRUE)
+  expect_match(message, "CZI files are not readable through the ImageMagick fallback backend", fixed = TRUE)
+})
+
+test_that("explicit backend open failures include check and fix commands", {
+  path <- tempfile("not_really_tiff_", fileext = ".tif")
+  writeBin(as.raw(1:8), path)
+  err <- expect_error(wsi_open(path, backend = "vips"))
+  message <- conditionMessage(err)
+
+  expect_match(message, "Image could not be opened", fixed = TRUE)
+  expect_match(message, "Requested backend: vips", fixed = TRUE)
+  expect_match(message, "vips:", fixed = TRUE)
+  expect_match(message, "wsi_backends()", fixed = TRUE)
+  expect_match(message, "wsi_install_backends(\"libvips\")", fixed = TRUE)
 })
 
 test_that("CZI auto backend order gives OpenSlide and libvips first refusal", {
