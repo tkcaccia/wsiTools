@@ -1,12 +1,133 @@
-url: https://stefano.github.io/wsiTools/
+url: https://tkcaccia.github.io/wsiTools/
+
 template:
   bootstrap: 5
+  bootswatch: flatly
+  bslib:
+    primary: "#2563eb"
+    base_font: {google: "Inter"}
+    heading_font: {google: "Inter"}
+    code_font: {google: "JetBrains Mono"}
+
+home:
+  title: wsiTools
+  description: >
+    Memory-efficient R tools for whole-slide image access, tiled viewing,
+    annotations, spatial omics overlays, CellPhenotyper projects, conversion,
+    and reproducible pathology preprocessing.
+  sidebar:
+    structure: [links, license, community, citation, authors, dev]
+
+development:
+  mode: auto
+
+navbar:
+  bg: primary
+  structure:
+    left:
+      - intro
+      - installation
+      - viewer
+      - backends
+      - annotations
+      - spatial_omics
+      - cellphenotyper
+      - segmentation
+      - tile_extraction
+      - reference
+    right:
+      - search
+      - github
+  components:
+    intro:
+      text: Get started
+      href: articles/getting-started.html
+    installation:
+      text: Installation
+      href: articles/installation.html
+    viewer:
+      text: Viewer
+      menu:
+        - text: Viewer overview
+          href: articles/viewer.html
+        - text: Live viewer guide
+          href: articles/viewer.html#live-viewer
+        - text: Architecture diagram
+          href: https://github.com/tkcaccia/wsiTools/blob/main/docs/architecture.md
+        - text: Open one image
+          href: https://github.com/tkcaccia/wsiTools/blob/main/docs/open-one-image.md
+        - text: Visual gallery
+          href: https://github.com/tkcaccia/wsiTools/blob/main/docs/screenshots.md
+    backends:
+      text: Backends
+      href: articles/backends.html
+    annotations:
+      text: Annotations
+      href: articles/annotations.html
+    spatial_omics:
+      text: Spatial omics
+      href: articles/spatial-omics.html
+    cellphenotyper:
+      text: CellPhenotyper
+      href: articles/cellphenotyper.html
+    segmentation:
+      text: Segmentation
+      href: articles/segmentation.html
+    tile_extraction:
+      text: Tile extraction
+      href: articles/tile-extraction.html
+    reference:
+      text: Reference
+      href: reference/index.html
+    github:
+      icon: fa-github
+      href: https://github.com/tkcaccia/wsiTools
+      aria-label: GitHub repository
+
+articles:
+  - title: Start here
+    navbar: Get started
+    contents:
+      - getting-started
+  - title: Installation and runtime capabilities
+    navbar: Installation
+    contents:
+      - installation
+      - backends
+  - title: Viewer workflows
+    navbar: Viewer
+    contents:
+      - viewer
+      - annotations
+      - tile-extraction
+  - title: Analysis integrations
+    navbar: Analysis
+    contents:
+      - spatial-omics
+      - cellphenotyper
+      - segmentation
+
 reference:
-  - title: Backend checks
+  - title: Package setup, diagnostics, and demos
+    desc: Install the lightweight R package, inspect optional backends, and start from demo projects.
     contents:
       - wsi_backends
       - starts_with("wsi_has_")
-  - title: Slides and metadata
+      - wsi_setup
+      - wsi_setup_report
+      - wsi_diagnose
+      - wsi_dependency_plan
+      - wsi_install_backends
+      - wsi_install_deps
+      - wsi_install_native_czi
+      - wsi_install_stardist
+      - wsi_first_run_example
+      - wsi_demo_project
+      - wsi_demo_viewer
+      - wsi_cli
+
+  - title: Slides, metadata, and image access
+    desc: Open images without loading full slides into R memory and inspect metadata, pyramid levels, and properties.
     contents:
       - wsi_open
       - wsi_close
@@ -15,25 +136,207 @@ reference:
       - wsi_properties
       - wsi_mpp
       - wsi_objective_power
-  - title: Regions, thumbnails, tiles, and masks
-    contents:
+      - wsi_associated_images
+      - wsi_read_associated_image
       - wsi_read_region
       - wsi_read_region_grid
       - wsi_thumbnail
       - wsi_crop
-      - wsi_tile_grid
-      - wsi_tile
-      - wsi_tissue_mask
-  - title: ROI support
-    contents:
-      - wsi_read_geojson
       - wsi_crop_roi
-      - wsi_tile_roi
-  - title: Conversion and export
-    contents:
-      - wsi_convert
-      - wsi_pyramid
       - wsi_export_region
       - wsi_export_tiles
-      - wsi_associated_images
-      - wsi_read_associated_image
+
+  - title: Viewer sessions and browser integration
+    desc: Static viewers, live R-connected viewers, project viewers, comparative viewers, and viewer state.
+    contents:
+      - wsi_viewer
+      - wsi_viewer_live
+      - wsi_viewer_session
+      - wsi_viewer_state
+      - wsi_viewer_service
+      - wsi_viewer_stop
+      - wsi_viewer_noninteractive
+      - wsi_viewer_project
+      - wsi_viewer_compare
+      - wsi_viewer_roi
+      - wsi_viewer_he
+      - wsi_viewer_ihc
+      - wsi_viewer_multi_ihc
+      - wsi_viewer_he_mihc
+      - wsi_viewer_czi_project_live
+      - wsi_viewer_add_rois
+      - wsi_viewer_add_segmentation
+      - wsi_channel_source
+      - wsi_add_channel_source
+      - wsi_remove_channel_source
+      - wsi_set_channel_visible
+      - wsi_set_channel_opacity
+      - wsi_set_channel_colour
+      - wsi_set_channel_contrast
+      - wsi_dynamic_tile_source
+      - wsi_dynamic_image_tile_source
+      - wsi_dynamic_czi_section_tile_source
+
+  - title: Annotations, ROIs, masks, and geometry
+    desc: Read, write, edit, translate, transform, summarize, and rasterize annotations.
+    contents:
+      - wsi_read_geojson
+      - wsi_write_geojson
+      - read_geojson
+      - write_geojson
+      - viewer_add_rois
+      - wsi_tile_roi
+      - mask_to_rois
+      - wsi_mask_to_rois
+      - read_mask_annotations
+      - wsi_read_mask_annotations
+      - rois_to_mask
+      - wsi_rois_to_mask
+      - segmentation_to_rois
+      - wsi_segmentation_to_rois
+      - translate_rois
+      - wsi_translate_rois
+      - transform_rois
+      - wsi_transform_rois
+      - estimate_transform
+      - wsi_estimate_transform
+      - wsi_set_roi_class
+      - wsi_default_roi_class_presets
+      - wsi_roi_class_presets
+      - wsi_update_roi_class_preset
+      - wsi_apply_roi_class_presets
+      - wsi_filter_roi_export
+      - summarise_rois
+      - wsi_summarise_rois
+
+  - title: Tile extraction, tissue masks, and quality control
+    desc: Generate reproducible tile manifests and optionally filter by tissue, whitespace, or artifact flags.
+    contents:
+      - wsi_tile_grid
+      - wsi_tile
+      - extract_tiles
+      - wsi_extract_tiles
+      - wsi_tile_grid_from_coords
+      - wsi_tile_from_coords
+      - wsi_extract_tiles_async
+      - wsi_tissue_mask
+      - wsi_detect_tissue
+      - wsi_detect_whitespace
+      - wsi_whitespace_options
+      - wsi_flag_whitespace
+      - wsi_filter_whitespace_tiles
+      - wsi_artifact_options
+      - wsi_detect_artifacts
+      - wsi_detect_blur
+      - wsi_focus_heatmap
+      - wsi_detect_pen_marks
+      - wsi_detect_fold_candidates
+      - wsi_fold_candidate_heatmap
+      - wsi_detect_bubble_candidates
+      - wsi_bubble_candidate_heatmap
+      - wsi_detect_dust_candidates
+      - wsi_dust_candidate_heatmap
+      - wsi_detect_stain_quality
+      - wsi_stain_quality_heatmap
+      - wsi_flag_artifacts
+      - wsi_filter_artifact_tiles
+
+  - title: Stains, channels, and measurements
+    desc: Deconvolve brightfield stains, normalize stains, measure intensities, and write reports.
+    contents:
+      - wsi_deconvolve_he
+      - wsi_deconvolve_he_region
+      - wsi_deconvolve_ihc
+      - wsi_deconvolve_multi_ihc
+      - wsi_deconvolve_region
+      - wsi_he_stain_matrix
+      - wsi_he_stain_channels
+      - wsi_stain_channels
+      - wsi_stain_channel_sources
+      - wsi_mihc_channel_sources
+      - wsi_estimate_he_stain_channels
+      - wsi_estimate_stain_matrix
+      - wsi_normalise_stains
+      - wsi_normalize_stains
+      - wsi_stain_normalise_region
+      - wsi_stain_normalize_region
+      - wsi_reconstruct_stains
+      - measure_distance
+      - wsi_measure_distance
+      - measure_nearest_cells
+      - wsi_measure_nearest_cells
+      - measure_cells_to_roi
+      - wsi_measure_cells_to_roi
+      - measure_roi_distance
+      - wsi_measure_roi_distance
+      - measure_cell_density
+      - wsi_measure_cell_density
+      - measure_stain_intensity
+      - wsi_measure_stain_intensity
+      - measure_ihc_intensity
+      - wsi_measure_ihc_intensity
+      - summarise_ihc_intensity
+      - wsi_summarise_ihc_intensity
+      - measurement_report
+      - wsi_measurement_report
+      - write_measurement_report
+      - wsi_write_measurement_report
+
+  - title: Spatial omics and prediction
+    desc: Link Seurat, Giotto, and SpatialExperiment coordinates to slide images and query expression-driven overlays.
+    contents:
+      - wsi_link_spatial_image
+      - wsi_link_seurat_image
+      - wsi_link_giotto_image
+      - wsi_link_spatialexperiment_image
+      - wsi_viewer_spatial
+      - wsi_viewer_seurat
+      - wsi_viewer_seurat_project
+      - wsi_viewer_giotto
+      - wsi_viewer_spatialexperiment
+      - wsi_viewer_spatialexperiment_project
+      - wsi_spatial_clusters
+      - wsi_spatial_cluster_fields
+      - wsi_prediction_context
+      - wsi_proximity_context
+      - wsi_has_fastpls
+
+  - title: CellPhenotyper, cells, and segmentation overlays
+    desc: Open CellPhenotyper projects and import or run optional segmentation outputs in ROI-aware workflows.
+    contents:
+      - read_cellphenotyper_project
+      - wsi_read_cellphenotyper_project
+      - viewer_cellphenotyper
+      - wsi_viewer_cellphenotyper
+      - import_segmentation
+      - wsi_import_segmentation
+      - cell_segment_roi
+      - wsi_cell_segment_roi
+      - wsi_cell_segment_roi_async
+      - wsi_cell_segmentation_engines
+      - wsi_cell_counts
+      - cell_counts
+
+  - title: Conversion, pyramids, OME-Zarr, jobs, projects, and reports
+    desc: Convert images, create pyramids, manage projects, launch background jobs, and export reproducible reports.
+    contents:
+      - wsi_convert
+      - wsi_convert_async
+      - wsi_pyramid
+      - wsi_pyramid_async
+      - wsi_export_ome_tiff
+      - open_omezarr
+      - wsi_open_omezarr
+      - omezarr_metadata
+      - wsi_omezarr_metadata
+      - wsi_project
+      - wsi_save_project
+      - save_wsi_project
+      - wsi_read_project
+      - read_wsi_project
+      - restore_project_state
+      - wsi_run_async
+      - wsi_job
+      - wsi_case_report
+      - write_case_report
+      - wsi_write_case_report

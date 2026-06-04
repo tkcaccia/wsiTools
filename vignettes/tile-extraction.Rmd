@@ -1,0 +1,60 @@
+---
+title: "Tile extraction"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Tile extraction}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```
+
+## Coordinate Manifests First
+
+Tile grids are coordinate manifests. They do not read image pixels.
+
+```{r}
+grid <- wsi_tile_grid(
+  slide,
+  tile_size = 512,
+  overlap = 0,
+  level = 0
+)
+
+head(grid)
+```
+
+## Extract Tiles
+
+Tiles can be extracted from the whole image, an ROI, or a list of coordinates.
+The manifest records provenance columns such as tile coordinates, size, level,
+class labels, tissue fraction, and output paths.
+
+```{r}
+manifest <- extract_tiles(
+  slide,
+  roi = rois,
+  output_dir = "tiles",
+  tile_size = 512,
+  stride = 512,
+  skip_background = TRUE,
+  split = c(train = 0.7, valid = 0.3),
+  seed = 1
+)
+```
+
+## Viewer Preview
+
+In live viewers, tile grids can be previewed before extraction so users can
+confirm the exported regions visually.
+
+```{r}
+viewer$preview_tiles(grid)
+viewer$extract_tile_preview(output_dir = "tiles")
+```
+
+More detail:
+
+- [Examples gallery](https://github.com/tkcaccia/wsiTools/blob/main/docs/examples.md)

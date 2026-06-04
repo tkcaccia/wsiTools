@@ -1,0 +1,51 @@
+---
+title: "Backends"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Backends}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```
+
+## Runtime Capabilities
+
+wsiTools is installable without heavy image libraries. Backends are optional
+runtime capabilities discovered with:
+
+```{r}
+wsi_backends()
+wsi_has_vips()
+wsi_has_openslide()
+wsi_has_native_czi()
+wsi_has_bioformats()
+```
+
+## Backend Roles
+
+| Backend | Main role |
+| --- | --- |
+| libvips | conversion, pyramids, thumbnails, fast tiles |
+| OpenSlide | SVS/NDPI/SCN/MRXS-style WSI reading |
+| native CZI | fast CZI scene/section region reads |
+| Bio-Formats | broad microscopy fallback |
+| ImageMagick | ordinary image fallback previews |
+| httpuv | live R/browser bridge |
+
+When a backend is unavailable, backend-dependent functions should fail with an
+informative error instead of crashing R.
+
+## Setup Reports
+
+```{r}
+wsi_setup_report()
+wsi_diagnose()
+```
+
+More detail:
+
+- [Backend setup guide](https://github.com/tkcaccia/wsiTools/blob/main/docs/backends.md)
+- [Installation guide](https://github.com/tkcaccia/wsiTools/blob/main/docs/installation.md)

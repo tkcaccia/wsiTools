@@ -1,0 +1,53 @@
+---
+title: "Annotations"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Annotations}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```
+
+## QuPath-Compatible GeoJSON
+
+wsiTools reads and writes GeoJSON annotations for pathology workflows.
+
+```{r}
+rois <- read_geojson("qupath_annotations.geojson")
+
+viewer <- wsi_viewer_live(slide, tiled = TRUE)
+viewer$open()
+viewer$add_rois(rois)
+
+edited <- viewer$get_rois()
+write_geojson(edited, "edited_for_qupath.geojson")
+```
+
+The annotation system is designed for polygon and multipolygon ROIs, labels,
+classes, colors, IDs, and basic measurements.
+
+## Masks And Geometry
+
+Mask images can be converted to ROIs, and ROIs can be rasterized back to masks
+for CellPhenotyper, StarDist, Cellpose, Mesmer, or machine-learning pipelines.
+
+```{r}
+rois <- mask_to_rois("mask.png", class = "tumour")
+mask <- rois_to_mask(rois, width = 2000, height = 1500)
+```
+
+## Measurements
+
+```{r}
+summarise_rois(rois)
+measure_distance(c(10, 20), c(100, 200), pixel_size = 0.5)
+measure_cell_density(cells, rois, pixel_size = 0.5)
+```
+
+More detail:
+
+- [Examples gallery](https://github.com/tkcaccia/wsiTools/blob/main/docs/examples.md)
+- [Project format](https://github.com/tkcaccia/wsiTools/blob/main/docs/projects.md)

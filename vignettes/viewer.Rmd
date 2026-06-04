@@ -1,0 +1,64 @@
+---
+title: "Viewer"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Viewer}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```
+
+## Static Viewer
+
+Use a static viewer when you want a portable HTML page and do not need browser
+edits to return automatically to R.
+
+```{r}
+library(wsiTools)
+
+slide <- wsi_open("/path/to/image.svs")
+wsi_viewer(slide)
+```
+
+Static viewers may use precomputed Deep Zoom tiles for smooth full-resolution
+zooming.
+
+## Live Viewer
+
+Use a live viewer when annotations, selections, measurements, trajectories,
+channels, or project state should come back to the active R session.
+
+```{r}
+viewer <- wsi_viewer_live(
+  slide,
+  tiled = TRUE
+)
+
+viewer$open()
+viewer$get_rois()
+viewer$get_selected_roi()
+viewer$get_measurements()
+viewer$get_channel_settings()
+```
+
+The live viewer opens an `http://127.0.0.1:<port>/...` URL through `httpuv`.
+If the page is opened as `file://`, automatic synchronization with R is not
+active.
+
+## Full-Resolution Viewing
+
+The browser needs image tiles, not raw SVS, CZI, BTF, or OME-TIFF file paths.
+wsiTools can use:
+
+- prebuilt Deep Zoom tiles for the smoothest static viewing;
+- dynamic live tile endpoints for on-demand region reads;
+- OpenSeadragon overlays for annotations, spots, masks, and channels.
+
+More detail:
+
+- [Live viewer guide](https://github.com/tkcaccia/wsiTools/blob/main/docs/live-viewer.md)
+- [Architecture diagram](https://github.com/tkcaccia/wsiTools/blob/main/docs/architecture.md)
+- [Visual gallery](https://github.com/tkcaccia/wsiTools/blob/main/docs/screenshots.md)

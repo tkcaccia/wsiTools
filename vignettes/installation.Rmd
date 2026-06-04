@@ -1,0 +1,58 @@
+---
+title: "Installation"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Installation}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```
+
+## Start With The R Package
+
+Install the lightweight R package first. Optional image and analysis tools are
+detected at runtime and are not silently bundled.
+
+```{r}
+install.packages("remotes", repos = "https://cloud.r-project.org")
+
+remotes::install_github(
+  "tkcaccia/wsiTools",
+  upgrade = "never",
+  build_vignettes = FALSE
+)
+
+library(wsiTools)
+wsi_backends()
+wsi_diagnose(live_test = FALSE)
+```
+
+## Optional Tools
+
+Use `wsi_setup()` to print a CRAN-safe setup report. It does not install
+anything unless `install = TRUE` is supplied.
+
+```{r}
+wsi_setup()
+wsi_install_backends(install = FALSE)
+```
+
+Common optional tools are:
+
+- libvips for conversion, pyramids, thumbnails, and fast tiles.
+- OpenSlide for many digital pathology WSI formats.
+- native CZI or Bio-Formats for microscopy CZI workflows.
+- `httpuv` for live browser-to-R synchronization.
+- StarDist or Mesmer only when selected-ROI cell segmentation is explicitly
+  configured.
+
+## More Detail
+
+The full installation notes are maintained in the repository:
+
+- [Installation guide](https://github.com/tkcaccia/wsiTools/blob/main/docs/installation.md)
+- [Backend setup guide](https://github.com/tkcaccia/wsiTools/blob/main/docs/backends.md)
+- [Troubleshooting](https://github.com/tkcaccia/wsiTools/blob/main/docs/troubleshooting.md)

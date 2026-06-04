@@ -4,7 +4,7 @@
 [![Lifecycle: experimental/maturing](https://img.shields.io/badge/lifecycle-experimental%20%2F%20maturing-orange.svg)](https://lifecycle.r-lib.org/articles/stages.html)
 [![License](https://img.shields.io/github/license/tkcaccia/wsiTools.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/tkcaccia/wsiTools?include_prereleases)](https://github.com/tkcaccia/wsiTools/releases)
-[![pkgdown docs](https://img.shields.io/badge/docs-pkgdown-blue.svg)](https://stefano.github.io/wsiTools/)
+[![pkgdown docs](https://img.shields.io/badge/docs-pkgdown-blue.svg)](https://tkcaccia.github.io/wsiTools/)
 
 wsiTools is an R toolkit for memory-efficient WSI access and preprocessing
 through region-based reading, tiling, pyramidal image handling, conversion and

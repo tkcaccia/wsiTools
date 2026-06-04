@@ -1,0 +1,53 @@
+---
+title: "Spatial omics"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Spatial omics}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```
+
+## Supported Object Types
+
+wsiTools provides a shared viewer architecture for spatial objects, including:
+
+- Seurat
+- Giotto
+- SpatialExperiment
+- CellPhenotyper project outputs
+
+The goal is to keep high-resolution image pixels on disk while synchronizing
+spots, annotations, selections, and derived tables with R.
+
+## Seurat Example
+
+```{r}
+linked <- wsi_link_seurat_image(
+  object = brain,
+  image = "/path/to/high_resolution_image.tif",
+  image_id = "anterior1",
+  coordinate_transform = list(flip = "vertical", rotate = 90)
+)
+
+viewer <- wsi_viewer_seurat(linked, live = TRUE)
+viewer$open()
+
+viewer$colour_spots_by_gene("Mbp")
+viewer$get_selected_spots()
+viewer$get_spot_annotation_table()
+```
+
+## Giotto And SpatialExperiment
+
+```{r}
+giotto_linked <- wsi_link_giotto_image(giotto_object, image = "slide.tif")
+spe_linked <- wsi_link_spatialexperiment_image(spe_object, image = "slide.tif")
+```
+
+More detail:
+
+- [Spatial omics guide](https://github.com/tkcaccia/wsiTools/blob/main/docs/spatial-omics.md)

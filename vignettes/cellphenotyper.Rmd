@@ -1,0 +1,52 @@
+---
+title: "CellPhenotyper"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{CellPhenotyper}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```
+
+## Open A CellPhenotyper Project
+
+CellPhenotyper projects can be opened from their output directory. wsiTools
+uses `00_execution/project_outputs.tsv` to discover available outputs where
+possible.
+
+```{r}
+project <- read_cellphenotyper_project(
+  "/path/to/CellPhenotyper/results"
+)
+
+viewer <- viewer_cellphenotyper(project, live = TRUE)
+viewer$open()
+```
+
+## Typical Layers
+
+Depending on available outputs, the viewer may expose:
+
+- input H&E or OME-TIFF images;
+- GigaTIME/mIHC channel overlays;
+- shifted or registered channel sources;
+- cells, masks, centroids, or polygons;
+- CellPhenotyper and GrandQC GeoJSON annotations;
+- KODAMA/CellPhenotyper selection plots.
+
+## Returned R Objects
+
+```{r}
+viewer$get_rois()
+viewer$get_segmentation()
+viewer$get_cell_summary()
+viewer$get_channel_settings()
+```
+
+More detail:
+
+- [Spatial omics guide](https://github.com/tkcaccia/wsiTools/blob/main/docs/spatial-omics.md)
+- [Examples gallery](https://github.com/tkcaccia/wsiTools/blob/main/docs/examples.md)
