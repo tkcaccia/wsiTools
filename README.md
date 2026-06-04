@@ -59,6 +59,7 @@ wsi_diagnose(live_test = FALSE)
 remotes::install_github("tkcaccia/wsiTools", upgrade = "never")
 
 library(wsiTools)
+wsi_start()
 wsi_backends()
 
 slide <- wsi_open("sample.svs")

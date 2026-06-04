@@ -113,6 +113,25 @@ test_that("setup reports missing dependencies without installing by default", {
   expect_true(any(grepl("Nothing is installed", printed, fixed = TRUE)))
 })
 
+test_that("wsi_start prints a concise first-run checklist", {
+  output <- capture.output(
+    start <- wsi_start(live_test = FALSE)
+  )
+
+  expect_s3_class(start, "wsi_start")
+  expect_named(
+    start,
+    c("package_version", "backends", "installed_backends", "missing_core_backends", "live_viewer", "suggested_next_command")
+  )
+  expect_s3_class(start$backends, "data.frame")
+  expect_s3_class(start$live_viewer, "data.frame")
+  expect_true(any(grepl("1. Checking package", output, fixed = TRUE)))
+  expect_true(any(grepl("2. Checking backends", output, fixed = TRUE)))
+  expect_true(any(grepl("3. Checking live viewer", output, fixed = TRUE)))
+  expect_true(any(grepl("4. Suggested next command", output, fixed = TRUE)))
+  expect_true(any(grepl("wsi_diagnose(live_test = FALSE)", output, fixed = TRUE)))
+})
+
 test_that("setup report is read-only and includes diagnostic sections", {
   setup_output <- capture.output(
     report <- wsi_setup_report(
