@@ -28,6 +28,10 @@ viewer$get_segmentation()
 Keep the R session alive while the browser is open. If R stops, the browser may
 still show the last static page, but live synchronization stops.
 
+For a diagram of the R session, `httpuv` bridge, browser viewer,
+OpenSeadragon tiles, and runtime image backends, see
+[architecture](architecture.md).
+
 ## Use Tiled Mode For Full Resolution
 
 For whole-slide images, use tiled OpenSeadragon viewing:

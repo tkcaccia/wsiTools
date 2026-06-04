@@ -86,7 +86,9 @@ installation on Windows, macOS, Ubuntu, and optional runtime tools, see the
 [installation guide](docs/installation.md) and [backend setup guide](docs/backends.md).
 For browser-to-R synchronization, remote desktops, SSH tunnels, and common live
 viewer mistakes such as opening `/viewer-state` instead of the HTML viewer, see
-the dedicated [live viewer guide](docs/live-viewer.md). For known installation,
+the dedicated [live viewer guide](docs/live-viewer.md). For a compact diagram
+of the R session, browser viewer, OpenSeadragon tiles, and runtime backends, see
+[architecture](docs/architecture.md). For known installation,
 backend, and viewer errors, see [troubleshooting](docs/troubleshooting.md).
 For Seurat, Giotto, SpatialExperiment, and CellPhenotyper workflows, see
 [spatial omics](docs/spatial-omics.md).
