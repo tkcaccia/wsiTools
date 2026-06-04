@@ -13,6 +13,29 @@ wsi_backends()
 wsi_setup_report()
 ```
 
+## Installed Copy-Paste Scripts
+
+wsiTools ships copy-paste scripts in `inst/examples/`. After installation, get
+their paths with `system.file()`:
+
+```r
+system.file("examples/open_single_svs_live.R", package = "wsiTools")
+system.file("examples/open_czi_project_live.R", package = "wsiTools")
+system.file("examples/open_spatialexperiment_four_slide_live.R", package = "wsiTools")
+system.file("examples/open_cellphenotyper_project_live.R", package = "wsiTools")
+system.file("examples/open_he_mihc_overlay_live.R", package = "wsiTools")
+```
+
+Run one directly from R:
+
+```r
+Sys.setenv(WSITOOLS_SVS = "/path/to/sample.svs")
+source(system.file("examples/open_single_svs_live.R", package = "wsiTools"))
+```
+
+Each script documents the environment variables it accepts, so the same file
+can be used from RStudio, `Rscript`, or a remote desktop.
+
 For the full selected-ROI StarDist, Mesmer, mask import, and cell export
 workflow, see [cell segmentation](cell-segmentation.md).
 For Seurat, Giotto, SpatialExperiment, and CellPhenotyper workflows, see

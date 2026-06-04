@@ -553,6 +553,24 @@ script:
 source(system.file("examples/first-run-guided-example.R", package = "wsiTools"))
 ```
 
+Installed copy-paste scripts for common remote viewer workflows are available
+under `inst/examples/`:
+
+```r
+system.file("examples/open_single_svs_live.R", package = "wsiTools")
+system.file("examples/open_czi_project_live.R", package = "wsiTools")
+system.file("examples/open_spatialexperiment_four_slide_live.R", package = "wsiTools")
+system.file("examples/open_cellphenotyper_project_live.R", package = "wsiTools")
+system.file("examples/open_he_mihc_overlay_live.R", package = "wsiTools")
+```
+
+For example:
+
+```r
+Sys.setenv(WSITOOLS_SVS = "/path/to/sample.svs")
+source(system.file("examples/open_single_svs_live.R", package = "wsiTools"))
+```
+
 For a live viewer, inspect the capabilities of that specific session before
 starting optional tools:
 
