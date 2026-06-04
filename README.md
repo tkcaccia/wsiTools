@@ -40,8 +40,10 @@ demo$path
   core R package.
 
 For the shortest image-opening workflow, see [open one image](docs/open-one-image.md).
-For copy-paste workflows, see the [examples gallery](docs/examples.md); the
-older [examples page](EXAMPLES.md) contains longer notes. For
+For screenshots and the ROI round-trip GIF, see the
+[visual gallery](docs/screenshots.md). For copy-paste workflows, see the
+[examples gallery](docs/examples.md); the older [examples page](EXAMPLES.md)
+contains longer notes. For
 installation on Windows, macOS, Ubuntu, and optional runtime tools, see the
 [installation guide](docs/installation.md) and [backend setup guide](docs/backends.md).
 For browser-to-R synchronization, remote desktops, SSH tunnels, and common live
@@ -52,6 +54,32 @@ These pages cover
 single-image viewing, CZI projects, H&E/mIHC overlays, CellPhenotyper,
 Seurat/Visium PCA, annotation round trips, tile extraction, conversion, and
 troubleshooting.
+
+## Visual preview
+
+These previews are generated from synthetic demo data and are safe to keep in
+the repository. They show the main viewer workflows without committing any large
+or identifiable slide data.
+
+| Full-resolution viewer | Annotation panel |
+| --- | --- |
+| ![Full-resolution tiled viewer](docs/media/full-resolution-viewer.png) | ![Annotation panel](docs/media/annotation-panel.png) |
+
+| GeoJSON overlay | mIHC channel overlay |
+| --- | --- |
+| ![GeoJSON overlay](docs/media/geojson-overlay.png) | ![mIHC channel overlay](docs/media/mihc-channel-overlay.png) |
+
+| Spatial spots | CellPhenotyper cells |
+| --- | --- |
+| ![Seurat and SpatialExperiment spots](docs/media/spatial-spots.png) | ![CellPhenotyper cells](docs/media/cellphenotyper-cells.png) |
+
+| Tile grid | Live R synchronization |
+| --- | --- |
+| ![Tile grid preview](docs/media/tile-grid.png) | ![Live R synchronization](docs/media/live-r-synchronization.png) |
+
+ROI drawing and R round trip:
+
+![Drawing an ROI and retrieving it in R](docs/media/roi-roundtrip.gif)
 
 ## Installation
 
