@@ -8,7 +8,7 @@ wsi_viewer_seurat(
   seurat,
   image,
   linked = NULL,
-  live = FALSE,
+  live = TRUE,
   dynamic_tiles = live,
   mode = c("tiles", "thumbnail"),
   output = NULL,
@@ -24,8 +24,9 @@ wsi_viewer_seurat(
 
 \item{linked}{Optional precomputed object from \code{\link[=wsi_link_seurat_image]{wsi_link_seurat_image()}}.}
 
-\item{live}{Use \code{\link[=wsi_viewer_live]{wsi_viewer_live()}} instead of static \code{\link[=wsi_viewer]{wsi_viewer()}}. Live
-mode keeps R and the browser synchronized while the session is active.}
+\item{live}{Use \code{\link[=wsi_viewer_live]{wsi_viewer_live()}} instead of static \code{\link[=wsi_viewer]{wsi_viewer()}}. The
+default is \code{TRUE} so R and the browser stay synchronized while the session
+is active; set \code{live = FALSE} to write a static HTML viewer.}
 
 \item{dynamic_tiles}{When \code{live = TRUE}, serve the image as dynamic tiles.}
 
@@ -39,8 +40,8 @@ Deep Zoom viewing when the backend can create tiles.}
 after the linked object is created.}
 }
 \value{
-The HTML path for static mode, or a \code{wsi_viewer_session} for live
-mode.
+A \code{wsi_viewer_session} by default. If \code{live = FALSE}, returns the
+static HTML path.
 }
 \description{
 \code{wsi_viewer_seurat()} opens a high-resolution tissue image and overlays

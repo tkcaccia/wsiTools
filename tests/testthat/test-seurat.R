@@ -1,3 +1,12 @@
+test_that("spatial viewer wrappers default to live R synchronization", {
+  expect_true(identical(formals(wsi_viewer_seurat)$live, TRUE))
+  expect_true(identical(formals(wsi_viewer_spatial)$live, TRUE))
+  expect_true(identical(formals(wsi_viewer_giotto)$live, TRUE))
+  expect_true(identical(formals(wsi_viewer_spatialexperiment)$live, TRUE))
+  expect_true(identical(formals(wsi_viewer_seurat_project)$live, TRUE))
+  expect_true(identical(formals(wsi_viewer_spatialexperiment_project)$live, TRUE))
+})
+
 test_that("Seurat spatial objects can be linked to high-resolution slide coordinates", {
   embeddings <- matrix(
     c(-2, 0.5, 1, -0.5, 2, 1.5),
@@ -714,6 +723,7 @@ test_that("multi-image Seurat projects keep per-section overlays", {
     images = slides,
     image_names = names(slides),
     mode = "thumbnail",
+    live = FALSE,
     output = output,
     open = FALSE,
     overwrite = TRUE

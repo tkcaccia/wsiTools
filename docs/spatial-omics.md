@@ -12,7 +12,7 @@ Supported project types:
 - SpatialExperiment objects, including multi-slide projects;
 - CellPhenotyper output folders.
 
-The common pattern is:
+The common pattern is live by default:
 
 ```r
 library(wsiTools)
@@ -20,7 +20,6 @@ library(wsiTools)
 viewer <- wsi_viewer_spatial(
   object,
   image = "/path/to/high_resolution_image.tif",
-  live = TRUE,
   dynamic_tiles = TRUE
 )
 
@@ -54,7 +53,6 @@ image <- "/path/to/high_resolution_tissue_image.tif"
 viewer <- wsi_viewer_seurat(
   brain,
   image = image,
-  live = TRUE,
   dynamic_tiles = TRUE,
   coordinate_flip = "none",
   coordinate_rotation = 0
@@ -94,7 +92,6 @@ If the tissue coordinates are not aligned, adjust the transform parameters:
 viewer <- wsi_viewer_seurat(
   brain,
   image = image,
-  live = TRUE,
   dynamic_tiles = TRUE,
   coordinate_flip = "vertical",
   coordinate_rotation = 90
@@ -117,7 +114,6 @@ image <- "/path/to/high_resolution_tissue_image.tif"
 viewer <- wsi_viewer_giotto(
   gobject,
   image = image,
-  live = TRUE,
   dynamic_tiles = TRUE,
   reduction = "PCA"
 )
@@ -147,7 +143,6 @@ viewer <- wsi_viewer_giotto(
   image = image,
   coordinates = giotto_coordinates,
   embeddings = giotto_pca,
-  live = TRUE,
   dynamic_tiles = TRUE
 )
 ```
@@ -166,7 +161,6 @@ image <- "/path/to/high_resolution_tissue_image.tif"
 viewer <- wsi_viewer_spatialexperiment(
   spe,
   image = image,
-  live = TRUE,
   dynamic_tiles = TRUE,
   reduction = "PCA"
 )
@@ -193,19 +187,20 @@ images <- c(
   section_4 = "/path/to/section_4.tif"
 )
 
-html <- wsi_viewer_spatialexperiment_project(
+viewer <- wsi_viewer_spatialexperiment_project(
   spe,
   images = images,
   sample_ids = names(images),
   mode = "tiles",
   output = "spatialexperiment_four_slide_viewer.html",
   open = TRUE,
+  wait = FALSE,
   overwrite = TRUE
 )
 ```
 
 For live R feedback on one section at a time, open that section with
-`wsi_viewer_spatialexperiment(..., live = TRUE)`. When a live viewer is used and
+`wsi_viewer_spatialexperiment(...)`. When a live viewer is used and
 the reduction plot window is set to all tissues, selected spots should remain a
 project-wide selection:
 
@@ -321,7 +316,7 @@ wsi_backends()
 viewer$capabilities()
 ```
 
-Fix: open the object with `live = TRUE`, keep R running, and call:
+Fix: open the object with the default live viewer, keep R running, and call:
 
 ```r
 viewer$colour_spots_by_gene("Mbp")

@@ -370,8 +370,9 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
 #' @param seurat A Seurat object.
 #' @param image Path to the high-resolution image, or a `wsi_slide` object.
 #' @param linked Optional precomputed object from [wsi_link_seurat_image()].
-#' @param live Use [wsi_viewer_live()] instead of static [wsi_viewer()]. Live
-#'   mode keeps R and the browser synchronized while the session is active.
+#' @param live Use [wsi_viewer_live()] instead of static [wsi_viewer()]. The
+#'   default is `TRUE` so R and the browser stay synchronized while the session
+#'   is active; set `live = FALSE` to write a static HTML viewer.
 #' @param dynamic_tiles When `live = TRUE`, serve the image as dynamic tiles.
 #' @param mode Viewer mode for static output. `"tiles"` gives full-resolution
 #'   Deep Zoom viewing when the backend can create tiles.
@@ -380,8 +381,8 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
 #'   [wsi_viewer()] or [wsi_viewer_live()]. Viewer arguments take precedence
 #'   after the linked object is created.
 #'
-#' @return The HTML path for static mode, or a `wsi_viewer_session` for live
-#'   mode.
+#' @return A `wsi_viewer_session` by default. If `live = FALSE`, returns the
+#'   static HTML path.
 #' @export
 #'
 #' @examples
@@ -393,7 +394,7 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
 #' )
 #' }
 wsi_viewer_seurat <- function(seurat, image, linked = NULL,
-                              live = FALSE, dynamic_tiles = live,
+                              live = TRUE, dynamic_tiles = live,
                               mode = c("tiles", "thumbnail"),
                               output = NULL, open = interactive(),
                               overwrite = FALSE, ...) {
@@ -467,6 +468,15 @@ wsi_viewer_seurat <- function(seurat, image, linked = NULL,
 #' @param mode Viewer mode. `"tiles"` uses prebuilt Deep Zoom tiles and is the
 #'   recommended mode for real WSI or high-resolution tissue images.
 #'   `"thumbnail"` is useful for quick tests and mock slides.
+#' @param live Use [wsi_viewer_live()] by default so the project can synchronize
+#'   annotations, selections, measurements, and spot tables back to R. Set
+#'   `live = FALSE` to write a static HTML viewer.
+#' @param dynamic_tiles When `live = TRUE`, whether the first active image should
+#'   be served from the dynamic tile server instead of the prebuilt tile source.
+#'   The default is `FALSE` because prebuilt project tiles are usually smoother.
+#' @param wait For live viewers, whether to keep servicing the local R/httpuv
+#'   bridge until interrupted.
+#' @param transport Live viewer transport passed to [wsi_viewer_live()].
 #' @param output,open,overwrite,title Viewer output options.
 #' @param width,height Thumbnail/navigator size options passed to the viewer.
 #' @param tile_dir Directory where per-image Deep Zoom tile pyramids are stored.
@@ -474,7 +484,8 @@ wsi_viewer_seurat <- function(seurat, image, linked = NULL,
 #'   options used in tiled mode.
 #' @param roi_class_presets ROI classes used by the annotation UI.
 #'
-#' @return The HTML viewer path.
+#' @return A `wsi_viewer_session` by default. If `live = FALSE`, returns the
+#'   static HTML path.
 #' @export
 #'
 #' @examples
@@ -484,12 +495,13 @@ wsi_viewer_seurat <- function(seurat, image, linked = NULL,
 #'   anterior2 = "V1_Mouse_Brain_Sagittal_Anterior_Section_2_image.tif"
 #' )
 #'
-#' html <- wsi_viewer_seurat_project(
+#' viewer <- wsi_viewer_seurat_project(
 #'   brain.merge,
 #'   images = images,
 #'   image_names = names(images),
 #'   output = "seurat_project.html",
-#'   mode = "tiles"
+#'   mode = "tiles",
+#'   wait = FALSE
 #' )
 #' }
 wsi_viewer_seurat_project <- function(seurat = NULL, images = NULL, linked = NULL,
@@ -507,6 +519,9 @@ wsi_viewer_seurat_project <- function(seurat = NULL, images = NULL, linked = NUL
                                       spot_radius = NULL, max_points = 100000L,
                                       colour_by = c("component_1", "gene", "none"),
                                       mode = c("tiles", "thumbnail"),
+                                      live = TRUE, dynamic_tiles = FALSE,
+                                      wait = interactive(),
+                                      transport = c("auto", "websocket", "polling"),
                                       output = NULL, open = interactive(),
                                       overwrite = FALSE,
                                       title = "wsiTools Seurat project viewer",
@@ -517,11 +532,21 @@ wsi_viewer_seurat_project <- function(seurat = NULL, images = NULL, linked = NUL
                                       tile_overlap = NULL,
                                       roi_class_presets = wsi_roi_class_presets()) {
   mode <- match.arg(mode)
+  transport <- match.arg(transport)
   tile_format <- match.arg(tile_format)
   coordinate_scale <- match.arg(coordinate_scale)
   coordinate_flip <- wsi_seurat_coordinate_flip_arg(coordinate_flip)
   coordinate_rotation <- wsi_seurat_coordinate_rotation_arg(coordinate_rotation)
   colour_by <- match.arg(colour_by)
+  if (!is.logical(live) || length(live) != 1L || is.na(live)) {
+    wsi_abort("`live` must be `TRUE` or `FALSE`.")
+  }
+  if (!is.logical(dynamic_tiles) || length(dynamic_tiles) != 1L || is.na(dynamic_tiles)) {
+    wsi_abort("`dynamic_tiles` must be `TRUE` or `FALSE`.")
+  }
+  if (!is.logical(wait) || length(wait) != 1L || is.na(wait)) {
+    wsi_abort("`wait` must be `TRUE` or `FALSE`.")
+  }
   width <- as.integer(wsi_check_scalar_number(width, "width", allow_zero = FALSE))
   if (!is.null(height)) {
     height <- as.integer(wsi_check_scalar_number(height, "height", allow_zero = FALSE))
@@ -593,8 +618,8 @@ wsi_viewer_seurat_project <- function(seurat = NULL, images = NULL, linked = NUL
   first_layer$project_scoped <- TRUE
 
   if (identical(mode, "thumbnail")) {
-    return(wsi_viewer(
-      first$slide,
+    viewer_args <- list(
+      slide = first$slide,
       width = width,
       height = height,
       output = output,
@@ -606,11 +631,19 @@ wsi_viewer_seurat_project <- function(seurat = NULL, images = NULL, linked = NUL
       project_images = records,
       layers = list(first_layer),
       seurat = first
-    ))
+    )
+    if (isTRUE(live)) {
+      viewer_args$dynamic_tiles <- FALSE
+      viewer_args$wait <- wait
+      viewer_args$transport <- transport
+      viewer_args$name <- "wsi_seurat_project_live_state"
+      return(do.call(wsi_viewer_live, viewer_args))
+    }
+    return(do.call(wsi_viewer, viewer_args))
   }
 
-  wsi_viewer(
-    first$slide,
+  viewer_args <- list(
+    slide = first$slide,
     width = width,
     height = height,
     output = output,
@@ -631,6 +664,14 @@ wsi_viewer_seurat_project <- function(seurat = NULL, images = NULL, linked = NUL
     layers = list(first_layer),
     seurat = first
   )
+  if (isTRUE(live)) {
+    viewer_args$dynamic_tiles <- dynamic_tiles
+    viewer_args$wait <- wait
+    viewer_args$transport <- transport
+    viewer_args$name <- "wsi_seurat_project_live_state"
+    return(do.call(wsi_viewer_live, viewer_args))
+  }
+  do.call(wsi_viewer, viewer_args)
 }
 
 #' @export

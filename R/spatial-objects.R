@@ -23,7 +23,7 @@
 #' @examples
 #' \dontrun{
 #' linked <- wsi_link_spatial_image(brain, "tissue.tif", object_type = "seurat")
-#' viewer <- wsi_viewer_spatial(brain, "tissue.tif", live = TRUE)
+#' viewer <- wsi_viewer_spatial(brain, "tissue.tif")
 #' }
 wsi_link_spatial_image <- function(object, image,
                                    object_type = c("auto", "seurat", "giotto", "spatialexperiment"),
@@ -40,21 +40,22 @@ wsi_link_spatial_image <- function(object, image,
 #' Open a spatial omics object in the wsiTools viewer
 #'
 #' `wsi_viewer_spatial()` is a common viewer entry point for Seurat, Giotto,
-#' and SpatialExperiment-style objects. Static mode writes an HTML viewer.
-#' Live mode starts the R/httpuv bridge, enabling on-demand gene lookup from R
-#' without serialising the full expression matrix into the browser.
+#' and SpatialExperiment-style objects. It uses live mode by default so the
+#' R/httpuv bridge can synchronize selections and retrieve genes on demand
+#' without serialising the full expression matrix into the browser. Set
+#' `live = FALSE` to write a static HTML viewer.
 #'
 #' @inheritParams wsi_link_spatial_image
 #' @param linked Optional linked object returned by [wsi_link_spatial_image()]
 #'   or one of the specialised linkers.
 #' @inheritParams wsi_viewer_giotto
 #'
-#' @return The HTML path for static mode, or a `wsi_viewer_session` for live
-#'   mode.
+#' @return A `wsi_viewer_session` by default. If `live = FALSE`, returns the
+#'   static HTML path.
 #' @export
 wsi_viewer_spatial <- function(object, image, linked = NULL,
                                object_type = c("auto", "seurat", "giotto", "spatialexperiment"),
-                               live = FALSE, dynamic_tiles = live,
+                               live = TRUE, dynamic_tiles = live,
                                mode = c("tiles", "thumbnail"),
                                output = NULL, open = interactive(),
                                overwrite = FALSE, ...) {
@@ -462,11 +463,11 @@ wsi_link_giotto_image <- function(giotto, image, image_name = NULL,
 #' @param ... Arguments passed to [wsi_link_giotto_image()] and then to
 #'   [wsi_viewer()] or [wsi_viewer_live()].
 #'
-#' @return The HTML path for static mode, or a `wsi_viewer_session` for live
-#'   mode.
+#' @return A `wsi_viewer_session` by default. If `live = FALSE`, returns the
+#'   static HTML path.
 #' @export
 wsi_viewer_giotto <- function(giotto, image, linked = NULL,
-                              live = FALSE, dynamic_tiles = live,
+                              live = TRUE, dynamic_tiles = live,
                               mode = c("tiles", "thumbnail"),
                               output = NULL, open = interactive(),
                               overwrite = FALSE, ...) {
@@ -572,11 +573,11 @@ wsi_link_spatialexperiment_image <- function(spe, image, image_name = NULL,
 #' @param ... Arguments passed to [wsi_link_spatialexperiment_image()] and then
 #'   to [wsi_viewer()] or [wsi_viewer_live()].
 #'
-#' @return The HTML path for static mode, or a `wsi_viewer_session` for live
-#'   mode.
+#' @return A `wsi_viewer_session` by default. If `live = FALSE`, returns the
+#'   static HTML path.
 #' @export
 wsi_viewer_spatialexperiment <- function(spe, image, linked = NULL,
-                                         live = FALSE, dynamic_tiles = live,
+                                         live = TRUE, dynamic_tiles = live,
                                          mode = c("tiles", "thumbnail"),
                                          output = NULL, open = interactive(),
                                          overwrite = FALSE, ...) {
@@ -620,7 +621,8 @@ wsi_viewer_spatialexperiment <- function(spe, image, linked = NULL,
 #' @inheritParams wsi_link_spatialexperiment_image
 #' @inheritParams wsi_viewer_seurat_project
 #'
-#' @return The HTML viewer path.
+#' @return A `wsi_viewer_session` by default. If `live = FALSE`, returns the
+#'   static HTML path.
 #' @export
 #'
 #' @examples
@@ -629,11 +631,12 @@ wsi_viewer_spatialexperiment <- function(spe, image, linked = NULL,
 #'   `151507` = "151507_full_image.tif",
 #'   `151508` = "151508_full_image.tif"
 #' )
-#' html <- wsi_viewer_spatialexperiment_project(
+#' viewer <- wsi_viewer_spatialexperiment_project(
 #'   spe,
 #'   images = images,
 #'   coordinate_scale = "none",
-#'   output = "spatialexperiment_project.html"
+#'   output = "spatialexperiment_project.html",
+#'   wait = FALSE
 #' )
 #' }
 wsi_viewer_spatialexperiment_project <- function(spe = NULL, images = NULL,
@@ -656,6 +659,10 @@ wsi_viewer_spatialexperiment_project <- function(spe = NULL, images = NULL,
                                                  max_points = 100000L,
                                                  colour_by = c("component_1", "gene", "none"),
                                                  mode = c("tiles", "thumbnail"),
+                                                 live = TRUE,
+                                                 dynamic_tiles = FALSE,
+                                                 wait = interactive(),
+                                                 transport = c("auto", "websocket", "polling"),
                                                  output = NULL,
                                                  open = interactive(),
                                                  overwrite = FALSE,
@@ -670,11 +677,21 @@ wsi_viewer_spatialexperiment_project <- function(spe = NULL, images = NULL,
                                                  tile_overlap = NULL,
                                                  roi_class_presets = wsi_roi_class_presets()) {
   mode <- match.arg(mode)
+  transport <- match.arg(transport)
   tile_format <- match.arg(tile_format)
   coordinate_scale <- match.arg(coordinate_scale)
   coordinate_flip <- wsi_seurat_coordinate_flip_arg(coordinate_flip)
   coordinate_rotation <- wsi_seurat_coordinate_rotation_arg(coordinate_rotation)
   colour_by <- match.arg(colour_by)
+  if (!is.logical(live) || length(live) != 1L || is.na(live)) {
+    wsi_abort("`live` must be `TRUE` or `FALSE`.")
+  }
+  if (!is.logical(dynamic_tiles) || length(dynamic_tiles) != 1L || is.na(dynamic_tiles)) {
+    wsi_abort("`dynamic_tiles` must be `TRUE` or `FALSE`.")
+  }
+  if (!is.logical(wait) || length(wait) != 1L || is.na(wait)) {
+    wsi_abort("`wait` must be `TRUE` or `FALSE`.")
+  }
   width <- as.integer(wsi_check_scalar_number(width, "width", allow_zero = FALSE))
   if (!is.null(height)) {
     height <- as.integer(wsi_check_scalar_number(height, "height", allow_zero = FALSE))
@@ -745,8 +762,8 @@ wsi_viewer_spatialexperiment_project <- function(spe = NULL, images = NULL,
   first_layer$project_scoped <- TRUE
 
   if (identical(mode, "thumbnail")) {
-    return(wsi_viewer(
-      first$slide,
+    viewer_args <- list(
+      slide = first$slide,
       width = width,
       height = height,
       output = output,
@@ -758,11 +775,19 @@ wsi_viewer_spatialexperiment_project <- function(spe = NULL, images = NULL,
       project_images = records,
       layers = list(first_layer),
       seurat = first
-    ))
+    )
+    if (isTRUE(live)) {
+      viewer_args$dynamic_tiles <- FALSE
+      viewer_args$wait <- wait
+      viewer_args$transport <- transport
+      viewer_args$name <- "wsi_spatialexperiment_project_live_state"
+      return(do.call(wsi_viewer_live, viewer_args))
+    }
+    return(do.call(wsi_viewer, viewer_args))
   }
 
-  wsi_viewer(
-    first$slide,
+  viewer_args <- list(
+    slide = first$slide,
     width = width,
     height = height,
     output = output,
@@ -783,6 +808,14 @@ wsi_viewer_spatialexperiment_project <- function(spe = NULL, images = NULL,
     layers = list(first_layer),
     seurat = first
   )
+  if (isTRUE(live)) {
+    viewer_args$dynamic_tiles <- dynamic_tiles
+    viewer_args$wait <- wait
+    viewer_args$transport <- transport
+    viewer_args$name <- "wsi_spatialexperiment_project_live_state"
+    return(do.call(wsi_viewer_live, viewer_args))
+  }
+  do.call(wsi_viewer, viewer_args)
 }
 
 wsi_viewer_spatial_linked <- function(object, image, linked, linker, source_name,

@@ -51,7 +51,7 @@ if (file.exists(seurat_rds)) {
 }
 
 viewer_mode <- if (wsi_has_vips()) "tiles" else "thumbnail"
-html <- wsi_viewer_seurat_project(
+viewer <- wsi_viewer_seurat_project(
   seurat = brain.merge,
   images = slice_images,
   image_names = names(slice_images),
@@ -63,9 +63,13 @@ html <- wsi_viewer_seurat_project(
   output = file.path(save_dir, "seurat_4slides_project.html"),
   tile_dir = file.path(save_dir, "seurat_4slides_project_tiles"),
   open = interactive(),
+  wait = FALSE,
   overwrite = TRUE,
   rebuild = FALSE
 )
 
+assign("seurat_4slides_project_viewer", viewer, envir = .GlobalEnv)
+html <- if (inherits(viewer, "wsi_viewer_session")) viewer$html else viewer
 message("Viewer written to: ", html)
+message("Live R synchronization: ", if (inherits(viewer, "wsi_viewer_session")) "on" else "off")
 message("Mode: ", viewer_mode)

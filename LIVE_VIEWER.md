@@ -485,13 +485,14 @@ actual live sync port printed by R.
 
 ## Seurat, Giotto, And SpatialExperiment Live Viewers
 
-Spatial object viewers use the same live bridge.
+Spatial object viewers use the same live bridge, and default to live
+synchronization. Pass `live = FALSE` only when you deliberately want a static
+HTML file.
 
 ```r
 viewer <- wsi_viewer_seurat(
   brain,
   image = "tissue.tif",
-  live = TRUE,
   mode = "tiles",
   open = TRUE
 )
@@ -501,7 +502,6 @@ viewer <- wsi_viewer_seurat(
 viewer <- wsi_viewer_giotto(
   giotto_object,
   image = "tissue.tif",
-  live = TRUE,
   mode = "tiles",
   open = TRUE
 )
@@ -511,7 +511,6 @@ viewer <- wsi_viewer_giotto(
 viewer <- wsi_viewer_spatialexperiment(
   spe,
   image = "tissue.tif",
-  live = TRUE,
   mode = "tiles",
   open = TRUE
 )
@@ -650,12 +649,12 @@ but can be slower because R must generate requested tiles on demand.
 
 ### Gene lookup does not work
 
-Use a live spatial viewer:
+Use a live spatial viewer. These wrappers are live by default:
 
 ```r
-wsi_viewer_seurat(..., live = TRUE)
-wsi_viewer_giotto(..., live = TRUE)
-wsi_viewer_spatialexperiment(..., live = TRUE)
+wsi_viewer_seurat(...)
+wsi_viewer_giotto(...)
+wsi_viewer_spatialexperiment(...)
 ```
 
 The original R object must stay available in the active R session.

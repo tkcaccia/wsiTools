@@ -17,7 +17,7 @@ wsi_viewer_spatial(
   image,
   linked = NULL,
   object_type = c("auto", "seurat", "giotto", "spatialexperiment"),
-  live = FALSE,
+  live = TRUE,
   dynamic_tiles = live,
   mode = c("tiles", "thumbnail"),
   output = NULL,
@@ -41,7 +41,8 @@ Set this explicitly for lightweight lists or unusual objects.}
 \item{linked}{Optional linked object returned by
 \code{wsi_link_spatial_image()} or one of the specialised linkers.}
 
-\item{live}{Whether to start the live R/httpuv bridge.}
+\item{live}{Whether to start the live R/httpuv bridge. The default is
+\code{TRUE}; set \code{live = FALSE} for a static HTML viewer.}
 
 \item{dynamic_tiles}{Whether live tiled mode should use the dynamic tile
 server.}
@@ -53,18 +54,18 @@ is useful for quick tests and mock slides.}
 }
 \value{
 \code{wsi_link_spatial_image()} returns a linked spatial object.
-\code{wsi_viewer_spatial()} returns the HTML path for static mode or a
-\code{wsi_viewer_session} for live mode.
+\code{wsi_viewer_spatial()} returns a \code{wsi_viewer_session} by default, or
+the HTML path when \code{live = FALSE}.
 }
 \description{
 \code{wsi_link_spatial_image()} and \code{wsi_viewer_spatial()} provide a
 common user-facing entry point for Seurat, Giotto, and SpatialExperiment-style
-objects. Live mode keeps expression matrices in R and lets the browser request
-one gene at a time.
+objects. Live mode is the default, keeping expression matrices in R and letting
+the browser request one gene at a time.
 }
 \examples{
 \dontrun{
 linked <- wsi_link_spatial_image(brain, "tissue.tif", object_type = "seurat")
-viewer <- wsi_viewer_spatial(brain, "tissue.tif", live = TRUE)
+viewer <- wsi_viewer_spatial(brain, "tissue.tif")
 }
 }

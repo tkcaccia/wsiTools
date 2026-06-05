@@ -27,6 +27,10 @@ wsi_viewer_spatialexperiment_project(
   max_points = 100000L,
   colour_by = c("component_1", "gene", "none"),
   mode = c("tiles", "thumbnail"),
+  live = TRUE,
+  dynamic_tiles = FALSE,
+  wait = interactive(),
+  transport = c("auto", "websocket", "polling"),
   output = NULL,
   open = interactive(),
   overwrite = FALSE,
@@ -108,6 +112,19 @@ plotted reduction component; \code{"gene"} colours by \code{default_gene};
 recommended for high-resolution tissue images. \code{"thumbnail"} is useful for
 quick tests and mock slides.}
 
+\item{live}{Use \code{\link[=wsi_viewer_live]{wsi_viewer_live()}} by default so the project can synchronize
+annotations, selections, measurements, and spot tables back to R. Set
+\code{live = FALSE} to write a static HTML viewer.}
+
+\item{dynamic_tiles}{When \code{live = TRUE}, whether the first active image should
+be served from the dynamic tile server instead of the prebuilt tile source.
+The default is \code{FALSE} because prebuilt project tiles are usually smoother.}
+
+\item{wait}{For live viewers, whether to keep servicing the local R/httpuv
+bridge until interrupted.}
+
+\item{transport}{Live viewer transport passed to \code{\link[=wsi_viewer_live]{wsi_viewer_live()}}.}
+
 \item{output, open, overwrite, title}{Viewer output options.}
 
 \item{width, height}{Thumbnail/navigator size options passed to the viewer.}
@@ -120,7 +137,8 @@ options used in tiled mode.}
 \item{roi_class_presets}{ROI classes used by the annotation UI.}
 }
 \value{
-The HTML viewer path.
+A \code{wsi_viewer_session} by default. If \code{live = FALSE}, returns the
+static HTML path.
 }
 \description{
 \code{wsi_viewer_spatialexperiment_project()} links a multi-sample
@@ -135,11 +153,12 @@ images <- c(
   `151507` = "151507_full_image.tif",
   `151508` = "151508_full_image.tif"
 )
-html <- wsi_viewer_spatialexperiment_project(
+viewer <- wsi_viewer_spatialexperiment_project(
   spe,
   images = images,
   coordinate_scale = "none",
-  output = "spatialexperiment_project.html"
+  output = "spatialexperiment_project.html",
+  wait = FALSE
 )
 }
 }

@@ -407,7 +407,6 @@ viewer <- wsi_viewer_seurat(
   coordinate_rotation = 270,
   reduction = "pca",
   dims = c(1, 2),
-  live = TRUE,
   dynamic_tiles = TRUE,
   output = "/Users/stefano/Documents/viewer/seurat_mouse_brain_pca_live.html",
   overwrite = TRUE,
@@ -458,7 +457,6 @@ viewer <- wsi_viewer_seurat(
   brain,
   image = linked$image_path,
   linked = linked,
-  live = TRUE,
   dynamic_tiles = TRUE,
   open = TRUE,
   wait = FALSE

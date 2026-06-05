@@ -1067,7 +1067,9 @@ backend; the full WSI is not loaded into R memory.
 
 ### Seurat/Visium live gene colouring
 
-`wsi_viewer_seurat(..., live = TRUE)` keeps the Seurat expression matrix in R.
+`wsi_viewer_seurat()`, `wsi_viewer_giotto()`, `wsi_viewer_spatial()`, and
+`wsi_viewer_spatialexperiment()` now default to live R synchronization. The
+Seurat example keeps the expression matrix in R.
 The browser receives spot coordinates and PCA values, but not all genes. When
 you type a gene name in the **Seurat** menu and click **Colour by gene**, the
 viewer asks the active R session for that one gene only.
@@ -1076,7 +1078,6 @@ viewer asks the active R session for that one gene only.
 viewer <- wsi_viewer_seurat(
   brain,
   "/Users/stefano/Downloads/V1_Mouse_Brain_Sagittal_Anterior_image.tif",
-  live = TRUE,
   dynamic_tiles = TRUE,
   coordinate_flip = "horizontal",
   coordinate_rotation = 270,
@@ -1104,7 +1105,6 @@ remotes::install_github("tkcaccia/fastPLS")
 viewer <- wsi_viewer_seurat(
   brain,
   "/Users/stefano/Downloads/V1_Mouse_Brain_Sagittal_Anterior_image.tif",
-  live = TRUE,
   dynamic_tiles = TRUE,
   wait = FALSE
 )

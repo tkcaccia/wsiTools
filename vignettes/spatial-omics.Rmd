@@ -33,7 +33,11 @@ linked <- wsi_link_seurat_image(
   coordinate_transform = list(flip = "vertical", rotate = 90)
 )
 
-viewer <- wsi_viewer_seurat(linked, live = TRUE)
+viewer <- wsi_viewer_seurat(
+  brain,
+  "/path/to/high_resolution_image.tif",
+  linked = linked
+)
 viewer$open()
 
 viewer$colour_spots_by_gene("Mbp")

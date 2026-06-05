@@ -99,7 +99,7 @@ message("Backend status:")
 print(wsi_backends())
 message("Opening SpatialExperiment project with ", length(images), " section(s).")
 
-html <- wsi_viewer_spatialexperiment_project(
+project_viewer <- wsi_viewer_spatialexperiment_project(
   spe,
   images = images,
   sample_ids = sample_ids,
@@ -108,11 +108,18 @@ html <- wsi_viewer_spatialexperiment_project(
   mode = mode,
   output = output,
   open = open_browser,
+  wait = FALSE,
   overwrite = TRUE
 )
 
-assign("spatialexperiment_four_slide_viewer_html", html, envir = .GlobalEnv)
-message("Project viewer HTML saved as `spatialexperiment_four_slide_viewer_html`: ", normalizePath(html, winslash = "/", mustWork = FALSE))
+project_html <- if (inherits(project_viewer, "wsi_viewer_session")) project_viewer$html else project_viewer
+assign("spatialexperiment_four_slide_viewer", project_viewer, envir = .GlobalEnv)
+assign("spatialexperiment_four_slide_viewer_html", project_html, envir = .GlobalEnv)
+message("Project viewer saved as `spatialexperiment_four_slide_viewer`.")
+message("Project viewer HTML saved as `spatialexperiment_four_slide_viewer_html`: ", normalizePath(project_html, winslash = "/", mustWork = FALSE))
+if (inherits(project_viewer, "wsi_viewer_session")) {
+  message("Live project sync is active. Use: spatialexperiment_four_slide_viewer$get_rois()")
+}
 
 live_section <- Sys.getenv("WSITOOLS_SPE_LIVE_SECTION", "")
 if (nzchar(live_section)) {
@@ -126,15 +133,27 @@ if (nzchar(live_section)) {
     sample_id = live_section,
     image_name = live_section,
     reduction = reduction,
-    live = TRUE,
     dynamic_tiles = TRUE,
     output = file.path(dirname(output), paste0("open_spatialexperiment_", live_section, "_live.html")),
     open = open_browser,
     overwrite = TRUE,
-    wait = wait,
+    wait = FALSE,
     name = "spatialexperiment_live_viewer_state"
   )
   assign("spatialexperiment_live_viewer", live_viewer, envir = .GlobalEnv)
   message("Live section viewer saved as `spatialexperiment_live_viewer`.")
   message("Selected spots: spatialexperiment_live_viewer$get_selected_spots()")
+}
+
+if (isTRUE(wait) && inherits(project_viewer, "wsi_viewer_session")) {
+  message("Press Ctrl+C or Esc to stop the live sync loop and return to R.")
+  tryCatch(
+    repeat {
+      project_viewer$service(100)
+      if (exists("live_viewer", inherits = FALSE) && inherits(live_viewer, "wsi_viewer_session")) {
+        live_viewer$service(0)
+      }
+    },
+    interrupt = function(e) NULL
+  )
 }

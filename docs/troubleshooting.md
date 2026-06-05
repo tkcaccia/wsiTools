@@ -490,7 +490,6 @@ transform parameters explicitly:
 viewer <- wsi_viewer_seurat(
   seurat_obj,
   image = "/path/to/high_resolution_tissue_image.tif",
-  live = TRUE,
   dynamic_tiles = TRUE,
   flip = "vertical",
   rotation = 90

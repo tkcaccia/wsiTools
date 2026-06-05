@@ -7,6 +7,7 @@
 - Made backend-opening and command-line backend failures more actionable by reporting what failed, which backend was tried, how to check availability, and copyable setup/fix commands.
 - Added `wsi_start()` as a read-only first-run checklist for package, backend, live-viewer, and next-command guidance.
 - Added `wsi_open_viewer()` as a one-command entry point that opens an image with automatic backend, static/live, tiled/thumbnail, and browser-launch choices.
+- Made R synchronization the default for Seurat, Giotto, SpatialExperiment, and their Seurat/SpatialExperiment multi-section project viewers; pass `live = FALSE` for static HTML output.
 - Added live viewer TIFF export controls for the visible viewport and selected annotation bounding box. The export is written by R/backends through the live bridge, while annotation geometry remains exportable as GeoJSON or project state.
 - Added SVG screenshot export alongside PNG screenshots for report, presentation, and publication-ready viewer captures.
 - Added an explicit viewer preference save action and broader browser-local preference restore for brush size, annotation labels, preferred tool, display toggles, screenshot format, trajectory width, and related annotation settings.

@@ -444,6 +444,7 @@ test_that("SpatialExperiment project viewer uses one scoped spot layer per secti
   html <- wsi_viewer_spatialexperiment_project(
     linked = linked,
     mode = "thumbnail",
+    live = FALSE,
     output = output,
     open = FALSE,
     overwrite = TRUE

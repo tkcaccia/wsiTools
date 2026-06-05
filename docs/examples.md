@@ -168,7 +168,6 @@ library(Seurat)
 viewer <- wsi_viewer_seurat(
   seurat = seurat_obj,
   image = "/path/to/high_resolution_tissue_image.tif",
-  live = TRUE,
   dynamic_tiles = TRUE,
   mode = "tiles",
   open = TRUE,
@@ -192,7 +191,6 @@ library(wsiTools)
 viewer <- wsi_viewer_giotto(
   giotto = giotto_obj,
   image = "/path/to/high_resolution_tissue_image.tif",
-  live = TRUE,
   dynamic_tiles = TRUE,
   mode = "tiles",
   open = TRUE,
@@ -213,7 +211,6 @@ library(wsiTools)
 viewer <- wsi_viewer_spatialexperiment(
   spe = spe,
   image = "/path/to/high_resolution_tissue_image.tif",
-  live = TRUE,
   dynamic_tiles = TRUE,
   mode = "tiles",
   open = TRUE,
