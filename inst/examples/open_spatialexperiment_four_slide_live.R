@@ -13,8 +13,11 @@
 #   source(system.file("examples/open_spatialexperiment_four_slide_live.R", package = "wsiTools"))
 #
 # Optional environment variables:
+#   WSITOOLS_SPE_DIR             Folder containing the SpatialExperiment object and images.
 #   WSITOOLS_SPE_OBJECT          .rds, .rda, or .RData file containing a SpatialExperiment.
+#                                If omitted, the script searches WSITOOLS_SPE_DIR.
 #   WSITOOLS_SPE_IMAGES          Four image paths separated by .Platform$path.sep.
+#                                If omitted, the script searches WSITOOLS_SPE_DIR.
 #   WSITOOLS_SPE_SAMPLE_IDS      Comma-separated sample IDs matching colData().
 #   WSITOOLS_SPE_LABELS          Optional comma-separated labels for the Project panel.
 #   WSITOOLS_SPE_REDUCTION       Reduction name. Default: PCA.
@@ -52,6 +55,59 @@ example_paths <- function(name) {
   paths
 }
 
+example_spatial_dir <- function() {
+  path <- Sys.getenv("WSITOOLS_SPE_DIR", "")
+  if (!nzchar(path)) {
+    object_path <- Sys.getenv("WSITOOLS_SPE_OBJECT", "")
+    if (nzchar(object_path)) {
+      path <- dirname(object_path)
+    }
+  }
+  if (!nzchar(path)) {
+    return("")
+  }
+  normalizePath(path, winslash = "/", mustWork = FALSE)
+}
+
+example_find_spatialexperiment_object <- function(dir) {
+  if (!nzchar(dir) || !dir.exists(dir)) {
+    return("")
+  }
+  candidates <- list.files(
+    dir,
+    pattern = "\\.(rds|rda|rdata)$",
+    recursive = FALSE,
+    full.names = TRUE,
+    ignore.case = TRUE
+  )
+  if (!length(candidates)) {
+    return("")
+  }
+  score <- grepl("spatial|spe|object|obj|obejct", basename(candidates), ignore.case = TRUE)
+  candidates <- c(candidates[score], candidates[!score])
+  normalizePath(candidates[[1L]], winslash = "/", mustWork = FALSE)
+}
+
+example_find_images <- function(dir) {
+  if (!nzchar(dir) || !dir.exists(dir)) {
+    return(character())
+  }
+  candidates <- list.files(
+    dir,
+    pattern = "\\.(tif|tiff|ome\\.tif|ome\\.tiff)$",
+    recursive = FALSE,
+    full.names = TRUE,
+    ignore.case = TRUE
+  )
+  if (!length(candidates)) {
+    return(character())
+  }
+  preferred <- grepl("full.*image|image", basename(candidates), ignore.case = TRUE)
+  candidates <- c(candidates[preferred], candidates[!preferred])
+  candidates <- candidates[order(basename(candidates))]
+  normalizePath(candidates, winslash = "/", mustWork = FALSE)
+}
+
 load_spatialexperiment_object <- function(path) {
   path <- normalizePath(path, winslash = "/", mustWork = FALSE)
   if (!file.exists(path)) {
@@ -74,15 +130,44 @@ load_spatialexperiment_object <- function(path) {
   stop("Could not identify a SpatialExperiment object in: ", path, call. = FALSE)
 }
 
+spe_dir <- example_spatial_dir()
 spe_path <- Sys.getenv("WSITOOLS_SPE_OBJECT", "")
+if (!nzchar(spe_path) || !file.exists(spe_path)) {
+  detected <- example_find_spatialexperiment_object(spe_dir)
+  if (nzchar(detected)) {
+    spe_path <- detected
+    message("Detected SpatialExperiment object: ", spe_path)
+  }
+}
 if (!nzchar(spe_path)) {
-  stop("Set WSITOOLS_SPE_OBJECT to a .rds, .rda, or .RData SpatialExperiment file.", call. = FALSE)
+  stop("Set WSITOOLS_SPE_OBJECT to a .rds, .rda, or .RData SpatialExperiment file, or set WSITOOLS_SPE_DIR to a folder containing one.", call. = FALSE)
 }
 spe <- load_spatialexperiment_object(spe_path)
-images <- example_paths("WSITOOLS_SPE_IMAGES")
+images <- character()
+if (nzchar(Sys.getenv("WSITOOLS_SPE_IMAGES", ""))) {
+  images <- tryCatch(
+    example_paths("WSITOOLS_SPE_IMAGES"),
+    error = function(e) {
+      detected_images <- example_find_images(spe_dir)
+      if (length(detected_images)) {
+        message("Ignoring WSITOOLS_SPE_IMAGES because one or more files were not found.")
+        message("Detected image files:\n", paste(detected_images, collapse = "\n"))
+        return(detected_images)
+      }
+      stop(conditionMessage(e), call. = FALSE)
+    }
+  )
+}
+if (!length(images)) {
+  images <- example_find_images(spe_dir)
+  if (!length(images)) {
+    stop("Set WSITOOLS_SPE_IMAGES to image paths separated by .Platform$path.sep, or set WSITOOLS_SPE_DIR to a folder containing TIFF images.", call. = FALSE)
+  }
+  message("Detected image files:\n", paste(images, collapse = "\n"))
+}
 sample_ids <- example_csv("WSITOOLS_SPE_SAMPLE_IDS")
 if (!length(sample_ids)) {
-  sample_ids <- tools::file_path_sans_ext(basename(images))
+  sample_ids <- sub("_full_image$", "", tools::file_path_sans_ext(basename(images)), ignore.case = TRUE)
 }
 if (length(sample_ids) != length(images)) {
   stop("WSITOOLS_SPE_SAMPLE_IDS must have the same length as WSITOOLS_SPE_IMAGES.", call. = FALSE)
