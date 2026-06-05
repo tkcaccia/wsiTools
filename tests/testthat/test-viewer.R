@@ -107,6 +107,8 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_false(grepl("setSeuratSpotRadius", html, fixed = TRUE))
   expect_match(html, "Spot size is fixed by the spatial transcriptomics platform metadata.", fixed = TRUE)
   expect_match(html, "Visium spots are 55 microns", fixed = TRUE)
+  expect_match(html, "spot_index_file", fixed = TRUE)
+  expect_match(html, "spot index CSV", fixed = TRUE)
   expect_match(html, "Stains", fixed = TRUE)
   pos_annotations_menu <- regexpr("<summary title=\"Draw, select, import, export, and manage annotations\">Annotations</summary>", html, fixed = TRUE)[[1]]
   pos_segmentation_section <- regexpr("StarDist segmentation", html, fixed = TRUE)[[1]]

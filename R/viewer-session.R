@@ -3016,6 +3016,11 @@ wsi_attach_viewer_session_methods <- function(session) {
     )
     class(manifest) <- c("wsi_tile_manifest", setdiff(class(manifest), "wsi_tile_manifest"))
     wsi_write_tile_manifest_file(manifest, manifest_file, overwrite = overwrite)
+    spot_index_file <- NULL
+    if ("spot_id" %in% names(manifest)) {
+      spot_index_file <- file.path(output_dir, "spot_tile_index.csv")
+      wsi_write_spatial_tile_index_file(manifest, spot_index_file, overwrite = overwrite)
+    }
     wsi_viewer_state_record_event(
       self$state,
       "tile_preview_exported",
@@ -3023,6 +3028,7 @@ wsi_attach_viewer_session_methods <- function(session) {
         tile_count = nrow(manifest),
         output_dir = output_dir,
         manifest_file = manifest_file %||% NA_character_,
+        spot_index_file = spot_index_file %||% NA_character_,
         format = format
       )
     )
@@ -3626,6 +3632,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	      response$tile_count <- result$tile_count
 	      response$output_dir <- result$output_dir
 	      response$manifest_file <- result$manifest_file
+	      response$spot_index_file <- result$spot_index_file
 	      wsi_http_json_response(body = response)
 	    }, error = function(err) {
 	      wsi_http_json_response(status = 500L, body = list(ok = FALSE, error = conditionMessage(err)))

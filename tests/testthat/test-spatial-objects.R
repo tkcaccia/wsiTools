@@ -328,7 +328,39 @@ test_that("spatial-object spot tile previews are centered on spots and respect s
   expect_equal(nrow(payload_grid), 1)
   expect_true(is.na(payload_grid$tissue_fraction[[1]]))
 })
-	
+
+test_that("spatial spot tile exports write a compact spot-to-file index", {
+  manifest <- data.frame(
+    tile_id = c("spot_a", "spot_b"),
+    file = file.path(tempdir(), c("spot_a.png", "spot_b.png")),
+    x = c(50L, 850L),
+    y = c(50L, 650L),
+    width = c(100L, 100L),
+    height = c(100L, 100L),
+    level = c(0L, 0L),
+    spot_id = c("AAAC-1", "AAAC-2"),
+    spot_label = c("A", "B"),
+    project_image = c("section 1", "section 1"),
+    project_section = c("anterior", "anterior"),
+    stringsAsFactors = FALSE
+  )
+
+  index <- wsiTools:::wsi_spatial_tile_index(manifest)
+  expect_equal(index$spot_id, manifest$spot_id)
+  expect_equal(index$image_file, c("spot_a.png", "spot_b.png"))
+  expect_equal(index$image_path, manifest$file)
+  expect_equal(index$tile_id, manifest$tile_id)
+  expect_equal(index$project_section, manifest$project_section)
+
+  index_file <- tempfile(fileext = ".csv")
+  wsiTools:::wsi_write_spatial_tile_index_file(manifest, index_file, overwrite = FALSE)
+  expect_true(file.exists(index_file))
+  saved <- utils::read.csv(index_file, stringsAsFactors = FALSE)
+  expect_equal(saved$spot_id, manifest$spot_id)
+  expect_equal(saved$image_file, c("spot_a.png", "spot_b.png"))
+  expect_equal(saved$image_path, manifest$file)
+})
+
 test_that("SpatialExperiment project viewer uses one scoped spot layer per section", {
   slide1 <- wsiTools:::wsi_mock_slide(width = 100, height = 90, levels = c(1, 2))
   slide2 <- wsiTools:::wsi_mock_slide(width = 120, height = 100, levels = c(1, 2))

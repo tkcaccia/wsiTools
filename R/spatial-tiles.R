@@ -172,13 +172,53 @@ wsi_spatial_tile_payload_grid <- function(tiles, max_tiles = 100000L) {
   wsi_tile_preview(grid)
 }
 
+wsi_spatial_tile_index <- function(manifest) {
+  if (!is.data.frame(manifest)) {
+    manifest <- as.data.frame(manifest, stringsAsFactors = FALSE)
+  }
+  n <- nrow(manifest)
+  file <- if ("file" %in% names(manifest)) as.character(manifest$file) else rep(NA_character_, n)
+  output_file <- if ("output_file" %in% names(manifest)) as.character(manifest$output_file) else rep(NA_character_, n)
+  image_file <- basename(ifelse(!is.na(file) & nzchar(file), file, output_file))
+  spot_id <- if ("spot_id" %in% names(manifest)) {
+    as.character(manifest$spot_id)
+  } else if ("tile_id" %in% names(manifest)) {
+    as.character(manifest$tile_id)
+  } else {
+    sprintf("spot_%05d", seq_len(n))
+  }
+  spot_id[is.na(spot_id) | !nzchar(spot_id)] <- sprintf("spot_%05d", which(is.na(spot_id) | !nzchar(spot_id)))
+  image_file[is.na(image_file) | !nzchar(image_file)] <- paste0(wsi_safe_id(spot_id[is.na(image_file) | !nzchar(image_file)], "spot"), ".png")
+  out <- data.frame(
+    spot_id = spot_id,
+    image_file = image_file,
+    image_path = file,
+    tile_id = if ("tile_id" %in% names(manifest)) as.character(manifest$tile_id) else spot_id,
+    stringsAsFactors = FALSE
+  )
+  optional <- c("spot_label", "project_image", "project_section", "roi_id", "x", "y", "width", "height", "level")
+  for (column in intersect(optional, names(manifest))) {
+    out[[column]] <- manifest[[column]]
+  }
+  out
+}
+
+wsi_write_spatial_tile_index_file <- function(manifest, file, overwrite = FALSE) {
+  if (is.null(file)) {
+    return(invisible(NULL))
+  }
+  index <- wsi_spatial_tile_index(manifest)
+  wsi_write_tile_manifest_file(index, file, overwrite = overwrite)
+  invisible(index)
+}
+
 wsi_spatial_tile_export_response <- function(slide, payload, state = NULL) {
   wsi_check_slide(slide)
   if (!is.list(payload)) {
     wsi_abort("Spatial tile export payload must be a JSON object.")
   }
   unknown <- setdiff(names(payload), c(
-    "output_dir", "format", "overwrite", "manifest_file", "tiles",
+    "output_dir", "format", "overwrite", "manifest_file", "spot_index_file", "tiles",
     "source_name", "project", "selected_roi", "tile_size", "units"
   ))
   if (length(unknown)) {
@@ -205,6 +245,8 @@ wsi_spatial_tile_export_response <- function(slide, payload, state = NULL) {
   manifest <- wsi_export_tiles(slide, grid, output_dir = output_dir, format = format, overwrite = overwrite)
   manifest_file <- payload$manifest_file %||% file.path(output_dir, "spatial_tiles_manifest.csv")
   wsi_write_tile_manifest_file(manifest, manifest_file, overwrite = overwrite)
+  spot_index_file <- payload$spot_index_file %||% file.path(output_dir, "spot_tile_index.csv")
+  wsi_write_spatial_tile_index_file(manifest, spot_index_file, overwrite = overwrite)
 
   if (inherits(state, "wsi_viewer_state")) {
     state$tile_preview <- wsi_tile_preview(grid)
@@ -215,6 +257,7 @@ wsi_spatial_tile_export_response <- function(slide, payload, state = NULL) {
         tile_count = nrow(manifest),
         output_dir = output_dir,
         manifest_file = manifest_file,
+        spot_index_file = spot_index_file,
         format = format,
         source_name = payload$source_name %||% NA_character_
       )
@@ -225,6 +268,7 @@ wsi_spatial_tile_export_response <- function(slide, payload, state = NULL) {
     tile_count = nrow(manifest),
     output_dir = normalizePath(output_dir, winslash = "/", mustWork = FALSE),
     manifest_file = normalizePath(manifest_file, winslash = "/", mustWork = FALSE),
+    spot_index_file = normalizePath(spot_index_file, winslash = "/", mustWork = FALSE),
     format = format
   )
 }
