@@ -633,7 +633,7 @@ wsi_viewer_styles <- function(background = "#101010") {
     "#kodamaPlotSelectionStatus{margin-bottom:6px;}\n",
     "#seuratPlotSelectionStatus{margin-bottom:6px;}\n",
     ".kodamaLegendItem{display:inline-flex;align-items:center;gap:5px;border:1px solid rgba(255,255,255,.14);border-radius:999px;background:rgba(255,255,255,.06);padding:3px 7px;font-size:11px;color:#e5e7eb;}\n",
-    "#workspacePanel{position:fixed;left:12px;top:72px;width:420px;max-height:calc(100vh - 132px);display:flex;flex-direction:column;gap:8px;z-index:29;pointer-events:auto;}\n",
+    "#workspacePanel{position:fixed;left:12px;top:88px;width:420px;max-height:calc(100vh - 148px);display:flex;flex-direction:column;gap:8px;z-index:29;pointer-events:auto;}\n",
     "#workspaceResizeHandle{position:absolute;right:-6px;top:0;bottom:0;width:12px;cursor:ew-resize;z-index:3;touch-action:none;}\n",
     "#workspaceResizeHandle::after{content:'';position:absolute;right:4px;top:12px;bottom:12px;width:2px;border-radius:999px;background:rgba(255,255,255,.18);opacity:.45;transition:opacity .12s ease,background .12s ease;}\n",
     "#workspaceResizeHandle:hover::after,#workspacePanel.resizing #workspaceResizeHandle::after{opacity:1;background:#5eead4;}\n",
