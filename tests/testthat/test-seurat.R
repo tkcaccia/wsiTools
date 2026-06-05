@@ -615,10 +615,11 @@ test_that("Seurat viewer exposes spot layer and reduction controls", {
   expect_match(text, "seurat_cluster_coloured", fixed = TRUE)
   expect_match(text, "seuratSelectionPayload", fixed = TRUE)
   expect_match(text, "Draw a lasso around reduction points", fixed = TRUE)
-  expect_match(text, "\"managed_analysis_project\":true", fixed = TRUE)
-  expect_false(grepl("id=\"projectOpenImage\"", text, fixed = TRUE))
-  expect_false(grepl("id=\"projectImageFile\"", text, fixed = TRUE))
-  expect_match(text, "Seurat/Giotto/SpatialExperiment/CellPhenotyper viewer from R", fixed = TRUE)
+	  expect_match(text, "\"managed_analysis_project\":true", fixed = TRUE)
+	  expect_false(grepl("id=\"projectOpenImage\"", text, fixed = TRUE))
+	  expect_false(grepl("id=\"projectImageFile\"", text, fixed = TRUE))
+	  expect_false(grepl("This managed analysis project is defined from R", text, fixed = TRUE))
+	  expect_false(grepl("Seurat/Giotto/SpatialExperiment/CellPhenotyper viewer from R", text, fixed = TRUE))
 })
 
 test_that("Seurat viewer only shows buttons for available reductions", {

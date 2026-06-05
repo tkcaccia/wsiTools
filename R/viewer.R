@@ -1360,9 +1360,14 @@ wsi_viewer_chrome <- function(config, loading_message, tiled = FALSE) {
     )
   }
   project_menu_summary <- if (managed_analysis_project) {
-    "This managed analysis project is defined from R. Add, remove, or replace images by recreating the Seurat/Giotto/SpatialExperiment/CellPhenotyper viewer from R so spots, channels, cells, and annotations stay aligned."
+    ""
   } else {
     "Add image accepts browser-readable images plus WSI and microscopy formats such as CZI, SVS, NDPI, BTF, OME-TIFF, QPTIFF, MRXS, SCN, BIF and DICOM. Browser-readable images preview immediately; raw WSI/microscopy files are added as references without loading the whole file into memory and should be opened from R/backends for full-resolution tiles."
+  }
+  project_menu_summary_markup <- if (nzchar(project_menu_summary)) {
+    paste0("<div id=\"projectMenuSummary\" class=\"menuHint\">", wsi_html_escape(project_menu_summary), "</div>")
+  } else {
+    "<div id=\"projectMenuSummary\" class=\"menuHint\" style=\"display:none\"></div>"
   }
   project_help_item <- if (managed_analysis_project) {
     "<li>Managed Seurat, Giotto, SpatialExperiment, and CellPhenotyper projects keep their image set fixed from R so overlays remain aligned.</li>"
@@ -1401,7 +1406,7 @@ wsi_viewer_chrome <- function(config, loading_message, tiled = FALSE) {
         "<button id=\"projectOpenFile\" title=\"Open a saved wsiTools viewer project JSON file\">Open project</button>",
         "</div>",
         "<input id=\"projectFile\" type=\"file\" accept=\"application/json,.json,.wsiproject,.wsiproject.json\" style=\"display:none\">",
-        "<div id=\"projectMenuSummary\" class=\"menuHint\">", wsi_html_escape(project_menu_summary), "</div>"
+        project_menu_summary_markup
       )
     ),
     wsi_viewer_menu(
@@ -3052,7 +3057,7 @@ wsi_viewer_project_js <- function() {
     "function removeProjectItem(index){index=Number(index);if(!Number.isInteger(index)||index<0||index>=projectItems.length)return false;if(projectItems.length<=1){projectMenuStatus('At least one project image must stay open.');notify('At least one project image must stay open.','warning',2600);return false;}saveActiveProjectAnnotations();const undoSnapshot=annotationSnapshot();if(typeof projectUndoSnapshot==='function')undoSnapshot.project=projectUndoSnapshot('project_image_closed');pushHistory(annotationUndo,undoSnapshot);annotationRedo=[];const removed=projectItems[index]||{},removedLabel=removed.label||removed.path||('Image '+(index+1)),removedKeys=projectAnnotationKeysForItem(index),wasActive=index===activeProjectIndex;projectItems.splice(index,1);removedKeys.forEach(key=>projectAnnotationStore.delete(key));if(wasActive){activeProjectIndex=Math.min(index,projectItems.length-1);if(!projectSwitchable(projectItems[activeProjectIndex])){const alt=projectItems.findIndex(projectSwitchable);if(alt>=0)activeProjectIndex=alt;}activeProjectSectionIndex=defaultProjectSectionIndex(projectItems[activeProjectIndex]||null);renderProjectPanel();const next=projectItems[activeProjectIndex]||null;if(next&&projectSwitchable(next))applyProjectPreview(next,activeProjectSection());else{loadProjectAnnotations(false);if(typeof draw==='function')draw();}}else{if(index<activeProjectIndex)activeProjectIndex-=1;renderProjectPanel();}markProjectDirty('project_image_closed');recordAnnotationHistory('project_image_closed',{index:index+1,label:removedLabel},false);scheduleViewerStateSync('project_image_closed',Object.assign({closed:{index:index+1,label:removedLabel}},projectStatePayload()));projectMenuStatus('Closed '+removedLabel+'. Press Ctrl+Z to undo.');notifyAction('Closed '+removedLabel+'.','Undo',()=>restoreAnnotationUndo(),'success',7000);return true;}\n",
     "function bindProjectItemDrag(button,index){button.draggable=projectItems.length>1;button.dataset.projectIndex=String(index);button.ondragstart=e=>{projectDragIndex=index;button.classList.add('dragging');setProjectEntryDragData(e,index,-1,'copyMove');try{e.dataTransfer.setData('application/x-wsitools-project-reorder',String(index));}catch(err){}};button.ondragover=e=>{if(projectDragIndex<0)return;e.preventDefault();button.classList.add('dragOver');try{e.dataTransfer.dropEffect='move';}catch(err){}};button.ondragleave=()=>button.classList.remove('dragOver');button.ondrop=e=>{e.preventDefault();let raw=e.dataTransfer?e.dataTransfer.getData('application/x-wsitools-project-reorder'):'';if(!raw&&e.dataTransfer){const plain=e.dataTransfer.getData('text/plain');if(/^\\d+$/.test(String(plain||'')))raw=plain;}const from=Number.isFinite(Number(raw))?Number(raw):projectDragIndex;let to=index;const rect=button.getBoundingClientRect();if(e.clientY>rect.top+rect.height/2)to=index+1;if(from<to)to--;clearProjectDragClasses();projectDragIndex=-1;moveProjectItem(from,to);};button.ondragend=()=>{projectDragIndex=-1;clearProjectDragClasses();};}\n",
     "function bindProjectSectionDrag(button,itemIndex,sectionIndex){button.draggable=true;button.dataset.projectIndex=String(itemIndex);button.dataset.projectSectionIndex=String(sectionIndex);button.ondragstart=e=>{setProjectEntryDragData(e,itemIndex,sectionIndex,'copy');button.classList.add('dragging');};button.ondragend=()=>button.classList.remove('dragging');}\n",
-    "function projectMenuStatus(message=''){const box=el('projectMenuSummary');if(box&&message)box.textContent=message;}\n",
+    "function projectMenuStatus(message=''){const box=el('projectMenuSummary');if(!box)return;if(message){box.textContent=message;box.style.display='';}else{box.textContent='';box.style.display='none';}}\n",
     "function projectPanelIsClosed(){const panel=el('projectPanel');return !!(panel&&(panel.classList.contains('closed')||panel.style.display==='none'));}\n",
     "function updateProjectPanelToggle(){const button=el('projectPanelToggle'),closed=projectPanelIsClosed();if(button)button.classList.toggle('active',!closed);}\n",
     "function ensureProjectWorkspaceVisible(){const workspace=el('workspacePanel'),panel=el('projectPanel');if(workspace){workspace.style.visibility='visible';workspace.style.opacity='1';workspace.style.pointerEvents='auto';workspace.removeAttribute('aria-hidden');const rect=workspace.getBoundingClientRect();if(rect.width<8||rect.height<8||rect.right<24||rect.bottom<72||rect.left>innerWidth-24||rect.top>innerHeight-24){workspace.style.left='12px';workspace.style.top=(innerWidth<=900?'118px':'72px');workspace.style.right='auto';}}if(panel){panel.style.display='';panel.classList.remove('closed','minimized');const header=el('projectPanelHeader'),state=el('projectPanelMinimizeState');if(header)header.setAttribute('aria-expanded','true');if(state)state.textContent='double-click to minimize';}}\n",
