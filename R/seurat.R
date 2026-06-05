@@ -351,6 +351,8 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
       object = seurat,
       spot_ids = as.character(spots$barcode %||% spots$id)
     ),
+    reduction_embeddings = embeddings,
+    reduction_embedding_name = reduction,
     plots = plots,
     pca = primary_plot
   )
@@ -612,9 +614,18 @@ wsi_viewer_seurat_project <- function(seurat = NULL, images = NULL, linked = NUL
     tile_overlap = tile_overlap
   )
 
-  first <- linked[[1L]]
+  project_prediction <- wsi_prediction_context(
+    spatial = wsi_seurat_project_prediction_context(linked, records)
+  )
+  first <- wsi_seurat_project_scoped_linked(
+    linked[[1L]],
+    records[[1L]],
+    item_index = 0L,
+    section = NULL,
+    section_index = -1L
+  )
   first_record <- records[[1L]]
-  first_layer <- wsi_seurat_spots_layer(first)
+  first_layer <- first_record$layers[[1L]] %||% wsi_seurat_spots_layer(first)
   first_layer$project_scoped <- TRUE
 
   if (identical(mode, "thumbnail")) {
@@ -637,6 +648,8 @@ wsi_viewer_seurat_project <- function(seurat = NULL, images = NULL, linked = NUL
       viewer_args$wait <- wait
       viewer_args$transport <- transport
       viewer_args$name <- "wsi_seurat_project_live_state"
+      viewer_args$prediction_context <- project_prediction
+      viewer_args$proximity_context <- project_prediction
       return(do.call(wsi_viewer_live, viewer_args))
     }
     return(do.call(wsi_viewer, viewer_args))
@@ -669,6 +682,8 @@ wsi_viewer_seurat_project <- function(seurat = NULL, images = NULL, linked = NUL
     viewer_args$wait <- wait
     viewer_args$transport <- transport
     viewer_args$name <- "wsi_seurat_project_live_state"
+    viewer_args$prediction_context <- project_prediction
+    viewer_args$proximity_context <- project_prediction
     return(do.call(wsi_viewer_live, viewer_args))
   }
   do.call(wsi_viewer, viewer_args)
@@ -952,6 +967,94 @@ wsi_seurat_project_labels <- function(labels = NULL, linked) {
   labels
 }
 
+wsi_seurat_project_record_key <- function(record, section = NULL) {
+  item_id <- wsi_safe_id(record$id %||% record$path %||% record$label %||% "image", "image")
+  section_id <- if (is.null(section)) {
+    "image"
+  } else {
+    wsi_safe_id(section$id %||% section$label %||% "section", "section")
+  }
+  paste(item_id, section_id, sep = "::")
+}
+
+wsi_seurat_project_scoped_linked <- function(linked, record, item_index,
+                                             section = NULL,
+                                             section_index = -1L) {
+  scoped <- linked
+  spots <- scoped$spots
+  if (is.data.frame(spots) && nrow(spots)) {
+    project_key <- wsi_seurat_project_record_key(record, section)
+    project_image <- as.character(record$label %||% record$id %||% record$path %||% "")
+    project_section <- if (is.null(section)) "" else {
+      as.character(section$label %||% section$id %||% "")
+    }
+    original_id <- as.character(spots$original_id %||% spots$barcode %||% spots$id %||% spots$label %||% seq_len(nrow(spots)))
+    spots$original_id <- original_id
+    spots$feature_id <- as.character(spots$feature_id %||% spots$barcode %||% original_id)
+    spots$project_key <- project_key
+    spots$wsi_project_key <- project_key
+    spots$project_image <- project_image
+    spots$project_section <- project_section
+    spots$image_id <- as.character(record$id %||% project_image)
+    spots$section_id <- if (is.null(section)) "image" else as.character(section$id %||% project_section)
+    spots$sample_id <- as.character(scoped$image_name %||% project_image)
+    spots$project_image_index <- as.integer(item_index)
+    spots$project_section_index <- as.integer(section_index)
+    spots$id <- paste(project_key, original_id, sep = "::")
+    scoped$spots <- spots
+    scoped$displayed_spot_count <- nrow(spots)
+  }
+  scoped$project_key <- wsi_seurat_project_record_key(record, section)
+  scoped$project_image <- as.character(record$label %||% record$id %||% record$path %||% "")
+  scoped$project_section <- if (is.null(section)) "" else as.character(section$label %||% section$id %||% "")
+  scoped$project_image_index <- as.integer(item_index)
+  scoped$project_section_index <- as.integer(section_index)
+  scoped
+}
+
+wsi_seurat_project_rbind_fill <- function(tables) {
+  tables <- tables[vapply(tables, function(x) is.data.frame(x) && nrow(x) > 0L, logical(1))]
+  if (!length(tables)) {
+    return(data.frame())
+  }
+  columns <- unique(unlist(lapply(tables, names), use.names = FALSE))
+  aligned <- lapply(tables, function(x) {
+    missing <- setdiff(columns, names(x))
+    for (column in missing) {
+      x[[column]] <- NA
+    }
+    x[, columns, drop = FALSE]
+  })
+  out <- do.call(rbind, aligned)
+  row.names(out) <- NULL
+  out
+}
+
+wsi_seurat_project_prediction_context <- function(linked, records) {
+  if (!length(linked) || !length(records)) {
+    return(NULL)
+  }
+  n <- min(length(linked), length(records))
+  scoped <- lapply(seq_len(n), function(i) {
+    wsi_seurat_project_scoped_linked(
+      linked[[i]],
+      records[[i]],
+      item_index = i - 1L,
+      section = NULL,
+      section_index = -1L
+    )
+  })
+  spots <- wsi_seurat_project_rbind_fill(lapply(scoped, function(x) x$spots %||% data.frame()))
+  out <- scoped[[1L]]
+  out$spots <- spots
+  out$spot_count <- sum(vapply(scoped, function(x) as.integer(x$spot_count %||% nrow(x$spots %||% data.frame())), integer(1)))
+  out$displayed_spot_count <- nrow(spots)
+  out$project_sections <- scoped
+  out$source_name <- paste0(out$source_name %||% "Spatial", " project")
+  class(out) <- unique(c("wsi_spatial_project", class(out)))
+  out
+}
+
 wsi_seurat_project_records <- function(linked, output, labels,
                                        mode = c("tiles", "thumbnail"),
                                        width = 768, height = NULL,
@@ -977,8 +1080,6 @@ wsi_seurat_project_records <- function(linked, output, labels,
     label <- labels[[i]]
     slide <- item$slide
     wsi_check_slide(slide)
-    layer <- wsi_seurat_spots_layer(item)
-    layer$project_scoped <- TRUE
     record <- list(
       id = paste0("seurat_project_", wsi_safe_id(label, paste0("section_", i))),
       label = label,
@@ -990,9 +1091,7 @@ wsi_seurat_project_records <- function(linked, output, labels,
       height = unname(as.numeric(slide$dimensions[["height"]])),
       mpp = item$mpp %||% item$pixel_size %||% NULL,
       pixel_size = item$pixel_size %||% item$mpp %||% NULL,
-      content_bbox = wsi_seurat_project_spot_bbox(item),
-      layers = list(layer),
-      seurat = wsi_viewer_seurat_config(item)
+      content_bbox = wsi_seurat_project_spot_bbox(item)
     )
 
     if (identical(mode, "thumbnail")) {
@@ -1027,6 +1126,18 @@ wsi_seurat_project_records <- function(linked, output, labels,
       record$max_level <- wsi_dz_max_level(record$width, record$height)
       record$navigator_image_data_uri <- wsi_viewer_navigator_data_uri(slide, width = 512)
     }
+    scoped_item <- wsi_seurat_project_scoped_linked(
+      item,
+      record,
+      item_index = i - 1L,
+      section = NULL,
+      section_index = -1L
+    )
+    layer <- wsi_seurat_spots_layer(scoped_item)
+    layer$project_scoped <- TRUE
+    record$project_key <- scoped_item$project_key
+    record$layers <- list(layer)
+    record$seurat <- wsi_viewer_seurat_config(scoped_item)
     records[[i]] <- record
   }
   records[[1L]]$active <- TRUE

@@ -29,6 +29,7 @@ Imports:
     utils
 Suggests:
     callr,
+    e1071,
     knitr,
     httpuv,
     magick,

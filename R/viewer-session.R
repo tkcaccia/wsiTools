@@ -1920,7 +1920,7 @@ wsi_viewer_layer_points_items <- function(points, colour = NULL, radius = 6) {
     x <- as.numeric(points$x[[i]])
     y <- as.numeric(points$y[[i]])
     point_colour <- wsi_viewer_layer_colour(point_colours[[i]], fallback = colour)
-    list(
+    item <- list(
       id = ids[[i]],
       name = ids[[i]],
       label = ids[[i]],
@@ -1934,6 +1934,24 @@ wsi_viewer_layer_points_items <- function(points, colour = NULL, radius = 6) {
       colour = point_colour,
       fill = wsi_viewer_hex_to_rgba(point_colour, alpha = 0.35)
     )
+    scope_columns <- c(
+      "project_key", "wsi_project_key", "project_image", "project_section",
+      "image_id", "section_id", "sample_id", "project_image_index",
+      "project_section_index", "original_id", "feature_id"
+    )
+    for (column in intersect(scope_columns, names(points))) {
+      value <- points[[column]][[i]]
+      item[[column]] <- if (is.numeric(value) || is.integer(value)) {
+        unname(value)
+      } else {
+        as.character(value %||% "")
+      }
+    }
+    item$project_scoped <- any(c(
+      "project_key", "wsi_project_key", "project_image", "project_section",
+      "image_id", "section_id", "sample_id", "project_image_index"
+    ) %in% names(item))
+    item
   })
 }
 

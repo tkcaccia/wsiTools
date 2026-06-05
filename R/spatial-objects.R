@@ -268,6 +268,9 @@ wsi_spatial_reduction_plot <- function(embeddings, spots, reduction, dims,
     id = paste0(tolower(wsi_safe_id(source_name, "spatial")), "_", wsi_safe_id(reduction, "reduction")),
     label = paste0(source_name, " ", wsi_reduction_label(reduction), " plot"),
     reduction = reduction,
+    dimension_count = ncol(emb),
+    selected_dims = as.integer(dims),
+    component_names = colnames(emb) %||% paste0(toupper(reduction), "_", seq_len(ncol(emb))),
     x_label = component_names[[1L]],
     y_label = component_names[[2L]],
     point_count = nrow(plot_points),
@@ -756,9 +759,18 @@ wsi_viewer_spatialexperiment_project <- function(spe = NULL, images = NULL,
     tile_overlap = tile_overlap
   )
 
-  first <- linked[[1L]]
+  project_prediction <- wsi_prediction_context(
+    spatial = wsi_seurat_project_prediction_context(linked, records)
+  )
+  first <- wsi_seurat_project_scoped_linked(
+    linked[[1L]],
+    records[[1L]],
+    item_index = 0L,
+    section = NULL,
+    section_index = -1L
+  )
   first_record <- records[[1L]]
-  first_layer <- wsi_seurat_spots_layer(first)
+  first_layer <- first_record$layers[[1L]] %||% wsi_seurat_spots_layer(first)
   first_layer$project_scoped <- TRUE
 
   if (identical(mode, "thumbnail")) {
@@ -781,6 +793,8 @@ wsi_viewer_spatialexperiment_project <- function(spe = NULL, images = NULL,
       viewer_args$wait <- wait
       viewer_args$transport <- transport
       viewer_args$name <- "wsi_spatialexperiment_project_live_state"
+      viewer_args$prediction_context <- project_prediction
+      viewer_args$proximity_context <- project_prediction
       return(do.call(wsi_viewer_live, viewer_args))
     }
     return(do.call(wsi_viewer, viewer_args))
@@ -813,6 +827,8 @@ wsi_viewer_spatialexperiment_project <- function(spe = NULL, images = NULL,
     viewer_args$wait <- wait
     viewer_args$transport <- transport
     viewer_args$name <- "wsi_spatialexperiment_project_live_state"
+    viewer_args$prediction_context <- project_prediction
+    viewer_args$proximity_context <- project_prediction
     return(do.call(wsi_viewer_live, viewer_args))
   }
   do.call(wsi_viewer, viewer_args)
@@ -1199,6 +1215,8 @@ wsi_link_spatial_table_image <- function(object, image, source_name, image_name,
       object = object,
       spot_ids = as.character(spots$barcode %||% spots$id)
     ),
+    reduction_embeddings = embeddings,
+    reduction_embedding_name = reduction,
     plots = plots,
     pca = primary_plot
   )

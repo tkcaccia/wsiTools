@@ -10,6 +10,10 @@ wsi_has_fastpls <- function() {
   requireNamespace(wsi_fastpls_package(), quietly = TRUE)
 }
 
+wsi_has_refine_svm <- function() {
+  requireNamespace("e1071", quietly = TRUE)
+}
+
 wsi_fastpls_package <- function() {
   paste0("fast", "PLS")
 }
@@ -25,6 +29,8 @@ wsi_empty_prediction_result <- function() {
     test_annotation_id = character(),
     observed = character(),
     predicted = character(),
+    predicted_pls_lda = character(),
+    svm_refined = logical(),
     feature_source = character(),
     stringsAsFactors = FALSE
   )
@@ -50,11 +56,17 @@ wsi_prediction_config <- function(seurat = NULL, cellphenotyper = NULL) {
       for (i in seq_along(plots)) {
         plot <- plots[[i]]
         reduction <- as.character(plot$reduction %||% plot$label %||% paste0("reduction_", i))
+        dimension_count <- suppressWarnings(as.integer(plot$dimension_count %||%
+          length(plot$component_names %||% character()) %||% 2L))
+        if (!is.finite(dimension_count) || dimension_count < 1L) {
+          dimension_count <- 2L
+        }
         sources[[length(sources) + 1L]] <- list(
           id = sprintf("spatial:reduction:%d", i - 1L),
           label = paste(source_name, wsi_reduction_label(reduction)),
           type = "reduction",
           reduction = reduction,
+          dimension_count = dimension_count,
           unit = "spot"
         )
       }
@@ -74,7 +86,9 @@ wsi_prediction_config <- function(seurat = NULL, cellphenotyper = NULL) {
     enabled = length(sources) > 0L,
     sources = sources,
     fastpls_installed = wsi_has_fastpls(),
-    fastpls_install = "remotes::install_github(\"tkcaccia/fastPLS\")"
+    fastpls_install = "remotes::install_github(\"tkcaccia/fastPLS\")",
+    svm_refinement_installed = wsi_has_refine_svm(),
+    svm_refinement_install = "install.packages(\"e1071\")"
   )
 }
 
@@ -115,13 +129,27 @@ wsi_prediction_spatial_points <- function(linked) {
   }
   id <- as.character(spots$id %||% spots$barcode %||% spots$label %||% seq_len(nrow(spots)))
   label <- as.character(spots$label %||% spots$barcode %||% spots$id %||% id)
-  data.frame(
+  out <- data.frame(
     id = id,
     label = label,
     x = as.numeric(spots$x),
     y = as.numeric(spots$y),
     stringsAsFactors = FALSE
   )
+  if ("feature_id" %in% names(spots)) {
+    out$feature_id <- as.character(spots$feature_id)
+  } else if ("barcode" %in% names(spots)) {
+    out$feature_id <- as.character(spots$barcode)
+  }
+  if ("original_id" %in% names(spots)) {
+    out$original_id <- as.character(spots$original_id)
+  }
+  for (column in c("project_image_index", "project_section_index")) {
+    if (column %in% names(spots)) {
+      out[[column]] <- suppressWarnings(as.integer(spots[[column]]))
+    }
+  }
+  wsi_prediction_add_point_metadata(out, spots)
 }
 
 wsi_prediction_cell_points <- function(project) {
@@ -131,13 +159,44 @@ wsi_prediction_cell_points <- function(project) {
   }
   id <- as.character(cells$id %||% cells$cell_id %||% cells$label %||% seq_len(nrow(cells)))
   label <- as.character(cells$label %||% cells$id %||% cells$cell_id %||% id)
-  data.frame(
+  out <- data.frame(
     id = id,
     label = label,
     x = as.numeric(cells$x %||% cells$cellphenotyper_x),
     y = as.numeric(cells$y %||% cells$cellphenotyper_y),
     stringsAsFactors = FALSE
   )
+  wsi_prediction_add_point_metadata(out, cells)
+}
+
+wsi_prediction_first_metadata_column <- function(data, candidates) {
+  for (candidate in candidates) {
+    if (candidate %in% names(data)) {
+      value <- data[[candidate]]
+      if (length(value) == nrow(data)) {
+        return(as.character(value))
+      }
+    }
+  }
+  rep(NA_character_, nrow(data))
+}
+
+wsi_prediction_add_point_metadata <- function(points, source) {
+  metadata_columns <- list(
+    project_key = c("project_key", "wsi_project_key"),
+    project_image = c("project_image", "image", "image_id", "sample_id", "sample", "slide_id", "tissue"),
+    project_section = c("project_section", "section", "section_id", "scene", "sample_id", "sample"),
+    image_id = c("image_id", "sample_id", "sample", "slide_id", "project_image"),
+    section_id = c("section_id", "section", "scene", "project_section"),
+    sample_id = c("sample_id", "sample", "slide_id")
+  )
+  for (name in names(metadata_columns)) {
+    value <- wsi_prediction_first_metadata_column(source, metadata_columns[[name]])
+    if (any(nzchar(value) & !is.na(value))) {
+      points[[name]] <- value
+    }
+  }
+  points
 }
 
 wsi_prediction_points <- function(context, source_id) {
@@ -207,7 +266,92 @@ wsi_prediction_matrix_for_spatial_raw <- function(linked, ids) {
   wsi_abort("Could not align expression matrix rows/columns to the viewer spot IDs.")
 }
 
-wsi_prediction_matrix_for_spatial_reduction <- function(linked, ids, source_id) {
+wsi_prediction_reduction_dim_count <- function(dimensions = NULL, max_dim = 2L, default = 2L) {
+  max_dim <- suppressWarnings(as.integer(max_dim %||% default))
+  if (!is.finite(max_dim) || max_dim < 1L) {
+    max_dim <- 1L
+  }
+  if (is.null(dimensions) || !length(dimensions)) {
+    dimensions <- default
+  }
+  n <- suppressWarnings(as.integer(dimensions[[1L]]))
+  if (!is.finite(n) || n < 1L) {
+    n <- min(default, max_dim)
+  }
+  min(n, max_dim)
+}
+
+wsi_prediction_stored_reduction_embeddings <- function(linked, reduction) {
+  reduction <- as.character(reduction %||% linked$reduction %||% "")
+  emb <- linked$reduction_embeddings %||% linked$reduction_matrix %||% linked$embeddings %||% NULL
+  if (is.matrix(emb) || is.data.frame(emb)) {
+    emb_name <- as.character(linked$reduction_embedding_name %||% linked$reduction %||% reduction)
+    if (!nzchar(reduction) || !nzchar(emb_name) || identical(tolower(emb_name), tolower(reduction))) {
+      return(emb)
+    }
+  }
+  if (is.list(emb) && length(emb)) {
+    nms <- names(emb) %||% character()
+    hit <- nms[match(tolower(reduction), tolower(nms), nomatch = 0L)]
+    if (length(hit) && nzchar(hit[[1L]])) {
+      return(emb[[hit[[1L]]]])
+    }
+  }
+  NULL
+}
+
+wsi_prediction_object_reduction_embeddings <- function(linked, reduction) {
+  object <- linked$expression_source$object %||% linked$object %||% NULL
+  if (is.null(object)) {
+    return(NULL)
+  }
+  type <- tryCatch(wsi_infer_spatial_object_type(object), error = function(e) "")
+  tryCatch(
+    switch(
+      type,
+      seurat = wsi_seurat_embeddings(object, reduction = reduction),
+      giotto = wsi_giotto_embeddings(object, reduction = reduction),
+      spatialexperiment = wsi_spatialexperiment_embeddings(object, reduction = reduction),
+      NULL
+    ),
+    error = function(e) NULL
+  )
+}
+
+wsi_prediction_reduction_embeddings <- function(linked, reduction) {
+  wsi_prediction_stored_reduction_embeddings(linked, reduction) %||%
+    wsi_prediction_object_reduction_embeddings(linked, reduction)
+}
+
+wsi_prediction_matrix_from_embeddings <- function(embeddings, ids, dimensions = NULL,
+                                                  source_name = "reduction") {
+  emb <- tryCatch(as.matrix(embeddings), error = function(e) NULL)
+  if (is.null(emb) || length(dim(emb)) != 2L || !nrow(emb) || !ncol(emb)) {
+    return(NULL)
+  }
+  storage.mode(emb) <- "double"
+  dim_count <- wsi_prediction_reduction_dim_count(dimensions, ncol(emb), default = 2L)
+  emb <- emb[, seq_len(dim_count), drop = FALSE]
+  emb_ids <- rownames(emb) %||% character()
+  idx <- if (length(emb_ids)) match(ids, emb_ids) else rep(NA_integer_, length(ids))
+  if (!any(!is.na(idx)) && nrow(emb) == length(ids)) {
+    idx <- seq_along(ids)
+  }
+  out <- matrix(NA_real_, nrow = length(ids), ncol = ncol(emb))
+  rownames(out) <- ids
+  colnames(out) <- colnames(emb) %||% paste0("dim", seq_len(ncol(emb)))
+  keep <- !is.na(idx)
+  if (any(keep)) {
+    out[keep, ] <- emb[idx[keep], , drop = FALSE]
+  }
+  attr(out, "source_name") <- source_name
+  attr(out, "reduction_dimensions") <- ncol(out)
+  attr(out, "available_reduction_dimensions") <- ncol(as.matrix(embeddings))
+  out
+}
+
+wsi_prediction_matrix_for_spatial_reduction <- function(linked, ids, source_id,
+                                                        dimensions = NULL) {
   plots <- linked$plots %||% list()
   index <- suppressWarnings(as.integer(sub("^spatial:reduction:", "", source_id))) + 1L
   plot <- NULL
@@ -221,6 +365,17 @@ wsi_prediction_matrix_for_spatial_reduction <- function(linked, ids, source_id) 
   if (!is.data.frame(points) || !nrow(points)) {
     wsi_abort("The selected dimensionality reduction source does not contain usable points.")
   }
+  reduction <- as.character(plot$reduction %||% linked$reduction %||% "reduction")
+  embeddings <- wsi_prediction_reduction_embeddings(linked, reduction)
+  full <- wsi_prediction_matrix_from_embeddings(
+    embeddings,
+    ids = ids,
+    dimensions = dimensions,
+    source_name = plot$label %||% reduction
+  )
+  if (!is.null(full)) {
+    return(full)
+  }
   point_ids <- as.character(points$spot_id %||% points$label %||% points$id)
   idx <- match(ids, point_ids)
   out <- matrix(NA_real_, nrow = length(ids), ncol = 2L)
@@ -233,6 +388,8 @@ wsi_prediction_matrix_for_spatial_reduction <- function(linked, ids, source_id) 
   out[keep, 1L] <- as.numeric(points$x[idx[keep]])
   out[keep, 2L] <- as.numeric(points$y[idx[keep]])
   attr(out, "source_name") <- plot$label %||% plot$reduction %||% "reduction"
+  attr(out, "reduction_dimensions") <- 2L
+  attr(out, "available_reduction_dimensions") <- 2L
   out
 }
 
@@ -266,7 +423,83 @@ wsi_prediction_matrix_for_cells <- function(project, ids) {
   out
 }
 
-wsi_prediction_feature_matrix <- function(context, source_id, ids) {
+wsi_prediction_is_spatial_project <- function(linked) {
+  inherits(linked, "wsi_spatial_project") &&
+    is.list(linked$project_sections) &&
+    length(linked$project_sections) > 0L
+}
+
+wsi_prediction_align_feature_matrices <- function(parts, ids) {
+  parts <- parts[vapply(parts, function(part) is.matrix(part$x) && nrow(part$x) > 0L, logical(1))]
+  if (!length(parts)) {
+    wsi_abort("No project-scoped feature rows were found for the selected spots/cells.")
+  }
+  columns <- unique(unlist(lapply(parts, function(part) colnames(part$x)), use.names = FALSE))
+  columns <- columns[nzchar(columns) & !is.na(columns)]
+  if (!length(columns)) {
+    wsi_abort("Project-scoped feature matrices do not share usable feature names.")
+  }
+  out <- matrix(NA_real_, nrow = length(ids), ncol = length(columns))
+  rownames(out) <- as.character(ids)
+  colnames(out) <- make.unique(columns)
+  source_names <- character()
+  for (part in parts) {
+    idx <- part$rows
+    cols <- match(colnames(part$x), columns)
+    out[idx, cols] <- part$x
+    source_names <- c(source_names, attr(part$x, "source_name", exact = TRUE) %||% character())
+  }
+  source_names <- unique(source_names[nzchar(source_names) & !is.na(source_names)])
+  attr(out, "source_name") <- if (length(source_names)) {
+    paste(source_names, collapse = " / ")
+  } else {
+    "project-scoped features"
+  }
+  out
+}
+
+wsi_prediction_matrix_for_spatial_project <- function(linked, source_id, ids,
+                                                      reduction_dims = NULL,
+                                                      points = NULL) {
+  if (!is.data.frame(points) || !nrow(points)) {
+    wsi_abort("Project-scoped prediction needs point metadata.")
+  }
+  sections <- linked$project_sections
+  ids <- as.character(ids)
+  parts <- list()
+  for (section in sections) {
+    section_key <- as.character(section$project_key %||% NA_character_)
+    if (is.na(section_key) || !nzchar(section_key)) {
+      next
+    }
+    rows <- which(as.character(points$project_key %||% "") == section_key)
+    if (!length(rows)) {
+      next
+    }
+    feature_ids <- if ("feature_id" %in% names(points)) {
+      as.character(points$feature_id[rows])
+    } else {
+      ids[rows]
+    }
+    x <- if (identical(source_id, "spatial:raw")) {
+      wsi_prediction_matrix_for_spatial_raw(section, feature_ids)
+    } else if (startsWith(source_id, "spatial:reduction:")) {
+      wsi_prediction_matrix_for_spatial_reduction(
+        section, feature_ids, source_id,
+        dimensions = reduction_dims
+      )
+    } else {
+      wsi_abort(sprintf("Unsupported prediction feature source `%s`.", source_id))
+    }
+    rownames(x) <- ids[rows]
+    parts[[length(parts) + 1L]] <- list(rows = rows, x = x)
+  }
+  wsi_prediction_align_feature_matrices(parts, ids)
+}
+
+wsi_prediction_feature_matrix <- function(context, source_id, ids,
+                                          reduction_dims = NULL,
+                                          points = NULL) {
   context <- context %||% list()
   source_id <- as.character(source_id %||% "spatial:raw")
   if (identical(source_id, "cellphenotyper:numeric")) {
@@ -279,11 +512,21 @@ wsi_prediction_feature_matrix <- function(context, source_id, ids) {
   if (!inherits(linked, "wsi_seurat_spatial") && !inherits(linked, "wsi_spatial_object")) {
     wsi_abort("No live spatial object is attached to this viewer session.")
   }
+  if (wsi_prediction_is_spatial_project(linked)) {
+    return(wsi_prediction_matrix_for_spatial_project(
+      linked, source_id, ids,
+      reduction_dims = reduction_dims,
+      points = points
+    ))
+  }
   if (identical(source_id, "spatial:raw")) {
     return(wsi_prediction_matrix_for_spatial_raw(linked, ids))
   }
   if (startsWith(source_id, "spatial:reduction:")) {
-    return(wsi_prediction_matrix_for_spatial_reduction(linked, ids, source_id))
+    return(wsi_prediction_matrix_for_spatial_reduction(
+      linked, ids, source_id,
+      dimensions = reduction_dims
+    ))
   }
   wsi_abort(sprintf("Unsupported prediction feature source `%s`.", source_id))
 }
@@ -357,7 +600,11 @@ wsi_prediction_assign_points <- function(points, rois, ids, include_all = FALSE)
     return(list(label = label, roi_id = roi_id, indices = indices))
   }
   for (i in indices) {
-    inside <- wsi_points_in_roi(rois, i, points$x, points$y)
+    scope_keep <- wsi_prediction_scope_keep(points, wsi_prediction_roi_scope(rois, i))
+    inside <- rep(FALSE, nrow(points))
+    if (any(scope_keep, na.rm = TRUE)) {
+      inside[scope_keep] <- wsi_points_in_roi(rois, i, points$x[scope_keep], points$y[scope_keep])
+    }
     inside <- inside & is.na(label)
     if (!any(inside, na.rm = TRUE)) {
       next
@@ -366,6 +613,88 @@ wsi_prediction_assign_points <- function(points, rois, ids, include_all = FALSE)
     roi_id[inside] <- as.character(rois$roi_id[[i]] %||% i)
   }
   list(label = label, roi_id = roi_id, indices = indices)
+}
+
+wsi_prediction_scope_scalar <- function(...) {
+  values <- list(...)
+  for (value in values) {
+    value <- wsi_geojson_scalar(value, default = NA_character_)
+    if (!is.na(value) && nzchar(value)) {
+      return(value)
+    }
+  }
+  NA_character_
+}
+
+wsi_prediction_roi_scope <- function(rois, index) {
+  properties <- if ("properties" %in% names(rois)) {
+    rois$properties[[index]]
+  } else {
+    list()
+  }
+  properties <- wsi_geojson_list(properties)
+  project <- wsi_geojson_list(properties$wsiToolsProject %||% properties$wsitools_project)
+  list(
+    project_key = wsi_prediction_scope_scalar(
+      properties$project_key, properties$projectKey, project$key
+    ),
+    project_image = wsi_prediction_scope_scalar(
+      properties$project_image, properties$projectImage,
+      properties$image, properties$image_id, properties$sample_id, project$image
+    ),
+    project_section = wsi_prediction_scope_scalar(
+      properties$project_section, properties$projectSection,
+      properties$section, properties$section_id, project$section
+    ),
+    image_id = wsi_prediction_scope_scalar(
+      properties$image_id, properties$sample_id, project$image_id
+    ),
+    section_id = wsi_prediction_scope_scalar(
+      properties$section_id, properties$scene, project$section_id
+    ),
+    sample_id = wsi_prediction_scope_scalar(
+      properties$sample_id, properties$sample, project$sample_id
+    )
+  )
+}
+
+wsi_prediction_scope_keep <- function(points, scope) {
+  if (!is.data.frame(points) || !nrow(points)) {
+    return(logical())
+  }
+  scope <- scope %||% list()
+  candidates <- list(
+    project_key = c("project_key", "wsi_project_key"),
+    project_image = c("project_image", "image", "image_id", "sample_id", "sample", "slide_id", "tissue"),
+    project_section = c("project_section", "section", "section_id", "scene", "sample_id", "sample"),
+    image_id = c("image_id", "sample_id", "sample", "slide_id", "project_image"),
+    section_id = c("section_id", "section", "scene", "project_section"),
+    sample_id = c("sample_id", "sample", "slide_id")
+  )
+  keep <- rep(TRUE, nrow(points))
+  matched_scope <- FALSE
+  for (name in names(candidates)) {
+    value <- as.character(scope[[name]] %||% NA_character_)
+    if (length(value) != 1L || is.na(value) || !nzchar(value)) {
+      next
+    }
+    cols <- intersect(candidates[[name]], names(points))
+    if (!length(cols)) {
+      next
+    }
+    field_keep <- rep(FALSE, nrow(points))
+    value <- tolower(value)
+    for (col in cols) {
+      field_keep <- field_keep | tolower(as.character(points[[col]])) == value
+    }
+    keep <- keep & field_keep
+    matched_scope <- TRUE
+  }
+  if (!matched_scope) {
+    rep(TRUE, nrow(points))
+  } else {
+    keep
+  }
 }
 
 wsi_prediction_palette <- function(labels) {
@@ -403,7 +732,7 @@ wsi_prediction_layer <- function(result, radius = 8) {
   items <- lapply(seq_len(nrow(result)), function(i) {
     pred <- as.character(result$predicted[[i]] %||% "")
     colour <- palette[[pred]] %||% "#38BDF8"
-    list(
+    item <- list(
       id = paste0("prediction_", result$id[[i]]),
       name = as.character(result$label[[i]] %||% result$id[[i]]),
       label = as.character(result$label[[i]] %||% result$id[[i]]),
@@ -414,9 +743,29 @@ wsi_prediction_layer <- function(result, radius = 8) {
       colour = colour,
       fill = wsi_hex_to_rgba(colour, 0.33),
       predicted = pred,
+      predicted_pls_lda = as.character(result$predicted_pls_lda[[i]] %||% pred),
+      svm_refined = isTRUE(result$svm_refined[[i]]),
       observed = as.character(result$observed[[i]] %||% NA_character_),
       feature_source = as.character(result$feature_source[[i]] %||% "")
     )
+    scope_columns <- c(
+      "project_key", "wsi_project_key", "project_image", "project_section",
+      "image_id", "section_id", "sample_id", "project_image_index",
+      "project_section_index", "feature_id", "original_id"
+    )
+    for (column in intersect(scope_columns, names(result))) {
+      value <- result[[column]][[i]]
+      item[[column]] <- if (is.numeric(value) || is.integer(value)) {
+        unname(value)
+      } else {
+        as.character(value %||% "")
+      }
+    }
+    item$project_scoped <- any(c(
+      "project_key", "wsi_project_key", "project_image", "project_section",
+      "image_id", "section_id", "sample_id", "project_image_index"
+    ) %in% names(item))
+    item
   })
   list(
     id = "wsi_prediction_pls_lda",
@@ -431,7 +780,8 @@ wsi_prediction_layer <- function(result, radius = 8) {
     items = items,
     metadata = list(
       classes = unname(names(palette)),
-      colours = unname(palette)
+      colours = unname(palette),
+      svm_refined = any(as.logical(result$svm_refined %||% FALSE), na.rm = TRUE)
     )
   )
 }
@@ -517,9 +867,107 @@ wsi_prediction_fit <- function(x_train, y_train, x_test, ncomp = 2L,
   wsi_prediction_extract_predicted(model, x_test)
 }
 
+wsi_refine_SVM <- function(xy, labels, samples = NULL, newdata = NULL,
+                           newsamples = NULL, tiles = NULL, ...) {
+  if (!wsi_has_refine_svm()) {
+    wsi_abort(
+      "SVM prediction refinement requires the optional package `e1071`. Install it with `install.packages(\"e1071\")`.",
+      class = "wsi_missing_dependency"
+    )
+  }
+  xy <- tryCatch(as.matrix(xy), error = function(e) NULL)
+  if (is.null(xy) || length(dim(xy)) != 2L || !nrow(xy) || !ncol(xy)) {
+    wsi_abort("SVM refinement needs a non-empty numeric matrix.")
+  }
+  storage.mode(xy) <- "double"
+  labels <- factor(labels)
+  if (length(labels) != nrow(xy)) {
+    wsi_abort("SVM refinement labels must have one value per training row.")
+  }
+  if (is.null(rownames(xy))) {
+    rownames(xy) <- paste0("row_", seq_len(nrow(xy)))
+  }
+  if (is.null(names(labels))) {
+    names(labels) <- rownames(xy)
+  }
+  has_newdata <- !is.null(newdata)
+  if (has_newdata) {
+    newdata <- tryCatch(as.matrix(newdata), error = function(e) NULL)
+    if (is.null(newdata) || length(dim(newdata)) != 2L || !nrow(newdata) || ncol(newdata) != ncol(xy)) {
+      wsi_abort("SVM refinement `newdata` must be a non-empty matrix with the same columns as `xy`.")
+    }
+    storage.mode(newdata) <- "double"
+    if (is.null(rownames(newdata))) {
+      rownames(newdata) <- paste0("new_", seq_len(nrow(newdata)))
+    }
+  } else {
+    newdata <- xy
+  }
+
+  samples <- if (is.null(samples)) rep("sample_1", nrow(xy)) else as.character(samples)
+  if (length(samples) != nrow(xy)) {
+    wsi_abort("SVM refinement `samples` must have one value per training row.")
+  }
+  newsamples <- if (is.null(newsamples)) {
+    if (has_newdata) rep(samples[[1L]], nrow(newdata)) else samples
+  } else {
+    as.character(newsamples)
+  }
+  if (length(newsamples) != nrow(newdata)) {
+    wsi_abort("SVM refinement `newsamples` must have one value per prediction row.")
+  }
+
+  out <- rep(NA_character_, nrow(newdata))
+  names(out) <- rownames(newdata)
+  svm_fun <- get("svm", envir = asNamespace("e1071"), inherits = FALSE)
+  sample_levels <- unique(c(samples, newsamples))
+  sample_levels <- sample_levels[nzchar(sample_levels) & !is.na(sample_levels)]
+  for (sample_level in sample_levels) {
+    train_idx <- which(samples == sample_level)
+    pred_idx <- which(newsamples == sample_level)
+    if (!length(train_idx) || !length(pred_idx)) {
+      next
+    }
+    y <- droplevels(labels[train_idx])
+    present <- !is.na(y)
+    train_idx <- train_idx[present]
+    y <- droplevels(y[present])
+    if (!length(y)) {
+      next
+    }
+    if (length(levels(y)) < 2L) {
+      out[pred_idx] <- as.character(y)[[1L]]
+      next
+    }
+    model <- svm_fun(x = xy[train_idx, , drop = FALSE], y = y, ...)
+    out[pred_idx] <- as.character(stats::predict(model, newdata = newdata[pred_idx, , drop = FALSE]))
+  }
+  factor(out, levels = levels(labels))
+}
+
+wsi_prediction_apply_svm_refinement <- function(x, train_rows, test_rows,
+                                                y_train, predicted) {
+  if (!length(test_rows)) {
+    return(as.character(predicted))
+  }
+  refine_rows <- c(train_rows, test_rows)
+  labels <- c(as.character(y_train), as.character(predicted))
+  refine_x <- x[refine_rows, , drop = FALSE]
+  refined <- wsi_refine_SVM(refine_x, labels, kernel = "radial")
+  refined_ids <- rownames(refine_x)[seq_along(refined)]
+  wanted_ids <- rownames(x)[test_rows]
+  out <- as.character(refined[match(wanted_ids, refined_ids)])
+  missing <- is.na(out) | !nzchar(out)
+  if (any(missing)) {
+    out[missing] <- as.character(predicted)[missing]
+  }
+  out
+}
+
 wsi_prediction_run <- function(context, rois, source_id, train_ids, test_ids = character(),
                                ncomp = 2L, method = "simpls", scaling = "autoscaling",
-                               max_features = 5000L) {
+                               max_features = 5000L, reduction_dims = NULL,
+                               refine_svm = FALSE) {
   if (!inherits(rois, "wsi_roi") || !nrow(rois)) {
     wsi_abort("Draw or import annotations before running PLS-LDA prediction.")
   }
@@ -554,7 +1002,11 @@ wsi_prediction_run <- function(context, rois, source_id, train_ids, test_ids = c
     wsi_abort("The selected test annotations contain no spots/cells. Select test annotations or choose all non-training points.")
   }
 
-  x <- wsi_prediction_feature_matrix(context, source_id, points$id)
+  x <- wsi_prediction_feature_matrix(
+    context, source_id, points$id,
+    reduction_dims = reduction_dims,
+    points = points
+  )
   x <- wsi_prediction_feature_filter(x, max_features = max_features)
   complete <- stats::complete.cases(x)
   train_rows <- train_rows[complete[train_rows]]
@@ -578,6 +1030,17 @@ wsi_prediction_run <- function(context, rois, source_id, train_ids, test_ids = c
   if (length(predicted) != length(test_rows)) {
     predicted <- rep(predicted, length.out = length(test_rows))
   }
+  predicted_pls_lda <- as.character(predicted)
+  svm_refined <- isTRUE(refine_svm)
+  if (svm_refined) {
+    predicted <- wsi_prediction_apply_svm_refinement(
+      x = x,
+      train_rows = train_rows,
+      test_rows = test_rows,
+      y_train = y_train,
+      predicted = predicted_pls_lda
+    )
+  }
   result <- data.frame(
     id = points$id[test_rows],
     label = points$label[test_rows],
@@ -588,15 +1051,29 @@ wsi_prediction_run <- function(context, rois, source_id, train_ids, test_ids = c
     test_annotation_id = test_roi_id[test_rows],
     observed = test_label[test_rows],
     predicted = predicted,
+    predicted_pls_lda = predicted_pls_lda,
+    svm_refined = svm_refined,
     feature_source = source_id,
     stringsAsFactors = FALSE
   )
+  metadata_cols <- intersect(
+    c("project_key", "project_image", "project_section", "image_id", "section_id", "sample_id"),
+    names(points)
+  )
+  for (col in metadata_cols) {
+    result[[col]] <- points[[col]][test_rows]
+  }
+  for (col in intersect(c("project_image_index", "project_section_index", "feature_id", "original_id"), names(points))) {
+    result[[col]] <- points[[col]][test_rows]
+  }
   class(result) <- c("wsi_prediction_result", class(result))
   attr(result, "source_name") <- attr(x, "source_name") %||% source_id
   attr(result, "ncomp") <- as.integer(ncomp)
   attr(result, "method") <- method
   attr(result, "scaling") <- scaling
   attr(result, "feature_count") <- ncol(x)
+  attr(result, "reduction_dimensions") <- attr(x, "reduction_dimensions", exact = TRUE) %||% NA_integer_
+  attr(result, "svm_refined") <- svm_refined
   result
 }
 
@@ -606,7 +1083,8 @@ wsi_prediction_validate_payload <- function(payload) {
   }
   allowed <- c(
     "feature_source", "train_annotations", "test_annotations", "rois",
-    "ncomp", "method", "scaling", "max_features"
+    "ncomp", "method", "scaling", "max_features", "reduction_dims",
+    "refine_svm"
   )
   unknown <- setdiff(names(payload), allowed)
   if (length(unknown)) {
@@ -641,7 +1119,9 @@ wsi_prediction_response <- function(context, state, payload) {
     ncomp = payload$ncomp %||% 2L,
     method = payload$method %||% "simpls",
     scaling = payload$scaling %||% "autoscaling",
-    max_features = payload$max_features %||% 5000L
+    max_features = payload$max_features %||% 5000L,
+    reduction_dims = payload$reduction_dims %||% NULL,
+    refine_svm = isTRUE(payload$refine_svm)
   )
   layer <- wsi_prediction_layer(result, radius = 8)
   state$prediction <- result
@@ -652,7 +1132,9 @@ wsi_prediction_response <- function(context, state, payload) {
     classes = sort(unique(as.character(result$predicted))),
     feature_source = payload$feature_source %||% "spatial:raw",
     feature_count = attr(result, "feature_count") %||% NA_integer_,
-    ncomp = as.integer(payload$ncomp %||% 2L)
+    ncomp = as.integer(payload$ncomp %||% 2L),
+    reduction_dims = attr(result, "reduction_dimensions") %||% NA_integer_,
+    svm_refined = isTRUE(attr(result, "svm_refined") %||% FALSE)
   )
   wsi_viewer_state_record_event(state, "prediction_finished", detail)
   response <- wsi_viewer_state_response(state)

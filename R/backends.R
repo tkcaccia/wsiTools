@@ -22,7 +22,8 @@ wsi_backends <- function() {
       "aicspylibczi",
       "httpuv",
       "callr",
-      "fastPLS"
+      "fastPLS",
+      "svm_refinement"
     ),
     installed = c(
       wsi_has_openslide(),
@@ -34,7 +35,8 @@ wsi_backends <- function() {
       wsi_has_czi_python(),
       requireNamespace("httpuv", quietly = TRUE),
       wsi_has_callr(),
-      wsi_has_fastpls()
+      wsi_has_fastpls(),
+      wsi_has_refine_svm()
     ),
     version = c(
       wsi_command_version("openslide-show-properties"),
@@ -46,7 +48,8 @@ wsi_backends <- function() {
       wsi_czi_python_version(),
       wsi_optional_package_version("httpuv"),
       wsi_optional_package_version("callr"),
-      wsi_optional_package_version(wsi_fastpls_package())
+      wsi_optional_package_version(wsi_fastpls_package()),
+      wsi_optional_package_version("e1071")
     ),
     capabilities = c(
       "metadata, pyramid levels, region reads via openslide-write-png when available",
@@ -58,7 +61,8 @@ wsi_backends <- function() {
       "optional CZI mosaic metadata and lightweight preview generation",
       "live R viewer bridge and browser-to-R events",
       "non-blocking background jobs for tiling, conversion, pyramids, and project sync",
-      "optional PLS-LDA annotation prediction for live spatial and CellPhenotyper viewers"
+      "optional PLS-LDA annotation prediction for live spatial and CellPhenotyper viewers",
+      "optional SVM refinement of live PLS-LDA prediction labels"
     ),
     notes = c(
       "Requires OpenSlide command-line tools for this milestone; native C bindings are planned.",
@@ -70,7 +74,8 @@ wsi_backends <- function() {
       "Legacy optional fallback. Only used for CZI previews when WSITOOLS_CZI_ALLOW_PYTHON=true.",
       "Suggested R package; not required for static viewers or package installation.",
       "Suggested R package; not required unless async jobs are requested.",
-      "Optional GitHub package. Install with `remotes::install_github(\"tkcaccia/fastPLS\")` to enable the Prediction menu."
+      "Optional GitHub package. Install with `remotes::install_github(\"tkcaccia/fastPLS\")` to enable the Prediction menu.",
+      "Optional suggested package. Install with `install.packages(\"e1071\")` to enable the Prediction menu SVM refinement checkbox."
     ),
     stringsAsFactors = FALSE
   )
