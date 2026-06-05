@@ -804,6 +804,8 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "annotationFilter", fixed = TRUE)
   expect_match(html, "annotationSort", fixed = TRUE)
   expect_match(html, "annotationFilterClear", fixed = TRUE)
+  expect_match(html, "annotationListTools\"><button id=\"prevRoi\"", fixed = TRUE)
+  expect_match(html, "<button id=\"nextRoi\" title=\"Next ROI\">Next</button><button id=\"annotationSelectAll\"", fixed = TRUE)
   expect_match(html, "bindAnnotationListControls", fixed = TRUE)
   expect_match(html, "currentRoiListEntries", fixed = TRUE)
   expect_match(html, "roiMatchesAnnotationSearch", fixed = TRUE)
