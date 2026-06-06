@@ -158,6 +158,7 @@ wsi_viewer_allowed_events <- function() {
     "stain_updated", "image_transform_updated",
     "layer_added", "layer_removed", "layer_updated", "layer_visibility_updated",
     "layer_opacity_updated", "tile_grid_toggled",
+    "multi_view_layout_updated", "multi_view_pane_replaced", "multi_view_sync_updated",
     "tile_preview_created", "tile_preview_cleared", "tile_preview_exported", "tiles_extracted",
     "channel_source_added", "channel_source_removed", "channel_updated",
     "artifact_detected", "artifact_flagged", "artifact_overlay_toggled",

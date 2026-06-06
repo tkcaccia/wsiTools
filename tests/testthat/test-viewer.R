@@ -2137,7 +2137,8 @@ test_that("viewer event validation allowlists live WebSocket events", {
     "segmentation_finished", "job_status", "project_image_reordered",
     "project_image_closed", "grandqc_loaded", "grandqc_cleared",
     "kodama_cells_selected", "seurat_cluster_coloured",
-    "viewer_log_updated", "viewer_log_cleared", "viewer_log_exported"
+    "viewer_log_updated", "viewer_log_cleared", "viewer_log_exported",
+    "multi_view_layout_updated", "multi_view_pane_replaced", "multi_view_sync_updated"
   )
 
   expect_true(all(expected %in% wsiTools:::wsi_viewer_allowed_events()))
@@ -2157,6 +2158,14 @@ test_that("viewer event validation allowlists live WebSocket events", {
   expect_silent(wsiTools:::wsi_viewer_validate_state_payload(list(
     event = "roi_selected",
     selected_object = list(type = "annotation", index = 0, id = "roi-1", name = "Tumour 1")
+  )))
+  expect_silent(wsiTools:::wsi_viewer_validate_state_payload(list(
+    event = "multi_view_layout_updated",
+    detail = list(layout = 2L, sync = TRUE)
+  )))
+  expect_silent(wsiTools:::wsi_viewer_validate_state_payload(list(
+    event = "multi_view_pane_replaced",
+    detail = list(pane = 1L, label = "151507", key = "project:0:0", layout = 2L)
   )))
 })
 
