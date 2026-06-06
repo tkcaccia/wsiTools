@@ -2429,6 +2429,8 @@ test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
   expect_match(html, "id=\"viewer\" class=\"osdViewer\"", fixed = TRUE)
   expect_match(html, "id=\"overlay\"", fixed = TRUE)
   expect_match(html, "id=\"multiViewGrid\"", fixed = TRUE)
+  expect_match(html, ".multiViewPaneViewer{position:absolute!important;inset:0!important;width:100%!important;height:100%!important", fixed = TRUE)
+  expect_match(html, ".multiViewPaneViewer>.openseadragon-container,.multiViewPaneViewer .openseadragon-canvas{width:100%!important;height:100%!important;}", fixed = TRUE)
   expect_match(html, "multiViewOsdOptions", fixed = TRUE)
   expect_match(html, "multiViewProjectEntries", fixed = TRUE)
   expect_match(html, "multiViewUsesProjectSources", fixed = TRUE)
