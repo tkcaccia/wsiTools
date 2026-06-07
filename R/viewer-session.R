@@ -165,7 +165,7 @@ wsi_viewer_allowed_events <- function() {
     "artifact_sensitivity_updated", "artifacts_cleared",
     "grandqc_loaded", "grandqc_cleared",
     "kodama_cells_selected", "seurat_spots_selected", "seurat_gene_coloured",
-    "seurat_cluster_coloured",
+    "seurat_cluster_coloured", "seurat_plot_scope_changed",
     "prediction_started", "prediction_finished", "prediction_failed",
     "prediction_cleared",
     "proximity_started", "proximity_finished", "proximity_failed",

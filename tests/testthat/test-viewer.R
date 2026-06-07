@@ -2150,6 +2150,7 @@ test_that("viewer event validation allowlists live WebSocket events", {
     "segmentation_finished", "job_status", "project_image_reordered",
     "project_image_closed", "grandqc_loaded", "grandqc_cleared",
     "kodama_cells_selected", "seurat_cluster_coloured",
+    "seurat_plot_scope_changed",
     "viewer_log_updated", "viewer_log_cleared", "viewer_log_exported",
     "multi_view_layout_updated", "multi_view_pane_replaced", "multi_view_sync_updated"
   )
@@ -2179,6 +2180,10 @@ test_that("viewer event validation allowlists live WebSocket events", {
   expect_silent(wsiTools:::wsi_viewer_validate_state_payload(list(
     event = "multi_view_pane_replaced",
     detail = list(pane = 1L, label = "151507", key = "project:0:0", layout = 2L)
+  )))
+  expect_silent(wsiTools:::wsi_viewer_validate_state_payload(list(
+    event = "seurat_plot_scope_changed",
+    detail = list(scope = "all", requested_scope = "all")
   )))
 })
 
