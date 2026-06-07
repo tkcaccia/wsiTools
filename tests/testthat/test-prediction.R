@@ -123,6 +123,32 @@ test_that("internal SVM refinement preserves label structure", {
   expect_equal(length(out), nrow(x))
 })
 
+test_that("SVM prediction refinement uses spatial coordinates and section groups", {
+  skip_if_not_installed("e1071")
+  points <- data.frame(
+    id = paste0("p", 1:8),
+    x = c(0, 0.1, 4.9, 5.1, 0, 0.1, 4.9, 5.1),
+    y = c(0, 0.2, 0.1, 0.2, 10, 10.2, 10.1, 10.2),
+    project_key = rep(c("section_a", "section_b"), each = 4),
+    stringsAsFactors = FALSE
+  )
+  xy <- wsiTools:::wsi_prediction_spatial_refinement_matrix(points, c(4L, 1L))
+  expect_equal(unname(xy[, "x"]), c(5.1, 0))
+  expect_equal(rownames(xy), c("p4", "p1"))
+  samples <- wsiTools:::wsi_prediction_refinement_samples(points, seq_len(nrow(points)))
+  expect_equal(samples, rep(c("section_a", "section_b"), each = 4))
+
+  refined <- wsiTools:::wsi_prediction_apply_svm_refinement(
+    points = points,
+    train_rows = c(1L, 4L, 5L, 8L),
+    test_rows = c(2L, 3L, 6L, 7L),
+    y_train = c("left", "right", "left", "right"),
+    predicted = c("left", "right", "left", "right")
+  )
+  expect_equal(length(refined), 4L)
+  expect_true(all(refined %in% c("left", "right")))
+})
+
 test_that("prediction reduction sources can use requested dimensions", {
   ids <- paste0("s", 1:5)
   embeddings <- matrix(

@@ -868,7 +868,7 @@ wsi_prediction_fit <- function(x_train, y_train, x_test, ncomp = 2L,
 }
 
 wsi_refine_SVM <- function(xy, labels, samples = NULL, newdata = NULL,
-                           newsamples = NULL, tiles = NULL, ...) {
+                           newsamples = NULL, tiles = NULL, newtiles = NULL, ...) {
   if (!wsi_has_refine_svm()) {
     wsi_abort(
       "SVM prediction refinement requires the optional package `e1071`. Install it with `install.packages(\"e1071\")`.",
@@ -916,6 +916,26 @@ wsi_refine_SVM <- function(xy, labels, samples = NULL, newdata = NULL,
   if (length(newsamples) != nrow(newdata)) {
     wsi_abort("SVM refinement `newsamples` must have one value per prediction row.")
   }
+  use_tiles <- !is.null(tiles) && (!has_newdata || !is.null(newtiles))
+  if (!is.null(newtiles) && is.null(tiles)) {
+    wsi_abort("SVM refinement `newtiles` requires `tiles`.")
+  }
+  if (use_tiles) {
+    tiles <- as.character(tiles)
+    if (length(tiles) != nrow(xy)) {
+      wsi_abort("SVM refinement `tiles` must have one value per training row.")
+    }
+    samples <- paste(samples, tiles, sep = "::tile::")
+  }
+  if (use_tiles && !is.null(newtiles)) {
+    newtiles <- as.character(newtiles)
+    if (length(newtiles) != nrow(newdata)) {
+      wsi_abort("SVM refinement `newtiles` must have one value per prediction row.")
+    }
+    newsamples <- paste(newsamples, newtiles, sep = "::tile::")
+  } else if (use_tiles && !has_newdata) {
+    newsamples <- samples
+  }
 
   out <- rep(NA_character_, nrow(newdata))
   names(out) <- rownames(newdata)
@@ -945,17 +965,80 @@ wsi_refine_SVM <- function(xy, labels, samples = NULL, newdata = NULL,
   factor(out, levels = levels(labels))
 }
 
-wsi_prediction_apply_svm_refinement <- function(x, train_rows, test_rows,
+wsi_prediction_spatial_refinement_matrix <- function(points, rows) {
+  rows <- as.integer(rows)
+  xy <- cbind(
+    x = as.numeric(points$x[rows]),
+    y = as.numeric(points$y[rows])
+  )
+  rownames(xy) <- as.character(points$id[rows] %||% rows)
+  complete <- stats::complete.cases(xy)
+  if (!all(complete)) {
+    wsi_abort("SVM refinement needs finite spatial coordinates for all training and test points.")
+  }
+  storage.mode(xy) <- "double"
+  xy
+}
+
+wsi_prediction_refinement_samples <- function(points, rows) {
+  rows <- as.integer(rows)
+  n <- length(rows)
+  if (!n) {
+    return(character())
+  }
+  text_value <- function(column) {
+    if (!column %in% names(points)) {
+      return(rep(NA_character_, n))
+    }
+    value <- as.character(points[[column]][rows])
+    value[!nzchar(value) | is.na(value)] <- NA_character_
+    value
+  }
+  for (column in c("project_key", "wsi_project_key")) {
+    value <- text_value(column)
+    if (any(!is.na(value))) {
+      value[is.na(value)] <- "sample_1"
+      return(value)
+    }
+  }
+  if (all(c("project_image_index", "project_section_index") %in% names(points))) {
+    image <- suppressWarnings(as.integer(points$project_image_index[rows]))
+    section <- suppressWarnings(as.integer(points$project_section_index[rows]))
+    if (any(is.finite(image) | is.finite(section))) {
+      image[!is.finite(image)] <- -1L
+      section[!is.finite(section)] <- -1L
+      return(paste0("image_", image, "::section_", section))
+    }
+  }
+  image <- text_value("project_image")
+  section <- text_value("project_section")
+  if (any(!is.na(image) | !is.na(section))) {
+    image[is.na(image)] <- "image"
+    section[is.na(section)] <- "section"
+    return(paste0(image, "::", section))
+  }
+  for (column in c("image_id", "sample_id", "section_id")) {
+    value <- text_value(column)
+    if (any(!is.na(value))) {
+      value[is.na(value)] <- "sample_1"
+      return(value)
+    }
+  }
+  rep("sample_1", n)
+}
+
+wsi_prediction_apply_svm_refinement <- function(points, train_rows, test_rows,
                                                 y_train, predicted) {
   if (!length(test_rows)) {
     return(as.character(predicted))
   }
   refine_rows <- c(train_rows, test_rows)
   labels <- c(as.character(y_train), as.character(predicted))
-  refine_x <- x[refine_rows, , drop = FALSE]
-  refined <- wsi_refine_SVM(refine_x, labels, kernel = "radial")
-  refined_ids <- rownames(refine_x)[seq_along(refined)]
-  wanted_ids <- rownames(x)[test_rows]
+  refine_xy <- wsi_prediction_spatial_refinement_matrix(points, refine_rows)
+  samples <- wsi_prediction_refinement_samples(points, refine_rows)
+  refined <- wsi_refine_SVM(refine_xy, labels, samples = samples, kernel = "radial")
+  refined_ids <- rownames(refine_xy)[seq_along(refined)]
+  wanted_ids <- as.character(points$id[test_rows] %||% test_rows)
   out <- as.character(refined[match(wanted_ids, refined_ids)])
   missing <- is.na(out) | !nzchar(out)
   if (any(missing)) {
@@ -1034,7 +1117,7 @@ wsi_prediction_run <- function(context, rois, source_id, train_ids, test_ids = c
   svm_refined <- isTRUE(refine_svm)
   if (svm_refined) {
     predicted <- wsi_prediction_apply_svm_refinement(
-      x = x,
+      points = points,
       train_rows = train_rows,
       test_rows = test_rows,
       y_train = y_train,
