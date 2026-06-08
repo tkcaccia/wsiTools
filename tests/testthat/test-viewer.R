@@ -427,6 +427,7 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "multiView6", fixed = TRUE)
   expect_match(html, "multiViewCustomCount", fixed = TRUE)
   expect_match(html, "multiViewCustom", fixed = TRUE)
+  expect_match(html, "multiViewPaneBlank", fixed = TRUE)
   expect_match(html, "Drag project images or sections onto a pane", fixed = TRUE)
   expect_match(html, "link zoom/pan", fixed = TRUE)
   expect_match(html, "Multi-view panes are independent by default", fixed = TRUE)
@@ -640,6 +641,13 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "trajectoryPayload", fixed = TRUE)
   expect_match(html, "drawTrajectories", fixed = TRUE)
   expect_match(html, "bindTrajectoryControls", fixed = TRUE)
+  expect_match(html, "Gradient profile", fixed = TRUE)
+  expect_match(html, "trajectoryProfileSource", fixed = TRUE)
+  expect_match(html, "trajectoryProfileFeature", fixed = TRUE)
+  expect_match(html, "runTrajectoryProfile", fixed = TRUE)
+  expect_match(html, "trajectoryProfileResultRows", fixed = TRUE)
+  expect_match(html, "trajectory_profile_finished", fixed = TRUE)
+  expect_match(html, "viewer$get_trajectory_profile()", fixed = TRUE)
   expect_match(html, "Project", fixed = TRUE)
   expect_false(grepl("projectOpenPanel", html, fixed = TRUE))
   expect_match(html, "projectPanelToggle", fixed = TRUE)
@@ -781,6 +789,9 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "multiViewPaneMpp", fixed = TRUE)
   expect_match(html, "multiViewMppFromValue", fixed = TRUE)
   expect_match(html, "multiViewCanvasUnitScale(pane)", fixed = TRUE)
+  expect_match(html, "deltaPointsFromPixels(new OpenSeadragon.Point(1,0),true)", fixed = TRUE)
+  expect_match(html, "refreshMultiViewOverlaysSoon", fixed = TRUE)
+  expect_match(html, "window.requestAnimationFrame(drawMultiViewOverlays)", fixed = TRUE)
   expect_match(html, "multiViewDrawScaleBar(pack.ctx,pane,pack.rect)", fixed = TRUE)
   expect_match(html, "if(typeof multiViewLayout!=='undefined'&&multiViewLayout>1){bar.style.display='none'", fixed = TRUE)
   expect_match(html, "if(typeof updateScaleBar==='function')updateScaleBar();if(typeof requestDraw==='function')requestDraw();", fixed = TRUE)
@@ -796,8 +807,11 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "magnification10", fixed = TRUE)
   expect_match(html, "magnification20", fixed = TRUE)
   expect_match(html, "magnification40", fixed = TRUE)
+  expect_match(html, "magnificationInitial", fixed = TRUE)
   expect_match(html, "currentMagnification", fixed = TRUE)
   expect_match(html, "setMagnificationPower", fixed = TRUE)
+  expect_match(html, "resetInitialMagnification", fixed = TRUE)
+  expect_match(html, "Returned to initial magnification", fixed = TRUE)
   expect_match(html, "bindMagnificationControls", fixed = TRUE)
   expect_match(html, "defaultObjectivePower", fixed = TRUE)
   expect_match(html, "objectivePowerEstimated", fixed = TRUE)
@@ -1276,6 +1290,9 @@ test_that("live viewer sessions expose R-native helper methods and command queue
   expect_true(is.function(session$get_history))
   expect_true(is.function(session$get_logs))
   expect_true(is.function(session$get_tile_preview))
+  expect_true(is.function(session$get_prediction))
+  expect_true(is.function(session$get_proximity))
+  expect_true(is.function(session$get_trajectory_profile))
   expect_true(is.function(session$list_layers))
   expect_true(is.function(session$on))
   expect_true(is.function(session$off))
@@ -1770,6 +1787,64 @@ test_that("live viewer state payloads update R objects", {
   expect_equal(env$live_annotation_spots$spot_label, "AAAC-1")
   expect_equal(env$live_last_event$event, "roi_added")
 
+  payload$event <- "trajectory_profile_finished"
+  payload$detail <- list(
+    trajectory_profile = list(
+      list(
+        trajectory_id = "trajectory_1",
+        trajectory_name = "Trajectory 1",
+        source_id = "seurat_spots",
+        source_name = "Spatial spots",
+        feature = "CD8A",
+        feature_type = "numeric",
+        bin = 1,
+        distance_px = 5,
+        distance_fraction = 0.25,
+        width_px = 512,
+        total_length_px = 20,
+        count = 2,
+        mean = 1.5,
+        median = 1.5,
+        min = 1,
+        max = 2,
+        sd = 0.7,
+        project_image = "section 1"
+      ),
+      list(
+        trajectory_id = "trajectory_1",
+        trajectory_name = "Trajectory 1",
+        source_id = "seurat_spots",
+        source_name = "Spatial spots",
+        feature = "cluster",
+        feature_type = "categorical",
+        category = "tumour",
+        bin = 2,
+        distance_px = 15,
+        distance_fraction = 0.75,
+        width_px = 512,
+        total_length_px = 20,
+        count = 3,
+        dominant = "tumour",
+        dominant_count = 2,
+        fraction = 2 / 3,
+        project_image = "section 1"
+      )
+    )
+  )
+  wsiTools:::wsi_viewer_state_apply(state, payload)
+  snapshot <- wsi_viewer_state(state)
+  expect_s3_class(snapshot$trajectory_profile, "wsi_trajectory_profile")
+  expect_equal(nrow(snapshot$trajectory_profile), 2)
+  expect_equal(snapshot$trajectory_profile$feature[[1]], "CD8A")
+  expect_equal(snapshot$trajectory_profile$mean[[1]], 1.5)
+  expect_equal(snapshot$trajectory_profile$dominant[[2]], "tumour")
+  expect_equal(env$live_trajectory_profile$source_id[[1]], "seurat_spots")
+
+  payload$event <- "trajectory_profile_cleared"
+  payload$detail <- list()
+  wsiTools:::wsi_viewer_state_apply(state, payload)
+  expect_equal(nrow(wsi_viewer_state(state)$trajectory_profile), 0)
+
   payload$event <- "segmentation_added"
   payload$detail <- list(
     added = 1,
@@ -2205,6 +2280,8 @@ test_that("viewer event validation allowlists live WebSocket events", {
     "roi_created", "roi_updated", "roi_deleted", "roi_selected",
     "brush_committed", "viewport_changed", "layer_updated",
     "trajectory_deleted", "trajectory_area_created", "trajectory_area_updated",
+    "trajectory_profile_started", "trajectory_profile_finished",
+    "trajectory_profile_failed", "trajectory_profile_cleared",
     "segmentation_started", "segmentation_progress",
     "segmentation_finished", "job_status", "project_image_reordered",
     "project_image_closed", "grandqc_loaded", "grandqc_cleared",
@@ -2554,8 +2631,14 @@ test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
   expect_match(html, "gestureSettingsMouse:{clickToZoom:false,dblClickToZoom:false,scrollToZoom:true,dragToPan:false}", fixed = TRUE)
   expect_match(html, "multiViewProjectEntries", fixed = TRUE)
   expect_match(html, "multiViewUsesProjectSources", fixed = TRUE)
+  expect_match(html, "multiViewCustomMode", fixed = TRUE)
+  expect_match(html, "multiViewPaneIsBlank", fixed = TRUE)
+  expect_match(html, "Number(index)>=entries.length", fixed = TRUE)
+  expect_match(html, "multiViewBlankTileSource", fixed = TRUE)
   expect_match(html, "multiViewTileSource", fixed = TRUE)
   expect_match(html, "multiViewPaneLabel", fixed = TRUE)
+  expect_match(html, "Empty view", fixed = TRUE)
+  expect_match(html, "Drop a project image or section here", fixed = TRUE)
   expect_match(html, "multiViewAssignments", fixed = TRUE)
   expect_match(html, "multiViewControlPaneIndex", fixed = TRUE)
   expect_match(html, "Click a pane to make it active; + and - zoom that active pane", fixed = TRUE)
@@ -2595,6 +2678,7 @@ test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
   expect_match(html, "addProjectImageDataUri(dataUri,file.name,img.naturalWidth,img.naturalHeight,{activate:false,apply:false,refresh_multi_view:false})", fixed = TRUE)
   expect_match(html, "replaceMultiViewPane", fixed = TRUE)
   expect_match(html, "multiViewClearChannelItems(pane)", fixed = TRUE)
+  expect_match(html, "pane.blank=false", fixed = TRUE)
   expect_match(html, "refreshOpenedMultiViewPane", fixed = TRUE)
   expect_match(html, "resizeMultiViewPaneViewer", fixed = TRUE)
   expect_match(html, "scheduleMultiViewPaneRefresh", fixed = TRUE)

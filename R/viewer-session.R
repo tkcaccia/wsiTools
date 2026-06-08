@@ -52,6 +52,7 @@ wsi_new_viewer_state <- function(name = "wsi_viewer_live_state", envir = parent.
   state$tile_preview <- wsi_empty_tile_preview()
   state$prediction <- wsi_empty_prediction_result()
   state$proximity <- wsi_empty_proximity_result()
+  state$trajectory_profile <- wsi_empty_trajectory_profile()
   state$selected_roi <- NULL
   state$selected_rois <- wsi_empty_roi()
   state$selected_object <- NULL
@@ -170,6 +171,8 @@ wsi_viewer_allowed_events <- function() {
     "prediction_cleared",
     "proximity_started", "proximity_finished", "proximity_failed",
     "proximity_cleared",
+    "trajectory_profile_started", "trajectory_profile_finished",
+    "trajectory_profile_failed", "trajectory_profile_cleared",
     "ihc_intensity_measured",
     "segmentation_requested", "segmentation_started", "segmentation_progress",
     "segmentation_added", "segmentation_completed",
@@ -466,6 +469,9 @@ wsi_viewer_callback_object <- function(callback_event, state, payload) {
       return(utils::tail(state$trajectories, 1L))
     }
     return(state$trajectories %||% wsi_empty_trajectories())
+  }
+  if (callback_event %in% c("trajectory_profile_finished")) {
+    return(state$trajectory_profile %||% wsi_empty_trajectory_profile())
   }
   if (callback_event %in% c("annotation_spots_exported", "annotation_spots_updated")) {
     return(state$annotation_spots %||% wsi_empty_annotation_spots())
@@ -1416,6 +1422,7 @@ wsi_assign_viewer_state <- function(state) {
   assign(paste0(name, "_tile_preview"), state$tile_preview %||% wsi_empty_tile_preview(), envir = envir)
   assign(paste0(name, "_prediction"), state$prediction %||% wsi_empty_prediction_result(), envir = envir)
   assign(paste0(name, "_proximity"), state$proximity %||% wsi_empty_proximity_result(), envir = envir)
+  assign(paste0(name, "_trajectory_profile"), state$trajectory_profile %||% wsi_empty_trajectory_profile(), envir = envir)
   assign(paste0(name, "_annotations"), state$annotations, envir = envir)
   assign(paste0(name, "_history"), state$history, envir = envir)
   assign(paste0(name, "_logs"), state$logs %||% wsi_empty_viewer_logs(), envir = envir)
@@ -1447,22 +1454,25 @@ wsi_viewer_state_apply <- function(state, payload) {
   state$segmentation <- wsi_rois_from_payload(payload[["segmentation", exact = TRUE]])
   state$layers <- wsi_viewer_update_layers_from_payload(state$layers, payload[["layers", exact = TRUE]])
   state$project <- payload[["project", exact = TRUE]] %||% state$project %||% list()
-	  detail <- payload[["detail", exact = TRUE]]
-	  if (is.list(detail) && !is.null(detail$project_snapshot)) {
-	    state$project_snapshot <- detail$project_snapshot
-	  }
-	  if (is.list(detail) && !is.null(detail$tile_preview)) {
-	    state$tile_preview <- tryCatch(
-	      wsi_spatial_tile_payload_grid(detail$tile_preview),
-	      error = function(err) state$tile_preview %||% wsi_empty_tile_preview()
-	    )
-	  }
-	  if (is.list(detail) && !is.null(detail$prediction) && is.data.frame(detail$prediction)) {
-	    state$prediction <- detail$prediction
-	  }
-	  if (is.list(detail) && !is.null(detail$proximity) && is.data.frame(detail$proximity)) {
-	    state$proximity <- detail$proximity
-	  }
+  detail <- payload[["detail", exact = TRUE]]
+  if (is.list(detail) && !is.null(detail$project_snapshot)) {
+    state$project_snapshot <- detail$project_snapshot
+  }
+  if (is.list(detail) && !is.null(detail$tile_preview)) {
+    state$tile_preview <- tryCatch(
+      wsi_spatial_tile_payload_grid(detail$tile_preview),
+      error = function(err) state$tile_preview %||% wsi_empty_tile_preview()
+    )
+  }
+  if (is.list(detail) && !is.null(detail$prediction) && is.data.frame(detail$prediction)) {
+    state$prediction <- detail$prediction
+  }
+  if (is.list(detail) && !is.null(detail$proximity) && is.data.frame(detail$proximity)) {
+    state$proximity <- detail$proximity
+  }
+  if (is.list(detail) && !is.null(detail$trajectory_profile)) {
+    state$trajectory_profile <- wsi_trajectory_profile_from_payload(detail$trajectory_profile)
+  }
   state$selected_roi <- wsi_selected_roi_from_payload(payload[["selected_roi", exact = TRUE]])
   state$selected_rois <- wsi_selected_rois_from_payload(
     payload[["selected_rois", exact = TRUE]],
@@ -1498,6 +1508,9 @@ wsi_viewer_state_apply <- function(state, payload) {
   if (identical(state$last_event, "proximity_cleared")) {
     state$proximity <- wsi_empty_proximity_result()
   }
+  if (identical(state$last_event, "trajectory_profile_cleared")) {
+    state$trajectory_profile <- wsi_empty_trajectory_profile()
+  }
   if (startsWith(state$last_event, "segmentation")) {
     state$last_segmentation <- payload[["detail", exact = TRUE]] %||% list()
   }
@@ -1520,6 +1533,7 @@ wsi_viewer_state_apply <- function(state, payload) {
     tile_preview_count = nrow(state$tile_preview %||% wsi_empty_tile_preview()),
     prediction_count = nrow(state$prediction %||% wsi_empty_prediction_result()),
     proximity_count = nrow(state$proximity %||% wsi_empty_proximity_result()),
+    trajectory_profile_count = nrow(state$trajectory_profile %||% wsi_empty_trajectory_profile()),
     layer_count = length(state$layers %||% list()),
     channel_count = nrow(state$channel_settings %||% wsi_empty_channel_settings())
   )
@@ -1574,6 +1588,7 @@ wsi_viewer_state_record_event <- function(state, event, detail = list()) {
     tile_preview_count = if (is.data.frame(state$tile_preview)) nrow(state$tile_preview) else 0L,
     prediction_count = if (is.data.frame(state$prediction)) nrow(state$prediction) else 0L,
     proximity_count = if (is.data.frame(state$proximity)) nrow(state$proximity) else 0L,
+    trajectory_profile_count = if (is.data.frame(state$trajectory_profile)) nrow(state$trajectory_profile) else 0L,
     layer_count = length(state$layers %||% list()),
     channel_count = nrow(state$channel_settings %||% wsi_empty_channel_settings())
   )
@@ -1665,6 +1680,7 @@ wsi_viewer_state_response <- function(state, dequeue_commands = TRUE) {
     tile_preview_count = nrow(state$tile_preview %||% wsi_empty_tile_preview()),
     prediction_count = nrow(state$prediction %||% wsi_empty_prediction_result()),
     proximity_count = nrow(state$proximity %||% wsi_empty_proximity_result()),
+    trajectory_profile_count = nrow(state$trajectory_profile %||% wsi_empty_trajectory_profile()),
     annotations_dirty = isTRUE((state$annotations %||% list())$dirty),
     last_sync = as.character(state$last_sync),
     autosave = wsi_viewer_autosave_status(state),
@@ -2692,6 +2708,9 @@ wsi_attach_viewer_session_methods <- function(session) {
   }
   session$get_proximity <- function(service = TRUE) {
     session$get_state(service = service)$proximity
+  }
+  session$get_trajectory_profile <- function(service = TRUE) {
+    session$get_state(service = service)$trajectory_profile
   }
   session$colour_spots_by_gene <- function(gene, service = TRUE) {
     if (!is.character(gene) || length(gene) != 1L || is.na(gene) || !nzchar(trimws(gene))) {
@@ -4412,6 +4431,7 @@ wsi_viewer_state <- function(x) {
     tile_preview = state$tile_preview %||% wsi_empty_tile_preview(),
     prediction = state$prediction %||% wsi_empty_prediction_result(),
     proximity = state$proximity %||% wsi_empty_proximity_result(),
+    trajectory_profile = state$trajectory_profile %||% wsi_empty_trajectory_profile(),
     selected_roi = state$selected_roi,
     selected_rois = state$selected_rois,
     selected_object = state$selected_object %||% NULL,
@@ -4516,7 +4536,7 @@ print.wsi_viewer_session <- function(x, ...) {
   if (!is.null(x$stardist_server)) {
     cat(sprintf("  stardist: %s\n", x$stardist_server$url))
   }
-  cat("  methods: capabilities(), on(), get_rois(), get_selected_roi(), get_selected_rois(), get_selected_object(), get_selected_spots(), get_spot_annotation_table(), get_measurements(), get_trajectories(), get_roi_summary(), get_cell_summary(), get_ihc_summary(), get_segmentation(), get_layers(), get_channel_settings(), get_kodama_selection(), get_annotation_spots(), get_history(), get_logs(), get_tile_preview(), get_prediction(), get_proximity(), colour_spots_by_gene(), add_rois(), add_layer(), add_channel_source(), measure_ihc_intensity(), preview_tiles(), extract_tile_preview(), list_jobs(), run_tiles_async(), save_project(), autosave_start()\n")
+  cat("  methods: capabilities(), on(), get_rois(), get_selected_roi(), get_selected_rois(), get_selected_object(), get_selected_spots(), get_spot_annotation_table(), get_measurements(), get_trajectories(), get_roi_summary(), get_cell_summary(), get_ihc_summary(), get_segmentation(), get_layers(), get_channel_settings(), get_kodama_selection(), get_annotation_spots(), get_history(), get_logs(), get_tile_preview(), get_prediction(), get_proximity(), get_trajectory_profile(), colour_spots_by_gene(), add_rois(), add_layer(), add_channel_source(), measure_ihc_intensity(), preview_tiles(), extract_tile_preview(), list_jobs(), run_tiles_async(), save_project(), autosave_start()\n")
   cat("  stop with: wsi_viewer_stop(x)\n")
   invisible(x)
 }
