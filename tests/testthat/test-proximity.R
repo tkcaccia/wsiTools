@@ -140,6 +140,12 @@ test_that("proximity controls are rendered only for managed point sources", {
   html <- paste(readLines(out, warn = FALSE), collapse = "\n")
   expect_match(html, "Proximity analysis", fixed = TRUE)
   expect_match(html, "runProximityAnalysis", fixed = TRUE)
+  expect_match(html, "proximityCurrentSource", fixed = TRUE)
+  expect_match(html, "syncProximityAnnotations", fixed = TRUE)
+  expect_match(html, "currentProximityRoiSignature", fixed = TRUE)
+  expect_match(html, "if(typeof syncProximityAnnotations==='function')syncProximityAnnotations(false)", fixed = TRUE)
+  expect_false(grepl("id=\"proximityRefreshAnnotations\"", html, fixed = TRUE))
+  expect_false(grepl("Refresh proximity annotation choices", html, fixed = TRUE))
 
   out2 <- tempfile(fileext = ".html")
   wsi_viewer(slide, output = out2, open = FALSE, overwrite = TRUE)

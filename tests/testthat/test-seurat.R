@@ -613,6 +613,7 @@ test_that("Seurat viewer exposes spot layer and reduction controls", {
   expect_match(text, "Current tissue", fixed = TRUE)
   expect_match(text, "All tissues", fixed = TRUE)
   expect_match(text, "bindSeuratControls", fixed = TRUE)
+  expect_match(text, "openSeuratPlot(Number(btn.dataset.plotIndex||0));if(typeof closeMenuAfterToolAction==='function')closeMenuAfterToolAction(e.currentTarget);", fixed = TRUE)
   expect_match(text, "seuratGeneInput", fixed = TRUE)
 	  expect_match(text, "seuratClusterSelect", fixed = TRUE)
 	  expect_match(text, "Spot-centered tiles", fixed = TRUE)
