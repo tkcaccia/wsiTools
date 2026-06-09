@@ -112,3 +112,33 @@ test_that("mock slides support metadata helpers", {
   expect_equal(wsi_mpp(slide), c(x = 0.25, y = 0.25))
   expect_equal(wsi_objective_power(slide), 40)
 })
+
+test_that("OME physical pixel size in ImageDescription supplies mpp", {
+  slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 800, levels = c(1, 4))
+  slide$properties[["openslide.mpp-x"]] <- NULL
+  slide$properties[["openslide.mpp-y"]] <- NULL
+  slide$properties[["image-description"]] <- paste0(
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+    "<OME><Image ID=\"Image:0\"><Pixels SizeX=\"66699\" SizeY=\"44544\" ",
+    "PhysicalSizeX=\"0.27377311315600433\" PhysicalSizeXUnit=\"\u00b5m\" ",
+    "PhysicalSizeY=\"0.27377438662948689\" PhysicalSizeYUnit=\"\u00b5m\"/>",
+    "</Image></OME>"
+  )
+
+  expect_equal(
+    wsi_mpp(slide),
+    c(x = 0.27377311315600433, y = 0.27377438662948689),
+    tolerance = 1e-12
+  )
+})
+
+test_that("TIFF display resolution is ignored when it is not plausible WSI scale", {
+  slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 800, levels = c(1, 4))
+  slide$properties[["openslide.mpp-x"]] <- NULL
+  slide$properties[["openslide.mpp-y"]] <- NULL
+  slide$properties[["xres"]] <- "3.77953"
+  slide$properties[["yres"]] <- "3.77953"
+  slide$properties[["resolution-unit"]] <- "in"
+
+  expect_equal(wsi_mpp(slide), c(x = NA_real_, y = NA_real_))
+})

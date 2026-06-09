@@ -383,12 +383,148 @@ wsi_properties <- function(slide) {
 wsi_mpp <- function(slide) {
   wsi_check_slide(slide)
   props <- slide$properties
-  x <- suppressWarnings(as.numeric(props[["openslide.mpp-x"]] %||% props[["mpp-x"]] %||% NA_real_))
-  y <- suppressWarnings(as.numeric(props[["openslide.mpp-y"]] %||% props[["mpp-y"]] %||% NA_real_))
-  if (is.na(x) && is.na(y)) {
+  x <- wsi_first_numeric_property(props, c(
+    "openslide.mpp-x", "mpp-x", "ome.physical-size-x",
+    "PhysicalSizeX", "physical-size-x", "microns-per-pixel-x"
+  ))
+  y <- wsi_first_numeric_property(props, c(
+    "openslide.mpp-y", "mpp-y", "ome.physical-size-y",
+    "PhysicalSizeY", "physical-size-y", "microns-per-pixel-y"
+  ))
+  if (!is.finite(x) || !is.finite(y)) {
+    description <- props[["image-description"]] %||%
+      props[["tiff.ImageDescription"]] %||%
+      props[["ImageDescription"]] %||%
+      NA_character_
+    ome_mpp <- wsi_ome_physical_size_mpp(description)
+    if (!is.finite(x)) x <- ome_mpp[["x"]]
+    if (!is.finite(y)) y <- ome_mpp[["y"]]
+  }
+  if (!is.finite(x) || !is.finite(y)) {
+    tiff_mpp <- wsi_tiff_resolution_mpp(props)
+    if (!is.finite(x)) x <- tiff_mpp[["x"]]
+    if (!is.finite(y)) y <- tiff_mpp[["y"]]
+  }
+  if (is.finite(x) && !is.finite(y)) {
+    y <- x
+  } else if (!is.finite(x) && is.finite(y)) {
+    x <- y
+  }
+  if (!is.finite(x) && !is.finite(y)) {
     return(c(x = NA_real_, y = NA_real_))
   }
   c(x = x, y = y)
+}
+
+wsi_first_numeric_property <- function(properties, names) {
+  for (name in names) {
+    value <- suppressWarnings(as.numeric(properties[[name]] %||% NA_real_))
+    if (length(value) && is.finite(value[[1L]]) && value[[1L]] > 0) {
+      return(value[[1L]])
+    }
+  }
+  NA_real_
+}
+
+wsi_ome_physical_size_mpp <- function(metadata_xml) {
+  metadata_xml <- metadata_xml[[1L]] %||% NA_character_
+  if (is.na(metadata_xml) || !nzchar(metadata_xml)) {
+    return(c(x = NA_real_, y = NA_real_))
+  }
+  metadata_xml <- wsi_clean_text(metadata_xml)
+  x <- wsi_ome_attribute_numeric(metadata_xml, "PhysicalSizeX")
+  y <- wsi_ome_attribute_numeric(metadata_xml, "PhysicalSizeY")
+  x_unit <- wsi_ome_attribute_value(metadata_xml, "PhysicalSizeXUnit")
+  y_unit <- wsi_ome_attribute_value(metadata_xml, "PhysicalSizeYUnit")
+  c(
+    x = wsi_physical_size_to_um(x, x_unit),
+    y = wsi_physical_size_to_um(y, y_unit)
+  )
+}
+
+wsi_ome_attribute_value <- function(metadata_xml, attribute) {
+  pattern <- sprintf("(?is)\\b%s\\s*=\\s*['\"]([^'\"]+)['\"]", attribute)
+  match <- regexec(pattern, metadata_xml, perl = TRUE)
+  parts <- regmatches(metadata_xml, match)[[1L]]
+  if (length(parts) < 2L) {
+    return(NA_character_)
+  }
+  parts[[2L]]
+}
+
+wsi_ome_attribute_numeric <- function(metadata_xml, attribute) {
+  suppressWarnings(as.numeric(wsi_ome_attribute_value(metadata_xml, attribute) %||% NA_real_))
+}
+
+wsi_physical_size_to_um <- function(value, unit = NA_character_) {
+  value <- suppressWarnings(as.numeric(value %||% NA_real_))
+  if (!is.finite(value) || value <= 0) {
+    return(NA_real_)
+  }
+  unit <- tolower(trimws(as.character(unit %||% "um")))
+  unit <- gsub("\u00b5", "u", unit, fixed = TRUE)
+  unit <- gsub("\u03bc", "u", unit, fixed = TRUE)
+  unit <- gsub("[[:space:]_/-]+", "", unit)
+  multiplier <- switch(
+    unit,
+    um = 1,
+    micron = 1,
+    microns = 1,
+    micrometer = 1,
+    micrometers = 1,
+    micrometre = 1,
+    micrometres = 1,
+    nm = 0.001,
+    nanometer = 0.001,
+    nanometers = 0.001,
+    nanometre = 0.001,
+    nanometres = 0.001,
+    mm = 1000,
+    millimeter = 1000,
+    millimeters = 1000,
+    millimetre = 1000,
+    millimetres = 1000,
+    cm = 10000,
+    m = 1e6,
+    1
+  )
+  value * multiplier
+}
+
+wsi_tiff_resolution_mpp <- function(properties) {
+  xres <- wsi_first_numeric_property(properties, c("xres", "XResolution", "tiff.XResolution"))
+  yres <- wsi_first_numeric_property(properties, c("yres", "YResolution", "tiff.YResolution"))
+  unit <- tolower(trimws(as.character(
+    properties[["resolution-unit"]] %||%
+      properties[["ResolutionUnit"]] %||%
+      properties[["tiff.ResolutionUnit"]] %||%
+      ""
+  )))
+  x <- wsi_resolution_to_mpp(xres, unit)
+  y <- wsi_resolution_to_mpp(yres, unit)
+  if (!wsi_plausible_mpp(x)) x <- NA_real_
+  if (!wsi_plausible_mpp(y)) y <- NA_real_
+  c(x = x, y = y)
+}
+
+wsi_resolution_to_mpp <- function(resolution, unit = "") {
+  resolution <- suppressWarnings(as.numeric(resolution %||% NA_real_))
+  if (!is.finite(resolution) || resolution <= 0) {
+    return(NA_real_)
+  }
+  unit <- gsub("[[:space:]_/-]+", "", tolower(as.character(unit %||% "")))
+  if (unit %in% c("in", "inch", "inches", "2")) {
+    return(25400 / resolution)
+  }
+  if (unit %in% c("cm", "centimeter", "centimeters", "centimetre", "centimetres", "3")) {
+    return(10000 / resolution)
+  }
+  1000 / resolution
+}
+
+wsi_plausible_mpp <- function(value) {
+  value <- suppressWarnings(as.numeric(value %||% NA_real_))
+  length(value) && is.finite(value[[1L]]) && value[[1L]] > 0 && value[[1L]] <= 50
 }
 
 #' @rdname wsi_info

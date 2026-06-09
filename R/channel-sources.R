@@ -349,7 +349,7 @@ wsi_channel_settings_from_sources <- function(sources) {
 
 wsi_ome_channel_names <- function(path, pages = NULL) {
   description <- tryCatch(
-    wsi_vips_field(path, "image-description"),
+    wsi_vips_field(path, "image-description", collapse = TRUE),
     error = function(err) NA_character_
   )
   names <- character()

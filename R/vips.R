@@ -1,4 +1,4 @@
-wsi_vips_field <- function(path, field) {
+wsi_vips_field <- function(path, field, collapse = FALSE) {
   if (!wsi_has_vips()) {
     return(NA_character_)
   }
@@ -10,9 +10,17 @@ wsi_vips_field <- function(path, field) {
   if (!identical(as.integer(status), 0L) || length(out) == 0L) {
     return(NA_character_)
   }
+  out <- wsi_clean_text(out)
+  out <- out[!grepl("VIPS-WARNING", out, fixed = TRUE)]
+  if (isTRUE(collapse)) {
+    out <- out[nzchar(out)]
+    if (!length(out)) {
+      return(NA_character_)
+    }
+    return(paste(out, collapse = "\n"))
+  }
   out <- trimws(out)
   out <- out[nzchar(out)]
-  out <- out[!grepl("VIPS-WARNING", out, fixed = TRUE)]
   if (!length(out)) {
     return(NA_character_)
   }
@@ -47,6 +55,7 @@ wsi_vips_open <- function(path) {
   }
 
   properties <- wsi_vips_properties(path)
+  properties <- wsi_vips_add_ome_physical_size(path, properties)
   levels <- wsi_properties_to_levels(properties)
   if (nrow(levels) == 0L || is.na(levels$width[[1L]]) || is.na(levels$height[[1L]])) {
     levels <- data.frame(level = 0L, width = width, height = height, downsample = 1, stringsAsFactors = FALSE)
@@ -66,6 +75,23 @@ wsi_vips_open <- function(path) {
     metadata = metadata,
     associated_images = wsi_openslide_associated_images(properties)
   )
+}
+
+wsi_vips_add_ome_physical_size <- function(path, properties) {
+  description <- wsi_vips_field(path, "image-description", collapse = TRUE)
+  if (is.na(description) || !nzchar(description)) {
+    return(properties)
+  }
+  properties[["image-description"]] <- description
+  mpp <- wsi_ome_physical_size_mpp(description)
+  if (!all(is.finite(mpp)) || !all(mpp > 0)) {
+    return(properties)
+  }
+  properties[["ome.physical-size-x"]] <- format(mpp[["x"]], scientific = FALSE, trim = TRUE)
+  properties[["ome.physical-size-y"]] <- format(mpp[["y"]], scientific = FALSE, trim = TRUE)
+  properties[["mpp-x"]] <- properties[["mpp-x"]] %||% properties[["ome.physical-size-x"]]
+  properties[["mpp-y"]] <- properties[["mpp-y"]] %||% properties[["ome.physical-size-y"]]
+  properties
 }
 
 wsi_vips_input_for_level <- function(path, level) {
