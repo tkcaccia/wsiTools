@@ -1,0 +1,391 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #0f172a;
+  color: #e5e7eb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #0b1020;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+button {
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 6px;
+  background: #1f2937;
+  color: #f8fafc;
+  padding: 8px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: #5eead4;
+  background: #243244;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.homeScreen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #0b1020;
+}
+
+.homeCard {
+  width: min(520px, 100%);
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.96);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+  padding: 24px;
+}
+
+.homeBrand {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  text-align: center;
+  margin-bottom: 22px;
+}
+
+.homeBrand h1 {
+  margin: 0;
+  font-size: 34px;
+  line-height: 1.05;
+}
+
+.homeBrand p {
+  margin: 0;
+  color: #94a3b8;
+}
+
+.homeActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.homeActions button {
+  min-height: 84px;
+  font-size: 17px;
+  font-weight: 700;
+  background: #172033;
+}
+
+.homeActions button:first-child {
+  background: #0f766e;
+  border-color: rgba(94, 234, 212, 0.52);
+}
+
+.homeActions button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.appShell {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.launcherPanel {
+  width: min(760px, 100%);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.98);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
+}
+
+.projectBuilderPanel {
+  min-height: min(860px, calc(100vh - 48px));
+}
+
+.brand {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.brand p {
+  margin: 5px 0 0;
+  color: #94a3b8;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.brandActions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.brandActions button {
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.statusPill {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(59, 130, 246, 0.18);
+  color: #bfdbfe;
+  font-size: 12px;
+}
+
+.statusPill[data-kind="ok"] {
+  background: rgba(20, 184, 166, 0.18);
+  color: #99f6e4;
+}
+
+.statusPill[data-kind="error"] {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fecaca;
+}
+
+.projectActions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.projectActions button {
+  min-height: 48px;
+  font-weight: 650;
+}
+
+.projectActions #runR {
+  background: #0f766e;
+  border-color: rgba(94, 234, 212, 0.52);
+}
+
+.wizardStep {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wizardStep[hidden] {
+  display: none !important;
+}
+
+.selectedFile {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 10px;
+}
+
+.selectedFile span {
+  display: block;
+  color: #94a3b8;
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+
+.selectedFile code {
+  display: block;
+  color: #f8fafc;
+  font-size: 12px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.imageList,
+.associationList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.imageRow,
+.associationCard {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.62);
+}
+
+.imageRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+}
+
+.imageRowText strong,
+.associationHeader strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.imageRowText code,
+.associationHeader code {
+  display: block;
+  color: #cbd5e1;
+  font-size: 11px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.imageRow button,
+.associationHeader button,
+.associationActions button {
+  min-height: 0;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.associationCard {
+  padding: 10px;
+}
+
+.associationHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.associationActions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.associationFiles {
+  display: grid;
+  gap: 7px;
+  margin: 10px 0 0;
+}
+
+.associationFiles div {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.associationFiles dt {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.associationFiles dd {
+  margin: 0;
+  color: #e5e7eb;
+  font-size: 12px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.runtimePanel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.launchError {
+  border: 1px solid rgba(248, 113, 113, 0.48);
+  border-radius: 8px;
+  background: rgba(127, 29, 29, 0.46);
+  color: #fee2e2;
+  font-size: 12px;
+  line-height: 1.45;
+  max-height: 180px;
+  overflow: auto;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+}
+
+.launchError[hidden] {
+  display: none !important;
+}
+
+.runtimePanel[hidden] {
+  display: none !important;
+}
+
+.runtimePanel > button {
+  align-self: flex-start;
+}
+
+.logBox {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 8px;
+}
+
+.logBox summary {
+  cursor: pointer;
+  color: #cbd5e1;
+  font-size: 13px;
+}
+
+.logActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.logActions button {
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.logBox pre {
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #d1d5db;
+}
+
+@media (max-width: 900px) {
+  .homeActions {
+    grid-template-columns: 1fr;
+  }
+
+  .projectActions,
+  .associationHeader,
+  .associationActions,
+  .imageRow {
+    grid-template-columns: 1fr;
+  }
+}

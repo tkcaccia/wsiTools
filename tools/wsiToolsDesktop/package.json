@@ -1,0 +1,22 @@
+{
+  "name": "wsitools-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Tauri desktop launcher for the wsiTools live viewer.",
+  "scripts": {
+    "dev:ui": "vite --host 127.0.0.1 --port 1420 --strictPort",
+    "build:ui": "vite build",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "vite": "^7"
+  }
+}

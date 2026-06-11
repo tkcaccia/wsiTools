@@ -376,6 +376,10 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
 #'   default is `TRUE` so R and the browser stay synchronized while the session
 #'   is active; set `live = FALSE` to write a static HTML viewer.
 #' @param dynamic_tiles When `live = TRUE`, serve the image as dynamic tiles.
+#' @param show_spots Whether to draw the spatial spot layer on top of the
+#'   tissue image. Set this to `FALSE` for very dense assays such as Visium HD
+#'   when a tiled mask or other aggregate layer is more appropriate than sending
+#'   sampled spots to the browser.
 #' @param mode Viewer mode for static output. `"tiles"` gives full-resolution
 #'   Deep Zoom viewing when the backend can create tiles.
 #' @param output,open,overwrite Additional viewer options.
@@ -397,12 +401,16 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
 #' }
 wsi_viewer_seurat <- function(seurat, image, linked = NULL,
                               live = TRUE, dynamic_tiles = live,
+                              show_spots = TRUE,
                               mode = c("tiles", "thumbnail"),
                               output = NULL, open = interactive(),
                               overwrite = FALSE, ...) {
   dots <- list(...)
   if (!is.logical(live) || length(live) != 1L || is.na(live)) {
     wsi_abort("`live` must be `TRUE` or `FALSE`.")
+  }
+  if (!is.logical(show_spots) || length(show_spots) != 1L || is.na(show_spots)) {
+    wsi_abort("`show_spots` must be `TRUE` or `FALSE`.")
   }
   mode <- match.arg(mode)
   if (is.null(linked)) {
@@ -422,12 +430,15 @@ wsi_viewer_seurat <- function(seurat, image, linked = NULL,
     )
   }
 
-  spot_layer <- wsi_seurat_spots_layer(linked)
   layers <- dots$layers %||% list()
   if (!is.list(layers) || inherits(layers, "data.frame")) {
     layers <- list(layers)
   }
-  dots$layers <- c(list(spot_layer), layers)
+  dots$layers <- if (isTRUE(show_spots)) {
+    c(list(wsi_seurat_spots_layer(linked)), layers)
+  } else {
+    layers
+  }
   dots$seurat <- linked
   dots$output <- output
   dots$open <- open
@@ -436,6 +447,7 @@ wsi_viewer_seurat <- function(seurat, image, linked = NULL,
 
   if (isTRUE(live)) {
     dots$dynamic_tiles <- dynamic_tiles
+    dots$mode <- mode
     dots$slide <- linked$slide
     return(do.call(wsi_viewer_live, dots))
   }

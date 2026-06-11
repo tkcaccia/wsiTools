@@ -1255,7 +1255,8 @@ wsi_http_file_response <- function(file, content_type, status = 200L) {
     status = as.integer(status),
     headers = list(
       "Content-Type" = content_type,
-      "Cache-Control" = "public, max-age=86400",
+      "Cache-Control" = "no-store, max-age=0",
+      "Pragma" = "no-cache",
       "Access-Control-Allow-Origin" = "*",
       "Access-Control-Allow-Methods" = "GET, OPTIONS",
       "Access-Control-Allow-Headers" = "Content-Type"

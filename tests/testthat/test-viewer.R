@@ -2724,9 +2724,16 @@ test_that("tiled viewer HTML writes mIHC channel overlay controls", {
     opacity = 0.5,
     metadata = list(
       extent = list(x = 10, y = 20, width = 320, height = 240),
-      server_colourized = TRUE
+      server_colourized = TRUE,
+      legend = list(
+        list(value = 1, label = "Tumour cells", colour = "#ff0000", count = 10),
+        list(value = 2, label = "Stroma cells", colour = "#00ff00", count = 5)
+      )
     )
   )
+  source$selected_values <- c("1")
+  settings <- wsiTools:::wsi_channel_settings_from_sources(list(source))
+  expect_equal(settings$selected_values[[1]], "1")
 
   result <- wsi_viewer(
     slide,
@@ -2754,6 +2761,16 @@ test_that("tiled viewer HTML writes mIHC channel overlay controls", {
   expect_match(html, "No image channels for the current image.", fixed = TRUE)
   expect_match(html, "channelPlacementOptions", fixed = TRUE)
   expect_match(html, "server_colourized", fixed = TRUE)
+  expect_match(html, "channelLegendPanel", fixed = TRUE)
+  expect_match(html, "channelLegendEntries", fixed = TRUE)
+  expect_match(html, "channelMaskFilterState", fixed = TRUE)
+  expect_match(html, "channelMaskCanvasFilterActive", fixed = TRUE)
+  expect_match(html, "drawFilteredMaskChannels", fixed = TRUE)
+  expect_match(html, "multiViewDrawFilteredMaskChannels", fixed = TRUE)
+  expect_match(html, "channelLegendTools", fixed = TRUE)
+  expect_match(html, "selected_values", fixed = TRUE)
+  expect_match(html, "Mask legend", fixed = TRUE)
+  expect_match(html, "Tumour cells", fixed = TRUE)
   expect_match(html, "contrast_min", fixed = TRUE)
   expect_match(html, "Marker A", fixed = TRUE)
   expect_match(html, "baseImageVisible", fixed = TRUE)

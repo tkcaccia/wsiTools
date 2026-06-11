@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>wsiTools Desktop</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main id="homeScreen" class="homeScreen">
+      <section class="homeCard">
+        <div class="homeBrand">
+          <h1>wsiTools</h1>
+          <p>Live R-connected pathology viewer</p>
+          <span id="homeRStatus" class="statusPill">checking R</span>
+        </div>
+        <div class="homeActions" aria-label="Project actions">
+          <button id="openProjectHome" type="button">Open project</button>
+          <button id="createProjectHome" type="button">Create new project</button>
+        </div>
+      </section>
+    </main>
+
+    <main id="appShell" class="appShell" hidden>
+      <section class="launcherPanel projectBuilderPanel">
+        <div class="brand">
+          <div>
+            <h1>wsiTools</h1>
+            <p id="workspaceSubtitle">Create a new project</p>
+          </div>
+          <div class="brandActions">
+            <span id="rStatus" class="statusPill">checking R</span>
+            <button id="backHome" type="button">Home</button>
+          </div>
+        </div>
+
+        <div id="imageStep" class="wizardStep">
+          <div class="projectActions">
+            <button id="addImage" type="button">Add new image</button>
+            <button id="nextAssociations" type="button" disabled>Next</button>
+          </div>
+
+          <div class="selectedFile">
+            <span>Selected microscopy images</span>
+            <div id="imageList" class="imageList">No images selected.</div>
+          </div>
+        </div>
+
+        <div id="associationStep" class="wizardStep" hidden>
+          <div class="projectActions">
+            <button id="backToImages" type="button">Back</button>
+            <button id="runR" type="button" disabled>Run R</button>
+          </div>
+
+          <div class="selectedFile">
+            <span>Associate data to each image</span>
+            <div id="associationList" class="associationList">No images selected.</div>
+          </div>
+        </div>
+
+        <div id="launchError" class="launchError" hidden></div>
+
+        <div id="runtimePanel" class="runtimePanel" hidden>
+          <button id="stopViewer" type="button" disabled>Stop R</button>
+          <details class="logBox" open>
+            <summary>R / viewer log</summary>
+            <div class="logActions">
+              <button id="copyLog" type="button">Copy log</button>
+              <button id="saveLog" type="button">Save log</button>
+            </div>
+            <pre id="logOutput">No log messages yet.</pre>
+          </details>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

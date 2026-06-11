@@ -52,6 +52,7 @@ wsi_new_viewer_state <- function(name = "wsi_viewer_live_state", envir = parent.
   state$tile_preview <- wsi_empty_tile_preview()
   state$prediction <- wsi_empty_prediction_result()
   state$proximity <- wsi_empty_proximity_result()
+  state$proximity_stats <- wsi_empty_proximity_stats_result()
   state$trajectory_profile <- wsi_empty_trajectory_profile()
   state$selected_roi <- NULL
   state$selected_rois <- wsi_empty_roi()
@@ -170,7 +171,9 @@ wsi_viewer_allowed_events <- function() {
     "prediction_started", "prediction_finished", "prediction_failed",
     "prediction_cleared",
     "proximity_started", "proximity_finished", "proximity_failed",
-    "proximity_cleared",
+    "proximity_cleared", "proximity_stats_started",
+    "proximity_stats_finished", "proximity_stats_failed",
+    "proximity_stats_cleared", "proximity_stats_exported",
     "trajectory_profile_started", "trajectory_profile_finished",
     "trajectory_profile_failed", "trajectory_profile_cleared",
     "ihc_intensity_measured",
@@ -1422,6 +1425,7 @@ wsi_assign_viewer_state <- function(state) {
   assign(paste0(name, "_tile_preview"), state$tile_preview %||% wsi_empty_tile_preview(), envir = envir)
   assign(paste0(name, "_prediction"), state$prediction %||% wsi_empty_prediction_result(), envir = envir)
   assign(paste0(name, "_proximity"), state$proximity %||% wsi_empty_proximity_result(), envir = envir)
+  assign(paste0(name, "_proximity_stats"), state$proximity_stats %||% wsi_empty_proximity_stats_result(), envir = envir)
   assign(paste0(name, "_trajectory_profile"), state$trajectory_profile %||% wsi_empty_trajectory_profile(), envir = envir)
   assign(paste0(name, "_annotations"), state$annotations, envir = envir)
   assign(paste0(name, "_history"), state$history, envir = envir)
@@ -1470,6 +1474,9 @@ wsi_viewer_state_apply <- function(state, payload) {
   if (is.list(detail) && !is.null(detail$proximity) && is.data.frame(detail$proximity)) {
     state$proximity <- detail$proximity
   }
+  if (is.list(detail) && !is.null(detail$proximity_stats) && is.data.frame(detail$proximity_stats)) {
+    state$proximity_stats <- detail$proximity_stats
+  }
   if (is.list(detail) && !is.null(detail$trajectory_profile)) {
     state$trajectory_profile <- wsi_trajectory_profile_from_payload(detail$trajectory_profile)
   }
@@ -1507,6 +1514,10 @@ wsi_viewer_state_apply <- function(state, payload) {
   }
   if (identical(state$last_event, "proximity_cleared")) {
     state$proximity <- wsi_empty_proximity_result()
+    state$proximity_stats <- wsi_empty_proximity_stats_result()
+  }
+  if (identical(state$last_event, "proximity_stats_cleared")) {
+    state$proximity_stats <- wsi_empty_proximity_stats_result()
   }
   if (identical(state$last_event, "trajectory_profile_cleared")) {
     state$trajectory_profile <- wsi_empty_trajectory_profile()
@@ -1533,6 +1544,7 @@ wsi_viewer_state_apply <- function(state, payload) {
     tile_preview_count = nrow(state$tile_preview %||% wsi_empty_tile_preview()),
     prediction_count = nrow(state$prediction %||% wsi_empty_prediction_result()),
     proximity_count = nrow(state$proximity %||% wsi_empty_proximity_result()),
+    proximity_stats_count = nrow(state$proximity_stats %||% wsi_empty_proximity_stats_result()),
     trajectory_profile_count = nrow(state$trajectory_profile %||% wsi_empty_trajectory_profile()),
     layer_count = length(state$layers %||% list()),
     channel_count = nrow(state$channel_settings %||% wsi_empty_channel_settings())
@@ -1588,6 +1600,7 @@ wsi_viewer_state_record_event <- function(state, event, detail = list()) {
     tile_preview_count = if (is.data.frame(state$tile_preview)) nrow(state$tile_preview) else 0L,
     prediction_count = if (is.data.frame(state$prediction)) nrow(state$prediction) else 0L,
     proximity_count = if (is.data.frame(state$proximity)) nrow(state$proximity) else 0L,
+    proximity_stats_count = if (is.data.frame(state$proximity_stats)) nrow(state$proximity_stats) else 0L,
     trajectory_profile_count = if (is.data.frame(state$trajectory_profile)) nrow(state$trajectory_profile) else 0L,
     layer_count = length(state$layers %||% list()),
     channel_count = nrow(state$channel_settings %||% wsi_empty_channel_settings())
@@ -1680,6 +1693,7 @@ wsi_viewer_state_response <- function(state, dequeue_commands = TRUE) {
     tile_preview_count = nrow(state$tile_preview %||% wsi_empty_tile_preview()),
     prediction_count = nrow(state$prediction %||% wsi_empty_prediction_result()),
     proximity_count = nrow(state$proximity %||% wsi_empty_proximity_result()),
+    proximity_stats_count = nrow(state$proximity_stats %||% wsi_empty_proximity_stats_result()),
     trajectory_profile_count = nrow(state$trajectory_profile %||% wsi_empty_trajectory_profile()),
     annotations_dirty = isTRUE((state$annotations %||% list())$dirty),
     last_sync = as.character(state$last_sync),
@@ -2709,6 +2723,9 @@ wsi_attach_viewer_session_methods <- function(session) {
   session$get_proximity <- function(service = TRUE) {
     session$get_state(service = service)$proximity
   }
+  session$get_proximity_stats <- function(service = TRUE) {
+    session$get_state(service = service)$proximity_stats
+  }
   session$get_trajectory_profile <- function(service = TRUE) {
     session$get_state(service = service)$trajectory_profile
   }
@@ -2912,6 +2929,7 @@ wsi_attach_viewer_session_methods <- function(session) {
                                            colour = NULL, gain = NULL,
                                            contrast_min = NULL,
                                            contrast_max = NULL,
+                                           selected_values = NULL,
                                            service = TRUE) {
     id <- wsi_channel_source_id(id)
     patch <- list(
@@ -2920,7 +2938,8 @@ wsi_attach_viewer_session_methods <- function(session) {
       colour = colour,
       gain = gain,
       contrast_min = contrast_min,
-      contrast_max = contrast_max
+      contrast_max = contrast_max,
+      selected_values = selected_values
     )
     patch <- patch[!vapply(patch, is.null, logical(1))]
     self$state$channel_settings <- wsi_channel_update_one(self$state$channel_settings, id, patch)
@@ -3750,7 +3769,10 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	      response <- wsi_proximity_response(context = context, state = state, payload = payload)
 	      wsi_http_json_response(body = response)
 	    }, error = function(err) {
-	      wsi_viewer_state_record_event(state, "proximity_failed", list(error = conditionMessage(err)))
+	      payload <- get0("payload", ifnotfound = list())
+	      action <- if (is.list(payload)) tolower(as.character(payload$action %||% "")) else ""
+	      event <- if (action %in% c("stats", "statistics")) "proximity_stats_failed" else "proximity_failed"
+	      wsi_viewer_state_record_event(state, event, list(error = conditionMessage(err)))
 	      wsi_http_json_response(status = 500L, body = list(ok = FALSE, error = conditionMessage(err)))
 	    })
 	  }
@@ -3881,6 +3903,92 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
     last_error <- conditionMessage(attr(server, "condition"))
   }
   wsi_abort(sprintf("Could not start live viewer state server near port %d: %s", port, last_error %||% "unknown error"))
+}
+
+wsi_project_tile_record_from_dynamic <- function(source, base_url = NULL, index = 1L) {
+  metadata <- wsi_dynamic_tile_metadata(source, base_url = base_url)
+  source_metadata <- source$metadata %||% list()
+  slide <- source$slide %||% NULL
+  path <- source_metadata$path %||% source$path %||% if (!is.null(slide)) slide$path else ""
+  backend <- source_metadata$backend %||%
+    if (!is.null(slide)) slide$backend else metadata$kind %||% "dynamic"
+  mpp <- if (!is.null(source_metadata$mpp)) {
+    source_metadata$mpp
+  } else if (!is.null(slide)) {
+    wsi_viewer_mpp_payload(tryCatch(wsi_mpp(slide), error = function(err) NULL))
+  } else {
+    NULL
+  }
+  objective_power <- if (!is.null(source_metadata$objective_power)) {
+    source_metadata$objective_power
+  } else if (!is.null(slide)) {
+    wsi_viewer_objective_power_payload(
+      tryCatch(wsi_objective_power(slide), error = function(err) NULL)
+    )
+  } else {
+    NULL
+  }
+
+  list(
+    id = as.character(source_metadata$project_item_id %||% source_metadata$id %||% metadata$id),
+    label = as.character(source_metadata$label %||% source_metadata$name %||% metadata$name %||% sprintf("Image %d", index)),
+    path = as.character(path %||% ""),
+    backend = as.character(backend %||% "dynamic"),
+    type = as.character(source_metadata$type %||% metadata$kind %||% "slide"),
+    status = as.character(source_metadata$status %||% "live tiles"),
+    message = as.character(source_metadata$message %||% "Full-resolution tiles are served on demand by the live R session."),
+    width = unname(as.numeric(metadata$width)),
+    height = unname(as.numeric(metadata$height)),
+    tile_url_base = metadata$tile_url_base,
+    tile_url_template = metadata$tile_url_template,
+    tile_url_style = metadata$tile_url_style,
+    tile_format = metadata$tile_format,
+    tile_size = metadata$tile_size,
+    tile_overlap = metadata$tile_overlap,
+    min_level = metadata$min_level,
+    max_level = metadata$max_level,
+    image_data_uri = NULL,
+    navigator_image_data_uri = NULL,
+    sections = list(),
+    mpp = mpp,
+    objective_power = objective_power,
+    active = isTRUE(source_metadata$active)
+  )
+}
+
+wsi_project_images_with_dynamic_tiles <- function(project_images = NULL,
+                                                  dynamic_sources = list(),
+                                                  base_url = NULL) {
+  if (!length(dynamic_sources)) {
+    return(project_images)
+  }
+  records <- lapply(seq_along(dynamic_sources), function(i) {
+    wsi_project_tile_record_from_dynamic(dynamic_sources[[i]], base_url = base_url, index = i)
+  })
+  if (is.null(project_images)) {
+    return(records)
+  }
+  existing <- if (is.list(project_images) && !is.data.frame(project_images)) {
+    project_images
+  } else {
+    as.list(project_images)
+  }
+  existing_ids <- vapply(existing, function(item) {
+    if (is.list(item)) {
+      as.character(item$id %||% item$path %||% "")
+    } else {
+      as.character(item %||% "")
+    }
+  }, character(1))
+  existing_ids <- existing_ids[nzchar(existing_ids)]
+  for (record in records) {
+    record_ids <- c(record$id %||% "", record$path %||% "")
+    if (any(nzchar(record_ids) & record_ids %in% existing_ids)) {
+      next
+    }
+    existing[[length(existing) + 1L]] <- record
+  }
+  existing
 }
 
 #' Start a live viewer session that syncs back to R
@@ -4229,8 +4337,25 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   }, add = TRUE)
 
   base_url <- sprintf("http://%s:%d", bridge$host, bridge$port)
+  if (length(dynamic_project_sources)) {
+    dots$project_images <- wsi_project_images_with_dynamic_tiles(
+      dots$project_images %||% NULL,
+      dynamic_project_sources,
+      base_url = base_url
+    )
+  }
   if (!is.null(dynamic_source)) {
     metadata <- wsi_dynamic_tile_metadata(dynamic_source, base_url = base_url)
+    cache_key <- as.character(metadata$cache_key %||% "")
+    if (nzchar(cache_key)) {
+      separator <- if (grepl("\\?", metadata$tile_url_template)) "&" else "?"
+      metadata$tile_url_template <- paste0(
+        metadata$tile_url_template,
+        separator,
+        "v=",
+        utils::URLencode(cache_key, reserved = TRUE)
+      )
+    }
     state$tile_sources <- list(dynamic = metadata)
     dots$mode <- dots$mode %||% "tiles"
     dots$tile_url_base <- metadata$tile_url_base
@@ -4431,6 +4556,7 @@ wsi_viewer_state <- function(x) {
     tile_preview = state$tile_preview %||% wsi_empty_tile_preview(),
     prediction = state$prediction %||% wsi_empty_prediction_result(),
     proximity = state$proximity %||% wsi_empty_proximity_result(),
+    proximity_stats = state$proximity_stats %||% wsi_empty_proximity_stats_result(),
     trajectory_profile = state$trajectory_profile %||% wsi_empty_trajectory_profile(),
     selected_roi = state$selected_roi,
     selected_rois = state$selected_rois,
@@ -4536,7 +4662,7 @@ print.wsi_viewer_session <- function(x, ...) {
   if (!is.null(x$stardist_server)) {
     cat(sprintf("  stardist: %s\n", x$stardist_server$url))
   }
-  cat("  methods: capabilities(), on(), get_rois(), get_selected_roi(), get_selected_rois(), get_selected_object(), get_selected_spots(), get_spot_annotation_table(), get_measurements(), get_trajectories(), get_roi_summary(), get_cell_summary(), get_ihc_summary(), get_segmentation(), get_layers(), get_channel_settings(), get_kodama_selection(), get_annotation_spots(), get_history(), get_logs(), get_tile_preview(), get_prediction(), get_proximity(), get_trajectory_profile(), colour_spots_by_gene(), add_rois(), add_layer(), add_channel_source(), measure_ihc_intensity(), preview_tiles(), extract_tile_preview(), list_jobs(), run_tiles_async(), save_project(), autosave_start()\n")
+  cat("  methods: capabilities(), on(), get_rois(), get_selected_roi(), get_selected_rois(), get_selected_object(), get_selected_spots(), get_spot_annotation_table(), get_measurements(), get_trajectories(), get_roi_summary(), get_cell_summary(), get_ihc_summary(), get_segmentation(), get_layers(), get_channel_settings(), get_kodama_selection(), get_annotation_spots(), get_history(), get_logs(), get_tile_preview(), get_prediction(), get_proximity(), get_proximity_stats(), get_trajectory_profile(), colour_spots_by_gene(), add_rois(), add_layer(), add_channel_source(), measure_ihc_intensity(), preview_tiles(), extract_tile_preview(), list_jobs(), run_tiles_async(), save_project(), autosave_start()\n")
   cat("  stop with: wsi_viewer_stop(x)\n")
   invisible(x)
 }

@@ -838,8 +838,13 @@ wsi_viewer_spatial_linked <- function(object, image, linked, linker, source_name
                                       live, dynamic_tiles, mode, output, open,
                                       overwrite, ...) {
   dots <- list(...)
+  show_spots <- dots$show_spots %||% TRUE
+  dots$show_spots <- NULL
   if (!is.logical(live) || length(live) != 1L || is.na(live)) {
     wsi_abort("`live` must be `TRUE` or `FALSE`.")
+  }
+  if (!is.logical(show_spots) || length(show_spots) != 1L || is.na(show_spots)) {
+    wsi_abort("`show_spots` must be `TRUE` or `FALSE`.")
   }
   if (is.null(linked)) {
     link_args <- dots[names(dots) %in% names(formals(linker))]
@@ -855,12 +860,15 @@ wsi_viewer_spatial_linked <- function(object, image, linked, linker, source_name
     )
   }
 
-  spot_layer <- wsi_seurat_spots_layer(linked)
   layers <- dots$layers %||% list()
   if (!is.list(layers) || inherits(layers, "data.frame")) {
     layers <- list(layers)
   }
-  dots$layers <- c(list(spot_layer), layers)
+  dots$layers <- if (isTRUE(show_spots)) {
+    c(list(wsi_seurat_spots_layer(linked)), layers)
+  } else {
+    layers
+  }
   dots$seurat <- linked
   dots$output <- output
   dots$open <- open
@@ -869,6 +877,7 @@ wsi_viewer_spatial_linked <- function(object, image, linked, linker, source_name
 
   if (isTRUE(live)) {
     dots$dynamic_tiles <- dynamic_tiles
+    dots$mode <- mode
     dots$slide <- linked$slide
     return(do.call(wsi_viewer_live, dots))
   }

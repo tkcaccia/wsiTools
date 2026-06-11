@@ -58,6 +58,8 @@ navbar:
           href: https://github.com/tkcaccia/wsiTools/blob/main/docs/open-one-image.md
         - text: Visual gallery
           href: https://github.com/tkcaccia/wsiTools/blob/main/docs/screenshots.md
+        - text: Desktop launcher
+          href: https://github.com/tkcaccia/wsiTools/blob/main/docs/desktop-app.md
     backends:
       text: Backends
       href: articles/backends.html

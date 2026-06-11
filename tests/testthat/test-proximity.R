@@ -117,6 +117,69 @@ test_that("proximity response stores result and queues viewer layer", {
   expect_equal(nrow(state$proximity), 1L)
   expect_equal(response$proximity$count, 1L)
   expect_true(any(vapply(response$commands, function(x) identical(x$type, "add_layer"), logical(1))))
+  layer <- response$commands[[which(vapply(response$commands, function(x) identical(x$type, "add_layer"), logical(1)))[[1]]]]$payload$layer
+  expect_equal(layer$legend$title, "Distance to reference")
+  expect_equal(layer$legend$unit, "px")
+  expect_length(layer$legend$stops, 3L)
+  expect_named(layer$legend$stops[[1]], c("name", "value", "distance_px", "colour"))
+})
+
+test_that("proximity statistics rank live feature trends and sync state", {
+  rois <- wsiTools:::wsi_roi_from_geojson(list(
+    type = "FeatureCollection",
+    features = list(
+      list(
+        type = "Feature",
+        id = "query_roi",
+        properties = list(name = "Query", classification = list(name = "query")),
+        geometry = list(type = "Polygon", coordinates = list(list(
+          c(0.5, 0), c(4.5, 0), c(4.5, 2), c(0.5, 2), c(0.5, 0)
+        )))
+      ),
+      list(
+        type = "Feature",
+        id = "target_roi",
+        properties = list(name = "Target", classification = list(name = "target")),
+        geometry = list(type = "Polygon", coordinates = list(list(
+          c(-1, 0), c(0.1, 0), c(0.1, 2), c(-1, 2), c(-1, 0)
+        )))
+      )
+    )
+  ))
+  project <- list(
+    cells = data.frame(
+      id = c("q1", "q2", "q3", "q4", "t1"),
+      x = c(1, 2, 3, 4, 0),
+      y = c(1, 1, 1, 1, 1),
+      DAB = c(1, 2, 3, 4, 0),
+      hematoxylin = c(4, 3, 2, 1, 2),
+      stringsAsFactors = FALSE
+    )
+  )
+  class(project) <- c("wsi_cellphenotyper_project", "list")
+  state <- wsiTools:::wsi_new_viewer_state(envir = new.env(parent = emptyenv()))
+
+  response <- wsiTools:::wsi_proximity_response(
+    context = list(cellphenotyper_project = project),
+    state = state,
+    payload = list(
+      action = "stats",
+      point_source = "cellphenotyper:cells",
+      feature_source = "cellphenotyper:numeric",
+      method = "spearman",
+      quantile_step = 0.25,
+      query_annotations = "query_roi",
+      target_annotations = "target_roi",
+      rois = wsiTools:::wsi_viewer_rois_to_geojson(rois)
+    )
+  )
+
+  expect_s3_class(state$proximity_stats, "wsi_proximity_stats_result")
+  expect_equal(response$proximity_stats$count, nrow(state$proximity_stats))
+  expect_true("DAB" %in% state$proximity_stats$feature)
+  dab <- state$proximity_stats[state$proximity_stats$feature == "DAB", , drop = FALSE]
+  expect_equal(dab$correlation[[1]], 1)
+  expect_equal(state$proximity_stats$feature_source[[1]], "cellphenotyper:numeric")
 })
 
 test_that("proximity controls are rendered only for managed point sources", {
@@ -143,6 +206,10 @@ test_that("proximity controls are rendered only for managed point sources", {
   expect_match(html, "proximityCurrentSource", fixed = TRUE)
   expect_match(html, "syncProximityAnnotations", fixed = TRUE)
   expect_match(html, "currentProximityRoiSignature", fixed = TRUE)
+  expect_match(html, "id=\"proximityLegend\"", fixed = TRUE)
+  expect_match(html, "renderProximityLegend", fixed = TRUE)
+  expect_match(html, "runProximityStatistics", fixed = TRUE)
+  expect_match(html, "id=\"proximityStatsWindow\"", fixed = TRUE)
   expect_match(html, "if(typeof syncProximityAnnotations==='function')syncProximityAnnotations(false)", fixed = TRUE)
   expect_false(grepl("id=\"proximityRefreshAnnotations\"", html, fixed = TRUE))
   expect_false(grepl("Refresh proximity annotation choices", html, fixed = TRUE))

@@ -152,6 +152,10 @@ wsi_channel_source_payload <- function(source) {
   contrast <- wsi_channel_contrast(source$contrast_min %||% 0, source$contrast_max %||% 1)
   source$contrast_min <- unname(contrast[["min"]])
   source$contrast_max <- unname(contrast[["max"]])
+  selected_values <- wsi_channel_source_selected_values(source)
+  if (!is.null(selected_values)) {
+    source$selected_values <- wsi_channel_selected_values(selected_values)
+  }
   source
 }
 
@@ -322,8 +326,24 @@ wsi_empty_channel_settings <- function() {
     gain = numeric(),
     contrast_min = numeric(),
     contrast_max = numeric(),
+    selected_values = I(list()),
     stringsAsFactors = FALSE
   )
+}
+
+wsi_channel_selected_values <- function(x) {
+  if (is.null(x)) {
+    return(character())
+  }
+  as.character(unlist(x, use.names = FALSE))
+}
+
+wsi_channel_source_selected_values <- function(source) {
+  if (!is.null(source$selected_values)) {
+    return(source$selected_values)
+  }
+  metadata <- source$metadata %||% list()
+  metadata$selected_values %||% NULL
 }
 
 wsi_channel_settings_from_sources <- function(sources) {
@@ -341,6 +361,7 @@ wsi_channel_settings_from_sources <- function(sources) {
     gain = vapply(sources, function(x) as.numeric(x$gain %||% x$strength %||% 1), numeric(1)),
     contrast_min = vapply(sources, function(x) as.numeric(x$contrast_min %||% 0), numeric(1)),
     contrast_max = vapply(sources, function(x) as.numeric(x$contrast_max %||% 1), numeric(1)),
+    selected_values = I(lapply(sources, function(x) wsi_channel_selected_values(wsi_channel_source_selected_values(x)))),
     stringsAsFactors = FALSE
   )
   class(out) <- c("wsi_channel_settings", class(out))
@@ -641,6 +662,9 @@ wsi_channel_update_one <- function(settings, id, patch = list()) {
   if (!is.data.frame(settings) || !nrow(settings)) {
     settings <- wsi_empty_channel_settings()
   }
+  if (!"selected_values" %in% names(settings)) {
+    settings$selected_values <- I(rep(list(character()), nrow(settings)))
+  }
   id <- wsi_channel_source_id(id)
   idx <- match(id, settings$id)
   if (is.na(idx)) {
@@ -660,6 +684,9 @@ wsi_channel_update_one <- function(settings, id, patch = list()) {
     )
     settings$contrast_min[[idx]] <- unname(contrast[["min"]])
     settings$contrast_max[[idx]] <- unname(contrast[["max"]])
+  }
+  if (!is.null(patch$selected_values)) {
+    settings$selected_values[idx] <- list(wsi_channel_selected_values(patch$selected_values))
   }
   settings
 }

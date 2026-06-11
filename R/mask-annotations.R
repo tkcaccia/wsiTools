@@ -458,6 +458,548 @@ wsi_rois_to_mask_write <- function(mask, output, overwrite = FALSE) {
   invisible(output)
 }
 
+wsi_roi_mask_values_for_image <- function(mask) {
+  values <- as.matrix(unclass(mask))
+  if (!is.numeric(values) && !is.integer(values) && !is.logical(values)) {
+    wsi_abort("TIFF mask output requires numeric, integer, or logical mask values.")
+  }
+  if (is.logical(values)) {
+    values <- values * 255
+  }
+  max_value <- max(values, na.rm = TRUE)
+  min_value <- min(values, na.rm = TRUE)
+  if (!is.finite(max_value) || !is.finite(min_value)) {
+    wsi_abort("Mask image contains no finite values.")
+  }
+  if (min_value < 0 || max_value > 255) {
+    wsi_abort("TIFF mask output currently supports integer values from 0 to 255.")
+  }
+  out <- pmin(pmax(as.integer(round(values)), 0L), 255L)
+  dim(out) <- dim(values)
+  out
+}
+
+wsi_write_mask_pgm <- function(mask, output) {
+  values <- wsi_roi_mask_values_for_image(mask)
+  con <- file(output, open = "wb")
+  on.exit(close(con), add = TRUE)
+  header <- sprintf("P5\n%d %d\n255\n", ncol(values), nrow(values))
+  writeBin(charToRaw(header), con)
+  for (i in seq_len(nrow(values))) {
+    writeBin(as.raw(values[i, ]), con, size = 1L)
+  }
+  invisible(output)
+}
+
+wsi_hex_to_rgb_int <- function(colour, fallback = "#FFFFFF") {
+  colour <- wsi_colour_to_hex(colour %||% fallback, "colour")
+  col <- grDevices::col2rgb(colour)
+  as.integer(col[, 1L])
+}
+
+wsi_geojson_mask_label_colours <- function(rois, labels, label_by, colour_map = NULL) {
+  if (is.null(labels) || !nrow(labels)) {
+    return(labels)
+  }
+  if (!is.null(colour_map) && is.list(colour_map) && !is.data.frame(colour_map)) {
+    colour_map <- unlist(colour_map, use.names = TRUE)
+  }
+  roi_keys <- wsi_rois_to_mask_label_keys(rois, label_by)
+  roi_keys[is.na(roi_keys) | !nzchar(roi_keys)] <- "unlabelled"
+  roi_colours <- rois$color %||% rois$colour %||% rep(NA_character_, nrow(rois))
+  out <- character(nrow(labels))
+  for (i in seq_len(nrow(labels))) {
+    key <- as.character(labels$key[[i]])
+    value <- as.character(labels$value[[i]])
+    colour <- NA_character_
+    if (!is.null(colour_map) && length(colour_map)) {
+      if (!is.null(names(colour_map)) && any(nzchar(names(colour_map)))) {
+        idx <- match(key, names(colour_map))
+        if (is.na(idx)) {
+          idx <- match(value, names(colour_map))
+        }
+        if (!is.na(idx)) {
+          colour <- as.character(colour_map[[idx]])
+        }
+      } else if (length(colour_map) >= i) {
+        colour <- as.character(colour_map[[i]])
+      }
+    }
+    if (is.na(colour) || !nzchar(colour)) {
+      idx <- match(key, roi_keys)
+      if (!is.na(idx)) {
+        colour <- as.character(roi_colours[[idx]])
+      }
+    }
+    if (is.na(colour) || !nzchar(colour)) {
+      colour <- wsi_stain_palette(nrow(labels))[[i]]
+    }
+    out[[i]] <- wsi_colour_to_hex(colour, "colour")
+  }
+  labels$colour <- out
+  labels$color <- out
+  labels
+}
+
+wsi_write_mask_ppm <- function(mask, output, labels = NULL, background_colour = "#000000") {
+  values <- wsi_roi_mask_values_for_image(mask)
+  labels <- labels %||% attr(mask, "labels", exact = TRUE)
+  value_keys <- as.character(labels$value %||% character())
+  colours <- as.character(labels$colour %||% labels$color %||% character())
+  rgb <- lapply(seq_along(value_keys), function(i) wsi_hex_to_rgb_int(colours[[i]] %||% NA_character_))
+  names(rgb) <- value_keys
+  bg <- wsi_hex_to_rgb_int(background_colour, fallback = "#000000")
+  con <- file(output, open = "wb")
+  on.exit(close(con), add = TRUE)
+  header <- sprintf("P6\n%d %d\n255\n", ncol(values), nrow(values))
+  writeBin(charToRaw(header), con)
+  for (i in seq_len(nrow(values))) {
+    row <- values[i, ]
+    raw_row <- raw(length(row) * 3L)
+    for (j in seq_along(row)) {
+      colour <- rgb[[as.character(row[[j]])]] %||% bg
+      pos <- (j - 1L) * 3L + 1L
+      raw_row[pos:(pos + 2L)] <- as.raw(colour)
+    }
+    writeBin(raw_row, con, size = 1L)
+  }
+  invisible(output)
+}
+
+wsi_geojson_mask_format <- function(output, format = c("auto", "tiff", "ome-tiff")) {
+  format <- match.arg(format)
+  if (!identical(format, "auto")) {
+    return(format)
+  }
+  output_lower <- tolower(output)
+  if (grepl("\\.ome\\.tiff?$", output_lower)) {
+    return("ome-tiff")
+  }
+  "tiff"
+}
+
+wsi_geojson_mask_dimensions <- function(rois, slide, width, height, origin, downsample) {
+  if (!is.null(slide)) {
+    if (inherits(slide, "wsi_slide")) {
+      width <- as.numeric(slide$dimensions[["width"]])
+      height <- as.numeric(slide$dimensions[["height"]])
+    } else if (is.character(slide) && length(slide) == 1L) {
+      slide <- wsi_open(slide)
+      width <- as.numeric(slide$dimensions[["width"]])
+      height <- as.numeric(slide$dimensions[["height"]])
+      wsi_close(slide)
+    } else {
+      wsi_abort("`slide` must be a `wsi_slide` object, an image path, or `NULL`.")
+    }
+  }
+
+  if (is.null(width) || is.null(height)) {
+    if (!nrow(rois)) {
+      wsi_abort("`width` and `height` are required when the GeoJSON contains no ROIs.")
+    }
+    xmax <- suppressWarnings(max(as.numeric(rois$xmax), na.rm = TRUE))
+    ymax <- suppressWarnings(max(as.numeric(rois$ymax), na.rm = TRUE))
+    if (!is.finite(xmax) || !is.finite(ymax)) {
+      points <- do.call(rbind, lapply(rois$coordinates, wsi_collect_points))
+      if (!nrow(points)) {
+        wsi_abort("Could not infer mask dimensions from the GeoJSON coordinates.")
+      }
+      xmax <- max(points[, 1L], na.rm = TRUE)
+      ymax <- max(points[, 2L], na.rm = TRUE)
+    }
+    width <- xmax - origin[["x"]]
+    height <- ymax - origin[["y"]]
+    wsi_warn("`width`/`height` were not supplied; inferred mask extent from ROI bounds.")
+  }
+
+  width <- wsi_check_scalar_number(width, "width", allow_zero = FALSE)
+  height <- wsi_check_scalar_number(height, "height", allow_zero = FALSE)
+  mask_width <- max(1L, as.integer(ceiling(width / downsample[["x"]])))
+  mask_height <- max(1L, as.integer(ceiling(height / downsample[["y"]])))
+  list(slide_width = width, slide_height = height, mask_width = mask_width, mask_height = mask_height)
+}
+
+wsi_write_geojson_mask_legend <- function(mask, output, overwrite = FALSE) {
+  if (is.null(output)) {
+    return(invisible(NULL))
+  }
+  output <- wsi_validate_output_path(output, overwrite = overwrite)
+  labels <- attr(mask, "labels", exact = TRUE)
+  if (is.null(labels)) {
+    labels <- data.frame(value = integer(), key = character(), stringsAsFactors = FALSE)
+  }
+  utils::write.csv(labels, output, row.names = FALSE)
+  invisible(output)
+}
+
+wsi_smooth_mask_iterations <- function(iterations) {
+  iterations <- wsi_check_scalar_number(iterations, "smooth_iterations")
+  iterations <- as.integer(iterations)
+  if (is.na(iterations) || iterations < 0L) {
+    wsi_abort("`smooth_iterations` must be a non-negative integer.")
+  }
+  iterations
+}
+
+wsi_smooth_mask_max_vertices <- function(max_vertices) {
+  max_vertices <- wsi_check_scalar_number(max_vertices, "smooth_max_vertices", allow_zero = FALSE)
+  max_vertices <- as.integer(max_vertices)
+  if (is.na(max_vertices) || max_vertices < 4L) {
+    wsi_abort("`smooth_max_vertices` must be at least 4.")
+  }
+  max_vertices
+}
+
+wsi_ring_matrix_to_geojson <- function(ring) {
+  lapply(seq_len(nrow(ring)), function(i) unname(c(ring[i, 1L], ring[i, 2L])))
+}
+
+wsi_chaikin_ring_once <- function(points) {
+  n <- nrow(points)
+  next_i <- c(seq_len(n)[-1L], 1L)
+  p1 <- points
+  p2 <- points[next_i, , drop = FALSE]
+  q <- 0.75 * p1 + 0.25 * p2
+  r <- 0.25 * p1 + 0.75 * p2
+  out <- matrix(NA_real_, nrow = n * 2L, ncol = 2L)
+  out[seq(1L, n * 2L, by = 2L), ] <- q
+  out[seq(2L, n * 2L, by = 2L), ] <- r
+  out
+}
+
+wsi_rescale_ring_area <- function(ring, target_area) {
+  current_area <- wsi_ring_area(ring)
+  if (!is.finite(target_area) || !is.finite(current_area) ||
+      target_area <= 0 || current_area <= 0) {
+    return(ring)
+  }
+  factor <- sqrt(target_area / current_area)
+  if (!is.finite(factor) || factor <= 0 || factor < 0.25 || factor > 4) {
+    return(ring)
+  }
+  centre <- colMeans(ring, na.rm = TRUE)
+  sweep(sweep(ring, 2L, centre, "-") * factor, 2L, centre, "+")
+}
+
+wsi_smooth_ring_chaikin <- function(ring, iterations = 1L,
+                                    preserve_area = TRUE,
+                                    max_vertices = 2000L) {
+  points <- wsi_ring_matrix(ring)
+  if (nrow(points) < 4L || iterations < 1L) {
+    return(ring)
+  }
+  closed <- identical(points[1L, 1L], points[nrow(points), 1L]) &&
+    identical(points[1L, 2L], points[nrow(points), 2L])
+  if (closed) {
+    points <- points[-nrow(points), , drop = FALSE]
+  }
+  if (nrow(points) < 3L) {
+    return(ring)
+  }
+  original_area <- wsi_ring_area(points)
+  available_iterations <- iterations
+  while (available_iterations > 0L &&
+         nrow(points) * (2L ^ available_iterations) > max_vertices) {
+    available_iterations <- available_iterations - 1L
+  }
+  if (available_iterations < 1L) {
+    return(wsi_ring_matrix_to_geojson(rbind(points, points[1L, , drop = FALSE])))
+  }
+  out <- points
+  for (i in seq_len(available_iterations)) {
+    out <- wsi_chaikin_ring_once(out)
+  }
+  if (isTRUE(preserve_area)) {
+    out <- wsi_rescale_ring_area(out, original_area)
+  }
+  out <- rbind(out, out[1L, , drop = FALSE])
+  wsi_ring_matrix_to_geojson(out)
+}
+
+wsi_smooth_polygon_coordinates <- function(polygon, iterations = 1L,
+                                           preserve_area = TRUE,
+                                           max_vertices = 2000L) {
+  lapply(polygon, wsi_smooth_ring_chaikin,
+         iterations = iterations,
+         preserve_area = preserve_area,
+         max_vertices = max_vertices)
+}
+
+wsi_smooth_roi_coordinates <- function(coordinates, geometry_type,
+                                       iterations = 1L,
+                                       preserve_area = TRUE,
+                                       max_vertices = 2000L) {
+  geometry_type <- tolower(as.character(geometry_type %||% ""))
+  if (identical(geometry_type, "polygon")) {
+    return(wsi_smooth_polygon_coordinates(
+      coordinates,
+      iterations = iterations,
+      preserve_area = preserve_area,
+      max_vertices = max_vertices
+    ))
+  }
+  if (identical(geometry_type, "multipolygon")) {
+    return(lapply(
+      coordinates,
+      wsi_smooth_polygon_coordinates,
+      iterations = iterations,
+      preserve_area = preserve_area,
+      max_vertices = max_vertices
+    ))
+  }
+  coordinates
+}
+
+wsi_smooth_rois_for_mask <- function(rois, smooth = FALSE,
+                                     smooth_iterations = 1L,
+                                     smooth_preserve_area = TRUE,
+                                     smooth_max_vertices = 2000L) {
+  if (!is.logical(smooth) || length(smooth) != 1L || is.na(smooth)) {
+    wsi_abort("`smooth` must be `TRUE` or `FALSE`.")
+  }
+  smooth_iterations <- wsi_smooth_mask_iterations(smooth_iterations)
+  if (!is.logical(smooth_preserve_area) || length(smooth_preserve_area) != 1L ||
+      is.na(smooth_preserve_area)) {
+    wsi_abort("`smooth_preserve_area` must be `TRUE` or `FALSE`.")
+  }
+  smooth_max_vertices <- wsi_smooth_mask_max_vertices(smooth_max_vertices)
+  if (!isTRUE(smooth) || smooth_iterations < 1L || !nrow(rois)) {
+    return(rois)
+  }
+
+  out <- rois
+  for (i in seq_len(nrow(out))) {
+    coords <- wsi_smooth_roi_coordinates(
+      out$coordinates[[i]],
+      out$geometry_type[[i]],
+      iterations = smooth_iterations,
+      preserve_area = smooth_preserve_area,
+      max_vertices = smooth_max_vertices
+    )
+    out$coordinates[i] <- list(coords)
+    geometry <- out$geometry[[i]] %||% list()
+    geometry$coordinates <- coords
+    out$geometry[i] <- list(geometry)
+    feature <- out$feature[[i]] %||% list()
+    feature$geometry <- geometry
+    out$feature[i] <- list(feature)
+
+    points <- wsi_collect_points(coords)
+    if (nrow(points)) {
+      out$xmin[[i]] <- min(points[, 1L])
+      out$xmax[[i]] <- max(points[, 1L])
+      out$ymin[[i]] <- min(points[, 2L])
+      out$ymax[[i]] <- max(points[, 2L])
+    }
+  }
+  out
+}
+
+#' Convert GeoJSON annotations to a TIFF mask
+#'
+#' Reads QuPath-style GeoJSON polygon annotations and rasterises them into a
+#' labelled TIFF mask. This function does not read whole-slide pixels; it only
+#' burns annotation geometry into a mask grid. When `format = "ome-tiff"` or
+#' `pyramid = TRUE`, libvips is used at runtime to write a tiled/pyramidal
+#' TIFF suitable for use as a viewer layer.
+#'
+#' @param geojson GeoJSON annotation file path.
+#' @param output Output TIFF path. Use `.ome.tif` or `.ome.tiff` for OME-TIFF.
+#' @param slide Optional `wsi_slide` object or image path used to derive the
+#'   full-resolution image width and height.
+#' @param width,height Full-resolution slide width and height in pixels. Ignored
+#'   when `slide` is supplied. If neither `slide` nor dimensions are supplied,
+#'   the extent is inferred from the ROI bounds.
+#' @param downsample One or two positive numbers giving the full-resolution
+#'   pixel size represented by each mask pixel. For example, `downsample = 4`
+#'   creates a mask at one quarter of the slide width and height.
+#' @param origin Full-resolution x/y coordinate of the top-left mask corner.
+#' @param label_by How ROI values are assigned: `"constant"` burns all ROIs as
+#'   foreground, `"class"` gives one value per class, `"index"` one per ROI, and
+#'   `"roi_id"`/`"name"` one per ROI id/name.
+#' @param values Optional mask values passed to [rois_to_mask()].
+#' @param background Background mask value.
+#' @param overlap How overlapping ROIs are handled.
+#' @param smooth Whether to smooth polygon boundaries before rasterisation.
+#'   This uses a lightweight Chaikin corner-cutting pass and is useful for
+#'   turning jagged cell-segmentation GeoJSON into cleaner mask borders.
+#' @param smooth_iterations Number of smoothing passes when `smooth = TRUE`.
+#'   One pass is usually enough for cell masks; higher values create more
+#'   rounded boundaries and more vertices.
+#' @param smooth_preserve_area Whether to rescale each smoothed ring back toward
+#'   its original area. This reduces shrinkage of small segmented cells.
+#' @param smooth_max_vertices Maximum vertices allowed per ring after smoothing.
+#'   The number of passes is reduced for very large rings to avoid memory blowup.
+#' @param format `"auto"`, `"tiff"`, or `"ome-tiff"`. `"auto"` selects OME-TIFF
+#'   when `output` ends in `.ome.tif` or `.ome.tiff`.
+#' @param pyramid Whether to write a tiled pyramid. Enabled automatically for
+#'   OME-TIFF output.
+#' @param tile_size TIFF tile size for libvips output.
+#' @param compression TIFF compression for libvips output.
+#' @param bigtiff Whether libvips should write BigTIFF.
+#' @param colour Whether to write an RGB mask coloured by the annotation label
+#'   table instead of a single-band labelled mask.
+#' @param colour_map Optional colour map keyed by class/name/ROI id, depending
+#'   on `label_by`, or by mask value.
+#' @param background_colour Background colour for RGB masks.
+#' @param legend_output Optional CSV path for the value-to-label table.
+#' @param overwrite Whether existing output files may be overwritten.
+#' @param return_mask Whether to include the in-memory mask matrix in the return
+#'   value. Leave this `FALSE` for large slides.
+#'
+#' @return A `wsi_geojson_mask_tiff` list with output path, dimensions,
+#'   downsample, label table, and optional mask.
+#' @export
+#'
+#' @examples
+#' geojson <- system.file("extdata", "example-qupath-annotations.geojson", package = "wsiTools")
+#' if (nzchar(geojson) && requireNamespace("magick", quietly = TRUE)) {
+#'   out <- tempfile(fileext = ".tif")
+#'   result <- wsi_geojson_to_mask_tiff(geojson, out, width = 1000, height = 1000)
+#'   file.exists(result$output)
+#' }
+wsi_geojson_to_mask_tiff <- function(geojson,
+                                     output,
+                                     slide = NULL,
+                                     width = NULL,
+                                     height = NULL,
+                                     downsample = 1,
+                                     origin = c(x = 0, y = 0),
+                                     label_by = c("constant", "class", "index", "roi_id", "name"),
+                                     values = NULL,
+                                     background = 0,
+                                     overlap = c("last", "first", "error"),
+                                     smooth = FALSE,
+                                     smooth_iterations = 1,
+                                     smooth_preserve_area = TRUE,
+                                     smooth_max_vertices = 2000,
+                                     format = c("auto", "tiff", "ome-tiff"),
+                                     pyramid = NULL,
+                                     tile_size = 512,
+                                     compression = c("lzw", "jpeg", "deflate", "zstd", "webp", "packbits", "none"),
+                                     bigtiff = TRUE,
+                                     colour = FALSE,
+                                     colour_map = NULL,
+                                     background_colour = "#000000",
+                                     legend_output = NULL,
+                                     overwrite = FALSE,
+                                     return_mask = FALSE) {
+  geojson <- wsi_validate_input_path(geojson)
+  output <- wsi_validate_output_path(output, overwrite = overwrite)
+  label_by <- match.arg(label_by)
+  overlap <- match.arg(overlap)
+  format <- wsi_geojson_mask_format(output, format)
+  compression <- match.arg(compression)
+  downsample <- wsi_mask_scale(downsample)
+  origin <- wsi_mask_origin(origin)
+  if (!is.null(pyramid) && (!is.logical(pyramid) || length(pyramid) != 1L || is.na(pyramid))) {
+    wsi_abort("`pyramid` must be `TRUE`, `FALSE`, or `NULL`.")
+  }
+  if (is.null(pyramid)) {
+    pyramid <- identical(format, "ome-tiff")
+  }
+  if (!is.logical(overwrite) || length(overwrite) != 1L || is.na(overwrite)) {
+    wsi_abort("`overwrite` must be `TRUE` or `FALSE`.")
+  }
+  if (!is.logical(return_mask) || length(return_mask) != 1L || is.na(return_mask)) {
+    wsi_abort("`return_mask` must be `TRUE` or `FALSE`.")
+  }
+  if (!is.logical(colour) || length(colour) != 1L || is.na(colour)) {
+    wsi_abort("`colour` must be `TRUE` or `FALSE`.")
+  }
+
+  rois <- read_geojson(geojson)
+  rois <- wsi_smooth_rois_for_mask(
+    rois,
+    smooth = smooth,
+    smooth_iterations = smooth_iterations,
+    smooth_preserve_area = smooth_preserve_area,
+    smooth_max_vertices = smooth_max_vertices
+  )
+  dims <- wsi_geojson_mask_dimensions(rois, slide, width, height, origin, downsample)
+  mask <- rois_to_mask(
+    rois,
+    width = dims$mask_width,
+    height = dims$mask_height,
+    scale = downsample,
+    origin = origin,
+    label_by = label_by,
+    values = values,
+    background = background,
+    overlap = overlap
+  )
+
+  labels <- wsi_geojson_mask_label_colours(
+    rois,
+    attr(mask, "labels", exact = TRUE),
+    label_by = label_by,
+    colour_map = colour_map
+  )
+  attr(mask, "labels") <- labels
+  if (is.null(legend_output)) {
+    stem <- sub("\\.ome\\.tiff?$", "", output, ignore.case = TRUE)
+    stem <- sub("\\.tiff?$", "", stem, ignore.case = TRUE)
+    legend_output <- paste0(stem, "_labels.csv")
+  }
+
+  if (identical(format, "ome-tiff") || isTRUE(pyramid) || wsi_has_vips()) {
+    if (!wsi_has_vips()) {
+      wsi_abort(
+        wsi_backend_action_message(
+          "libvips is required to write tiled or OME-TIFF mask output.",
+          backend = "vips"
+        ),
+        class = "wsi_backend_unavailable"
+      )
+    }
+    temp_pgm <- tempfile(fileext = if (isTRUE(colour)) ".ppm" else ".pgm")
+    on.exit(unlink(temp_pgm), add = TRUE)
+    if (isTRUE(colour)) {
+      wsi_write_mask_ppm(mask, temp_pgm, labels = labels, background_colour = background_colour)
+    } else {
+      wsi_write_mask_pgm(mask, temp_pgm)
+    }
+    wsi_convert(
+      input = temp_pgm,
+      output = output,
+      format = if (identical(format, "ome-tiff")) "ome-tiff" else "tiff",
+      backend = "vips",
+      tile_size = tile_size,
+      compression = compression,
+      pyramid = isTRUE(pyramid),
+      bigtiff = bigtiff,
+      overwrite = TRUE
+    )
+  } else {
+    wsi_rois_to_mask_write(mask, output = output, overwrite = TRUE)
+  }
+  wsi_write_geojson_mask_legend(mask, legend_output, overwrite = overwrite)
+
+  result <- list(
+    output = normalizePath(output, winslash = "/", mustWork = FALSE),
+    legend = normalizePath(legend_output, winslash = "/", mustWork = FALSE),
+    geojson = normalizePath(geojson, winslash = "/", mustWork = TRUE),
+    format = format,
+    pyramid = isTRUE(pyramid),
+    slide_width = dims$slide_width,
+    slide_height = dims$slide_height,
+    mask_width = dims$mask_width,
+    mask_height = dims$mask_height,
+    downsample = downsample,
+    origin = origin,
+    labels = labels
+  )
+  if (isTRUE(return_mask)) {
+    result$mask <- mask
+  }
+  class(result) <- c("wsi_geojson_mask_tiff", "list")
+  result
+}
+
+#' @rdname wsi_geojson_to_mask_tiff
+#' @export
+geojson_to_mask_tiff <- wsi_geojson_to_mask_tiff
+
 #' Rasterise ROI polygons into a mask
 #'
 #' Converts polygon or multipolygon ROI annotations into a small labelled mask.

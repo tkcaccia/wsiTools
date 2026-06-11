@@ -12,3 +12,8 @@ src/*.dll
 src/*.rds
 manuscript/
 scripts/create_bioinformatics_application_note.py
+tools/wsiToolsDesktop/node_modules/
+tools/wsiToolsDesktop/dist/
+tools/wsiToolsDesktop/src-tauri/target/
+tools/wsiToolsDesktop/src-tauri/gen/
+tools/wsiToolsDesktop/src-tauri/Cargo.lock

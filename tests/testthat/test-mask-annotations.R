@@ -161,6 +161,44 @@ test_that("ROI rasterisation respects polygon holes and overlap modes", {
   )
 })
 
+test_that("ROI smoothing densifies boundaries while preserving labels", {
+  rois <- wsiTools:::wsi_roi_from_geojson(list(
+    type = "FeatureCollection",
+    features = list(
+      list(
+        type = "Feature",
+        id = "cell-1",
+        properties = list(name = "Cell 1", classification = list(name = "epithelial")),
+        geometry = list(
+          type = "Polygon",
+          coordinates = list(list(c(1, 1), c(9, 1), c(9, 9), c(1, 9), c(1, 1)))
+        )
+      )
+    )
+  ))
+
+  smoothed <- wsiTools:::wsi_smooth_rois_for_mask(
+    rois,
+    smooth = TRUE,
+    smooth_iterations = 1,
+    smooth_preserve_area = TRUE
+  )
+  original_ring <- wsiTools:::wsi_ring_matrix(rois$coordinates[[1L]][[1L]])
+  smoothed_ring <- wsiTools:::wsi_ring_matrix(smoothed$coordinates[[1L]][[1L]])
+
+  expect_gt(nrow(smoothed_ring), nrow(original_ring))
+  expect_equal(
+    wsiTools:::wsi_ring_area(smoothed_ring),
+    wsiTools:::wsi_ring_area(original_ring),
+    tolerance = 1e-8
+  )
+  expect_equal(smoothed$class, rois$class)
+
+  mask <- rois_to_mask(smoothed, width = 12, height = 12, label_by = "class")
+  expect_equal(attr(mask, "labels")$key, "epithelial")
+  expect_true(any(unclass(mask) == 1))
+})
+
 test_that("ROI masks can be exported without optional image dependencies", {
   seed <- matrix(0, nrow = 4, ncol = 4)
   seed[2:3, 2:3] <- 1
@@ -175,4 +213,103 @@ test_that("ROI masks can be exported without optional image dependencies", {
   expect_equal(dim(roundtrip), dim(mask))
   expect_equal(as.vector(roundtrip), as.vector(mask))
   expect_equal(attr(roundtrip, "labels")$value, 1)
+})
+
+test_that("GeoJSON annotations can be exported directly as TIFF masks", {
+  skip_if_not(wsi_has_vips() || requireNamespace("magick", quietly = TRUE))
+
+  geojson <- tempfile(fileext = ".geojson")
+  jsonlite::write_json(
+    list(
+      type = "FeatureCollection",
+      features = list(
+        list(
+          type = "Feature",
+          id = "tumour-1",
+          properties = list(name = "Tumour 1", classification = list(name = "tumour")),
+          geometry = list(
+            type = "Polygon",
+            coordinates = list(list(c(2, 2), c(8, 2), c(8, 8), c(2, 8), c(2, 2)))
+          )
+        )
+      )
+    ),
+    geojson,
+    auto_unbox = TRUE
+  )
+  output <- tempfile(fileext = ".tif")
+  legend <- tempfile(fileext = ".csv")
+
+  result <- wsi_geojson_to_mask_tiff(
+    geojson,
+    output,
+    width = 12,
+    height = 12,
+    downsample = 2,
+    label_by = "class",
+    smooth = TRUE,
+    smooth_iterations = 1,
+    legend_output = legend,
+    return_mask = TRUE
+  )
+
+  expect_s3_class(result, "wsi_geojson_mask_tiff")
+  expect_true(file.exists(output))
+  expect_true(file.exists(legend))
+  expect_equal(result$mask_width, 6)
+  expect_equal(result$mask_height, 6)
+  expect_equal(result$labels$key, "tumour")
+  expect_true(all(c("colour", "color") %in% names(result$labels)))
+  expect_equal(dim(result$mask), c(6, 6))
+  expect_true(any(unclass(result$mask) == 1))
+})
+
+test_that("GeoJSON masks can be written as coloured TIFF layers", {
+  skip_if_not(wsi_has_vips())
+
+  geojson <- tempfile(fileext = ".geojson")
+  jsonlite::write_json(
+    list(
+      type = "FeatureCollection",
+      features = list(
+        list(
+          type = "Feature",
+          id = "tumour-1",
+          properties = list(name = "Tumour 1", classification = list(name = "tumour"), color = "#ff0000"),
+          geometry = list(
+            type = "Polygon",
+            coordinates = list(list(c(0, 0), c(512, 0), c(512, 256), c(0, 256), c(0, 0)))
+          )
+        ),
+        list(
+          type = "Feature",
+          id = "stroma-1",
+          properties = list(name = "Stroma 1", classification = list(name = "stroma"), color = "#00ff00"),
+          geometry = list(
+            type = "Polygon",
+            coordinates = list(list(c(512, 0), c(1024, 0), c(1024, 256), c(512, 256), c(512, 0)))
+          )
+        )
+      )
+    ),
+    geojson,
+    auto_unbox = TRUE
+  )
+  output <- tempfile(fileext = ".ome.tif")
+
+  result <- wsi_geojson_to_mask_tiff(
+    geojson,
+    output,
+    width = 1024,
+    height = 512,
+    label_by = "class",
+    format = "ome-tiff",
+    colour = TRUE,
+    overwrite = TRUE
+  )
+
+  expect_true(file.exists(output))
+  expect_equal(sort(result$labels$key), c("stroma", "tumour"))
+  expect_true(all(grepl("^#[0-9A-F]{6}$", result$labels$colour)))
+  expect_match(paste(system2("vipsheader", output, stdout = TRUE), collapse = " "), "3 bands")
 })
