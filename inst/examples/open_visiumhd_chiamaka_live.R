@@ -275,8 +275,8 @@ if (!is.null(geojson_file)) {
       tile_format = "png",
       max_level = dz_max_level(mask_result$mask_width, mask_result$mask_height),
       tile_overlap = as.integer(mask_tiles$overlap %||% 1L),
-      visible = TRUE,
-      opacity = 0.78,
+      visible = FALSE,
+      opacity = 0.45,
       colour = "#ffffff",
       metadata = list(
         kind = "mask",
