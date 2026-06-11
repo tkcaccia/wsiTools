@@ -1535,7 +1535,7 @@ wsi_seurat_fetch_gene_expression <- function(seurat, genes, spot_ids) {
 }
 
 wsi_seurat_matrix_like <- function(x) {
-  dims <- tryCatch(dim(x), error = function(e) NULL)
+  dims <- tryCatch(suppressWarnings(dim(x)), error = function(e) NULL)
   if (length(dims) != 2L || any(dims <= 0)) {
     return(FALSE)
   }
@@ -1544,7 +1544,9 @@ wsi_seurat_matrix_like <- function(x) {
   }
   tryCatch(
     {
-      x[seq_len(min(1L, dims[[1L]])), seq_len(min(1L, dims[[2L]])), drop = FALSE]
+      suppressWarnings(
+        x[seq_len(min(1L, dims[[1L]])), seq_len(min(1L, dims[[2L]])), drop = FALSE]
+      )
       TRUE
     },
     error = function(e) FALSE
