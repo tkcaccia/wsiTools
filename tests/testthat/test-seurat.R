@@ -608,6 +608,8 @@ test_that("Seurat viewer exposes spot layer and reduction controls", {
 	  expect_match(text, "seurat_gene_url", fixed = TRUE)
 	  expect_match(text, "spatial_tile_export_url", fixed = TRUE)
 	  expect_match(text, "Type any gene name", fixed = TRUE)
+	  expect_match(text, "hasGenes=seuratEnabled()&&(genes.length>0||dynamic)", fixed = TRUE)
+	  expect_false(grepl("hasGenes=has&&(genes.length>0||dynamic)", text, fixed = TRUE))
   expect_match(text, "JSON.stringify({gene:String(gene||'').trim()})", fixed = TRUE)
   expect_match(text, "seuratPlotWindow", fixed = TRUE)
   expect_match(text, "Current tissue", fixed = TRUE)
