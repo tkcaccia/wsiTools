@@ -220,7 +220,81 @@ wsi_prediction_points <- function(context, source_id) {
   points
 }
 
-wsi_prediction_matrix_for_spatial_raw <- function(linked, ids) {
+wsi_prediction_expression_id_candidates <- function(ids, points = NULL) {
+  ids <- as.character(ids)
+  candidates <- list(ids = ids)
+  if (is.data.frame(points) && nrow(points) == length(ids)) {
+    for (field in c("feature_id", "barcode", "spot_id", "cell_id", "label", "id")) {
+      if (field %in% names(points)) {
+        value <- as.character(points[[field]])
+        if (length(value) == length(ids)) {
+          candidates[[field]] <- value
+        }
+      }
+    }
+  }
+  seen <- character()
+  out <- list()
+  for (name in names(candidates)) {
+    value <- candidates[[name]]
+    if (length(value) != length(ids) || all(is.na(value) | !nzchar(value))) {
+      next
+    }
+    key <- paste(value, collapse = "\r")
+    if (key %in% seen) {
+      next
+    }
+    seen <- c(seen, key)
+    out[[name]] <- value
+  }
+  out
+}
+
+wsi_prediction_margin_variance <- function(x, margin) {
+  margin <- as.integer(margin)
+  if (requireNamespace("Matrix", quietly = TRUE) && inherits(x, "Matrix")) {
+    n <- if (identical(margin, 1L)) ncol(x) else nrow(x)
+    if (!is.finite(n) || n < 2L) {
+      return(rep(0, if (identical(margin, 1L)) nrow(x) else ncol(x)))
+    }
+    mean_fun <- if (identical(margin, 1L)) Matrix::rowMeans else Matrix::colMeans
+    mu <- mean_fun(x)
+    x2 <- x
+    squared <- FALSE
+    if (isS4(x2) && "x" %in% methods::slotNames(x2)) {
+      methods::slot(x2, "x") <- methods::slot(x2, "x") ^ 2
+      squared <- TRUE
+    }
+    if (!squared) {
+      x2 <- x2 ^ 2
+    }
+    mu2 <- mean_fun(x2)
+    return((mu2 - mu ^ 2) * n / (n - 1))
+  }
+  dense <- as.matrix(x)
+  apply(dense, margin, stats::var, na.rm = TRUE)
+}
+
+wsi_prediction_top_feature_indices <- function(x, max_features, margin) {
+  max_features <- suppressWarnings(as.integer(max_features %||% 0L))
+  feature_count <- if (identical(as.integer(margin), 1L)) nrow(x) else ncol(x)
+  if (!is.finite(max_features) || max_features <= 0L || feature_count <= max_features) {
+    return(seq_len(feature_count))
+  }
+  variance <- tryCatch(
+    wsi_prediction_margin_variance(x, margin = margin),
+    error = function(e) rep(NA_real_, feature_count)
+  )
+  keep <- which(is.finite(variance) & variance > 0)
+  if (!length(keep)) {
+    return(seq_len(min(max_features, feature_count)))
+  }
+  ord <- keep[order(variance[keep], decreasing = TRUE)]
+  ord[seq_len(min(max_features, length(ord)))]
+}
+
+wsi_prediction_matrix_for_spatial_raw <- function(linked, ids, points = NULL,
+                                                  max_features = NULL) {
   source <- linked$expression_source %||% list()
   object <- source$object %||% NULL
   if (is.null(object)) {
@@ -231,6 +305,7 @@ wsi_prediction_matrix_for_spatial_raw <- function(linked, ids) {
     wsi_abort("No expression matrix was found in the live spatial object.")
   }
   ids <- as.character(ids)
+  id_candidates <- wsi_prediction_expression_id_candidates(ids, points = points)
   for (entry in matrices) {
     mat <- entry$matrix
     rn <- tryCatch(rownames(mat), error = function(e) NULL)
@@ -238,29 +313,44 @@ wsi_prediction_matrix_for_spatial_raw <- function(linked, ids) {
     if (!length(rn) || !length(cn)) {
       next
     }
-    sample_idx <- match(ids, cn)
-    if (any(!is.na(sample_idx))) {
-      keep <- !is.na(sample_idx)
-      out <- matrix(NA_real_, nrow = length(ids), ncol = length(rn))
-      rownames(out) <- ids
-      colnames(out) <- make.unique(as.character(rn))
-      sub <- as.matrix(mat[, sample_idx[keep], drop = FALSE])
-      storage.mode(sub) <- "double"
-      out[keep, ] <- t(sub)
-      attr(out, "source_name") <- entry$name %||% "expression"
-      return(out)
-    }
-    sample_idx <- match(ids, rn)
-    if (any(!is.na(sample_idx))) {
-      keep <- !is.na(sample_idx)
-      out <- matrix(NA_real_, nrow = length(ids), ncol = length(cn))
-      rownames(out) <- ids
-      colnames(out) <- make.unique(as.character(cn))
-      sub <- as.matrix(mat[sample_idx[keep], , drop = FALSE])
-      storage.mode(sub) <- "double"
-      out[keep, ] <- sub
-      attr(out, "source_name") <- entry$name %||% "expression"
-      return(out)
+    for (candidate_name in names(id_candidates)) {
+      sample_ids <- id_candidates[[candidate_name]]
+      sample_idx <- match(sample_ids, cn)
+      if (any(!is.na(sample_idx))) {
+        keep <- !is.na(sample_idx)
+        feature_idx <- wsi_prediction_top_feature_indices(
+          mat[, sample_idx[keep], drop = FALSE],
+          max_features = max_features,
+          margin = 1L
+        )
+        out <- matrix(NA_real_, nrow = length(ids), ncol = length(feature_idx))
+        rownames(out) <- ids
+        colnames(out) <- make.unique(as.character(rn[feature_idx]))
+        sub <- as.matrix(mat[feature_idx, sample_idx[keep], drop = FALSE])
+        storage.mode(sub) <- "double"
+        out[keep, ] <- t(sub)
+        attr(out, "source_name") <- entry$name %||% "expression"
+        attr(out, "id_source") <- candidate_name
+        return(out)
+      }
+      sample_idx <- match(sample_ids, rn)
+      if (any(!is.na(sample_idx))) {
+        keep <- !is.na(sample_idx)
+        feature_idx <- wsi_prediction_top_feature_indices(
+          mat[sample_idx[keep], , drop = FALSE],
+          max_features = max_features,
+          margin = 2L
+        )
+        out <- matrix(NA_real_, nrow = length(ids), ncol = length(feature_idx))
+        rownames(out) <- ids
+        colnames(out) <- make.unique(as.character(cn[feature_idx]))
+        sub <- as.matrix(mat[sample_idx[keep], feature_idx, drop = FALSE])
+        storage.mode(sub) <- "double"
+        out[keep, ] <- sub
+        attr(out, "source_name") <- entry$name %||% "expression"
+        attr(out, "id_source") <- candidate_name
+        return(out)
+      }
     }
   }
   wsi_abort("Could not align expression matrix rows/columns to the viewer spot IDs.")
@@ -460,7 +550,8 @@ wsi_prediction_align_feature_matrices <- function(parts, ids) {
 
 wsi_prediction_matrix_for_spatial_project <- function(linked, source_id, ids,
                                                       reduction_dims = NULL,
-                                                      points = NULL) {
+                                                      points = NULL,
+                                                      max_features = NULL) {
   if (!is.data.frame(points) || !nrow(points)) {
     wsi_abort("Project-scoped prediction needs point metadata.")
   }
@@ -482,7 +573,11 @@ wsi_prediction_matrix_for_spatial_project <- function(linked, source_id, ids,
       ids[rows]
     }
     x <- if (identical(source_id, "spatial:raw")) {
-      wsi_prediction_matrix_for_spatial_raw(section, feature_ids)
+      wsi_prediction_matrix_for_spatial_raw(
+        section,
+        feature_ids,
+        max_features = max_features
+      )
     } else if (startsWith(source_id, "spatial:reduction:")) {
       wsi_prediction_matrix_for_spatial_reduction(
         section, feature_ids, source_id,
@@ -499,7 +594,8 @@ wsi_prediction_matrix_for_spatial_project <- function(linked, source_id, ids,
 
 wsi_prediction_feature_matrix <- function(context, source_id, ids,
                                           reduction_dims = NULL,
-                                          points = NULL) {
+                                          points = NULL,
+                                          max_features = NULL) {
   context <- context %||% list()
   source_id <- as.character(source_id %||% "spatial:raw")
   if (identical(source_id, "cellphenotyper:numeric")) {
@@ -516,11 +612,17 @@ wsi_prediction_feature_matrix <- function(context, source_id, ids,
     return(wsi_prediction_matrix_for_spatial_project(
       linked, source_id, ids,
       reduction_dims = reduction_dims,
-      points = points
+      points = points,
+      max_features = max_features
     ))
   }
   if (identical(source_id, "spatial:raw")) {
-    return(wsi_prediction_matrix_for_spatial_raw(linked, ids))
+    return(wsi_prediction_matrix_for_spatial_raw(
+      linked,
+      ids,
+      points = points,
+      max_features = max_features
+    ))
   }
   if (startsWith(source_id, "spatial:reduction:")) {
     return(wsi_prediction_matrix_for_spatial_reduction(
@@ -1088,7 +1190,8 @@ wsi_prediction_run <- function(context, rois, source_id, train_ids, test_ids = c
   x <- wsi_prediction_feature_matrix(
     context, source_id, points$id,
     reduction_dims = reduction_dims,
-    points = points
+    points = points,
+    max_features = max_features
   )
   x <- wsi_prediction_feature_filter(x, max_features = max_features)
   complete <- stats::complete.cases(x)

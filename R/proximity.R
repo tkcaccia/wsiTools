@@ -435,7 +435,8 @@ wsi_proximity_stats_feature_matrix <- function(context, proximity, feature_sourc
     feature_source,
     ids,
     reduction_dims = reduction_dims,
-    points = points
+    points = points,
+    max_features = max_features
   )
   if (!is.matrix(x) || !nrow(x) || !ncol(x)) {
     wsi_abort("No numeric feature matrix was found for proximity statistics.")

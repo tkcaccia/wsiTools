@@ -1571,6 +1571,38 @@ wsi_seurat_collect_expression_matrices <- function(seurat) {
     matrices[[length(matrices) + 1L]] <<- list(name = name, matrix = x)
     invisible(NULL)
   }
+  add_seurat_layers <- function(x, prefix, assay_name = NULL) {
+    if (!requireNamespace("SeuratObject", quietly = TRUE) || is.null(x)) {
+      return(invisible(NULL))
+    }
+    layer_names <- tryCatch(
+      if (is.null(assay_name)) {
+        SeuratObject::Layers(x)
+      } else {
+        SeuratObject::Layers(x, assay = assay_name)
+      },
+      error = function(e) character()
+    )
+    layer_names <- unique(as.character(layer_names %||% character()))
+    layer_names <- layer_names[nzchar(layer_names) & !is.na(layer_names)]
+    if (!length(layer_names)) {
+      return(invisible(NULL))
+    }
+    preferred <- c("counts", "data", "normalized", "logcounts", "normcounts")
+    layer_names <- c(intersect(preferred, layer_names), setdiff(layer_names, preferred))
+    for (layer_name in layer_names) {
+      value <- tryCatch(
+        if (is.null(assay_name)) {
+          SeuratObject::LayerData(x, layer = layer_name)
+        } else {
+          SeuratObject::LayerData(x, assay = assay_name, layer = layer_name)
+        },
+        error = function(e) NULL
+      )
+      add_matrix(value, paste(prefix, "layers", layer_name, sep = "$"))
+    }
+    invisible(NULL)
+  }
   visit_expression_container <- function(x, prefix = "expression", depth = 0L,
                                          seen = character(), include_scaled = FALSE) {
     if (is.null(x) || depth > 8L) {
@@ -1685,9 +1717,19 @@ wsi_seurat_collect_expression_matrices <- function(seurat) {
   assays <- wsi_seurat_slot(seurat, "assays")
   if (is.list(assays) && length(assays)) {
     for (assay_name in names(assays)) {
+      add_seurat_layers(assays[[assay_name]], paste("assays", assay_name, sep = "$"))
       visit_container(assays[[assay_name]], paste("assays", assay_name, sep = "$"))
     }
   }
+  seurat_assays <- if (requireNamespace("SeuratObject", quietly = TRUE)) {
+    tryCatch(SeuratObject::Assays(seurat), error = function(e) character())
+  } else {
+    character()
+  }
+  for (assay_name in setdiff(as.character(seurat_assays %||% character()), names(assays) %||% character())) {
+    add_seurat_layers(seurat, paste("assays", assay_name, sep = "$"), assay_name = assay_name)
+  }
+  add_seurat_layers(seurat, "seurat")
   for (slot_name in c("data", "counts", "expression", "exprs")) {
     add_matrix(wsi_seurat_slot(seurat, slot_name), slot_name)
   }

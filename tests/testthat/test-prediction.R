@@ -421,6 +421,43 @@ test_that("prediction layer items retain project scope metadata", {
   expect_equal(layer$items[[1]]$feature_id, "spot1")
 })
 
+test_that("raw spatial expression uses point barcodes and limits features before dense output", {
+  expr <- matrix(
+    c(
+      1, 1, 1, 1,
+      1, 2, 4, 8,
+      8, 4, 2, 1,
+      3, 3, 3, 3
+    ),
+    nrow = 4L,
+    byrow = TRUE,
+    dimnames = list(c("constant_a", "GeneA", "GeneB", "constant_b"), paste0("cell", 1:4))
+  )
+  linked <- list(
+    expression_source = list(object = expr),
+    spots = data.frame(
+      id = paste0("viewer_", 1:4),
+      barcode = paste0("cell", 1:4),
+      x = seq_len(4),
+      y = seq_len(4),
+      stringsAsFactors = FALSE
+    )
+  )
+  class(linked) <- c("wsi_seurat_spatial", "list")
+  points <- linked$spots
+  out <- wsiTools:::wsi_prediction_feature_matrix(
+    wsi_prediction_context(spatial = linked),
+    "spatial:raw",
+    points$id,
+    points = points,
+    max_features = 2L
+  )
+  expect_equal(rownames(out), points$id)
+  expect_equal(ncol(out), 2L)
+  expect_setequal(colnames(out), c("GeneA", "GeneB"))
+  expect_equal(unname(out[, "GeneA"]), c(1, 2, 4, 8))
+})
+
 test_that("prediction feature filtering removes zero variance and limits features", {
   x <- cbind(
     constant = c(1, 1, 1, 1),
