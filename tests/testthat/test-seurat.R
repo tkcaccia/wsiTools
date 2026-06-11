@@ -907,3 +907,12 @@ test_that("Seurat selection events are accepted by the live bridge validator", {
   ))
   expect_equal(cluster_payload$event, "seurat_cluster_coloured")
 })
+
+test_that("Seurat gene overlay represents zero-expression cells", {
+  js <- paste(wsiTools:::wsi_viewer_seurat_js(), collapse = "\n")
+
+  expect_false(grepl("value<=0", js, fixed = TRUE))
+  expect_false(grepl("skipZero", js, fixed = TRUE))
+  expect_true(grepl("represented_count:items.length", js, fixed = TRUE))
+  expect_true(grepl("positive_count:positiveCount", js, fixed = TRUE))
+})
