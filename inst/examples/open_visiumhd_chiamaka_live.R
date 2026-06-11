@@ -146,7 +146,12 @@ spatial_dir <- NULL
 spatial_files <- find_files(project_root, exts = c("json", "csv"), target = target, include = "scalefactors_json|tissue_positions")
 if (length(spatial_files)) {
   possible <- unique(dirname(spatial_files[grepl("scalefactors_json|tissue_positions", basename(spatial_files), ignore.case = TRUE)]))
-  spatial_dir <- possible[basename(possible) == "spatial"][[1L]] %||% possible[[1L]]
+  preferred <- possible[basename(possible) == "spatial"]
+  if (length(preferred)) {
+    spatial_dir <- preferred[[1L]]
+  } else if (length(possible)) {
+    spatial_dir <- possible[[1L]]
+  }
 }
 
 if (is.null(image_file)) stop("No high-resolution tissue image was found. Set WSITOOLS_VISIUMHD_IMAGE.", call. = FALSE)
