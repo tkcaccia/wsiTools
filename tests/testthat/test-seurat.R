@@ -241,11 +241,51 @@ test_that("live Seurat gene payload fetches one selected gene without preloading
 
   expect_true(payload$ok)
   expect_equal(payload$gene, "Gad1")
+  expect_equal(payload$feature_type, "spot")
+  expect_equal(payload$feature_plural, "spots")
   expect_equal(payload$count, 3)
   expect_equal(vapply(payload$points, `[[`, numeric(1), "value"), c(9, 0, 1))
   expect_equal(vapply(payload$points, `[[`, numeric(1), "x"), linked$spots$x)
   expect_equal(vapply(payload$points, `[[`, numeric(1), "y"), linked$spots$y)
   expect_true(all(is.finite(vapply(payload$points, `[[`, numeric(1), "radius"))))
+})
+
+test_that("live Seurat gene payload identifies cell-level spatial data", {
+  embeddings <- matrix(
+    c(1, 0, 0, 1),
+    nrow = 2,
+    byrow = TRUE,
+    dimnames = list(c("cellid_001", "cellid_002"), c("PC_1", "PC_2"))
+  )
+  expression <- matrix(
+    c(3, 9),
+    nrow = 1,
+    dimnames = list("CRABP2", c("cellid_001", "cellid_002"))
+  )
+  seurat_like <- list(
+    reductions = list(pca = list(cell.embeddings = embeddings)),
+    assays = list(Spatial = list(data = expression)),
+    images = list(
+      breast = list(
+        coordinates = data.frame(
+          cell = c("cellid_001", "cellid_002"),
+          imagecol = c(100, 200),
+          imagerow = c(150, 250)
+        ),
+        image = array(0, dim = c(50, 100, 3))
+      )
+    )
+  )
+  slide <- wsi_mock_slide(width = 1000, height = 500, levels = c(1, 2))
+
+  linked <- wsi_link_seurat_image(seurat_like, slide)
+  payload <- wsiTools:::wsi_seurat_dynamic_gene_payload(linked, "CRABP2")
+
+  expect_equal(linked$feature_type, "cell")
+  expect_equal(payload$feature_type, "cell")
+  expect_equal(payload$feature_plural, "cells")
+  expect_true(all(vapply(payload$points, `[[`, character(1), "feature_type") == "cell"))
+  expect_equal(vapply(payload$points, `[[`, numeric(1), "value"), c(3, 9))
 })
 
 test_that("live Seurat gene endpoint preserves the gene query parameter", {

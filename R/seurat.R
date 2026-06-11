@@ -168,6 +168,7 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
   if (!nrow(coordinates)) {
     wsi_abort("No shared spot/barcode identifiers were found between Seurat coordinates and the reduction.")
   }
+  feature_type <- wsi_seurat_feature_type(coordinates, source_name = "Seurat")
   gene_expression <- wsi_seurat_gene_expression(
     seurat,
     genes = spot_genes,
@@ -236,6 +237,7 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
     id = ids,
     label = ids,
     barcode = ids,
+    feature_type = feature_type,
     x = coordinates$x,
     y = coordinates$y,
     component_1 = component_values[, 1L],
@@ -340,6 +342,7 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
     pixel_size = scale_metadata$mpp,
     scale_metadata = scale_metadata,
     gene_expression = gene_expression,
+    feature_type = feature_type,
     spot_radius = spot_radius,
     spot_count = total,
     displayed_spot_count = nrow(spots),
@@ -349,7 +352,8 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
     cluster_values = cluster_values,
     expression_source = list(
       object = seurat,
-      spot_ids = as.character(spots$barcode %||% spots$id)
+      spot_ids = as.character(spots$barcode %||% spots$id),
+      feature_type = feature_type
     ),
     reduction_embeddings = embeddings,
     reduction_embedding_name = reduction,
@@ -704,11 +708,12 @@ wsi_viewer_seurat_project <- function(seurat = NULL, images = NULL, linked = NUL
 #' @export
 print.wsi_seurat_spatial <- function(x, ...) {
   source_name <- x$source_name %||% "Seurat"
+  feature_plural <- if (identical(x$feature_type %||% "spot", "cell")) "cells" else "spots"
   cat("<", tolower(source_name), "_spatial>\n", sep = "")
   cat("  image:     ", x$image_path %||% "<slide>", "\n", sep = "")
   cat("  image key: ", x$image_name %||% NA_character_, "\n", sep = "")
   cat("  reduction: ", x$reduction, " dims ", paste(x$dims, collapse = ","), "\n", sep = "")
-  cat("  spots:     ", format(x$spot_count, big.mark = ","), "\n", sep = "")
+  cat("  ", feature_plural, ":     ", format(x$spot_count, big.mark = ","), "\n", sep = "")
   cat("  displayed: ", format(x$displayed_spot_count, big.mark = ","), "\n", sep = "")
   cat("  mapping:   x*", signif(x$coordinate_mapping$scale_x, 5), " y*", signif(x$coordinate_mapping$scale_y, 5),
       " (", x$coordinate_mapping$method, ")\n", sep = "")
@@ -726,8 +731,10 @@ print.wsi_seurat_spatial <- function(x, ...) {
 
 wsi_seurat_spots_layer <- function(linked, visible = TRUE, opacity = 0.85) {
   source_name <- linked$source_name %||% "Seurat"
+  feature_type <- linked$feature_type %||% "spot"
+  feature_plural <- if (identical(feature_type, "cell")) "cells" else "spots"
   layer <- wsi_viewer_layer_payload(
-    name = paste(source_name, "spatial spots"),
+    name = paste(source_name, "spatial", feature_plural),
     data = linked$spots,
     type = "points",
     visible = visible,
@@ -758,10 +765,12 @@ wsi_seurat_spots_layer <- function(linked, visible = TRUE, opacity = 0.85) {
     }
   }
   layer$id <- "seurat_spots"
-  layer$name <- paste(source_name, "spatial spots")
+  layer$name <- paste(source_name, "spatial", feature_plural)
   layer$source_type <- "seurat_spots"
   layer$metadata <- list(
     source_name = source_name,
+    feature_type = feature_type,
+    feature_label = feature_plural,
     reduction = linked$reduction,
     image_name = linked$image_name,
     coordinate_mapping = linked$coordinate_mapping,
@@ -785,6 +794,8 @@ wsi_viewer_seurat_config <- function(seurat = NULL) {
   list(
     enabled = TRUE,
     source_name = seurat$source_name %||% "Seurat",
+    feature_type = seurat$feature_type %||% "spot",
+    feature_label = if (identical(seurat$feature_type %||% "spot", "cell")) "cells" else "spots",
     image_name = seurat$image_name,
     reduction = seurat$reduction,
     dims = as.integer(seurat$dims),
@@ -1396,6 +1407,7 @@ wsi_seurat_read_tissue_positions <- function(path) {
   row.names(out) <- NULL
   attr(out, "coordinate_space") <- if (all(c("pxl_col_in_fullres", "pxl_row_in_fullres") %in% names(coords))) "fullres" else "unknown"
   attr(out, "coordinate_source") <- path
+  attr(out, "id_column") <- barcode_col
   attr(out, "x_column") <- x_col
   attr(out, "y_column") <- y_col
   out
@@ -1443,9 +1455,25 @@ wsi_seurat_coordinate_table <- function(seurat, image_name, image_obj = NULL, ti
   }
   attr(out, "coordinate_space") <- attr(coords, "coordinate_space", exact = TRUE) %||% source_space
   attr(out, "coordinate_source") <- attr(coords, "coordinate_source", exact = TRUE) %||% "seurat"
+  attr(out, "id_column") <- attr(coords, "id_column", exact = TRUE) %||% {
+    if ("cell" %in% names(coords)) "cell" else if ("cells" %in% names(coords)) "cells" else "barcode"
+  }
   attr(out, "x_column") <- x_col
   attr(out, "y_column") <- y_col
   out
+}
+
+wsi_seurat_feature_type <- function(coordinates, source_name = "Seurat") {
+  ids <- as.character(coordinates$barcode %||% character())
+  id_column <- tolower(as.character(attr(coordinates, "id_column", exact = TRUE) %||% ""))
+  source_name <- tolower(as.character(source_name %||% ""))
+  cell_like_ids <- length(ids) && mean(grepl("(^cell(id)?[_:-])|(^cell[0-9])|cellid", tolower(ids))) > 0.5
+  if (id_column %in% c("cell", "cells", "cell_id", "cellid") ||
+      grepl("cell", source_name, fixed = TRUE) ||
+      isTRUE(cell_like_ids)) {
+    return("cell")
+  }
+  "spot"
 }
 
 wsi_seurat_first_column <- function(data, candidates) {
@@ -1911,6 +1939,12 @@ wsi_seurat_dynamic_gene_payload <- function(linked, gene) {
   if (!length(spot_ids)) {
     wsi_abort(sprintf("No %s spot/cell identifiers are available for dynamic gene lookup.", source_name))
   }
+  feature_type <- source$feature_type %||% linked$feature_type %||% {
+    if ("feature_type" %in% names(linked$spots)) linked$spots$feature_type[[1L]] else "spot"
+  }
+  feature_type <- if (identical(as.character(feature_type), "cell")) "cell" else "spot"
+  feature_label <- if (identical(feature_type, "cell")) "cell" else "spot"
+  feature_plural <- paste0(feature_label, "s")
   gene_expression <- wsi_seurat_gene_expression(
     object,
     genes = gene,
@@ -1939,6 +1973,7 @@ wsi_seurat_dynamic_gene_payload <- function(linked, gene) {
       id = as.character(spots$id[[i]] %||% ""),
       label = as.character(spots$label[[i]] %||% spots$id[[i]] %||% ""),
       barcode = as.character(spots$barcode[[i]] %||% spots$id[[i]] %||% ""),
+      feature_type = feature_type,
       x = if (is.finite(x)) x else NA_real_,
       y = if (is.finite(y)) y else NA_real_,
       slide_x = if (is.finite(x)) x else NA_real_,
@@ -1952,6 +1987,9 @@ wsi_seurat_dynamic_gene_payload <- function(linked, gene) {
     ok = TRUE,
     gene = as.character(actual_gene),
     requested_gene = as.character(gene),
+    feature_type = feature_type,
+    feature_label = feature_label,
+    feature_plural = feature_plural,
     range = gene_expression$ranges[[actual_gene]] %||% list(min = NA_real_, max = NA_real_),
     count = length(points),
     points = points

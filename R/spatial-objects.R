@@ -1039,6 +1039,7 @@ wsi_link_spatial_table_image <- function(object, image, source_name, image_name,
   if (!nrow(coordinates)) {
     wsi_abort(sprintf("No shared spot/cell identifiers were found between %s coordinates and the reduction.", source_name))
   }
+  feature_type <- wsi_seurat_feature_type(coordinates, source_name = source_name)
   gene_expression <- wsi_seurat_gene_expression(
     object,
     genes = spot_genes,
@@ -1108,6 +1109,7 @@ wsi_link_spatial_table_image <- function(object, image, source_name, image_name,
     id = ids,
     label = ids,
     barcode = ids,
+    feature_type = feature_type,
     x = coordinates$x,
     y = coordinates$y,
     component_1 = component_values[, 1L],
@@ -1213,6 +1215,7 @@ wsi_link_spatial_table_image <- function(object, image, source_name, image_name,
     pixel_size = scale_metadata$mpp,
     scale_metadata = scale_metadata,
     gene_expression = gene_expression,
+    feature_type = feature_type,
     spot_radius = spot_radius,
     spot_count = total,
     displayed_spot_count = nrow(spots),
@@ -1222,7 +1225,8 @@ wsi_link_spatial_table_image <- function(object, image, source_name, image_name,
     cluster_values = cluster_values,
     expression_source = list(
       object = object,
-      spot_ids = as.character(spots$barcode %||% spots$id)
+      spot_ids = as.character(spots$barcode %||% spots$id),
+      feature_type = feature_type
     ),
     reduction_embeddings = embeddings,
     reduction_embedding_name = reduction,
@@ -1239,14 +1243,17 @@ wsi_spatial_coordinate_table <- function(coords, source_name = "spatial object")
   }
   coords <- as.data.frame(coords, stringsAsFactors = FALSE)
   barcode <- NULL
+  id_col <- NULL
   for (candidate in c("barcode", "barcodes", "cell_ID", "cell_id", "cell", "cells", "spot", "spot_id", "sample_id", "id", "ID")) {
     if (candidate %in% names(coords)) {
       barcode <- as.character(coords[[candidate]])
+      id_col <- candidate
       break
     }
   }
   if (is.null(barcode)) {
     barcode <- rownames(coords) %||% as.character(seq_len(nrow(coords)))
+    id_col <- "rownames"
   }
   x_col <- wsi_seurat_first_column(coords, c("pxl_col_in_fullres", "imagecol", "col", "x", "X", "sdimx", "sdimX", "spatial_x", "array_col"))
   y_col <- wsi_seurat_first_column(coords, c("pxl_row_in_fullres", "imagerow", "row", "y", "Y", "sdimy", "sdimY", "spatial_y", "array_row"))
@@ -1263,6 +1270,7 @@ wsi_spatial_coordinate_table <- function(coords, source_name = "spatial object")
   row.names(out) <- NULL
   attr(out, "coordinate_space") <- if (all(c("pxl_col_in_fullres", "pxl_row_in_fullres") %in% names(coords))) "fullres" else "unknown"
   attr(out, "coordinate_source") <- tolower(source_name)
+  attr(out, "id_column") <- id_col
   attr(out, "x_column") <- x_col
   attr(out, "y_column") <- y_col
   out
