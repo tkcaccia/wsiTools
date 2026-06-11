@@ -1932,10 +1932,18 @@ wsi_seurat_dynamic_gene_payload <- function(linked, gene) {
     colours <- colours[seq_len(nrow(spots))]
   }
   points <- lapply(seq_len(nrow(spots)), function(i) {
+    x <- suppressWarnings(as.numeric(spots$x[[i]] %||% spots$slide_x[[i]] %||% NA_real_))
+    y <- suppressWarnings(as.numeric(spots$y[[i]] %||% spots$slide_y[[i]] %||% NA_real_))
+    radius <- suppressWarnings(as.numeric(spots$radius[[i]] %||% spots$spot_radius[[i]] %||% linked$spot_radius %||% NA_real_))
     list(
       id = as.character(spots$id[[i]] %||% ""),
       label = as.character(spots$label[[i]] %||% spots$id[[i]] %||% ""),
       barcode = as.character(spots$barcode[[i]] %||% spots$id[[i]] %||% ""),
+      x = if (is.finite(x)) x else NA_real_,
+      y = if (is.finite(y)) y else NA_real_,
+      slide_x = if (is.finite(x)) x else NA_real_,
+      slide_y = if (is.finite(y)) y else NA_real_,
+      radius = if (is.finite(radius)) radius else NA_real_,
       value = if (is.finite(values[[i]])) values[[i]] else NA_real_,
       colour = as.character(colours[[i]] %||% "#d1d5db")
     )

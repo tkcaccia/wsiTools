@@ -243,6 +243,9 @@ test_that("live Seurat gene payload fetches one selected gene without preloading
   expect_equal(payload$gene, "Gad1")
   expect_equal(payload$count, 3)
   expect_equal(vapply(payload$points, `[[`, numeric(1), "value"), c(9, 0, 1))
+  expect_equal(vapply(payload$points, `[[`, numeric(1), "x"), linked$spots$x)
+  expect_equal(vapply(payload$points, `[[`, numeric(1), "y"), linked$spots$y)
+  expect_true(all(is.finite(vapply(payload$points, `[[`, numeric(1), "radius"))))
 })
 
 test_that("live Seurat gene endpoint preserves the gene query parameter", {
