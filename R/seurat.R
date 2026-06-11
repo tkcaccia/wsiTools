@@ -1935,12 +1935,16 @@ wsi_seurat_dynamic_gene_payload <- function(linked, gene) {
       )
     )
   }
-  spot_ids <- as.character(source$spot_ids %||% linked$spots$barcode %||% linked$spots$id)
+  spots <- linked$spots
+  spot_ids <- as.character(source$spot_ids %||% spots$barcode %||% spots$id)
   if (!length(spot_ids)) {
     wsi_abort(sprintf("No %s spot/cell identifiers are available for dynamic gene lookup.", source_name))
   }
   feature_type <- source$feature_type %||% linked$feature_type %||% {
-    if ("feature_type" %in% names(linked$spots)) linked$spots$feature_type[[1L]] else "spot"
+    if ("feature_type" %in% names(spots)) spots$feature_type[[1L]] else NULL
+  }
+  feature_type <- feature_type %||% {
+    tryCatch(wsi_seurat_feature_type(spots, source_name = source_name), error = function(err) "spot")
   }
   feature_type <- if (identical(as.character(feature_type), "cell")) "cell" else "spot"
   feature_label <- if (identical(feature_type, "cell")) "cell" else "spot"
@@ -1959,7 +1963,6 @@ wsi_seurat_dynamic_gene_payload <- function(linked, gene) {
   }
   values <- suppressWarnings(as.numeric(gene_expression$values[, idx]))
   colours <- wsi_seurat_gene_colours(gene_expression, actual_gene)
-  spots <- linked$spots
   if (nrow(spots) != length(values)) {
     spots <- spots[seq_len(min(nrow(spots), length(values))), , drop = FALSE]
     values <- values[seq_len(nrow(spots))]

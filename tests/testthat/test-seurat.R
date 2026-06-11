@@ -288,6 +288,37 @@ test_that("live Seurat gene payload identifies cell-level spatial data", {
   expect_equal(vapply(payload$points, `[[`, numeric(1), "value"), c(3, 9))
 })
 
+test_that("live Seurat gene payload infers cells for manually constructed linked objects", {
+  expression <- matrix(
+    c(1, 4),
+    nrow = 1,
+    dimnames = list("CRABP2", c("cellid_001", "cellid_002"))
+  )
+  seurat_like <- list(assays = list(Spatial = list(data = expression)))
+  linked <- list(
+    source_name = "Seurat",
+    spots = data.frame(
+      id = c("cellid_001", "cellid_002"),
+      label = c("cellid_001", "cellid_002"),
+      barcode = c("cellid_001", "cellid_002"),
+      x = c(10, 20),
+      y = c(30, 40),
+      stringsAsFactors = FALSE
+    ),
+    spot_radius = 8,
+    expression_source = list(
+      object = seurat_like,
+      spot_ids = c("cellid_001", "cellid_002")
+    )
+  )
+  class(linked) <- c("wsi_seurat_spatial", "list")
+
+  payload <- wsiTools:::wsi_seurat_dynamic_gene_payload(linked, "CRABP2")
+
+  expect_equal(payload$feature_type, "cell")
+  expect_equal(payload$feature_plural, "cells")
+})
+
 test_that("live Seurat gene endpoint preserves the gene query parameter", {
   query <- wsiTools:::wsi_http_query_params("gene=Cryzl2&q=Gad1")
 
