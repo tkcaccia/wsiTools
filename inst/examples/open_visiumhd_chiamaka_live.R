@@ -97,15 +97,41 @@ cat("--------------------------------\n\n")
 
 target <- Sys.getenv("WSITOOLS_VISIUMHD_PROJECT", unset = "breast")
 project_root <- env_path("WSITOOLS_VISIUMHD_DIR") %||% "/mnt/sata_ssd/benchmarks/VF"
-output_root <- env_path("WSITOOLS_VISIUMHD_OUTPUT_DIR") %||%
-  file.path(project_root, "save", paste0("visiumhd_wsiTools_", format(Sys.time(), "%Y%m%d_%H%M%S")))
-dir.create(output_root, recursive = TRUE, showWarnings = FALSE)
 
 if (!dir.exists(project_root)) {
   stop("Project root was not found: ", project_root, "\nSet WSITOOLS_VISIUMHD_DIR to the VisiumHD project folder.", call. = FALSE)
 }
 
-msg("Searching VisiumHD files under: %s", project_root)
+project_dir <- NULL
+project_dirs <- list.dirs(project_root, recursive = FALSE, full.names = TRUE)
+if (length(project_dirs) && nzchar(target)) {
+  matches <- project_dirs[grepl(tolower(target), tolower(basename(project_dirs)), fixed = TRUE)]
+  if (length(matches)) project_dir <- normalizePath(matches[[1L]], winslash = "/", mustWork = TRUE)
+}
+search_root <- project_dir %||% project_root
+
+output_root <- env_path("WSITOOLS_VISIUMHD_OUTPUT_DIR") %||%
+  if (!is.null(project_dir)) {
+    file.path(project_dir, "wsiTools_viewer")
+  } else {
+    file.path(project_root, "save", paste0("visiumhd_wsiTools_", format(Sys.time(), "%Y%m%d_%H%M%S")))
+  }
+dir.create(output_root, recursive = TRUE, showWarnings = FALSE)
+
+existing_output_file <- function(pattern) {
+  hits <- list.files(output_root, pattern = pattern, full.names = TRUE, ignore.case = TRUE)
+  hits <- hits[file.exists(hits)]
+  if (length(hits)) normalizePath(hits[[1L]], winslash = "/", mustWork = TRUE) else NULL
+}
+
+existing_output_dir <- function(pattern) {
+  hits <- list.dirs(output_root, recursive = FALSE, full.names = TRUE)
+  hits <- hits[grepl(pattern, basename(hits), ignore.case = TRUE)]
+  hits <- hits[dir.exists(hits)]
+  if (length(hits)) normalizePath(hits[[1L]], winslash = "/", mustWork = TRUE) else NULL
+}
+
+msg("Searching VisiumHD files under: %s", search_root)
 msg("Project keyword: %s", target)
 
 image_file <- first_existing(env_path("WSITOOLS_VISIUMHD_IMAGE") %||% character())
@@ -114,7 +140,7 @@ geojson_file <- first_existing(env_path("WSITOOLS_VISIUMHD_GEOJSON") %||% charac
 
 if (is.null(image_file)) {
   image_file <- first_existing(find_files(
-    project_root,
+    search_root,
     exts = c("btf", "tif", "tiff", "svs", "ome.tif", "ome.tiff"),
     target = target,
     include = "image|tissue|full|hires|high|wsi|btf|ome",
@@ -124,7 +150,7 @@ if (is.null(image_file)) {
 
 if (is.null(seurat_file)) {
   seurat_file <- first_existing(find_files(
-    project_root,
+    search_root,
     exts = c("rds", "rda", "rdata"),
     target = target,
     include = "seurat|object|visium|spatial",
@@ -134,7 +160,7 @@ if (is.null(seurat_file)) {
 
 if (is.null(geojson_file)) {
   geojson_file <- first_existing(find_files(
-    project_root,
+    search_root,
     exts = c("geojson", "json"),
     target = target,
     include = "cell|annotation|segmentation|geojson|medsam|mask|cluster",
@@ -143,7 +169,7 @@ if (is.null(geojson_file)) {
 }
 
 spatial_dir <- NULL
-spatial_files <- find_files(project_root, exts = c("json", "csv"), target = target, include = "scalefactors_json|tissue_positions")
+spatial_files <- find_files(search_root, exts = c("json", "csv"), target = target, include = "scalefactors_json|tissue_positions")
 if (length(spatial_files)) {
   possible <- unique(dirname(spatial_files[grepl("scalefactors_json|tissue_positions", basename(spatial_files), ignore.case = TRUE)]))
   preferred <- possible[basename(possible) == "spatial"]
@@ -176,13 +202,16 @@ if (!is.null(geojson_file)) {
   } else {
     mask_downsample <- as.numeric(Sys.getenv("WSITOOLS_VISIUMHD_MASK_DOWNSAMPLE", unset = "4"))
     if (!is.finite(mask_downsample) || mask_downsample < 1) mask_downsample <- 4
-    mask_ome <- file.path(output_root, sprintf("cell_annotation_mask_ds%s.ome.tif", gsub("\\.", "_", as.character(mask_downsample))))
+    mask_ds_token <- gsub("\\.", "_", as.character(mask_downsample))
+    mask_ome <- existing_output_file(sprintf(".*cell.*annotation.*mask.*ds%s.*\\.ome\\.tiff?$", mask_ds_token)) %||%
+      file.path(output_root, sprintf("cell_annotation_mask_ds%s.ome.tif", mask_ds_token))
     msg("Converting cell GeoJSON to coloured mask OME-TIFF at downsample %s.", mask_downsample)
     msg("This is intentionally tiled and does not send every cell polygon to the browser.")
 
     mask_result <- if (file.exists(mask_ome)) {
       msg("Reusing existing mask: %s", mask_ome)
-      legend_file <- sub("\\.ome\\.tiff?$", "_labels.csv", mask_ome, ignore.case = TRUE)
+      legend_file <- existing_output_file(sprintf(".*cell.*annotation.*mask.*(legend|labels).*ds%s.*\\.csv$", mask_ds_token)) %||%
+        sub("\\.ome\\.tiff?$", "_labels.csv", mask_ome, ignore.case = TRUE)
       labels <- if (file.exists(legend_file)) utils::read.csv(legend_file, stringsAsFactors = FALSE) else data.frame()
       list(
         output = mask_ome,
@@ -216,7 +245,8 @@ if (!is.null(geojson_file)) {
     }
 
     mask_slide <- wsi_open(mask_result$output)
-    mask_tile_dir <- file.path(output_root, "cell_annotation_mask_deepzoom")
+    mask_tile_dir <- existing_output_dir(sprintf(".*cell.*annotation.*mask.*ds%s.*tiles$", mask_ds_token)) %||%
+      file.path(output_root, "cell_annotation_mask_deepzoom")
     create_deepzoom <- getFromNamespace("wsi_create_deepzoom_tiles", "wsiTools")
     tile_base <- getFromNamespace("wsi_tile_base_url", "wsiTools")
     dz_max_level <- getFromNamespace("wsi_dz_max_level", "wsiTools")
@@ -268,7 +298,8 @@ if (!is.null(geojson_file)) {
 }
 
 html_output <- file.path(output_root, "visiumhd_live_viewer.html")
-tile_dir <- file.path(output_root, "tissue_deepzoom")
+tile_dir <- existing_output_dir(".*tissue.*tiles$|.*tissue.*deepzoom$") %||%
+  file.path(output_root, "tissue_deepzoom")
 
 msg("Opening live tiled viewer. First run may spend time creating full-resolution Deep Zoom tiles.")
 msg("Subsequent runs reuse: %s", tile_dir)
@@ -292,7 +323,7 @@ viewer <- wsi_viewer_seurat(
   rebuild = FALSE,
   tile_overlap = 1,
   channel_sources = channel_sources,
-  title = sprintf("wsiTools VisiumHD viewer: %s", basename(project_root)),
+  title = sprintf("wsiTools VisiumHD viewer: %s", basename(search_root)),
   output = html_output,
   open = truthy("WSITOOLS_VISIUMHD_OPEN", default = TRUE),
   wait = truthy("WSITOOLS_VISIUMHD_WAIT", default = TRUE),
