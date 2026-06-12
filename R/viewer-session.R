@@ -143,7 +143,7 @@ wsi_viewer_allowed_events <- function() {
     "project_image_added", "project_image_reordered", "project_image_closed",
     "project_image_selected", "project_section_selected",
     "roi_added", "roi_created", "roi_selected", "roi_deselected",
-    "roi_updated", "roi_edited", "roi_brush_edited", "roi_deleted",
+    "roi_updated", "roi_edited", "roi_curve_edited", "roi_brush_edited", "roi_deleted",
     "roi_duplicated", "roi_exported", "roi_export_selection_updated",
     "roi_color_updated", "roi_visibility_updated", "roi_lock_updated",
     "roi_smoothed", "roi_simplified", "roi_holes_filled", "roi_split",

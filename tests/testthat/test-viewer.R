@@ -490,7 +490,7 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "Pan mode", fixed = TRUE)
   expect_match(html, "Draw polygon ROI", fixed = TRUE)
   expect_match(html, "Brush annotation editing", fixed = TRUE)
-  expect_match(html, "Edit selected ROI vertices", fixed = TRUE)
+  expect_match(html, "Edit ROI vertices or redraw smooth boundary curves", fixed = TRUE)
   expect_match(html, "Measure distance between two points", fixed = TRUE)
   expect_match(html, "Undo annotation, trajectory, or closed-image edit", fixed = TRUE)
   expect_match(html, "Redo annotation, trajectory, or closed-image edit", fixed = TRUE)
@@ -502,6 +502,16 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "ROI saved", fixed = TRUE)
   expect_match(html, "GeoJSON exported", fixed = TRUE)
   expect_false(grepl("Run StarDist", html, fixed = TRUE))
+  expect_match(html, "curveEditStroke", fixed = TRUE)
+  expect_match(html, "nearestBoundarySegmentAtCanvas", fixed = TRUE)
+  expect_match(html, "startCurveEditStroke", fixed = TRUE)
+  expect_match(html, "addCurveEditPoint", fixed = TRUE)
+  expect_match(html, "chaikinSmoothOpenPoints", fixed = TRUE)
+  expect_match(html, "replaceRingForwardArc", fixed = TRUE)
+  expect_match(html, "finishCurveEditStroke", fixed = TRUE)
+  expect_match(html, "drawCurveEditPreview", fixed = TRUE)
+  expect_match(html, "roi_curve_edited", fixed = TRUE)
+  expect_match(html, "startCurveEditStroke(lastCanvasPointer,lastPointer,slideToCanvas)", fixed = TRUE)
   expect_match(html, "roiCompositeGeometry", fixed = TRUE)
   expect_match(html, "clippedHoleForGroup", fixed = TRUE)
   expect_match(html, "roiContainsPoint", fixed = TRUE)
@@ -2288,7 +2298,7 @@ test_that("live H&E viewer wires deconvolution as tiled channel layers", {
 
 test_that("viewer event validation allowlists live WebSocket events", {
   expected <- c(
-    "roi_created", "roi_updated", "roi_deleted", "roi_selected",
+    "roi_created", "roi_updated", "roi_curve_edited", "roi_deleted", "roi_selected",
     "brush_committed", "viewport_changed", "layer_updated",
     "trajectory_deleted", "trajectory_area_created", "trajectory_area_updated",
     "trajectory_profile_started", "trajectory_profile_finished",
@@ -2623,6 +2633,8 @@ test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
   expect_match(html, "syncMultiViewChannelSourcesForPane", fixed = TRUE)
   expect_match(html, "multiViewDrawRoiSet", fixed = TRUE)
   expect_match(html, "multiViewFindVertexAt", fixed = TRUE)
+  expect_match(html, "startCurveEditStroke(multiViewLastCanvasPointer,lastPointer,p=>multiViewSlideToCanvas(p,pane))", fixed = TRUE)
+  expect_match(html, "drawCurveEditPreview(cx,p=>multiViewSlideToCanvas(p,pane))", fixed = TRUE)
   expect_match(html, "multiViewPaneMouseDown", fixed = TRUE)
   expect_match(html, "multiViewPaneMouseMove", fixed = TRUE)
   expect_match(html, "multiViewPaneMouseUp", fixed = TRUE)
