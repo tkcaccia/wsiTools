@@ -22,6 +22,10 @@ wsi_viewer(
   tile_overlap = NULL,
   tile_url_base = NULL,
   tile_url_template = NULL,
+  tile_prefetch_margin = 1L,
+  tile_cache_count = 768L,
+  tile_prefetch_cache_count = 512L,
+  progressive_preview = TRUE,
   tile_url_style = c("deepzoom", "slash"),
   max_level = NULL,
   tile_source_label = NULL,
@@ -32,6 +36,8 @@ wsi_viewer(
   stain = c("none", "ihc", "he"),
   channels = NULL,
   base_layer_name = NULL,
+  base_layer_visible = TRUE,
+  base_layer_opacity = 1,
   hematoxylin = c(0.65, 0.704, 0.286),
   hrp = c(0.268, 0.57, 0.776),
   hematoxylin_colour = "#4b3f99",
@@ -99,6 +105,22 @@ for \code{mode = "tiles"}. These are normally set by \code{\link[=wsi_viewer_liv
 \code{dynamic_tiles = TRUE}; when supplied, static Deep Zoom generation is
 skipped.}
 
+\item{tile_prefetch_margin}{Number of tile rows/columns beyond the visible
+viewport to prefetch in tiled viewers. Use \code{0} to prefetch only visible
+tiles, \code{1} or \code{2} for smoother panning, and \code{-1} to disable browser-side
+prefetching.}
+
+\item{tile_cache_count}{Maximum number of decoded OpenSeadragon tiles kept
+in the browser cache.}
+
+\item{tile_prefetch_cache_count}{Maximum number of browser-side speculative
+prefetch tile images kept by wsiTools.}
+
+\item{progressive_preview}{Whether tiled viewers should keep the
+low-resolution navigator preview behind the tile canvas while sharper
+tiles stream in. This improves perceived opening speed for very large WSI
+files without loading the full image into R.}
+
 \item{tile_url_style}{URL style for \code{tile_url_base}: \code{"deepzoom"} uses
 \verb{/\{level\}/\{x\}_\{y\}.\{format\}}, while \code{"slash"} uses
 \verb{/\{level\}/\{x\}/\{y\}.\{format\}}.}
@@ -131,6 +153,9 @@ a time.}
 
 \item{base_layer_name}{Display name for the base image layer in the Stains
 menu.}
+
+\item{base_layer_visible, base_layer_opacity}{Initial visibility and opacity
+for the base image layer.}
 
 \item{hematoxylin, hrp}{RGB optical-density vectors used when
 \code{stain = "ihc"} and \code{channels} is not supplied.}

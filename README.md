@@ -56,13 +56,34 @@ wsi_diagnose(live_test = FALSE)
 ## Start here
 
 ```r
-remotes::install_github("tkcaccia/wsiTools", upgrade = "never")
+install.packages("remotes", repos = "https://cloud.r-project.org")
+remotes::install_github(
+  "tkcaccia/wsiTools",
+  upgrade = "never",
+  build_vignettes = FALSE
+)
 
 library(wsiTools)
 wsi_start()
 wsi_backends()
+```
 
+Open one image with the simplest entry point:
+
+```r
 viewer <- wsi_open_viewer("sample.svs")
+```
+
+For a live R-connected viewer, keep the R session running and open the HTTP
+viewer URL:
+
+```r
+slide <- wsi_open("sample.svs")
+viewer <- wsi_viewer_live(slide, mode = "tiles", wait = FALSE)
+viewer$open()
+
+viewer$get_rois()
+viewer$get_measurements()
 ```
 
 No sample slide yet? Run the lightweight built-in demo:
@@ -72,16 +93,87 @@ demo <- wsi_demo_viewer(open = TRUE)
 demo$path
 ```
 
-- Static viewer: writes an HTML viewer, but does not send automatic feedback
-  back to R.
-- Live viewer: opens a browser connected to the active R session through
-  `httpuv`, so annotations, selections, measurements, and other events can be
-  retrieved from R.
-- Full-resolution viewing: use tiled mode through OpenSeadragon; the browser
-  needs image tiles rather than raw SVS, CZI, or OME-TIFF pixels.
-- Optional tools: StarDist, Mesmer, OpenSlide, libvips, Bio-Formats, and
-  libCZI are runtime capabilities. They are not installed silently with the
-  core R package.
+### Viewer modes
+
+| Mode | Function | Best for | R feedback |
+| --- | --- | --- | --- |
+| Static HTML | `wsi_viewer()` or `wsi_open_viewer(..., live = "no")` | Sharing a standalone viewer or opening a quick local HTML file | No automatic sync back to R |
+| Live viewer | `wsi_viewer_live()` or `wsi_open_viewer(..., live = "yes")` | Interactive annotation, spatial omics, measurements, segmentation import, and R analysis | Yes, through `httpuv` with WebSocket or polling |
+| Tiled viewer | `mode = "tiles"` | Full-resolution WSI navigation with OpenSeadragon | Browser requests image tiles instead of loading the full slide |
+
+Full-resolution viewing requires tiled image access. The browser cannot display
+raw SVS, CZI, OME-TIFF, or very large TIFF files directly as a single image.
+wsiTools therefore uses precomputed Deep Zoom tiles where possible, or live
+dynamic tiles from R as a fallback. The package should not load complete
+level-0 WSI images into R memory by default.
+
+### Common viewer tasks
+
+| Task | R entry point | In the viewer |
+| --- | --- | --- |
+| Open one image | `wsi_open_viewer("sample.svs")` | Use pan/zoom controls or the mouse |
+| Open a live viewer | `viewer <- wsi_viewer_live(slide, mode = "tiles")` | Keep R running; use `viewer$get_rois()` and related methods |
+| Check metadata | `wsi_info(slide)`, `wsi_levels(slide)` | Use the Project and View panels |
+| Draw annotations | `wsi_viewer_live()` | Use the Annotations menu and left Annotations panel |
+| Import GeoJSON | `read_geojson("annotations.geojson")` | Use Annotations / GeoJSON import |
+| Export annotations | `write_geojson(rois, "annotations.geojson")` | Use the Save or Export controls in the Annotations panel |
+| Extract tiles | `extract_tiles()` or `wsi_tile()` | Preview tile grids before exporting when available |
+| Diagnose setup | `wsi_backends()`, `wsi_diagnose()` | Open the Logs/History panel for viewer warnings |
+
+### Saving and exporting annotations
+
+For live viewers, annotations are available immediately in R:
+
+```r
+rois <- viewer$get_rois()
+selected <- viewer$get_selected_roi()
+
+write_geojson(rois, "annotations.geojson", overwrite = TRUE)
+```
+
+In the browser, use the Annotations panel to save or export ROIs. GeoJSON is the
+main interoperability format for QuPath-style polygon annotations. CSV exports
+are useful for spot/annotation association tables, measurements, and summaries.
+Static HTML viewers can download/export from the browser, but they do not
+automatically update the R session after the file is opened.
+
+### Keyboard shortcuts
+
+| Shortcut | Action |
+| --- | --- |
+| Arrow keys | Pan the active image view |
+| Shift + Arrow keys | Pan by a larger step |
+| `Space` or `P` | Pan/navigation tool |
+| `D` | Draw polygon ROI |
+| `B` | Brush annotation tool |
+| `E` | Edit selected annotation or trajectory |
+| `M` | Measurement tool |
+| `T` | Trajectory tool |
+| Delete or Backspace | Delete the selected object |
+| Ctrl/Cmd + Z | Undo the last annotation or object edit |
+| Ctrl/Cmd + Shift + Z or Ctrl/Cmd + Y | Redo when available |
+| Ctrl/Cmd + S | Save/export annotations or project state when supported |
+| Ctrl/Cmd + I | Import GeoJSON when supported |
+| Ctrl/Cmd + K | Open the command palette |
+| `?` | Open viewer help |
+
+### Troubleshooting quick checks
+
+| Problem | Check | Typical fix |
+| --- | --- | --- |
+| `library(wsiTools)` says the package is missing | `packageVersion("wsiTools")` | Reinstall with `remotes::install_github("tkcaccia/wsiTools", upgrade = "never")` |
+| A backend is unavailable | `wsi_backends()` and `wsi_diagnose()` | Install the optional runtime tool, then restart R |
+| Viewer opens as `file://` and does not sync to R | Browser address bar | Use `wsi_viewer_live()` and open the `http://127.0.0.1:<port>` URL |
+| CZI opens but the image is not displayed | `wsi_has_native_czi()`, `wsi_has_bioformats()` | Install or enable native CZI/Bio-Formats support; use tiled live mode |
+| Image is slow or tiles are black/missing | Logs/History panel, `wsi_has_vips()` | Use `mode = "tiles"`, prebuild tiles with libvips when possible, keep the live R session running |
+| Windows install fails with `00LOCK-wsiTools` | R library folder | Close R sessions and remove the `00LOCK-wsiTools` directory |
+| Windows compile fails around `Makeconf` | `pkgbuild::has_build_tools(debug = TRUE)` | Install/update Rtools matching your R version, then reinstall |
+| Scale bar is unavailable | `wsi_mpp(slide)` | Add pixel-size metadata manually or use Visium spot spacing when available |
+| StarDist or Mesmer is not configured | `wsi_has_stardist()`, `wsi_has_mesmer()` | Install/configure the external command or import an existing cell mask/CSV/GeoJSON |
+
+Optional tools such as OpenSlide, libvips, Bio-Formats, native CZI, StarDist,
+and Mesmer are runtime capabilities. They are not mandatory R package
+dependencies and are not silently bundled with the core package.
 
 For the shortest image-opening workflow, see [open one image](docs/open-one-image.md).
 For screenshots and the ROI round-trip GIF, see the

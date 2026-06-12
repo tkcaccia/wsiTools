@@ -75,7 +75,8 @@ The automatic choices are conservative:
   \item tiled mode is used for real file-backed slides when a tiled route is
     available; mock slides and unsupported cases use thumbnail mode;
   \item prebuilt Deep Zoom tiles are preferred for libvips-readable slides;
-    live dynamic tiles are used only when needed or explicitly requested;
+    live dynamic tiles are used for very large files, when prebuilt libvips
+    Deep Zoom tiles are not the better default, or when explicitly requested;
   \item CZI paths are opened through the existing section-aware project
     viewer helpers.
 }

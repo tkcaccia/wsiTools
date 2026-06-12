@@ -12,7 +12,8 @@
 #'   \item tiled mode is used for real file-backed slides when a tiled route is
 #'     available; mock slides and unsupported cases use thumbnail mode;
 #'   \item prebuilt Deep Zoom tiles are preferred for libvips-readable slides;
-#'     live dynamic tiles are used only when needed or explicitly requested;
+#'     live dynamic tiles are used for very large files, when prebuilt libvips
+#'     Deep Zoom tiles are not the better default, or when explicitly requested;
 #'   \item CZI paths are opened through the existing section-aware project
 #'     viewer helpers.
 #' }
@@ -167,6 +168,13 @@ wsi_open_viewer <- function(input, ...,
     use_live = use_live,
     use_tiles = use_tiles
   )
+  if (isTRUE(use_dynamic_tiles)) {
+    dots$tile_prefetch_margin <- dots$tile_prefetch_margin %||% 1L
+    dots$tile_cache_count <- dots$tile_cache_count %||% 768L
+    dots$tile_prefetch_cache_count <- dots$tile_prefetch_cache_count %||% 512L
+    dots$progressive_preview <- dots$progressive_preview %||% TRUE
+    dots$dynamic_tile_format <- dots$dynamic_tile_format %||% "jpg"
+  }
   if (isTRUE(use_live)) {
     if (isTRUE(opened_slide) && isTRUE(close_slide) && !isTRUE(quiet)) {
       message("wsi_open_viewer(): keeping the opened slide alive inside the returned live viewer session.")
@@ -175,7 +183,7 @@ wsi_open_viewer <- function(input, ...,
       message(sprintf(
         "wsi_open_viewer(): opening live %s viewer%s.",
         mode,
-        if (isTRUE(use_dynamic_tiles)) " with dynamic tiles" else ""
+        if (isTRUE(use_dynamic_tiles)) " with progressive dynamic tiles" else ""
       ))
     }
     args <- c(
@@ -211,6 +219,64 @@ wsi_open_viewer <- function(input, ...,
   )
   html <- do.call(wsi_viewer, args)
   normalizePath(html, winslash = "/", mustWork = FALSE)
+}
+
+#' Open a large image with optimized progressive tiled viewing
+#'
+#' `wsi_open_fast_viewer()` is a convenience wrapper for large whole-slide
+#' images. It opens a live, full-resolution tiled viewer, serves tiles on demand
+#' through the local R session, keeps a low-resolution preview visible while
+#' sharper tiles stream in, and increases browser-side tile caching. The full
+#' slide is not loaded into R memory.
+#'
+#' @param input Image path or `wsi_slide` object.
+#' @param ... Additional arguments passed to [wsi_open_viewer()].
+#' @param live,tiled,dynamic_tiles Viewer routing flags passed to
+#'   [wsi_open_viewer()].
+#' @param tile_prefetch_margin Number of tile rows/columns beyond the visible
+#'   viewport to prefetch.
+#' @param tile_cache_count Maximum number of OpenSeadragon decoded tiles kept
+#'   in the browser cache.
+#' @param tile_prefetch_cache_count Maximum number of speculative prefetch tile
+#'   images kept by wsiTools.
+#' @param progressive_preview Whether to keep the low-resolution preview behind
+#'   the tiled canvas while high-resolution tiles load.
+#' @param dynamic_tile_format Tile image format for the live dynamic tile
+#'   server.
+#' @param open,wait Browser launch and live bridge servicing options.
+#'
+#' @return A `wsi_viewer_session` for live viewers.
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' viewer <- wsi_open_fast_viewer("very_large_slide.svs")
+#' }
+wsi_open_fast_viewer <- function(input, ...,
+                                 live = "yes",
+                                 tiled = "yes",
+                                 dynamic_tiles = "yes",
+                                 tile_prefetch_margin = 1L,
+                                 tile_cache_count = 1024L,
+                                 tile_prefetch_cache_count = 768L,
+                                 progressive_preview = TRUE,
+                                 dynamic_tile_format = "jpg",
+                                 open = interactive(),
+                                 wait = interactive()) {
+  wsi_open_viewer(
+    input,
+    ...,
+    live = live,
+    tiled = tiled,
+    dynamic_tiles = dynamic_tiles,
+    tile_prefetch_margin = tile_prefetch_margin,
+    tile_cache_count = tile_cache_count,
+    tile_prefetch_cache_count = tile_prefetch_cache_count,
+    progressive_preview = progressive_preview,
+    dynamic_tile_format = dynamic_tile_format,
+    open = open,
+    wait = wait
+  )
 }
 
 wsi_open_viewer_flag <- function(x, name, yes_alias = NULL, no_alias = NULL) {
@@ -289,6 +355,34 @@ wsi_open_viewer_region_backend_available <- function(slide) {
   FALSE
 }
 
+wsi_open_viewer_file_size <- function(slide) {
+  path <- slide$path %||% NA_character_
+  if (!is.character(path) || length(path) != 1L || is.na(path) || !nzchar(path) || !file.exists(path)) {
+    return(NA_real_)
+  }
+  size <- suppressWarnings(file.info(path)$size)
+  if (!is.finite(size)) {
+    return(NA_real_)
+  }
+  as.numeric(size)
+}
+
+wsi_open_viewer_large_file_threshold <- function() {
+  value <- suppressWarnings(as.numeric(Sys.getenv(
+    "WSITOOLS_LARGE_IMAGE_BYTES",
+    unset = as.character(5 * 1024^3)
+  )))
+  if (!is.finite(value) || value <= 0) {
+    return(5 * 1024^3)
+  }
+  value
+}
+
+wsi_open_viewer_is_large_file <- function(slide, threshold = wsi_open_viewer_large_file_threshold()) {
+  size <- wsi_open_viewer_file_size(slide)
+  is.finite(size) && is.finite(threshold) && size >= threshold
+}
+
 wsi_open_viewer_use_dynamic_tiles <- function(slide, dynamic_tiles, use_live, use_tiles) {
   if (!isTRUE(use_live) || !isTRUE(use_tiles)) {
     return(FALSE)
@@ -299,7 +393,7 @@ wsi_open_viewer_use_dynamic_tiles <- function(slide, dynamic_tiles, use_live, us
   if (identical(dynamic_tiles, "no")) {
     return(FALSE)
   }
-  !wsi_has_vips() || identical(slide$backend, "bioformats")
+  !wsi_has_vips() || identical(slide$backend, "bioformats") || wsi_open_viewer_is_large_file(slide)
 }
 
 wsi_open_viewer_project_route <- function(input, dots, live, use_live,

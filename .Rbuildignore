@@ -18,4 +18,8 @@
 ^.*\.Rcheck$
 ^\.\.Rcheck$
 ^.*\.tar\.gz$
-^src/.*\.(o|so|dll|rds)$
+^src/.*\.(o|so|dll|dylib|a|rds)$
+^tools/wsiToolsDesktop/node_modules$
+^tools/wsiToolsDesktop/dist$
+^tools/wsiToolsDesktop/src-tauri/target$
+^tools/wsiToolsDesktop/src-tauri/gen$

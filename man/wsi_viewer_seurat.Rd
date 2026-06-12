@@ -10,6 +10,7 @@ wsi_viewer_seurat(
   linked = NULL,
   live = TRUE,
   dynamic_tiles = live,
+  show_spots = TRUE,
   mode = c("tiles", "thumbnail"),
   output = NULL,
   open = interactive(),
@@ -29,6 +30,9 @@ default is \code{TRUE} so R and the browser stay synchronized while the session
 is active; set \code{live = FALSE} to write a static HTML viewer.}
 
 \item{dynamic_tiles}{When \code{live = TRUE}, serve the image as dynamic tiles.}
+
+\item{show_spots}{Whether to draw the spatial spot layer on top of the
+image.}
 
 \item{mode}{Viewer mode for static output. \code{"tiles"} gives full-resolution
 Deep Zoom viewing when the backend can create tiles.}
