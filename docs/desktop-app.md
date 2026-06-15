@@ -13,6 +13,9 @@ npm install
 npm run dev
 ```
 
+For platform-specific build instructions and distributable installers, see
+[Compile the Tauri Desktop App](tauri-build.md).
+
 The user workflow is:
 
 1. Click **Select image**.

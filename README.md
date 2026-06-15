@@ -195,7 +195,9 @@ workflows, see [cell segmentation](docs/cell-segmentation.md).
 For the `.wsiproject` directory layout and saved analysis state, see
 [project format](docs/projects.md).
 For users who prefer a desktop file-picker app instead of typing R commands,
-see the optional [Tauri desktop launcher](docs/desktop-app.md).
+see the optional [Tauri desktop launcher](docs/desktop-app.md). To compile the
+desktop app on macOS, Windows, or Linux, see
+[compile the Tauri desktop app](docs/tauri-build.md).
 These pages cover
 single-image viewing, CZI projects, H&E/mIHC overlays, CellPhenotyper,
 Seurat/Visium PCA, annotation round trips, tile extraction, conversion, and
