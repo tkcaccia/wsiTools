@@ -679,6 +679,9 @@ test_that("Seurat viewer exposes spot layer and reduction controls", {
 
   expect_match(text, "Seurat", fixed = TRUE)
   expect_match(text, "seurat_spots", fixed = TRUE)
+	  expect_match(text, "seuratSpotOpacityHelp", fixed = TRUE)
+	  expect_match(text, "showSeuratSpotOpacityHelp", fixed = TRUE)
+	  expect_false(grepl("<div class=\"menuHint\">Spot size is fixed by the spatial transcriptomics platform metadata.", text, fixed = TRUE))
 	  expect_match(text, "seurat_gene_url", fixed = TRUE)
 	  expect_match(text, "spatial_tile_export_url", fixed = TRUE)
 	  expect_match(text, "Type any gene name", fixed = TRUE)
