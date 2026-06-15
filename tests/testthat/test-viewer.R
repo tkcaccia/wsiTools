@@ -774,6 +774,8 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "imageTransformPayload", fixed = TRUE)
   expect_match(html, "imageTransformHasDisplayTransform", fixed = TRUE)
   expect_match(html, "refreshProgressivePreviewForImageTransform", fixed = TRUE)
+  expect_match(html, "clearOpenSeadragonTransformArtifacts", fixed = TRUE)
+  expect_match(html, "viewerEl.querySelectorAll('canvas')", fixed = TRUE)
   expect_match(html, "imageTransformHasDisplayTransform()){viewerEl.style.backgroundImage=''", fixed = TRUE)
   expect_match(html, "drawTransformedImage", fixed = TRUE)
   expect_match(html, "osdDisplayPixelForOverlayInRect", fixed = TRUE)
