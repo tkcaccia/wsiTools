@@ -1294,6 +1294,10 @@ wsi_viewer_seurat_controls <- function(config) {
     "Spot size is fixed by the spatial transcriptomics platform metadata.",
     "Visium spots are 55 microns; this viewer renders the mapped slide-pixel radius without manual resizing."
   )
+  spot_tile_help <- paste(
+    "Preview tile boxes on the slide before export.",
+    "If an annotation is selected, only tiles fully inside that annotation are included."
+  )
   wsi_viewer_menu(
     source_name,
     "Spatial transcriptomics spot overlays and reduction plots",
@@ -1318,7 +1322,11 @@ wsi_viewer_seurat_controls <- function(config) {
 	      if (enabled && spot_count > 0L) "" else " disabled",
 	      ">Tiles</button>",
 	      "</div>",
-	      "<div class=\"menuHint\">Preview tile boxes on the slide before export. If an annotation is selected, only tiles fully inside that annotation are included.</div>",
+	      "<div class=\"menuGrid\">",
+	      "<button id=\"seuratTileHelp\" type=\"button\" title=\"",
+	      wsi_html_escape(spot_tile_help),
+	      "\">Help</button>",
+	      "</div>",
 	      "<div class=\"menuTitle\">Gene expression</div>",
       "<label class=\"control\" title=\"Colour spatial spots by an extracted gene\">Gene <input id=\"seuratGeneInput\" type=\"text\" list=\"seuratGeneList\" value=\"",
       wsi_html_escape(default_gene),
@@ -2848,6 +2856,8 @@ wsi_viewer_seurat_js <- function() {
     "function spatialTileExt(format){const f=String(format||'png').toLowerCase();return f==='jpeg'?'jpg':(f==='tiff'?'tiff':f);}\n",
     "function spatialTileSafeName(value,fallback='spot'){return String(value||fallback).replace(/[^A-Za-z0-9_.-]+/g,'_').replace(/^_+|_+$/g,'')||fallback;}\n",
     "function spatialTileStatus(msg){const box=el('spatialTileSummary');if(box)box.textContent=msg||'';}\n",
+    "function spatialTileHelpText(){return 'Preview tile boxes on the slide before export. If an annotation is selected, only tiles fully inside that annotation are included.';}\n",
+    "function showSpatialTileHelp(control=null){notify(spatialTileHelpText(),'info',7000);if(control&&typeof closeMenuAfterToolAction==='function')closeMenuAfterToolAction(control);}\n",
     "function spatialTilePanel(){return el('spatialTileWindow');}\n",
     "function spatialTileSelectedRoi(){return selectedRoi>=0&&rois[selectedRoi]?rois[selectedRoi]:null;}\n",
     "function spatialTileProjectLabels(){let image='',section='';try{if(typeof projectStatePayload==='function'){const project=projectStatePayload()||{},item=project.active_item||project.item||{},sec=project.active_section||project.section||{};image=String(item.label||item.name||item.path||project.label||'');section=String(sec.label||sec.name||sec.id||project.section_label||'');}}catch(e){}if(!image&&typeof projectItems!=='undefined'&&Array.isArray(projectItems)){const item=projectItems[activeProjectIndex]||{};image=String(item.label||item.name||item.path||'');if(typeof activeProjectSection==='function'){const sec=activeProjectSection()||{};section=String(sec.label||sec.name||sec.id||'');}}return {image:image,section:section};}\n",
@@ -2864,7 +2874,7 @@ wsi_viewer_seurat_js <- function() {
     "function openSpatialTileWindow(){const panel=spatialTilePanel();if(!panel)return;panel.classList.add('open');panel.setAttribute('aria-hidden','false');updateSpatialTileControls();spatialTileStatus(spatialTilePreviewRows.length?('Preview contains '+spatialTilePreviewRows.length.toLocaleString()+' tile'+(spatialTilePreviewRows.length===1?'':'s')+'.'):'Choose a tile size, preview boxes, then save from a live viewer session.');}\n",
     "function closeSpatialTileWindow(){const panel=spatialTilePanel();if(panel){panel.classList.remove('open');panel.setAttribute('aria-hidden','true');}}\n",
     "function moveSpatialTilePanel(left,top){const panel=spatialTilePanel();if(!panel)return;const rect=panel.getBoundingClientRect(),margin=6,maxLeft=Math.max(margin,innerWidth-rect.width-margin),maxTop=Math.max(margin,innerHeight-rect.height-margin);panel.style.right='auto';panel.style.bottom='auto';panel.style.left=clamp(left,margin,maxLeft)+'px';panel.style.top=clamp(top,margin,maxTop)+'px';}\n",
-    "function bindSpatialTileWindow(){const open=el('seuratTileWindowOpen'),close=el('spatialTileClose'),preview=el('spatialTilePreview'),clear=el('spatialTileClear'),save=el('spatialTileSave'),panel=spatialTilePanel(),head=panel&&panel.querySelector('.spatialTileHead');if(open)open.onclick=openSpatialTileWindow;if(close)close.onclick=closeSpatialTileWindow;if(preview)preview.onclick=()=>previewSpatialTiles(true);if(clear)clear.onclick=()=>clearSpatialTilePreview(true,true);if(save)save.onclick=saveSpatialTiles;['spatialTileSize','spatialTileUnits','spatialTileFormat'].forEach(id=>{const input=el(id);if(input)input.onchange=()=>{if(spatialTilePreviewRows.length)previewSpatialTiles(true);else updateSpatialTileControls();};});if(panel&&head&&head.dataset.spatialTileMoveBound!=='1'){head.dataset.spatialTileMoveBound='1';head.title='Drag to move; resize from the bottom-right corner.';head.addEventListener('mousedown',evt=>{if(evt.button!==0||evt.target.closest('button,input,select,textarea'))return;const rect=panel.getBoundingClientRect();panel.style.width=rect.width+'px';panel.style.left=rect.left+'px';panel.style.top=rect.top+'px';panel.style.right='auto';panel.style.bottom='auto';spatialTileDrag={dx:evt.clientX-rect.left,dy:evt.clientY-rect.top};panel.classList.add('moving');evt.preventDefault();});window.addEventListener('mousemove',evt=>{if(!spatialTileDrag)return;moveSpatialTilePanel(evt.clientX-spatialTileDrag.dx,evt.clientY-spatialTileDrag.dy);});window.addEventListener('mouseup',()=>{if(!spatialTileDrag)return;spatialTileDrag=null;panel.classList.remove('moving');});}updateSpatialTileControls();}\n",
+    "function bindSpatialTileWindow(){const open=el('seuratTileWindowOpen'),help=el('seuratTileHelp'),close=el('spatialTileClose'),preview=el('spatialTilePreview'),clear=el('spatialTileClear'),save=el('spatialTileSave'),panel=spatialTilePanel(),head=panel&&panel.querySelector('.spatialTileHead');if(open)open.onclick=openSpatialTileWindow;if(help)help.onclick=e=>showSpatialTileHelp(e.currentTarget);if(close)close.onclick=closeSpatialTileWindow;if(preview)preview.onclick=()=>previewSpatialTiles(true);if(clear)clear.onclick=()=>clearSpatialTilePreview(true,true);if(save)save.onclick=saveSpatialTiles;['spatialTileSize','spatialTileUnits','spatialTileFormat'].forEach(id=>{const input=el(id);if(input)input.onchange=()=>{if(spatialTilePreviewRows.length)previewSpatialTiles(true);else updateSpatialTileControls();};});if(panel&&head&&head.dataset.spatialTileMoveBound!=='1'){head.dataset.spatialTileMoveBound='1';head.title='Drag to move; resize from the bottom-right corner.';head.addEventListener('mousedown',evt=>{if(evt.button!==0||evt.target.closest('button,input,select,textarea'))return;const rect=panel.getBoundingClientRect();panel.style.width=rect.width+'px';panel.style.left=rect.left+'px';panel.style.top=rect.top+'px';panel.style.right='auto';panel.style.bottom='auto';spatialTileDrag={dx:evt.clientX-rect.left,dy:evt.clientY-rect.top};panel.classList.add('moving');evt.preventDefault();});window.addEventListener('mousemove',evt=>{if(!spatialTileDrag)return;moveSpatialTilePanel(evt.clientX-spatialTileDrag.dx,evt.clientY-spatialTileDrag.dy);});window.addEventListener('mouseup',()=>{if(!spatialTileDrag)return;spatialTileDrag=null;panel.classList.remove('moving');});}updateSpatialTileControls();}\n",
     "function seuratExpressionConfig(){return seuratConfig().gene_expression||{enabled:false,genes:[],ranges:{}};}\n",
     "function seuratFeatureType(payload=null){const fromPayload=payload&&String(payload.feature_type||payload.feature||'').toLowerCase();const fromConfig=String(seuratConfig().feature_type||'').toLowerCase();return (fromPayload==='cell'||fromConfig==='cell')?'cell':'spot';}\n",
     "function seuratFeaturePlural(payload=null){return seuratFeatureType(payload)==='cell'?'cells':'spots';}\n",
