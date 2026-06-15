@@ -146,7 +146,7 @@ wsi_native_czi_scene_previews <- function(path, info, width = 768, height = NULL
         height = scene_height,
         zoom = preview_plan$zoom,
         channel = 0,
-        scene = NA_integer_
+        scene = scene_index
       ),
       error = function(err) NULL
     )

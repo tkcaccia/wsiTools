@@ -2612,6 +2612,12 @@ test_that("CZI metadata parser extracts micron scale from physical distances", {
   expect_equal(wsiTools:::wsi_native_czi_mpp(xml), c(x = 0.25, y = 0.26))
 })
 
+test_that("native CZI scene previews read the requested scene", {
+  scene_preview_code <- paste(deparse(wsiTools:::wsi_native_czi_scene_previews), collapse = "\n")
+
+  expect_match(scene_preview_code, "scene = scene_index", fixed = TRUE)
+})
+
 test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
   html <- wsiTools:::wsi_tiled_viewer_html(list(
     title = "synthetic tiled viewer",
