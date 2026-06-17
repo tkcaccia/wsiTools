@@ -687,12 +687,24 @@ test_that("Seurat viewer exposes spot layer and reduction controls", {
 	  expect_match(text, "Type any gene name", fixed = TRUE)
 	  expect_match(text, "hasGenes=seuratEnabled()&&(genes.length>0||dynamic)", fixed = TRUE)
 	  expect_false(grepl("hasGenes=has&&(genes.length>0||dynamic)", text, fixed = TRUE))
+  expect_match(text, "seuratGeneLayer", fixed = TRUE)
+  expect_match(text, "project_image_index:projectIndex", fixed = TRUE)
+  expect_match(text, "gene_values:{[gene]:value}", fixed = TRUE)
+  expect_match(text, "layer.visible=true", fixed = TRUE)
+  expect_match(text, "layer_visible", fixed = TRUE)
+  expect_match(text, "seuratGeneHasEmbeddedValues", fixed = TRUE)
+  expect_match(text, "seuratDynamicGeneAvailable()&&(!actual||!hasValues)", fixed = TRUE)
+  expect_match(text, "No expression values were available for", fixed = TRUE)
   expect_match(text, "JSON.stringify({gene:String(gene||'').trim()})", fixed = TRUE)
   expect_match(text, "seuratPlotWindow", fixed = TRUE)
   expect_match(text, "Current tissue", fixed = TRUE)
   expect_match(text, "All tissues", fixed = TRUE)
   expect_match(text, "bindSeuratControls", fixed = TRUE)
   expect_match(text, "openSeuratPlot(Number(btn.dataset.plotIndex||0));if(typeof closeMenuAfterToolAction==='function')closeMenuAfterToolAction(e.currentTarget);", fixed = TRUE)
+  expect_match(text, "const control=e.currentTarget;if(await applySeuratGeneColour()&&typeof closeMenuAfterToolAction==='function')closeMenuAfterToolAction(control);", fixed = TRUE)
+  expect_match(text, "const control=e.currentTarget;if(await applySeuratGeneColour()&&typeof closeMenuAfterToolAction==='function')closeMenuAfterToolAction(control);}};", fixed = TRUE)
+  expect_match(text, "if(applySeuratClusterColour()&&typeof closeMenuAfterToolAction==='function')closeMenuAfterToolAction(e.currentTarget);", fixed = TRUE)
+  expect_match(text, "setSeuratPlotScope('all');if(typeof closeMenuAfterToolAction==='function')closeMenuAfterToolAction(e.currentTarget);", fixed = TRUE)
   expect_match(text, "seuratGeneInput", fixed = TRUE)
 	  expect_match(text, "seuratClusterSelect", fixed = TRUE)
 	  expect_match(text, "Spot-centered tiles", fixed = TRUE)
@@ -713,6 +725,131 @@ test_that("Seurat viewer exposes spot layer and reduction controls", {
 	  expect_false(grepl("id=\"projectImageFile\"", text, fixed = TRUE))
 	  expect_false(grepl("This managed analysis project is defined from R", text, fixed = TRUE))
 	  expect_false(grepl("Seurat/Giotto/SpatialExperiment/CellPhenotyper viewer from R", text, fixed = TRUE))
+})
+
+test_that("live Seurat gene lookup stays enabled without an embedded spot layer", {
+  controls <- wsiTools:::wsi_viewer_seurat_controls(
+    list(
+      seurat = list(
+        enabled = TRUE,
+        source_name = "SpatialExperiment",
+        spot_count = 0L,
+        plots = list(),
+        gene_expression = list(enabled = FALSE, genes = character(), ranges = list())
+      ),
+      seurat_gene_url = "http://127.0.0.1:8788/seurat-gene"
+    )
+  )
+  text <- paste(controls, collapse = "\n")
+
+  expect_match(text, "Type any gene name", fixed = TRUE)
+  expect_false(grepl("id=\"seuratGeneInput\"[^>]* disabled", text))
+  expect_false(grepl("id=\"seuratGeneApply\"[^>]* disabled", text))
+})
+
+test_that("spatial omics menu label omits tissue names", {
+  seurat_controls <- wsiTools:::wsi_viewer_seurat_controls(
+    list(
+      seurat = list(
+        enabled = TRUE,
+        source_name = "Ovarian Seurat",
+        spot_count = 12L,
+        displayed_spot_count = 12L,
+        plots = list(),
+        gene_expression = list(enabled = FALSE, genes = character(), ranges = list())
+      )
+    )
+  )
+  seurat_text <- paste(seurat_controls, collapse = "\n")
+
+  expect_match(
+    seurat_text,
+    "<summary title=\"Spatial transcriptomics spot overlays and reduction plots\">Seurat</summary>",
+    fixed = TRUE
+  )
+  expect_false(grepl(">Ovarian Seurat</summary>", seurat_text, fixed = TRUE))
+  expect_match(seurat_text, "Ovarian Seurat spot", fixed = TRUE)
+
+  spe_controls <- wsiTools:::wsi_viewer_seurat_controls(
+    list(
+      seurat = list(
+        enabled = TRUE,
+        source_name = "Breast SpatialExperiment",
+        spot_count = 12L,
+        displayed_spot_count = 12L,
+        plots = list(),
+        gene_expression = list(enabled = FALSE, genes = character(), ranges = list())
+      )
+    )
+  )
+  spe_text <- paste(spe_controls, collapse = "\n")
+
+  expect_match(
+    spe_text,
+    "<summary title=\"Spatial transcriptomics spot overlays and reduction plots\">SpatialExperiment</summary>",
+    fixed = TRUE
+  )
+  expect_false(grepl(">Breast SpatialExperiment</summary>", spe_text, fixed = TRUE))
+  expect_match(spe_text, "Breast SpatialExperiment spot", fixed = TRUE)
+
+  spaced_spe_controls <- wsiTools:::wsi_viewer_seurat_controls(
+    list(
+      seurat = list(
+        enabled = TRUE,
+        source_name = "Colon Spatial Experiment",
+        spot_count = 12L,
+        displayed_spot_count = 12L,
+        plots = list(),
+        gene_expression = list(enabled = FALSE, genes = character(), ranges = list())
+      )
+    )
+  )
+  spaced_spe_text <- paste(spaced_spe_controls, collapse = "\n")
+  expect_match(
+    spaced_spe_text,
+    "<summary title=\"Spatial transcriptomics spot overlays and reduction plots\">SpatialExperiment</summary>",
+    fixed = TRUE
+  )
+  expect_false(grepl(">Colon Spatial Experiment</summary>", spaced_spe_text, fixed = TRUE))
+
+  giotto_controls <- wsiTools:::wsi_viewer_seurat_controls(
+    list(
+      seurat = list(
+        enabled = TRUE,
+        source_name = "Pancreatic Giotto",
+        spot_count = 12L,
+        displayed_spot_count = 12L,
+        plots = list(),
+        gene_expression = list(enabled = FALSE, genes = character(), ranges = list())
+      )
+    )
+  )
+  giotto_text <- paste(giotto_controls, collapse = "\n")
+  expect_match(
+    giotto_text,
+    "<summary title=\"Spatial transcriptomics spot overlays and reduction plots\">Giotto</summary>",
+    fixed = TRUE
+  )
+  expect_false(grepl(">Pancreatic Giotto</summary>", giotto_text, fixed = TRUE))
+})
+
+test_that("static Seurat gene controls are disabled without spots or live lookup", {
+  controls <- wsiTools:::wsi_viewer_seurat_controls(
+    list(
+      seurat = list(
+        enabled = TRUE,
+        source_name = "SpatialExperiment",
+        spot_count = 0L,
+        plots = list(),
+        gene_expression = list(enabled = FALSE, genes = character(), ranges = list())
+      )
+    )
+  )
+  text <- paste(controls, collapse = "\n")
+
+  expect_match(text, "No live SpatialExperiment gene lookup", fixed = TRUE)
+  expect_true(grepl("id=\"seuratGeneInput\"[^>]* disabled", text))
+  expect_true(grepl("id=\"seuratGeneApply\"[^>]* disabled", text))
 })
 
 test_that("Seurat viewer only shows buttons for available reductions", {
