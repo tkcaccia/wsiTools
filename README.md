@@ -6,6 +6,20 @@
 [![GitHub release](https://img.shields.io/github/v/release/tkcaccia/wsiTools?include_prereleases)](https://github.com/tkcaccia/wsiTools/releases)
 [![pkgdown docs](https://img.shields.io/badge/docs-pkgdown-blue.svg)](https://tkcaccia.github.io/wsiTools/)
 
+## Navigation
+
+| I want to... | Go here |
+| --- | --- |
+| Install the R package | [Installation](docs/installation.md) |
+| Download the desktop executable | [Desktop downloads](docs/downloads.md) |
+| Install R and required build tools | [R and platform setup](docs/installation.md#r-package-installation) |
+| Install optional backends such as OpenSlide, libvips, CZI, Bio-Formats, StarDist, or Mesmer | [Backend setup](docs/backends.md) |
+| Open one image quickly | [One-image quickstart](docs/open-one-image.md) |
+| Use the live R-synchronized viewer | [Live viewer guide](docs/live-viewer.md) |
+| Open Seurat, Giotto, SpatialExperiment, or CellPhenotyper projects | [Spatial omics](docs/spatial-omics.md) and [Examples](docs/examples.md) |
+| Compile the Tauri desktop app yourself | [Tauri build guide](docs/tauri-build.md) |
+| Diagnose installation or viewer problems | [Troubleshooting](docs/troubleshooting.md) |
+
 wsiTools is an R toolkit for memory-efficient WSI access and preprocessing
 through region-based reading, tiling, pyramidal image handling, conversion and
 export.

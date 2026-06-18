@@ -5,6 +5,9 @@ used by wsiTools. The core R package is intentionally lightweight: it can be
 installed without OpenSlide, libvips, Bio-Formats, StarDist, Mesmer, Python, or
 large model files. Those tools are detected at runtime with `wsi_backends()`.
 
+If you prefer a desktop application, first install R and wsiTools, then download
+the optional launcher from [Desktop Downloads](downloads.md).
+
 For a plain-language explanation of what each optional backend does, see the
 [backend setup guide](backends.md). After installation, the fastest test is the
 [one-image quickstart](open-one-image.md), followed by the

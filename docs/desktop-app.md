@@ -7,6 +7,15 @@ The desktop app opens a file picker, starts R in the background, runs
 `wsi_open_viewer()` in live mode, and displays the synchronized viewer inside a
 desktop window.
 
+## Download
+
+Prebuilt desktop installers are available from the GitHub release:
+
+[Download wsiTools Desktop 0.1.0](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.0)
+
+See [Desktop Downloads](downloads.md) for platform-specific installers,
+required R setup, and optional backend notes.
+
 ```sh
 cd tools/wsiToolsDesktop
 npm install

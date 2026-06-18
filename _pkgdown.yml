@@ -27,6 +27,7 @@ navbar:
     left:
       - intro
       - installation
+      - downloads
       - viewer
       - backends
       - annotations
@@ -45,6 +46,17 @@ navbar:
     installation:
       text: Installation
       href: articles/installation.html
+    downloads:
+      text: Downloads
+      menu:
+        - text: Desktop executables
+          href: https://github.com/tkcaccia/wsiTools/blob/main/docs/downloads.md
+        - text: GitHub Releases
+          href: https://github.com/tkcaccia/wsiTools/releases
+        - text: Compile Tauri app
+          href: https://github.com/tkcaccia/wsiTools/blob/main/docs/tauri-build.md
+        - text: R and dependencies
+          href: https://github.com/tkcaccia/wsiTools/blob/main/docs/installation.md
     viewer:
       text: Viewer
       menu:
