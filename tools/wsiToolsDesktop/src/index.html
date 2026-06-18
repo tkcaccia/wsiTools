@@ -13,6 +13,11 @@
           <h1>wsiTools</h1>
           <p>Live R-connected pathology viewer</p>
           <span id="homeRStatus" class="statusPill">checking R</span>
+          <div id="homeRHelp" class="runtimeHelp" hidden>
+            <strong>R was not found on this computer.</strong>
+            <span>Install R, restart the app, then run the viewer again.</span>
+            <button id="downloadRHome" type="button">Download R</button>
+          </div>
         </div>
         <div class="homeActions" aria-label="Project actions">
           <button id="openProjectHome" type="button">Open project</button>
@@ -30,6 +35,7 @@
           </div>
           <div class="brandActions">
             <span id="rStatus" class="statusPill">checking R</span>
+            <button id="downloadRPanel" class="downloadRButton" type="button" hidden>Download R</button>
             <button id="backHome" type="button">Home</button>
           </div>
         </div>

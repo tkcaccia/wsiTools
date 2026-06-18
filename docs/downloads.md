@@ -61,13 +61,15 @@ platform-specific notes.
 After installing the desktop app:
 
 1. Open the app.
-2. Choose **Create new project** or **Open project**.
-3. Add one or more microscopy images.
-4. Click **Run R** to start the live viewer.
-5. Keep the R process running while the viewer is open.
+2. The app checks for `Rscript` using `WSITOOLS_RSCRIPT`, the environment
+   `PATH`, `R_HOME`, and common R installation folders.
+3. If R is found, choose **Create new project** or **Open project**.
+4. Add one or more microscopy images.
+5. Click **Run R** to start the live viewer.
+6. Keep the R process running while the viewer is open.
 
 If the app cannot find R, set the `WSITOOLS_RSCRIPT` environment variable to
-the full path of `Rscript`.
+the full path of `Rscript`, or use the **Download R** button shown by the app.
 
 macOS/Linux:
 

@@ -38,6 +38,16 @@ The R process must stay open while the viewer is used. It owns the live
 
 ## R Setup
 
+On first launch, the app searches for `Rscript` in this order:
+
+1. `WSITOOLS_RSCRIPT`;
+2. the environment `PATH`;
+3. `R_HOME`;
+4. common R installation folders for macOS, Windows, and Linux.
+
+If R is not found, the first window shows a **Download R** button linking to
+CRAN. After installing R, restart the app.
+
 The app expects R and wsiTools to be available:
 
 ```r

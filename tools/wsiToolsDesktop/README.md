@@ -22,7 +22,9 @@ available backends.
 
 ## Requirements
 
-- R installed and available as `Rscript`.
+- R installed. On first launch, the app searches `WSITOOLS_RSCRIPT`, `PATH`,
+  `R_HOME`, and common R installation folders for `Rscript`. If R is missing,
+  the app shows a **Download R** button that opens CRAN.
 - The R package installed:
 
 ```r

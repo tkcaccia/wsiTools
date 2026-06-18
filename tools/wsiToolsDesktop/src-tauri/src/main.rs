@@ -36,6 +36,16 @@ struct ViewerLaunch {
     r_pid: u32,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RRuntimeStatus {
+    available: bool,
+    rscript: String,
+    source: String,
+    message: String,
+    download_url: String,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct NewProjectItem {
@@ -145,6 +155,41 @@ fn command_works(path: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn executable_names() -> Vec<&'static str> {
+    #[cfg(target_family = "windows")]
+    {
+        vec!["Rscript.exe", "Rscript"]
+    }
+    #[cfg(not(target_family = "windows"))]
+    {
+        vec!["Rscript"]
+    }
+}
+
+fn path_candidates_from_env() -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(paths) = env::var_os("PATH") {
+        for dir in env::split_paths(&paths) {
+            for name in executable_names() {
+                out.push(dir.join(name).to_string_lossy().to_string());
+            }
+        }
+    }
+    out
+}
+
+fn r_home_candidates() -> Vec<String> {
+    let mut out = Vec::new();
+    if let Ok(base) = env::var("R_HOME") {
+        let root = PathBuf::from(base);
+        for name in executable_names() {
+            out.push(root.join("bin").join(name).to_string_lossy().to_string());
+            out.push(root.join("bin").join("x64").join(name).to_string_lossy().to_string());
+        }
+    }
+    out
+}
+
 fn windows_r_candidates() -> Vec<String> {
     let mut out = Vec::new();
     for key in ["ProgramFiles", "ProgramFiles(x86)"] {
@@ -173,28 +218,51 @@ fn windows_r_candidates() -> Vec<String> {
     out
 }
 
-fn locate_rscript() -> Result<String, String> {
+fn rscript_download_url() -> &'static str {
+    "https://cran.r-project.org/"
+}
+
+fn locate_rscript_detail() -> Result<(String, String), String> {
     if let Ok(path) = env::var("WSITOOLS_RSCRIPT") {
         if command_works(&path) {
-            return Ok(path);
+            return Ok((path, "WSITOOLS_RSCRIPT".to_string()));
         }
     }
 
-    let mut candidates = vec![
-        "Rscript".to_string(),
-        "Rscript.exe".to_string(),
+    let mut candidates = Vec::new();
+    candidates.extend(path_candidates_from_env());
+    candidates.extend(r_home_candidates());
+    candidates.extend([
         "/usr/local/bin/Rscript".to_string(),
         "/opt/homebrew/bin/Rscript".to_string(),
         "/Library/Frameworks/R.framework/Resources/bin/Rscript".to_string(),
-    ];
+        "/usr/bin/Rscript".to_string(),
+    ]);
     candidates.extend(windows_r_candidates());
 
     candidates
         .into_iter()
         .find(|path| command_works(path))
-        .ok_or_else(|| {
-            "Could not find Rscript. Install R, add Rscript to PATH, or set WSITOOLS_RSCRIPT to the full Rscript path.".to_string()
+        .map(|path| {
+            let source = if path_candidates_from_env().iter().any(|candidate| candidate == &path) {
+                "PATH"
+            } else if r_home_candidates().iter().any(|candidate| candidate == &path) {
+                "R_HOME"
+            } else {
+                "standard install location"
+            };
+            (path, source.to_string())
         })
+        .ok_or_else(|| {
+            format!(
+                "Could not find Rscript. Install R from {}, add Rscript to PATH, or set WSITOOLS_RSCRIPT to the full Rscript path.",
+                rscript_download_url()
+            )
+        })
+}
+
+fn locate_rscript() -> Result<String, String> {
+    locate_rscript_detail().map(|(path, _source)| path)
 }
 
 fn launch_script_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -225,9 +293,42 @@ fn session_dir(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
-fn check_r() -> Result<String, String> {
-    let rscript = locate_rscript()?;
-    Ok(format!("R ready: {rscript}"))
+fn check_r() -> RRuntimeStatus {
+    match locate_rscript_detail() {
+        Ok((rscript, source)) => RRuntimeStatus {
+            available: true,
+            message: format!("R ready: {rscript}"),
+            rscript,
+            source,
+            download_url: rscript_download_url().to_string(),
+        },
+        Err(error) => RRuntimeStatus {
+            available: false,
+            rscript: String::new(),
+            source: "not found".to_string(),
+            message: error,
+            download_url: rscript_download_url().to_string(),
+        },
+    }
+}
+
+#[tauri::command]
+fn open_r_download_page() -> Result<(), String> {
+    let url = rscript_download_url();
+    #[cfg(target_os = "macos")]
+    let status = Command::new("open").arg(url).status();
+
+    #[cfg(target_os = "windows")]
+    let status = Command::new("cmd").args(["/C", "start", "", url]).status();
+
+    #[cfg(all(target_family = "unix", not(target_os = "macos")))]
+    let status = Command::new("xdg-open").arg(url).status();
+
+    status
+        .map_err(|err| format!("Could not open R download page: {err}"))?
+        .success()
+        .then_some(())
+        .ok_or_else(|| format!("Could not open R download page automatically. Visit {url}"))
 }
 
 #[tauri::command]
@@ -764,6 +865,7 @@ fn main() {
         .manage(Arc::new(RViewerState::default()))
         .invoke_handler(tauri::generate_handler![
             check_r,
+            open_r_download_page,
             start_r_viewer,
             start_r_project,
             start_r_new_project,

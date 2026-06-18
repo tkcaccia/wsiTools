@@ -21,6 +21,9 @@ const launchError = document.getElementById("launchError");
 const logOutput = document.getElementById("logOutput");
 const rStatus = document.getElementById("rStatus");
 const homeRStatus = document.getElementById("homeRStatus");
+const homeRHelp = document.getElementById("homeRHelp");
+const downloadRHome = document.getElementById("downloadRHome");
+const downloadRPanel = document.getElementById("downloadRPanel");
 const copyLog = document.getElementById("copyLog");
 const saveLog = document.getElementById("saveLog");
 
@@ -29,6 +32,8 @@ let currentMode = "home";
 let logTimer = null;
 let lastRustLogs = [];
 let viewerWindowOpen = false;
+let rAvailable = false;
+let rDownloadUrl = "https://cran.r-project.org/";
 const localLogs = [];
 
 function timestamp() {
@@ -67,13 +72,13 @@ function setStatus(message, kind = "info") {
 }
 
 function setBusy(isBusy) {
-  openProjectHome.disabled = isBusy;
-  createProjectHome.disabled = isBusy;
+  openProjectHome.disabled = isBusy || !rAvailable;
+  createProjectHome.disabled = isBusy || !rAvailable;
   backHome.disabled = isBusy;
   addImage.disabled = isBusy;
   nextAssociations.disabled = isBusy || projectImages.length === 0;
   backToImages.disabled = isBusy;
-  runR.disabled = isBusy || projectImages.length === 0;
+  runR.disabled = isBusy || !rAvailable || projectImages.length === 0;
   stopViewer.disabled = !viewerWindowOpen;
   for (const button of document.querySelectorAll("[data-action]")) {
     button.disabled = isBusy;
@@ -196,7 +201,7 @@ function pathText(path) {
 
 function renderProjectImages(message = null) {
   nextAssociations.disabled = projectImages.length === 0;
-  runR.disabled = projectImages.length === 0;
+  runR.disabled = !rAvailable || projectImages.length === 0;
   if (message) {
     imageList.textContent = message;
     return;
@@ -330,13 +335,21 @@ function stopLogPolling() {
 
 async function checkR() {
   appendLog("Checking Rscript availability.");
-  try {
-    const info = await invoke("check_r");
-    setStatus(info, "ok");
-  } catch (error) {
+  const info = await invoke("check_r");
+  rAvailable = Boolean(info.available);
+  rDownloadUrl = info.downloadUrl || rDownloadUrl;
+  if (rAvailable) {
+    setStatus(info.message, "ok");
+    if (homeRHelp) homeRHelp.hidden = true;
+    if (downloadRPanel) downloadRPanel.hidden = true;
+    appendLog(`Rscript source: ${info.source || "unknown"}`);
+  } else {
     setStatus("R not found", "error");
-    appendLog(error);
+    appendLog(info.message);
+    if (homeRHelp) homeRHelp.hidden = false;
+    if (downloadRPanel) downloadRPanel.hidden = false;
   }
+  setBusy(false);
 }
 
 async function chooseFile(options, label) {
@@ -359,6 +372,13 @@ async function openViewerWindow(url) {
 
 async function handleLaunch(launcher, codeLog, successPrefix) {
   clearLaunchError();
+  if (!rAvailable) {
+    const message = `R is required before starting the viewer. Install R from ${rDownloadUrl}, restart wsiTools Desktop, and try again.`;
+    setStatus("R not found", "error");
+    appendLog(message);
+    showLaunchError(message);
+    return;
+  }
   setBusy(true);
   setStatus("sending code to R", "info");
   appendLog("R code sent to R:");
@@ -568,6 +588,21 @@ runR.addEventListener("click", async () => {
     "Viewer opened"
   );
 });
+
+async function openRDownloadPage() {
+  appendLog(`Opening R download page: ${rDownloadUrl}`);
+  try {
+    await invoke("open_r_download_page");
+    setStatus("R download page opened", "info");
+  } catch (error) {
+    setStatus("open browser failed", "error");
+    appendLog(error);
+    window.location.href = rDownloadUrl;
+  }
+}
+
+downloadRHome.addEventListener("click", openRDownloadPage);
+downloadRPanel.addEventListener("click", openRDownloadPage);
 
 stopViewer.addEventListener("click", async () => {
   appendLog("Stop R clicked.");

@@ -172,6 +172,40 @@ button:disabled {
   color: #fecaca;
 }
 
+.runtimeHelp {
+  width: 100%;
+  border: 1px solid rgba(248, 113, 113, 0.42);
+  border-radius: 8px;
+  background: rgba(127, 29, 29, 0.35);
+  color: #fee2e2;
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  text-align: left;
+}
+
+.runtimeHelp strong,
+.runtimeHelp span {
+  display: block;
+}
+
+.runtimeHelp span {
+  color: #fecaca;
+  font-size: 13px;
+}
+
+.runtimeHelp button,
+.downloadRButton {
+  background: #7f1d1d;
+  border-color: rgba(248, 113, 113, 0.55);
+}
+
+.downloadRButton {
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
 .projectActions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
