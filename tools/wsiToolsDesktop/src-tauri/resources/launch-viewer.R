@@ -31,6 +31,36 @@ desktop_error_log_file <- function() {
   Sys.getenv("WSITOOLS_DESKTOP_LOG_FILE", unset = "")
 }
 
+desktop_prepare_backend_path <- function() {
+  candidates <- switch(
+    Sys.info()[["sysname"]],
+    Darwin = c(
+      "/opt/homebrew/bin", "/opt/homebrew/sbin",
+      "/usr/local/bin", "/usr/local/sbin",
+      "/opt/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"
+    ),
+    Linux = c(
+      "/usr/local/bin", "/usr/bin", "/bin",
+      "/usr/local/sbin", "/usr/sbin", "/sbin",
+      "/opt/conda/bin", "/opt/homebrew/bin"
+    ),
+    Windows = c(
+      "C:/Program Files/libvips/bin",
+      "C:/Program Files/openslide-win64/bin",
+      "C:/Program Files/Git/cmd",
+      "C:/rtools44/x86_64-w64-mingw32.static.posix/bin",
+      "C:/rtools44/usr/bin"
+    ),
+    character()
+  )
+  candidates <- candidates[dir.exists(candidates)]
+  current <- strsplit(Sys.getenv("PATH"), .Platform$path.sep, fixed = TRUE)[[1L]]
+  Sys.setenv(PATH = paste(unique(c(candidates, current)), collapse = .Platform$path.sep))
+  invisible(Sys.getenv("PATH"))
+}
+
+desktop_prepare_backend_path()
+
 desktop_content_type <- function(path) {
   ext <- tolower(tools::file_ext(path))
   switch(ext,

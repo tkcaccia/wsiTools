@@ -184,9 +184,72 @@ fn executable_names() -> Vec<&'static str> {
     }
 }
 
+fn backend_path_candidates() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    #[cfg(target_os = "macos")]
+    {
+        out.extend([
+            PathBuf::from("/opt/homebrew/bin"),
+            PathBuf::from("/opt/homebrew/sbin"),
+            PathBuf::from("/usr/local/bin"),
+            PathBuf::from("/usr/local/sbin"),
+            PathBuf::from("/opt/local/bin"),
+            PathBuf::from("/usr/bin"),
+            PathBuf::from("/bin"),
+            PathBuf::from("/usr/sbin"),
+            PathBuf::from("/sbin"),
+        ]);
+    }
+    #[cfg(all(target_family = "unix", not(target_os = "macos")))]
+    {
+        out.extend([
+            PathBuf::from("/usr/local/bin"),
+            PathBuf::from("/usr/bin"),
+            PathBuf::from("/bin"),
+            PathBuf::from("/usr/local/sbin"),
+            PathBuf::from("/usr/sbin"),
+            PathBuf::from("/sbin"),
+            PathBuf::from("/opt/conda/bin"),
+            PathBuf::from("/opt/homebrew/bin"),
+        ]);
+    }
+    #[cfg(target_family = "windows")]
+    {
+        out.extend([
+            PathBuf::from(r"C:\Program Files\libvips\bin"),
+            PathBuf::from(r"C:\Program Files\openslide-win64\bin"),
+            PathBuf::from(r"C:\Program Files\Git\cmd"),
+            PathBuf::from(r"C:\rtools44\x86_64-w64-mingw32.static.posix\bin"),
+            PathBuf::from(r"C:\rtools44\usr\bin"),
+        ]);
+    }
+    out
+}
+
+fn augmented_path_env() -> String {
+    let mut entries = Vec::<PathBuf>::new();
+    for candidate in backend_path_candidates() {
+        if candidate.exists() && !entries.iter().any(|entry| entry == &candidate) {
+            entries.push(candidate);
+        }
+    }
+    if let Some(paths) = env::var_os("PATH") {
+        for path in env::split_paths(&paths) {
+            if !entries.iter().any(|entry| entry == &path) {
+                entries.push(path);
+            }
+        }
+    }
+    env::join_paths(entries)
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|_| env::var("PATH").unwrap_or_default())
+}
+
 fn path_candidates_from_env() -> Vec<String> {
     let mut out = Vec::new();
-    if let Some(paths) = env::var_os("PATH") {
+    let path_value = augmented_path_env();
+    if !path_value.is_empty() {
+        let paths = std::ffi::OsString::from(path_value);
         for dir in env::split_paths(&paths) {
             for name in executable_names() {
                 out.push(dir.join(name).to_string_lossy().to_string());
@@ -564,6 +627,7 @@ emit_tissues(tissues)
         .arg("-e")
         .arg(inspector)
         .arg(file.to_string_lossy().to_string())
+        .env("PATH", augmented_path_env())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
@@ -645,6 +709,10 @@ fn launch_r_new_project_target(
     stop_existing_child(&state);
 
     push_log(&state.logs, format!("Rscript: {rscript}"));
+    push_log(
+        &state.logs,
+        format!("Backend PATH for R: {}", augmented_path_env()),
+    );
     push_log(&state.logs, "Mode: new-project");
     for (index, item) in items.iter().enumerate() {
         push_log(
@@ -768,6 +836,7 @@ fn launch_r_new_project_target(
 
     let mut child = Command::new(&rscript)
         .args(args)
+        .env("PATH", augmented_path_env())
         .env("WSITOOLS_DESKTOP_SESSION_DIR", &session_dir)
         .env("WSITOOLS_DESKTOP_SOURCE_DIR", env!("CARGO_MANIFEST_DIR"))
         .stdout(Stdio::piped())
@@ -875,6 +944,10 @@ fn launch_r_target(
     stop_existing_child(&state);
 
     push_log(&state.logs, format!("Rscript: {rscript}"));
+    push_log(
+        &state.logs,
+        format!("Backend PATH for R: {}", augmented_path_env()),
+    );
     push_log(&state.logs, format!("Mode: {mode}"));
     push_log(&state.logs, format!("Target: {}", target.display()));
     push_log(&state.logs, "R code sent to R:");
@@ -914,6 +987,7 @@ fn launch_r_target(
         .arg("--mode")
         .arg(mode)
         .arg(target)
+        .env("PATH", augmented_path_env())
         .env("WSITOOLS_DESKTOP_SESSION_DIR", &session_dir)
         .env("WSITOOLS_DESKTOP_SOURCE_DIR", env!("CARGO_MANIFEST_DIR"))
         .stdout(Stdio::piped())
