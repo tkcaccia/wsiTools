@@ -12,6 +12,7 @@
 ^LIVE_VIEWER\.md$
 ^scripts$
 ^manuscript$
+^release-artifacts$
 ^Data$
 ^Data/
 ^\.DS_Store$

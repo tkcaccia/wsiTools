@@ -7,8 +7,8 @@ vignette: >
   %\VignetteEncoding{UTF-8}
 ---
 
-```{r, include = FALSE}
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```{r, include = FALSE, purl = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE, purl = FALSE)
 ```
 
 ## Open A CellPhenotyper Project
@@ -17,7 +17,7 @@ CellPhenotyper projects can be opened from their output directory. wsiTools
 uses `00_execution/project_outputs.tsv` to discover available outputs where
 possible.
 
-```{r}
+```{r, purl = FALSE}
 project <- read_cellphenotyper_project(
   "/path/to/CellPhenotyper/results"
 )
@@ -39,7 +39,7 @@ Depending on available outputs, the viewer may expose:
 
 ## Returned R Objects
 
-```{r}
+```{r, purl = FALSE}
 viewer$get_rois()
 viewer$get_segmentation()
 viewer$get_cell_summary()

@@ -814,6 +814,9 @@ wsi_smooth_rois_for_mask <- function(rois, smooth = FALSE,
 #'   pixel size represented by each mask pixel. For example, `downsample = 4`
 #'   creates a mask at one quarter of the slide width and height.
 #' @param origin Full-resolution x/y coordinate of the top-left mask corner.
+#' @param transform Optional affine transform, such as one returned by
+#'   [wsi_orientation_transform()] or [estimate_transform()], applied to ROI
+#'   coordinates before rasterisation.
 #' @param label_by How ROI values are assigned: `"constant"` burns all ROIs as
 #'   foreground, `"class"` gives one value per class, `"index"` one per ROI, and
 #'   `"roi_id"`/`"name"` one per ROI id/name.
@@ -865,6 +868,7 @@ wsi_geojson_to_mask_tiff <- function(geojson,
                                      height = NULL,
                                      downsample = 1,
                                      origin = c(x = 0, y = 0),
+                                     transform = NULL,
                                      label_by = c("constant", "class", "index", "roi_id", "name"),
                                      values = NULL,
                                      background = 0,
@@ -909,6 +913,9 @@ wsi_geojson_to_mask_tiff <- function(geojson,
   }
 
   rois <- read_geojson(geojson)
+  if (!is.null(transform)) {
+    rois <- transform_rois(rois, transform)
+  }
   rois <- wsi_smooth_rois_for_mask(
     rois,
     smooth = smooth,
@@ -987,6 +994,7 @@ wsi_geojson_to_mask_tiff <- function(geojson,
     mask_height = dims$mask_height,
     downsample = downsample,
     origin = origin,
+    transform = transform,
     labels = labels
   )
   if (isTRUE(return_mask)) {

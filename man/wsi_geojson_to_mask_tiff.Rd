@@ -11,6 +11,7 @@ wsi_geojson_to_mask_tiff(
   height = NULL,
   downsample = 1,
   origin = c(x = 0, y = 0),
+  transform = NULL,
   label_by = c("constant", "class", "index", "roi_id", "name"),
   values = NULL,
   background = 0,
@@ -40,6 +41,7 @@ geojson_to_mask_tiff(
   height = NULL,
   downsample = 1,
   origin = c(x = 0, y = 0),
+  transform = NULL,
   label_by = c("constant", "class", "index", "roi_id", "name"),
   values = NULL,
   background = 0,
@@ -73,6 +75,11 @@ geojson_to_mask_tiff(
 \item{downsample}{One or two positive numbers giving the full-resolution pixel size represented by each mask pixel. For example, \code{downsample = 4} creates a mask at one quarter of the slide width and height.}
 
 \item{origin}{Full-resolution x/y coordinate of the top-left mask corner.}
+
+\item{transform}{Optional affine transform, such as one returned by
+\code{\link[=wsi_orientation_transform]{wsi_orientation_transform()}} or
+\code{\link[=estimate_transform]{estimate_transform()}}, applied to ROI
+coordinates before rasterisation.}
 
 \item{label_by}{How ROI values are assigned: \code{"constant"} burns all ROIs as foreground, \code{"class"} gives one value per class, \code{"index"} one per ROI, and \code{"roi_id"}/\code{"name"} one per ROI id/name.}
 

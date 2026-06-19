@@ -7,11 +7,12 @@ vignette: >
   %\VignetteEncoding{UTF-8}
 ---
 
-```{r, include = FALSE}
+```{r, include = FALSE, purl = FALSE}
 knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
-  eval = FALSE
+  eval = FALSE,
+  purl = FALSE
 )
 ```
 
@@ -38,7 +39,7 @@ therefore designed around:
 Install the lightweight package first, then check which optional WSI backends
 are available on your machine.
 
-```{r, eval=FALSE}
+```{r, eval=FALSE, purl=FALSE}
 install.packages("remotes", repos = "https://cloud.r-project.org")
 remotes::install_github(
   "tkcaccia/wsiTools",
@@ -61,7 +62,7 @@ runtime capabilities rather than mandatory installation dependencies. Use
 `wsi_setup()` after installation to print a setup report with copyable commands
 for optional tools.
 
-```{r, eval=FALSE}
+```{r, eval=FALSE, purl=FALSE}
 # Check what is available and what is missing
 wsi_setup()
 
@@ -75,7 +76,7 @@ wsi_install_backends(method = "auto")
 
 Examples for common platforms:
 
-```{r, eval=FALSE}
+```{r, eval=FALSE, purl=FALSE}
 # macOS with Homebrew
 wsi_install_backends(method = "homebrew")
 
@@ -112,7 +113,7 @@ next preferred path is the native CZI bridge. A second optional path is the
 Bio-Formats Java helper, which uses a tiny Java class around Bio-Formats
 `ImageReader` region reads.
 
-```{r, eval=FALSE}
+```{r, eval=FALSE, purl=FALSE}
 Sys.setenv(WSITOOLS_BIOFORMATS_JAR = "/path/to/bioformats_package.jar")
 # Optional if java/javac are not on PATH:
 # Sys.setenv(WSITOOLS_JAVA = "/path/to/java")
@@ -146,7 +147,7 @@ Windows computers.
 If R is running inside the active conda environment, this can also be requested
 from R:
 
-```{r, eval=FALSE}
+```{r, eval=FALSE, purl=FALSE}
 wsi_install_backends(tools = "bioformats", method = "conda")
 wsi_backends()
 ```
@@ -159,7 +160,7 @@ Fiji/ImageJ alone does not usually expose `showinf` and `bfconvert` to R.
 On Windows, if a previous installation was interrupted, remove stale lock
 directories before retrying:
 
-```{r, eval=FALSE}
+```{r, eval=FALSE, purl=FALSE}
 lib <- Sys.getenv("R_LIBS_USER")
 unlink(file.path(lib, "00LOCK-wsiTools"), recursive = TRUE, force = TRUE)
 unlink(file.path(lib, "wsiTools"), recursive = TRUE, force = TRUE)

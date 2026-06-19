@@ -7,8 +7,8 @@ vignette: >
   %\VignetteEncoding{UTF-8}
 ---
 
-```{r, include = FALSE}
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```{r, include = FALSE, purl = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE, purl = FALSE)
 ```
 
 ## Static Viewer
@@ -16,7 +16,7 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
 Use a static viewer when you want a portable HTML page and do not need browser
 edits to return automatically to R.
 
-```{r}
+```{r, purl = FALSE}
 library(wsiTools)
 
 slide <- wsi_open("/path/to/image.svs")
@@ -31,7 +31,7 @@ zooming.
 Use a live viewer when annotations, selections, measurements, trajectories,
 channels, or project state should come back to the active R session.
 
-```{r}
+```{r, purl = FALSE}
 viewer <- wsi_viewer_live(
   slide,
   tiled = TRUE

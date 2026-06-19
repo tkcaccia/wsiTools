@@ -7,15 +7,15 @@ vignette: >
   %\VignetteEncoding{UTF-8}
 ---
 
-```{r, include = FALSE}
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```{r, include = FALSE, purl = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE, purl = FALSE)
 ```
 
 ## QuPath-Compatible GeoJSON
 
 wsiTools reads and writes GeoJSON annotations for pathology workflows.
 
-```{r}
+```{r, purl = FALSE}
 rois <- read_geojson("qupath_annotations.geojson")
 
 viewer <- wsi_viewer_live(slide, tiled = TRUE)
@@ -34,14 +34,14 @@ classes, colors, IDs, and basic measurements.
 Mask images can be converted to ROIs, and ROIs can be rasterized back to masks
 for CellPhenotyper, StarDist, Cellpose, Mesmer, or machine-learning pipelines.
 
-```{r}
+```{r, purl = FALSE}
 rois <- mask_to_rois("mask.png", class = "tumour")
 mask <- rois_to_mask(rois, width = 2000, height = 1500)
 ```
 
 ## Measurements
 
-```{r}
+```{r, purl = FALSE}
 summarise_rois(rois)
 measure_distance(c(10, 20), c(100, 200), pixel_size = 0.5)
 measure_cell_density(cells, rois, pixel_size = 0.5)

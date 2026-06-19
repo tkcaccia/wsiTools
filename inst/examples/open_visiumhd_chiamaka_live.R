@@ -192,7 +192,32 @@ msg("Output:  %s", output_root)
 seurat_obj <- load_r_object(seurat_file)
 slide <- wsi_open(image_file)
 info <- wsi_info(slide)
-msg("Slide size: %s x %s pixels", info$width %||% slide$dimensions[["width"]], info$height %||% slide$dimensions[["height"]])
+slide_width <- as.numeric(info$width %||% slide$dimensions[["width"]])
+slide_height <- as.numeric(info$height %||% slide$dimensions[["height"]])
+msg("Slide size: %s x %s pixels", slide_width, slide_height)
+
+coordinate_flip <- tolower(Sys.getenv("WSITOOLS_VISIUMHD_COORDINATE_FLIP", unset = "none"))
+coordinate_rotation <- suppressWarnings(as.integer(Sys.getenv("WSITOOLS_VISIUMHD_COORDINATE_ROTATION", unset = "0")))
+if (is.na(coordinate_rotation) || !coordinate_rotation %in% c(0L, 90L, 180L, 270L)) coordinate_rotation <- 0L
+if (!coordinate_flip %in% c("none", "horizontal", "vertical", "both")) coordinate_flip <- "none"
+seurat_coordinate_flip <- coordinate_flip
+seurat_coordinate_rotation <- coordinate_rotation
+if (identical(coordinate_flip, "both")) {
+  seurat_coordinate_flip <- "none"
+  seurat_coordinate_rotation <- (coordinate_rotation + 180L) %% 360L
+}
+coordinate_transform <- NULL
+orientation_suffix <- ""
+if (!identical(coordinate_flip, "none") || coordinate_rotation != 0L) {
+  coordinate_transform <- wsi_orientation_transform(
+    width = slide_width,
+    height = slide_height,
+    flip = coordinate_flip,
+    rotation = coordinate_rotation
+  )
+  orientation_suffix <- sprintf("_flip-%s_rot%s", coordinate_flip, coordinate_rotation)
+  msg("Applying coordinate orientation to GeoJSON/mask: flip=%s rotation=%s.", coordinate_flip, coordinate_rotation)
+}
 
 channel_sources <- list()
 
@@ -203,8 +228,9 @@ if (!is.null(geojson_file)) {
     mask_downsample <- as.numeric(Sys.getenv("WSITOOLS_VISIUMHD_MASK_DOWNSAMPLE", unset = "4"))
     if (!is.finite(mask_downsample) || mask_downsample < 1) mask_downsample <- 4
     mask_ds_token <- gsub("\\.", "_", as.character(mask_downsample))
-    mask_ome <- existing_output_file(sprintf(".*cell.*annotation.*mask.*ds%s.*\\.ome\\.tiff?$", mask_ds_token)) %||%
-      file.path(output_root, sprintf("cell_annotation_mask_ds%s.ome.tif", mask_ds_token))
+    mask_pattern <- sprintf(".*cell.*annotation.*mask.*ds%s%s.*\\.ome\\.tiff?$", mask_ds_token, gsub("([.(){}+*?^$|\\[\\]\\\\])", "\\\\\\1", orientation_suffix))
+    mask_ome <- existing_output_file(mask_pattern) %||%
+      file.path(output_root, sprintf("cell_annotation_mask_ds%s%s.ome.tif", mask_ds_token, orientation_suffix))
     msg("Converting cell GeoJSON to coloured mask OME-TIFF at downsample %s.", mask_downsample)
     msg("This is intentionally tiled and does not send every cell polygon to the browser.")
 
@@ -217,10 +243,10 @@ if (!is.null(geojson_file)) {
         output = mask_ome,
         legend = legend_file,
         labels = labels,
-        slide_width = as.numeric(slide$dimensions[["width"]]),
-        slide_height = as.numeric(slide$dimensions[["height"]]),
-        mask_width = ceiling(as.numeric(slide$dimensions[["width"]]) / mask_downsample),
-        mask_height = ceiling(as.numeric(slide$dimensions[["height"]]) / mask_downsample),
+        slide_width = slide_width,
+        slide_height = slide_height,
+        mask_width = ceiling(slide_width / mask_downsample),
+        mask_height = ceiling(slide_height / mask_downsample),
         downsample = mask_downsample
       )
     } else {
@@ -229,6 +255,7 @@ if (!is.null(geojson_file)) {
         output = mask_ome,
         slide = slide,
         downsample = mask_downsample,
+        transform = coordinate_transform,
         label_by = "class",
         colour = TRUE,
         background_colour = "#000000",
@@ -285,10 +312,11 @@ if (!is.null(geojson_file)) {
         extent = list(
           x = 0,
           y = 0,
-          width = as.numeric(slide$dimensions[["width"]]),
-          height = as.numeric(slide$dimensions[["height"]])
+          width = slide_width,
+          height = slide_height
         ),
         mask_downsample = mask_downsample,
+        coordinate_orientation = list(flip = coordinate_flip, rotation = coordinate_rotation),
         source_geojson = geojson_file,
         source_mask = mask_result$output,
         legend_csv = mask_result$legend
@@ -309,6 +337,8 @@ viewer <- wsi_viewer_seurat(
   image = slide,
   spatial_dir = spatial_dir,
   coordinate_scale = "auto",
+  coordinate_flip = seurat_coordinate_flip,
+  coordinate_rotation = seurat_coordinate_rotation,
   reduction = Sys.getenv("WSITOOLS_VISIUMHD_REDUCTION", unset = "pca"),
   dims = c(1, 2),
   max_points = as.integer(Sys.getenv("WSITOOLS_VISIUMHD_MAX_POINTS", unset = "75000")),

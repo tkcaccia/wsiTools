@@ -7,15 +7,15 @@ vignette: >
   %\VignetteEncoding{UTF-8}
 ---
 
-```{r, include = FALSE}
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```{r, include = FALSE, purl = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE, purl = FALSE)
 ```
 
 ## Coordinate Manifests First
 
 Tile grids are coordinate manifests. They do not read image pixels.
 
-```{r}
+```{r, purl = FALSE}
 grid <- wsi_tile_grid(
   slide,
   tile_size = 512,
@@ -32,7 +32,7 @@ Tiles can be extracted from the whole image, an ROI, or a list of coordinates.
 The manifest records provenance columns such as tile coordinates, size, level,
 class labels, tissue fraction, and output paths.
 
-```{r}
+```{r, purl = FALSE}
 manifest <- extract_tiles(
   slide,
   roi = rois,
@@ -50,7 +50,7 @@ manifest <- extract_tiles(
 In live viewers, tile grids can be previewed before extraction so users can
 confirm the exported regions visually.
 
-```{r}
+```{r, purl = FALSE}
 viewer$preview_tiles(grid)
 viewer$extract_tile_preview(output_dir = "tiles")
 ```

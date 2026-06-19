@@ -190,3 +190,17 @@ test_that("affine registration transforms ROI coordinates", {
   expect_equal(shifted$xmax[1], 15)
   expect_equal(shifted$ymax[1], 17)
 })
+
+test_that("orientation transform mirrors ROI coordinates in slide space", {
+  rois <- wsi_test_roi()
+
+  transform <- wsi_orientation_transform(width = 100, height = 80, flip = "both")
+  expect_s3_class(transform, "wsi_affine_transform")
+  expect_equal(transform$matrix, matrix(c(-1, 0, 100, 0, -1, 80, 0, 0, 1), nrow = 3, byrow = TRUE))
+
+  flipped <- transform_rois(rois, transform)
+  expect_equal(flipped$xmin[1], 90)
+  expect_equal(flipped$ymin[1], 70)
+  expect_equal(flipped$xmax[1], 100)
+  expect_equal(flipped$ymax[1], 80)
+})

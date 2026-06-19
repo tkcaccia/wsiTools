@@ -7,8 +7,8 @@ vignette: >
   %\VignetteEncoding{UTF-8}
 ---
 
-```{r, include = FALSE}
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```{r, include = FALSE, purl = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE, purl = FALSE)
 ```
 
 ## Optional Engines
@@ -16,7 +16,7 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
 wsiTools keeps segmentation tools optional. The core package can import cell
 masks, centroids, polygons, or GeoJSON without installing StarDist or Mesmer.
 
-```{r}
+```{r, purl = FALSE}
 wsi_cell_segmentation_engines()
 wsi_has_stardist()
 wsi_has_mesmer()
@@ -27,7 +27,7 @@ wsi_has_mesmer()
 When an external command is configured, use selected ROI crops rather than
 processing the whole slide.
 
-```{r}
+```{r, purl = FALSE}
 viewer <- wsi_viewer_live(slide, tiled = TRUE)
 viewer$open()
 
@@ -37,7 +37,7 @@ crop <- export_roi_crop(slide, roi, file = "roi_crop.tif")
 
 ## Import Existing Results
 
-```{r}
+```{r, purl = FALSE}
 cells <- import_segmentation("cells.geojson")
 viewer$add_segmentation(cells)
 viewer$get_segmentation()

@@ -7,8 +7,8 @@ vignette: >
   %\VignetteEncoding{UTF-8}
 ---
 
-```{r, include = FALSE}
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE)
+```{r, include = FALSE, purl = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE, purl = FALSE)
 ```
 
 ## Supported Object Types
@@ -25,7 +25,7 @@ spots, annotations, selections, and derived tables with R.
 
 ## Seurat Example
 
-```{r}
+```{r, purl = FALSE}
 linked <- wsi_link_seurat_image(
   object = brain,
   image = "/path/to/high_resolution_image.tif",
@@ -47,7 +47,7 @@ viewer$get_spot_annotation_table()
 
 ## Giotto And SpatialExperiment
 
-```{r}
+```{r, purl = FALSE}
 giotto_linked <- wsi_link_giotto_image(giotto_object, image = "slide.tif")
 spe_linked <- wsi_link_spatialexperiment_image(spe_object, image = "slide.tif")
 ```
