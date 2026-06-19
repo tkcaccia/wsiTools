@@ -67,11 +67,49 @@ wsi_viewer_thumbnail_data_uri <- function(slide, width, height = NULL) {
   wsi_image_data_uri(tmp, mime = "image/png")
 }
 
+wsi_viewer_navigator_timeout <- function() {
+  timeout <- suppressWarnings(as.numeric(Sys.getenv("WSITOOLS_NAVIGATOR_TIMEOUT", unset = "8")))
+  if (!is.finite(timeout) || timeout < 0) {
+    timeout <- 8
+  }
+  timeout
+}
+
 wsi_viewer_navigator_data_uri <- function(slide, width = 512) {
-  tryCatch(
-    wsi_viewer_thumbnail_data_uri(slide, width = width, height = NULL),
-    error = function(err) NULL
+  timeout <- wsi_viewer_navigator_timeout()
+  if (timeout == 0) {
+    return(NULL)
+  }
+  if (identical(slide$backend, "mock") || identical(slide$backend, "omezarr") ||
+      (identical(slide$backend, "imagemagick") && !wsi_has_vips())) {
+    return(tryCatch(
+      wsi_viewer_thumbnail_data_uri(slide, width = width, height = NULL),
+      error = function(err) NULL
+    ))
+  }
+  if (!wsi_has_vips()) {
+    return(NULL)
+  }
+
+  tmp <- tempfile(fileext = ".png")
+  on.exit(unlink(tmp), add = TRUE)
+  args <- c("thumbnail", slide$path, tmp, as.character(width))
+  output <- tryCatch(
+    suppressWarnings(system2("vips", args = wsi_system2_args(args), stdout = TRUE, stderr = TRUE, timeout = timeout)),
+    error = function(err) structure(conditionMessage(err), status = 1L)
   )
+  status <- attr(output, "status", exact = TRUE) %||% 0L
+  if (!identical(as.integer(status), 0L) || !file.exists(tmp)) {
+    wsi_warn(
+      sprintf(
+        "Skipping navigator preview because libvips did not create it within %s second%s. Full-resolution tiled viewing is still available.",
+        format(timeout, trim = TRUE, scientific = FALSE),
+        if (identical(timeout, 1)) "" else "s"
+      )
+    )
+    return(NULL)
+  }
+  tryCatch(wsi_image_data_uri(tmp, mime = "image/png"), error = function(err) NULL)
 }
 
 wsi_url_encode_path <- function(path) {
