@@ -346,6 +346,44 @@ button:disabled {
   word-break: break-word;
 }
 
+.spatialMapping {
+  border: 1px solid rgba(94, 234, 212, 0.22);
+  border-radius: 6px;
+  background: rgba(20, 184, 166, 0.08);
+  color: #cbd5e1;
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 9px;
+}
+
+.spatialMapping label {
+  display: grid;
+  gap: 6px;
+}
+
+.spatialMapping span {
+  color: #99f6e4;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.spatialMapping select {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 6px;
+  background: #111827;
+  color: #f8fafc;
+  font: inherit;
+  padding: 8px 9px;
+}
+
+.spatialMapping small {
+  color: #94a3b8;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .runtimePanel {
   display: flex;
   flex-direction: column;

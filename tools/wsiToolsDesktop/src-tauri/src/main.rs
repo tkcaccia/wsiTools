@@ -53,6 +53,7 @@ struct NewProjectItem {
     cell_annotation: Option<String>,
     tissue_annotation: Option<String>,
     spatial_data: Option<String>,
+    spatial_sample_id: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -61,6 +62,23 @@ struct ResolvedProjectItem {
     cell_annotation: Option<PathBuf>,
     tissue_annotation: Option<PathBuf>,
     spatial_data: Option<PathBuf>,
+    spatial_sample_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SpatialTissueInfo {
+    tissue_id: String,
+    n_spots: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SpatialInspection {
+    object_type: String,
+    file_path: String,
+    tissues: Vec<SpatialTissueInfo>,
+    message: String,
 }
 
 fn push_log(logs: &Arc<Mutex<Vec<String>>>, line: impl Into<String>) {
@@ -184,7 +202,13 @@ fn r_home_candidates() -> Vec<String> {
         let root = PathBuf::from(base);
         for name in executable_names() {
             out.push(root.join("bin").join(name).to_string_lossy().to_string());
-            out.push(root.join("bin").join("x64").join(name).to_string_lossy().to_string());
+            out.push(
+                root.join("bin")
+                    .join("x64")
+                    .join(name)
+                    .to_string_lossy()
+                    .to_string(),
+            );
         }
     }
     out
@@ -451,6 +475,144 @@ fn optional_file(path: Option<String>, label: &str) -> Result<Option<PathBuf>, S
     }
 }
 
+fn optional_text(value: Option<String>) -> Option<String> {
+    value
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+}
+
+fn inspect_spatial_object_target(file_path: String) -> Result<SpatialInspection, String> {
+    let file = validate_file(&file_path, "Spatial transcriptomics data")?;
+    let rscript = locate_rscript()?;
+    let inspector = r#"
+args <- commandArgs(trailingOnly = TRUE)
+path <- args[[1L]]
+clean_value <- function(x) {
+  x <- as.character(x)
+  x[is.na(x) | !nzchar(x)] <- "unknown"
+  gsub("[\r\n\t]", " ", x)
+}
+first_col <- function(df, choices) {
+  if (!is.data.frame(df)) return(NULL)
+  lower <- tolower(names(df))
+  for (choice in tolower(choices)) {
+    hit <- which(lower == choice)
+    if (length(hit)) return(names(df)[[hit[[1L]]]])
+  }
+  NULL
+}
+load_object <- function(path) {
+  ext <- tolower(tools::file_ext(path))
+  if (identical(ext, "rds")) return(readRDS(path))
+  env <- new.env(parent = emptyenv())
+  loaded <- load(path, envir = env)
+  if (!length(loaded)) stop("No object was found in the selected file.", call. = FALSE)
+  env[[loaded[[1L]]]]
+}
+emit <- function(key, value) {
+  cat(sprintf("WSITOOLS_%s=%s\n", key, value))
+}
+emit_tissues <- function(ids) {
+  ids <- clean_value(ids)
+  ids <- ids[nzchar(ids)]
+  if (!length(ids)) ids <- "default"
+  tab <- sort(table(ids), decreasing = TRUE)
+  for (id in names(tab)) {
+    cat(sprintf("WSITOOLS_TISSUE=%s\t%s\n", id, as.integer(tab[[id]])))
+  }
+}
+obj <- load_object(path)
+classes <- class(obj)
+object_type <- if (inherits(obj, "Seurat")) {
+  "Seurat"
+} else if (inherits(obj, "SpatialExperiment")) {
+  "SpatialExperiment"
+} else if (inherits(obj, "SingleCellExperiment")) {
+  "SingleCellExperiment"
+} else if (inherits(obj, "SummarizedExperiment")) {
+  "SummarizedExperiment"
+} else if (any(grepl("giotto", classes, ignore.case = TRUE))) {
+  "Giotto"
+} else {
+  classes[[1L]]
+}
+tissues <- character()
+if (inherits(obj, "Seurat")) {
+  meta <- tryCatch(methods::slot(obj, "meta.data"), error = function(e) NULL)
+  if (is.data.frame(meta)) {
+    col <- first_col(meta, c("sample_id", "sample", "section", "image_id", "orig.ident", "slide_id", "tissue", "library_id"))
+    if (!is.null(col)) tissues <- meta[[col]]
+  }
+  images <- tryCatch(names(methods::slot(obj, "images")), error = function(e) character())
+  if (length(images)) tissues <- c(images, tissues)
+} else if (inherits(obj, "SpatialExperiment") ||
+           inherits(obj, "SingleCellExperiment") ||
+           inherits(obj, "SummarizedExperiment")) {
+  col_data <- tryCatch(as.data.frame(SummarizedExperiment::colData(obj)), error = function(e) NULL)
+  if (is.data.frame(col_data)) {
+    col <- first_col(col_data, c("sample_id", "sample", "section", "image_id", "orig.ident", "slide_id", "tissue", "library_id"))
+    if (!is.null(col)) tissues <- col_data[[col]]
+  }
+}
+if (!length(tissues)) tissues <- "default"
+emit("OBJECT_TYPE", object_type)
+emit("MESSAGE", sprintf("Detected %s in %s", object_type, basename(path)))
+emit_tissues(tissues)
+"#;
+    let output = Command::new(&rscript)
+        .arg("--vanilla")
+        .arg("-e")
+        .arg(inspector)
+        .arg(file.to_string_lossy().to_string())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|err| format!("Could not inspect spatial object with Rscript: {err}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !output.status.success() {
+        return Err(format!(
+            "Could not inspect spatial transcriptomics object with R.\n\n{}{}",
+            stdout, stderr
+        ));
+    }
+
+    let mut object_type = "unknown".to_string();
+    let mut message = String::new();
+    let mut tissues = Vec::new();
+    for line in stdout.lines() {
+        if let Some(value) = line.strip_prefix("WSITOOLS_OBJECT_TYPE=") {
+            object_type = value.trim().to_string();
+        } else if let Some(value) = line.strip_prefix("WSITOOLS_MESSAGE=") {
+            message = value.trim().to_string();
+        } else if let Some(value) = line.strip_prefix("WSITOOLS_TISSUE=") {
+            let mut parts = value.splitn(2, '\t');
+            let tissue_id = parts.next().unwrap_or("default").trim().to_string();
+            let n_spots = parts
+                .next()
+                .and_then(|text| text.trim().parse::<u64>().ok());
+            if !tissue_id.is_empty() {
+                tissues.push(SpatialTissueInfo { tissue_id, n_spots });
+            }
+        }
+    }
+    if tissues.is_empty() {
+        tissues.push(SpatialTissueInfo {
+            tissue_id: "default".to_string(),
+            n_spots: None,
+        });
+    }
+    if message.is_empty() {
+        message = format!("Detected {object_type} spatial object.");
+    }
+    Ok(SpatialInspection {
+        object_type,
+        file_path: file.to_string_lossy().to_string(),
+        tissues,
+        message,
+    })
+}
+
 fn launch_r_new_project_target(
     app: AppHandle,
     state: Arc<RViewerState>,
@@ -467,6 +629,7 @@ fn launch_r_new_project_target(
                 cell_annotation: optional_file(item.cell_annotation, "Cell annotation")?,
                 tissue_annotation: optional_file(item.tissue_annotation, "Tissue annotation")?,
                 spatial_data: optional_file(item.spatial_data, "Spatial transcriptomics data")?,
+                spatial_sample_id: optional_text(item.spatial_sample_id),
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
@@ -504,6 +667,12 @@ fn launch_r_new_project_target(
             push_log(
                 &state.logs,
                 format!("  Spatial transcriptomics data: {}", path.display()),
+            );
+        }
+        if let Some(sample_id) = &item.spatial_sample_id {
+            push_log(
+                &state.logs,
+                format!("  Spatial tissue/sample ID: {sample_id}"),
             );
         }
     }
@@ -545,10 +714,21 @@ fn launch_r_new_project_target(
         })
         .collect::<Vec<_>>()
         .join(", ");
+    let sample_r = items
+        .iter()
+        .map(|item| {
+            item.spatial_sample_id
+                .as_ref()
+                .map(|sample_id| r_string(sample_id))
+                .unwrap_or_else(|| r_string(""))
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
     push_log(&state.logs, format!("  image = c({image_r}),"));
     push_log(&state.logs, format!("  cell_annotation = c({cell_r}),"));
     push_log(&state.logs, format!("  tissue_annotation = c({tissue_r}),"));
     push_log(&state.logs, format!("  spatial_data = c({spatial_r}),"));
+    push_log(&state.logs, format!("  spatial_sample_id = c({sample_r}),"));
     push_log(&state.logs, "  stringsAsFactors = FALSE");
     push_log(&state.logs, ")");
     push_log(&state.logs, "viewer <- wsi_open_viewer(");
@@ -579,6 +759,10 @@ fn launch_r_new_project_target(
         if let Some(path) = &item.spatial_data {
             args.push("--spatial".to_string());
             args.push(path.to_string_lossy().to_string());
+        }
+        if let Some(sample_id) = &item.spatial_sample_id {
+            args.push("--sample".to_string());
+            args.push(sample_id.to_string());
         }
     }
 
@@ -834,6 +1018,13 @@ async fn start_r_new_project(
 }
 
 #[tauri::command]
+async fn inspect_spatial_object(file_path: String) -> Result<SpatialInspection, String> {
+    tauri::async_runtime::spawn_blocking(move || inspect_spatial_object_target(file_path))
+        .await
+        .map_err(|err| format!("Spatial object inspection task failed: {err}"))?
+}
+
+#[tauri::command]
 fn open_viewer_window(app: AppHandle, url: String) -> Result<(), String> {
     if url.trim().is_empty() {
         return Err("Viewer URL was empty.".to_string());
@@ -869,6 +1060,7 @@ fn main() {
             start_r_viewer,
             start_r_project,
             start_r_new_project,
+            inspect_spatial_object,
             open_viewer_window,
             stop_r_viewer,
             viewer_logs,

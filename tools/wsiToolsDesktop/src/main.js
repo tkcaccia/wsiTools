@@ -35,6 +35,7 @@ let viewerWindowOpen = false;
 let rAvailable = false;
 let rDownloadUrl = "https://cran.r-project.org/";
 const localLogs = [];
+const spatialInspections = new Map();
 
 function timestamp() {
   return new Date().toLocaleTimeString();
@@ -171,7 +172,8 @@ function addProjectImages(paths) {
       image: path,
       cellAnnotation: "",
       tissueAnnotation: "",
-      spatialData: ""
+      spatialData: "",
+      spatialSampleId: ""
     });
     known.add(path);
     added += 1;
@@ -179,6 +181,53 @@ function addProjectImages(paths) {
   appendLog(`Added ${added} image${added === 1 ? "" : "s"} to the project.`);
   renderProjectImages();
   renderAssociations();
+}
+
+function normaliseMatchToken(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function spatialInspectionFor(path) {
+  return spatialInspections.get(path || "") || null;
+}
+
+async function inspectSpatialObject(path) {
+  if (!path) return null;
+  const cached = spatialInspectionFor(path);
+  if (cached) return cached;
+  appendLog(`Inspecting spatial transcriptomics object: ${path}`);
+  const inspection = await invoke("inspect_spatial_object", { filePath: path });
+  spatialInspections.set(path, inspection);
+  const count = Array.isArray(inspection.tissues) ? inspection.tissues.length : 0;
+  appendLog(`Spatial object detected: ${inspection.objectType || "unknown"} with ${count} tissue/sample ${count === 1 ? "entry" : "entries"}.`);
+  return inspection;
+}
+
+function autoAssignSpatialTissues(spatialPath, inspection) {
+  const tissues = Array.isArray(inspection?.tissues) ? inspection.tissues : [];
+  if (!spatialPath || tissues.length === 0) return;
+  const tissueIds = tissues.map((entry) => entry.tissueId).filter(Boolean);
+  const used = new Set(projectImages.map((item) => item.spatialSampleId).filter(Boolean));
+  for (const item of projectImages) {
+    if (!item.spatialData) {
+      item.spatialData = spatialPath;
+    }
+    if (item.spatialData !== spatialPath || item.spatialSampleId) {
+      continue;
+    }
+    const imageToken = normaliseMatchToken(basename(item.image));
+    let match = tissueIds.find((id) => {
+      const token = normaliseMatchToken(id);
+      return token && (imageToken.includes(token) || token.includes(imageToken));
+    });
+    if (!match && tissueIds.length === projectImages.length) {
+      match = tissueIds.find((id) => !used.has(id));
+    }
+    if (match) {
+      item.spatialSampleId = match;
+      used.add(match);
+    }
+  }
 }
 
 function removeProjectImage(id) {
@@ -263,6 +312,40 @@ function renderAssociations() {
     card.querySelector('[data-field="cell"]').textContent = pathText(item.cellAnnotation);
     card.querySelector('[data-field="tissue"]').textContent = pathText(item.tissueAnnotation);
     card.querySelector('[data-field="spatial"]').textContent = pathText(item.spatialData);
+    const inspection = spatialInspectionFor(item.spatialData);
+    const tissues = Array.isArray(inspection?.tissues) ? inspection.tissues : [];
+    if (item.spatialData && tissues.length > 0) {
+      const mapping = document.createElement("div");
+      mapping.className = "spatialMapping";
+      mapping.innerHTML = `
+        <label>
+          <span>Spatial tissue/sample for this image</span>
+          <select data-action="set-spatial-sample" data-id="${item.id}"></select>
+        </label>
+        <small></small>
+      `;
+      const select = mapping.querySelector("select");
+      const empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = "Choose tissue/sample in spatial object";
+      select.append(empty);
+      for (const entry of tissues) {
+        const value = String(entry.tissueId || "");
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = `${value}${entry.nSpots == null ? "" : ` (${entry.nSpots} spots/cells)`}`;
+        select.append(option);
+      }
+      select.value = item.spatialSampleId || "";
+      mapping.querySelector("small").textContent =
+        `${inspection.objectType || "Spatial object"}: map the microscopy image to the matching tissue saved inside the R object.`;
+      card.append(mapping);
+    } else if (item.spatialData && inspection?.message) {
+      const mapping = document.createElement("div");
+      mapping.className = "spatialMapping";
+      mapping.textContent = inspection.message;
+      card.append(mapping);
+    }
     return card;
   }));
 }
@@ -283,6 +366,7 @@ function rNewProjectLaunchCode() {
     `  cell_annotation = ${quoteRVector(projectImages.map((item) => item.cellAnnotation || ""))},`,
     `  tissue_annotation = ${quoteRVector(projectImages.map((item) => item.tissueAnnotation || ""))},`,
     `  spatial_data = ${quoteRVector(projectImages.map((item) => item.spatialData || ""))},`,
+    `  spatial_sample_id = ${quoteRVector(projectImages.map((item) => item.spatialSampleId || ""))},`,
     "  stringsAsFactors = FALSE",
     ")",
     "viewer <- wsi_open_viewer(",
@@ -442,6 +526,16 @@ async function selectAssociation(id, kind) {
   }, spec.title);
   if (!selected) return;
   item[spec.key] = Array.isArray(selected) ? selected[0] : selected;
+  if (kind === "spatial") {
+    item.spatialSampleId = "";
+    const inspection = await inspectSpatialObject(item.spatialData);
+    const tissues = Array.isArray(inspection?.tissues) ? inspection.tissues : [];
+    if (tissues.length === 1) {
+      item.spatialSampleId = tissues[0].tissueId || "";
+    } else if (tissues.length > 1) {
+      autoAssignSpatialTissues(item.spatialData, inspection);
+    }
+  }
   appendLog(`${spec.status}: ${item[spec.key]}`);
   renderAssociations();
   setStatus(spec.status, "ok");
@@ -568,6 +662,7 @@ associationList.addEventListener("click", async (event) => {
       renderAssociations();
     } else if (button.dataset.action === "clear-spatial") {
       item.spatialData = "";
+      item.spatialSampleId = "";
       renderAssociations();
     }
   } catch (error) {
@@ -576,11 +671,32 @@ associationList.addEventListener("click", async (event) => {
   }
 });
 
+associationList.addEventListener("change", (event) => {
+  const select = event.target.closest('select[data-action="set-spatial-sample"]');
+  if (!select) return;
+  const item = projectImages.find((entry) => entry.id === select.dataset.id);
+  if (!item) return;
+  item.spatialSampleId = select.value || "";
+  appendLog(`Mapped ${basename(item.image)} to spatial tissue/sample: ${item.spatialSampleId || "not selected"}.`);
+  setStatus("spatial tissue mapped", "ok");
+});
+
 runR.addEventListener("click", async () => {
   if (!projectImages.length) {
     setStatus("add image(s) first", "error");
     appendLog("Run R clicked without image input.");
     return;
+  }
+  for (const item of projectImages) {
+    const inspection = spatialInspectionFor(item.spatialData);
+    const tissues = Array.isArray(inspection?.tissues) ? inspection.tissues : [];
+    if (item.spatialData && tissues.length > 1 && !item.spatialSampleId) {
+      const message = `Choose the spatial tissue/sample for ${basename(item.image)} before running R.`;
+      setStatus("spatial mapping needed", "error");
+      appendLog(message);
+      showLaunchError(message);
+      return;
+    }
   }
   await handleLaunch(
     () => invoke("start_r_new_project", { projectItems: projectImages }),

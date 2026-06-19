@@ -165,7 +165,8 @@ desktop_parse_args <- function(args) {
             image = value,
             cell_annotation = NULL,
             tissue_annotation = NULL,
-            spatial_data = NULL
+            spatial_data = NULL,
+            spatial_sample_id = NULL
           )
           i <- i + 2L
         } else if (identical(key, "--cell")) {
@@ -185,6 +186,12 @@ desktop_parse_args <- function(args) {
             stop("Spatial transcriptomics data was supplied before an image path.", call. = FALSE)
           }
           current$spatial_data <- value
+          i <- i + 2L
+        } else if (identical(key, "--sample")) {
+          if (is.null(current)) {
+            stop("Spatial tissue/sample ID was supplied before an image path.", call. = FALSE)
+          }
+          current$spatial_sample_id <- value
           i <- i + 2L
         } else {
           path <- value
@@ -301,9 +308,28 @@ desktop_add_annotation_files <- function(viewer, cell_annotation = NULL,
   invisible(viewer)
 }
 
-desktop_open_spatial_target <- function(object, image_paths, output, log_file) {
+desktop_open_spatial_target <- function(object, image_paths, output, log_file,
+                                        sample_ids = NULL) {
+  if (!is.null(sample_ids)) {
+    sample_ids <- as.character(sample_ids)
+    sample_ids[is.na(sample_ids)] <- ""
+    if (length(sample_ids) != length(image_paths) || any(!nzchar(sample_ids))) {
+      desktop_log(
+        "Ignoring incomplete spatial tissue/sample mapping from the desktop app.",
+        log_file = log_file
+      )
+      sample_ids <- NULL
+    } else {
+      names(image_paths) <- sample_ids
+      desktop_log(
+        "Using explicit spatial tissue/sample mapping: ",
+        paste(sprintf("%s -> %s", basename(image_paths), sample_ids), collapse = "; "),
+        log_file = log_file
+      )
+    }
+  }
   if (length(image_paths) == 1L) {
-    return(wsiTools::wsi_viewer_spatial(
+    single_args <- list(
       object,
       image_paths[[1L]],
       live = TRUE,
@@ -318,12 +344,23 @@ desktop_open_spatial_target <- function(object, image_paths, output, log_file) {
       wait = FALSE,
       output = output,
       overwrite = TRUE
-    ))
+    )
+    if (!is.null(sample_ids) && length(sample_ids) == 1L) {
+      single_args$image_name <- sample_ids[[1L]]
+      if (inherits(object, "SpatialExperiment") ||
+          inherits(object, "SingleCellExperiment") ||
+          inherits(object, "SummarizedExperiment")) {
+        single_args$sample_id <- sample_ids[[1L]]
+      }
+    }
+    return(do.call(wsiTools::wsi_viewer_spatial, single_args))
   }
   if (inherits(object, "Seurat")) {
     return(wsiTools::wsi_viewer_seurat_project(
       seurat = object,
       images = image_paths,
+      image_names = sample_ids,
+      labels = sample_ids,
       live = TRUE,
       dynamic_tiles = FALSE,
       open = FALSE,
@@ -338,6 +375,9 @@ desktop_open_spatial_target <- function(object, image_paths, output, log_file) {
     return(wsiTools::wsi_viewer_spatialexperiment_project(
       spe = object,
       images = image_paths,
+      sample_ids = sample_ids,
+      image_names = sample_ids,
+      labels = sample_ids,
       live = TRUE,
       dynamic_tiles = FALSE,
       open = FALSE,
@@ -541,13 +581,21 @@ desktop_open_live_image_project <- function(image_paths, output, log_file) {
 desktop_open_new_project <- function(items, output, log_file) {
   image_paths <- vapply(items, function(item) item$image, character(1))
   image_paths <- normalizePath(image_paths, winslash = "/", mustWork = TRUE)
+  sample_ids <- vapply(items, function(item) item$spatial_sample_id %||% "", character(1))
+  sample_ids <- if (any(nzchar(sample_ids))) sample_ids else NULL
   spatial_paths <- unique(vapply(items, function(item) item$spatial_data %||% "", character(1)))
   spatial_paths <- spatial_paths[nzchar(spatial_paths)]
   desktop_log("Opening new project with ", length(image_paths), " image(s).", log_file = log_file)
   if (length(spatial_paths) == 1L) {
     desktop_log("Loading spatial transcriptomics object: ", spatial_paths[[1L]], log_file = log_file)
     spatial_object <- desktop_load_spatial_object(spatial_paths[[1L]])
-    viewer <- desktop_open_spatial_target(spatial_object, image_paths, output, log_file)
+    viewer <- desktop_open_spatial_target(
+      spatial_object,
+      image_paths,
+      output,
+      log_file,
+      sample_ids = sample_ids
+    )
   } else if (length(spatial_paths) > 1L) {
     desktop_log(
       "Multiple different spatial transcriptomics files were associated. ",
