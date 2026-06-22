@@ -43,6 +43,53 @@ wsiTools is not:
 - a replacement for all QuPath functionality;
 - a package that bundles every external backend automatically.
 
+## Recent viewer and workflow updates
+
+The current development version includes several changes intended to make the
+viewer more stable for real pathology workflows:
+
+- **Live R synchronization by default for spatial projects.** Seurat, Giotto,
+  SpatialExperiment, and multi-section spatial project viewers now default to a
+  live `httpuv` bridge. Viewer edits, selected ROIs, measurements, spot
+  selections, proximity results, prediction results, logs, and project state can
+  be retrieved from R through the returned viewer session object.
+- **Full-resolution tiled viewing first.** Large SVS, TIFF/BTF, OME-TIFF, and
+  CZI files should be viewed with OpenSeadragon tiles. wsiTools prefers
+  precomputed Deep Zoom tiles when available, and can fall back to dynamic live
+  tiles served from R. The full level-0 image is not loaded into R memory.
+- **Project and panel workflow.** The left Project panel opens by default in
+  project viewers, can be closed/reopened from the top menus, and can be resized
+  horizontally and vertically. The Annotations, Layers, History, and Logs panels
+  use matching visibility behavior and opacity.
+- **Multi-view display.** The View menu supports 1, 2, 4, 6, and custom pane
+  layouts for tiled viewers. Project images can be dragged from the Project
+  panel into individual panes. Pan/zoom is independent by default, with optional
+  synchronization from the View menu. Each pane has its own ruler/scale display.
+- **Annotation editing.** Brush annotations use a 32 px default brush, support
+  add/subtract editing, use smooth/freehand boundary editing, keep categories
+  visually consistent, and keep same-category regions mergeable while different
+  categories remain non-overlapping. Selected objects can be deleted with
+  Delete/Backspace, and recent annotation/object edits can be undone/redone.
+- **Annotation export and persistence.** GeoJSON export uses slide-level
+  coordinates rather than the current zoom level. Live viewers can sync ROIs
+  back to R, export annotation-spot association CSV files, and save project
+  state. Browser-side save actions now expose clearer export options where the
+  browser supports them.
+- **Spatial omics and CellPhenotyper.** Seurat, Giotto, and SpatialExperiment
+  viewers retrieve selected genes/features from R on demand rather than loading
+  all genes into the browser. CellPhenotyper projects can show H&E, registered
+  GigaTIME/mIHC channels, GrandQC regions, KODAMA/MedSAM regions, cell masks,
+  and cell-level feature overlays.
+- **Analysis overlays.** The Trajectories menu supports proximity analysis,
+  distance-to-reference overlays with a draggable legend, and proximity
+  statistics. Feature names in the proximity statistics table can be clicked to
+  colour the corresponding spots or cells by that feature through the live R
+  session.
+- **Tauri desktop launcher.** The optional desktop app provides a file-picker
+  workflow for users who do not want to type R commands. It detects R from the
+  system `PATH`, opens saved projects, and supports a guided new-project flow
+  for associating images with annotations and spatial omics objects.
+
 ## Format support
 
 Format support depends on the installed backend, the exact file variant, and the
@@ -131,7 +178,11 @@ level-0 WSI images into R memory by default.
 | Draw annotations | `wsi_viewer_live()` | Use the Annotations menu and left Annotations panel |
 | Import GeoJSON | `read_geojson("annotations.geojson")` | Use Annotations / GeoJSON import |
 | Export annotations | `write_geojson(rois, "annotations.geojson")` | Use the Save or Export controls in the Annotations panel |
+| Save annotation-spot links | `viewer$get_annotation_spots()` | Use Annotations to export annotation/spot associations as CSV |
 | Extract tiles | `extract_tiles()` or `wsi_tile()` | Preview tile grids before exporting when available |
+| Compare tissues | `wsi_viewer_live(..., mode = "tiles")` | Use View / Multi-view and drag project images into panes |
+| Run proximity analysis | `viewer$get_proximity()`, `viewer$get_proximity_stats()` | Use Trajectories / Proximity; click statistic-table features to colour spots/cells |
+| Inspect warnings | `viewer$get_logs()` | Open the Logs panel; warnings and disappearing toasts are retained there |
 | Diagnose setup | `wsi_backends()`, `wsi_diagnose()` | Open the Logs/History panel for viewer warnings |
 
 ### Saving and exporting annotations
@@ -146,8 +197,10 @@ write_geojson(rois, "annotations.geojson", overwrite = TRUE)
 ```
 
 In the browser, use the Annotations panel to save or export ROIs. GeoJSON is the
-main interoperability format for QuPath-style polygon annotations. CSV exports
-are useful for spot/annotation association tables, measurements, and summaries.
+main interoperability format for QuPath-style polygon annotations. Exported
+GeoJSON coordinates are written in the original slide coordinate system, not the
+current zoom/pan display coordinate system. CSV exports are useful for
+spot/annotation association tables, measurements, and summaries.
 Static HTML viewers can download/export from the browser, but they do not
 automatically update the R session after the file is opened.
 
@@ -180,6 +233,8 @@ automatically update the R session after the file is opened.
 | Viewer opens as `file://` and does not sync to R | Browser address bar | Use `wsi_viewer_live()` and open the `http://127.0.0.1:<port>` URL |
 | CZI opens but the image is not displayed | `wsi_has_native_czi()`, `wsi_has_bioformats()` | Install or enable native CZI/Bio-Formats support; use tiled live mode |
 | Image is slow or tiles are black/missing | Logs/History panel, `wsi_has_vips()` | Use `mode = "tiles"`, prebuild tiles with libvips when possible, keep the live R session running |
+| Multi-view pane is blank after drag/drop | Logs panel, Project panel source | Use tiled project images or browser-readable images; avoid dropping the same image into several panes |
+| Proximity statistic gene says `Could not fetch` | Logs panel, `viewer$get_proximity_stats()` | Keep the live R session running; click a feature row from the statistics table so wsiTools sends the correct feature source to R |
 | Windows install fails with `00LOCK-wsiTools` | R library folder | Close R sessions and remove the `00LOCK-wsiTools` directory |
 | Windows compile fails around `Makeconf` | `pkgbuild::has_build_tools(debug = TRUE)` | Install/update Rtools matching your R version, then reinstall |
 | Scale bar is unavailable | `wsi_mpp(slide)` | Add pixel-size metadata manually or use Visium spot spacing when available |
@@ -501,21 +556,42 @@ wsi_viewer_project("sample.czi", open = TRUE)
 This helper compiles a tiny Java class into R's temporary directory and reads
 only requested regions with Bio-Formats; it does not batch-convert the full CZI.
 
-The native bridge currently supports CZI metadata, basic dimensions, and
-single-channel/RGB preview regions through libCZIAPI. More complete scene,
-channel, and high-resolution dynamic-tile support can be built on the same
-bridge.
+The native bridge supports CZI metadata, scene dimensions, low-resolution
+preview reads, and full-resolution dynamic OpenSeadragon tiles through
+libCZIAPI. The fastest interactive route is the live CZI viewer because it
+opens from metadata first and reads only the tiles requested by the browser.
 
-CZI project viewing opens a low-resolution scene preview first. By default
-wsiTools caps the first preview to about 1024 px on the longest side and, when
-libCZI reports pyramid layers, selects the most downsampled native layer that is
-still useful for navigation. This keeps first open responsive; higher-resolution
-region or tiled access can be requested later.
+Full-resolution live CZI project viewing now opens with lazy previews by
+default. The Project panel is populated from CZI metadata, and OpenSeadragon
+requests only the tiles needed for the selected scene. This avoids reading every
+scene into a PNG overview before the browser appears, which is much faster for
+multi-scene CZI files. To restore the older eager-preview behaviour, use
+`czi_preview = "all"`.
+
+Static CZI project viewing can still generate low-resolution scene previews. In
+that path, wsiTools caps the first preview to about 1024 px on the longest side
+and, when libCZI reports pyramid layers, selects the most downsampled native
+layer that is still useful for navigation.
 
 ```r
 # Optional tuning for the first CZI overview.
 Sys.setenv(WSITOOLS_CZI_INITIAL_PREVIEW_WIDTH = "1024")
 Sys.setenv(WSITOOLS_CZI_MIN_PREVIEW_WIDTH = "768")
+```
+
+```r
+# Fast first paint for live CZI viewing.
+viewer <- wsi_viewer_czi_project_live(
+  "sample.czi",
+  czi_preview = "lazy",
+  sections = TRUE
+)
+
+# Optional: generate all low-resolution section previews before opening.
+viewer <- wsi_viewer_czi_project_live(
+  "sample.czi",
+  czi_preview = "all"
+)
 ```
 
 Only use the Python wrapper if native libCZIAPI is not available and you choose
@@ -955,75 +1031,77 @@ session <- wsi_viewer_live(
 )
 ```
 
-The interactive toolbar is organized into menus such as `Project`,
-`Annotations`, `Cells`, `Artifacts`, `Measure`, `Trajectories`, `Image`, `View`,
-`Stains`, and `Help`. Use the `Cells` menu for project-level CellPhenotyper
-cell overlays loaded from an existing CellPhenotyper output directory. Use
-`Project` to reopen
-the left-side project panel, use `Add image` to append one or more ordinary
-browser-readable images or file references in formats such as CZI, SVS, NDPI,
-BTF, OME-TIFF, QPTIFF, MRXS, SCN, BIF, DICOM, PNG, JPEG and TIFF.
-Browser-readable images preview immediately; raw WSI/microscopy files are
-listed as project references without loading the whole file into browser memory
-and should be opened from R/backends for full-resolution viewing.
-Drag images in the left Project panel to reorder them, close an image with the
-row `X`, or save/open a browser project JSON containing the visible project images,
-section-specific annotations, and trajectories. Large WSI, CZI, SVS, OME-TIFF,
-and pyramidal images should still be opened from R or prepared as tiled project
-sources; the project file preserves their paths/tile metadata rather than
-copying full pixel data into R memory. Pyramid levels are used internally for
-zooming and are not listed as project sections. The `Help` menu opens an
-in-viewer guide organized into `Quick Recommendations`, `Full Guide`, and
-`Keyboard Shortcuts`, covering image loading, navigation, project, ROI,
-stain/channel, analysis, saved-output, and troubleshooting notes for new users.
-The left-side panel stack can be resized by dragging its right edge, and
-each Project, Annotations, or History panel can be resized vertically from its
-lower grip. The `View` menu also provides a multi-view tissue display for
-OpenSeadragon viewers, with 2, 4, or 6 panes that can be linked for
-synchronized zoom/pan or left independent. In project viewers, panes use
-different project images or sections when available; otherwise they compare
-separate ROIs, tumour and non-tumour regions, or different zoom levels within
-the active image. When multiple `project_images` are supplied and the caller
-does not explicitly request thumbnail mode, wsiTools switches to tiled mode
-automatically when a tile backend or explicit tile URL is available. These menus group pan and annotation modes, fit and
-1:1 zoom, ROI and label toggles, ROI opacity, previous/next ROI navigation, a
-side window listing all GeoJSON geometries, crosshair display, polygon drawing,
-and GeoJSON export. Use the annotation/GeoJSON tools
-to open the geometry list; each row shows the geometry type, bounds, point
-count, source, and id. Use `Draw ROI`, click polygon vertices, double-click or press
-Enter, then use `Save GeoJSON`. In `Brush` mode, each normal stroke creates
-a new automatically named annotation. If the painted area touches an existing
-annotation with the same label, the regions merge; holding `Alt` on
-Windows/Linux or `Command` on macOS while brushing removes from the selected
-annotation. The compact ROI report does not open
-automatically; select an ROI and click `ROI summary` when you want to inspect
-area, cell count, and density. Use `Edit`
-to move vertices, double-click an edge to insert a vertex, and Backspace/Delete
-to remove the active vertex. Drawn, painted, and edited annotation regions are
-kept class-exclusive: annotations with the same class label merge into one
-multi-part annotation, while areas already occupied by a different class label
-are clipped from the new or refined annotation. The brush refinement controls can smooth a
-boundary, simplify it with a pixel tolerance, fill holes, merge checked
-annotations from the left panel, and split a multi-part annotation into
-separate ROIs. The History panel can be maximized with its `Maximize` button
-and restored with `Esc` or `Restore`. The toolbar `Class`, `Custom class`, and `Set next class` controls
-set the class for the next drawn or painted annotation; selecting an ROI does
-not overwrite these controls, and changing them does not relabel the selected
-annotation. Use the annotation manager controls to change an existing
-annotation before GeoJSON export. Annotation colors
-are category-driven: all ROIs with the same class label share the same class
-color, including imported GeoJSON and newly painted annotations. `Ctrl+Z` undoes
-annotation edits and `Ctrl+Shift+Z`/`Ctrl+Y` redoes them, with the last 10
-committed states retained in each direction. The `Trajectories` menu can draw a
-smoothed backbone, preview an adjustable-width corridor around it, and create a
-GeoJSON annotation area from that corridor while preserving the same class
-merge and different-class clipping rules used by brush annotations. Double-click,
-press Enter, or click `Finish` to save a trajectory and automatically return to
-pan mode. After creating a trajectory area, use `Edit area` to select the area
-ROI for vertex editing or `Update area` to rebuild it with the current width.
-In a static browser viewer this opens the
-browser's normal save/download flow rather than silently writing to a server
-path.
+The interactive toolbar is organized into top menus such as `Project`,
+`Annotations`, `Cells`, `Artifacts`, `Measure`, `Trajectories`, `View`,
+`Stains`, and `Help`. Menus appear only when their data are relevant: for
+example, `Cells`, `Artifacts`, and `CellPhenotyper` appear for CellPhenotyper
+projects, while Seurat/Giotto/SpatialExperiment menus appear for spatial omics
+viewers. Dropdowns close after actions are selected so they do not cover the
+slide during annotation.
+
+The `Project` menu opens or saves project state and can reopen the left Project
+panel. The Project panel starts open in managed project viewers, lists images
+and sections rather than pyramid levels, and supports drag-and-drop ordering,
+row-level close buttons, and drag-and-drop into multi-view panes. Browser-
+readable images preview immediately; raw WSI/microscopy files are stored as
+references and should be opened through R/backends for full-resolution tiled
+viewing. Large WSI, CZI, SVS, OME-TIFF, BTF, and pyramidal images are not copied
+into R memory or browser project JSON.
+
+The left-side panels for Project, Annotations, Layers, History, and Logs can be
+closed, reopened, minimized, and resized. The Logs panel stores warnings,
+errors, disappearing toast notifications, tile problems, and sync failures, and
+can be copied or downloaded for troubleshooting. The title bar unsaved marker
+can be used to save project state when supported.
+
+The `View` menu controls layer-panel visibility, magnification shortcuts, reset
+to initial magnification, multi-view display, synchronized/independent pane
+movement, and saved browser preferences. Multi-view panes are resizable; images
+can be dragged from the Project panel into a specific pane. By default,
+multi-view panning/zooming is independent. Synchronization is optional, and the
+scale/ruler updates independently for each pane.
+
+The `Annotations` menu and left Annotations panel manage ROI drawing,
+freehand/brush editing, GeoJSON import/export, label-category selection, and
+annotation/spot association CSV export. The active category controls the next
+new annotation only; selected annotations can be relabelled from the side panel.
+`Choose location and save` opens the native desktop save dialog in the wsiTools
+Desktop app, or the browser Save As dialog when supported; the separate
+`Download` button intentionally uses the browser download folder.
+Annotation object names are kept automatic, while the category label is the
+meaningful pathology class. Separate objects with the same category keep the
+same category label and colour. Same-category brush strokes merge when they
+touch; different categories are clipped to prevent overlap. GeoJSON import and
+export use slide coordinates so ROIs remain aligned after closing and reopening
+a viewer.
+
+Brush mode uses a 32 px default brush. Holding `Alt` on Windows/Linux or
+`Command` on macOS subtracts from the selected annotation. The brush selection
+is handled as a buffered geometry, so all touched polygons, multipolygons,
+rectangles, and freehand regions can be selected or edited. Smooth curve-based
+editing lets users refine complex tissue boundaries without having to place many
+straight-line vertices manually. Delete/Backspace removes the selected
+annotation, trajectory, measurement, marker, or layer object. `Ctrl+Z` and
+`Ctrl+Shift+Z`/`Ctrl+Y` undo and redo recent annotation/object edits.
+
+The `Trajectories` menu draws smoothed paths, supports editable trajectory
+borders, and can run proximity analysis for spots or cells inside one
+annotation relative to another annotation. The Distance to Reference legend is
+draggable. Proximity statistics can be run in the live R session; clicking a
+feature name in the statistics table asks R for that feature and colours the
+corresponding spatial spots or CellPhenotyper cells.
+
+The right-side controls provide pan, rotate, flip, zoom, fit, 1:1, and
+screenshot actions. Screenshot export can include the tissue image plus visible
+annotations, trajectories, measurements, spots/layers, tile grids, or artifacts,
+with PNG/JPEG/SVG/PDF options depending on browser support. In static browser
+viewers, export actions use the browser's normal save/download flow rather than
+silently writing to a server path.
+
+The `Help` menu separates `Keyboard Shortcuts` and `Full Guide` into distinct
+pages. The guide covers opening images, zoom/pan, side panels, annotation,
+projects, live R synchronization, common warnings, tile loading, and where
+saved outputs are written.
 
 ### CellPhenotyper project viewer
 
@@ -2038,37 +2116,62 @@ embedding image pixels. `wsi_case_report()` adds a lightweight HTML report and
 CSV tables for ROI areas, class percentages, cell densities, stain intensity
 summaries, tile counts, and processing provenance.
 
-## First milestone status
+## Current development status
 
 Implemented:
 
-- package skeleton with roxygen2 documentation
-- backend checks for OpenSlide, libvips, Bio-Formats, and ImageMagick
-- lightweight `wsi_slide` abstraction
-- OpenSlide/libvips command-line metadata paths when installed
-- mock slide support for tests
-- slide info, levels, properties, MPP, objective power
-- coordinate validation and region-read abstraction
-- libvips command wrapper, conversion, and pyramid helpers
-- thumbnail and crop scaffolding
-- tile grid generation and tile manifest class
-- simple thumbnail-based tissue mask
-- basic GeoJSON ROI parser
-- ROI GeoJSON writing, class labels, and viewer overlay helpers
-- side-by-side comparison viewer
-- OME-Zarr metadata-backed opening
-- optional segmentation import/export bridge for CellPhenotyper or external outputs
-- CellPhenotyper polygon and centroid cell overlays in the HTML viewer
-- stride-based tile extraction wrapper
-- basic measurements, tissue class summaries, and affine ROI transforms
-- S3 print, summary, and plot methods
-- testthat suite
+- package skeleton with roxygen2 documentation, S3 slide/project/viewer objects,
+  and a testthat suite;
+- backend checks and diagnostics for OpenSlide, libvips, ImageMagick,
+  Bio-Formats, native CZI, httpuv, callr, StarDist, Mesmer, and Cellpose;
+- lightweight `wsi_slide` abstraction, mock slide support, slide metadata,
+  levels, MPP/objective metadata, coordinate validation, and region-read
+  abstraction;
+- libvips command wrappers for conversion, pyramids, thumbnails, cropping,
+  static Deep Zoom tiles, and pyramidal/OME-TIFF workflows;
+- live dynamic tile server for OpenSeadragon viewers, including temporary tile
+  caching and cleanup;
+- `wsi_open_viewer()` and `wsi_viewer_live()` entry points with WebSocket or
+  polling synchronization through `httpuv`;
+- interactive viewer panels for Project, Annotations, Layers, History, Logs,
+  Stains, Cells, Measurements, Trajectories, Prediction, Proximity, screenshots,
+  and multi-view tiled comparison;
+- QuPath-compatible GeoJSON import/export for polygons and multipolygons,
+  category-based colours, label/category editing, class-exclusive brush
+  editing, smooth/freehand boundary refinement, and undo/redo;
+- spatial omics viewers for Seurat, Giotto, and SpatialExperiment, including
+  multi-slide project mapping, live gene/feature lookup from R, clustering,
+  dimensionality-reduction plots, selected-spot highlighting, spot-centred tile
+  export, and annotation/spot CSV export;
+- CellPhenotyper project reading from `project_outputs.tsv`, H&E plus GigaTIME
+  mIHC overlays, GrandQC region import, KODAMA/MedSAM annotation import, KODAMA
+  plot window, cell mask overlays, and cell-level feature colouring;
+- ROI-aware proximity analysis and proximity statistics for spots or cells,
+  including a draggable distance legend and click-to-colour feature lookup from
+  the live R session;
+- optional StarDist/Mesmer selected-ROI orchestration and mask/GeoJSON/CSV
+  segmentation import, while keeping external model stacks optional;
+- tissue/background, whitespace, blur, stain-quality, pen-mark, fold-candidate,
+  bubble-candidate, dust/debris, and tile-level artifact/QC helpers;
+- tile extraction from grids, coordinate lists, ROIs, viewer selections, and
+  spatial spots, with manifests, optional image export, background/QC flags, and
+  reproducible ML sampling options;
+- project/session save helpers, `.wsiproject` sidecar layout, case-report
+  export, measurement summaries, IHC intensity summaries, and affine ROI
+  transform helpers;
+- optional Tauri desktop launcher for users who prefer a file-picker GUI over
+  typing R commands.
 
-Planned:
+Known limitations and planned work:
 
-- optional OpenSlide native bindings outside the CRAN-light core, if needed
-- OME-Zarr chunk decoding for true tiled pixel display
-- associated image reads
-- richer ROI geometry filtering and polygon masking
-- parallel tile extraction
-- advanced tissue segmentation
+- OpenSlide/libvips/native CZI/Bio-Formats remain optional runtime backends, so
+  format support depends on local installation and the exact scanner file
+  variant;
+- OME-Zarr support currently focuses on metadata and multiscale structure; full
+  chunked pixel decoding remains a future optional backend;
+- very large CZI/WSI projects are fastest when a low-resolution preview and
+  prebuilt or cached tiles are available;
+- advanced tissue/artifact detection remains rule-based QC rather than a
+  definitive diagnostic classifier;
+- native OpenSlide bindings and deeper polygon topology operations may be added
+  later if they can be kept compatible with the CRAN-light core.

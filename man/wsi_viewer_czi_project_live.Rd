@@ -16,6 +16,7 @@ wsi_viewer_czi_project_live(
   tile_format = c("jpg", "png", "jpeg"),
   channel = 0,
   sections = TRUE,
+  czi_preview = c("lazy", "all"),
   host = "127.0.0.1",
   port = 8798,
   path = "/viewer-state",
@@ -36,7 +37,8 @@ wsi_viewer_czi_project_live(
 
 \item{open}{Open the generated HTML file in a browser.}
 
-\item{width}{Preview width for the navigator/Project panel thumbnails.}
+\item{width}{Preview width for the navigator/Project panel thumbnails when
+\code{czi_preview = "all"}.}
 
 \item{title}{Viewer title.}
 
@@ -51,6 +53,11 @@ wsi_viewer_czi_project_live(
 \item{sections}{Show detected CZI scenes/sections separately in the Project
 panel. Set to \code{FALSE} to expose the whole CZI bounding box as one tiled
 image.}
+
+\item{czi_preview}{Preview strategy for CZI scenes. \code{"lazy"} (default)
+avoids reading preview pixels before the viewer opens and uses the live
+tile server for the selected scene. \code{"all"} preserves the older behavior
+and generates low-resolution previews for all scenes before opening.}
 
 \item{host, port, path, max_tries}{Local HTTP/WebSocket bridge address.}
 

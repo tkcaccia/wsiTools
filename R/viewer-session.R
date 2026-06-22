@@ -3629,28 +3629,37 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 
 	  seurat_gene_response <- function(req) {
     method <- req$REQUEST_METHOD %||% "GET"
+    feature_context <- proximity_context %||% prediction_context %||% list(spatial = seurat)
+    has_feature_context <- wsi_prediction_context_enabled(feature_context %||% list())
     source_name <- if (!is.null(seurat) && inherits(seurat, "wsi_seurat_spatial")) {
       as.character(seurat$source_name %||% "spatial object")
+    } else if (has_feature_context) {
+      "live feature source"
     } else {
       "spatial object"
     }
-    if (!wsi_seurat_live_gene_available(seurat)) {
+    if (!wsi_seurat_live_gene_available(seurat) && !has_feature_context) {
       return(wsi_http_json_response(
         status = 404L,
         body = list(error = sprintf("No live %s expression source is attached to this viewer.", source_name))
       ))
     }
     gene <- NULL
+    feature_source <- NULL
+    point_source <- NULL
+    reduction_dims <- NULL
     if (identical(method, "GET")) {
       query <- wsi_http_query_params(req$QUERY_STRING %||% "")
       gene <- query$gene %||% query$q %||% NULL
+      feature_source <- query$feature_source %||% query$source %||% NULL
+      point_source <- query$point_source %||% NULL
     } else if (identical(method, "POST")) {
       body <- wsi_http_request_body(req)
       payload <- if (nzchar(body)) jsonlite::fromJSON(body, simplifyVector = FALSE) else list()
       if (!is.list(payload)) {
         return(wsi_http_json_response(status = 400L, body = list(error = "Spatial gene request must be a JSON object.")))
       }
-      unknown <- setdiff(names(payload), c("gene", "q"))
+      unknown <- setdiff(names(payload), c("gene", "q", "feature_source", "source", "point_source", "reduction_dims"))
       if (length(unknown)) {
         return(wsi_http_json_response(
           status = 400L,
@@ -3658,6 +3667,9 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
         ))
       }
       gene <- payload$gene %||% payload$q %||% NULL
+      feature_source <- payload$feature_source %||% payload$source %||% NULL
+      point_source <- payload$point_source %||% NULL
+      reduction_dims <- payload$reduction_dims %||% NULL
     } else {
       return(wsi_http_json_response(status = 405L, body = list(error = "Use GET or POST for spatial gene expression lookup.")))
     }
@@ -3665,7 +3677,29 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
       return(wsi_http_json_response(status = 400L, body = list(error = "Provide a single non-empty `gene` value.")))
     }
     tryCatch(
-      wsi_http_json_response(body = wsi_seurat_dynamic_gene_payload(seurat, trimws(gene))),
+      wsi_http_json_response(body = {
+        feature_source <- as.character(feature_source %||% "")
+        point_source <- as.character(point_source %||% "")
+        if (nzchar(feature_source) && !identical(feature_source, "auto") && has_feature_context) {
+          wsi_prediction_feature_payload(
+            feature_context,
+            feature = trimws(gene),
+            source_id = feature_source,
+            point_source = if (nzchar(point_source)) point_source else NULL,
+            reduction_dims = reduction_dims
+          )
+        } else if (wsi_seurat_live_gene_available(seurat)) {
+          wsi_seurat_dynamic_gene_payload(seurat, trimws(gene))
+        } else {
+          wsi_prediction_feature_payload(
+            feature_context,
+            feature = trimws(gene),
+            source_id = "spatial:raw",
+            point_source = if (nzchar(point_source)) point_source else NULL,
+            reduction_dims = reduction_dims
+          )
+        }
+      }),
       error = function(err) {
         wsi_http_json_response(status = 404L, body = list(error = conditionMessage(err), gene = trimws(gene)))
       }
@@ -3892,7 +3926,12 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	        image_export_path = image_export_path,
 	        prediction_path = prediction_path,
 	        proximity_path = proximity_path,
-	        seurat_gene_url = if (wsi_seurat_live_gene_available(seurat)) sprintf("http://%s:%d%s", host, candidate, seurat_gene_path) else NULL,
+	        seurat_gene_url = if (wsi_seurat_live_gene_available(seurat) ||
+            wsi_prediction_context_enabled(proximity_context %||% prediction_context %||% list(spatial = seurat))) {
+            sprintf("http://%s:%d%s", host, candidate, seurat_gene_path)
+          } else {
+            NULL
+          },
 	        spatial_tile_export_url = sprintf("http://%s:%d%s", host, candidate, spatial_tile_path),
 	        image_export_url = if (!is.null(slide)) sprintf("http://%s:%d%s", host, candidate, image_export_path) else NULL,
 	        prediction_url = if (wsi_prediction_context_enabled(prediction_context %||% list(spatial = seurat))) sprintf("http://%s:%d%s", host, candidate, prediction_path) else NULL,

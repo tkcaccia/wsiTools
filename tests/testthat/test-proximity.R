@@ -182,6 +182,34 @@ test_that("proximity statistics rank live feature trends and sync state", {
   expect_equal(state$proximity_stats$feature_source[[1]], "cellphenotyper:numeric")
 })
 
+test_that("proximity statistics features can be fetched for viewer colouring", {
+  project <- list(
+    cells = data.frame(
+      id = c("cell_1", "cell_2", "cell_3"),
+      x = c(10, 20, 30),
+      y = c(15, 25, 35),
+      DAB = c(0.1, 0.5, 0.9),
+      stringsAsFactors = FALSE
+    )
+  )
+  class(project) <- c("wsi_cellphenotyper_project", "list")
+
+  payload <- wsiTools:::wsi_prediction_feature_payload(
+    context = list(cellphenotyper_project = project),
+    feature = "dab",
+    source_id = "cellphenotyper:numeric",
+    point_source = "cellphenotyper:cells"
+  )
+
+  expect_true(payload$ok)
+  expect_equal(payload$gene, "DAB")
+  expect_equal(payload$feature_type, "cell")
+  expect_equal(payload$feature_source, "cellphenotyper:numeric")
+  expect_equal(payload$count, 3)
+  expect_equal(vapply(payload$points, `[[`, numeric(1), "value"), c(0.1, 0.5, 0.9))
+  expect_true(all(grepl("^#", vapply(payload$points, `[[`, character(1), "colour"))))
+})
+
 test_that("proximity controls are rendered only for managed point sources", {
   slide <- wsiTools:::wsi_mock_slide()
   linked <- list(
@@ -215,6 +243,9 @@ test_that("proximity controls are rendered only for managed point sources", {
   expect_match(html, "<span>Measure inside</span><select id=\"proximityQueryAnnotations\"", fixed = TRUE)
   expect_match(html, "<span>Distance from</span><select id=\"proximityTargetAnnotations\"", fixed = TRUE)
   expect_match(html, "if(typeof syncProximityAnnotations==='function')syncProximityAnnotations(false)", fixed = TRUE)
+  expect_match(html, "applyProximityStatsFeature", fixed = TRUE)
+  expect_match(html, "feature_source:source", fixed = TRUE)
+  expect_match(html, "proximityStatsFeature", fixed = TRUE)
   expect_false(grepl("id=\"proximityRefreshAnnotations\"", html, fixed = TRUE))
   expect_false(grepl("Refresh proximity annotation choices", html, fixed = TRUE))
 

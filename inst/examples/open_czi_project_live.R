@@ -16,6 +16,7 @@
 #   WSITOOLS_OUTPUT           Output HTML path. Default: open_czi_project_live.html.
 #   WSITOOLS_CZI_SECTIONS     true/false. Default: true.
 #   WSITOOLS_CZI_CHANNEL      Zero-based CZI channel. Default: 0.
+#   WSITOOLS_CZI_PREVIEW      lazy/all. Default: lazy for faster opening.
 #   WSITOOLS_CZI_REQUIRE_LIVE true/false. Default: false.
 #   WSITOOLS_OPEN             true/false. Default: true.
 #   WSITOOLS_WAIT             true/false. Default: true for Rscript, false for interactive R.
@@ -51,6 +52,10 @@ channel <- suppressWarnings(as.integer(Sys.getenv("WSITOOLS_CZI_CHANNEL", "0")))
 if (is.na(channel) || channel < 0L) {
   channel <- 0L
 }
+preview <- tolower(Sys.getenv("WSITOOLS_CZI_PREVIEW", "lazy"))
+if (!preview %in% c("lazy", "all")) {
+  preview <- "lazy"
+}
 
 message("Backend status:")
 print(wsi_backends())
@@ -63,6 +68,7 @@ if (wsi_has_native_czi()) {
     open = open_browser,
     overwrite = TRUE,
     sections = sections,
+    czi_preview = preview,
     channel = channel,
     transport = "auto",
     wait = wait,

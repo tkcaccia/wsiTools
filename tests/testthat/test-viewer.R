@@ -2692,6 +2692,17 @@ test_that("native CZI scene previews read the requested scene", {
   expect_match(scene_preview_code, "scene = scene_index", fixed = TRUE)
 })
 
+test_that("live CZI project opening keeps section previews lazy by default", {
+  live_formals <- formals(wsiTools:::wsi_viewer_czi_project_live)
+  expect_true("czi_preview" %in% names(live_formals))
+  expect_equal(eval(live_formals$czi_preview), c("lazy", "all"))
+
+  live_item_code <- paste(deparse(wsiTools:::wsi_czi_live_project_item), collapse = "\n")
+  expect_match(live_item_code, "preview <- match.arg(preview)", fixed = TRUE)
+  expect_match(live_item_code, "if (identical(preview, \"all\"))", fixed = TRUE)
+  expect_match(live_item_code, "Section previews are lazy so the viewer opens quickly", fixed = TRUE)
+})
+
 test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
   html <- wsiTools:::wsi_tiled_viewer_html(list(
     title = "synthetic tiled viewer",

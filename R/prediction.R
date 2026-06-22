@@ -356,6 +356,284 @@ wsi_prediction_matrix_for_spatial_raw <- function(linked, ids, points = NULL,
   wsi_abort("Could not align expression matrix rows/columns to the viewer spot IDs.")
 }
 
+wsi_prediction_feature_match <- function(feature, available) {
+  feature <- as.character(feature %||% "")
+  available <- as.character(available %||% character())
+  if (!nzchar(feature) || !length(available)) {
+    return(NA_integer_)
+  }
+  hit <- match(feature, available)
+  if (!is.na(hit)) {
+    return(hit)
+  }
+  lower <- tolower(available)
+  hit <- match(tolower(feature), lower)
+  if (!is.na(hit)) {
+    return(hit)
+  }
+  aliases <- unique(c(
+    feature,
+    gsub("_", "-", feature, fixed = TRUE),
+    gsub("-", "_", feature, fixed = TRUE),
+    gsub("\\.", "-", feature),
+    gsub("\\.", "_", feature)
+  ))
+  aliases <- aliases[nzchar(aliases) & !is.na(aliases)]
+  hit <- match(tolower(aliases), lower)
+  hit <- hit[!is.na(hit)]
+  if (length(hit)) {
+    return(hit[[1L]])
+  }
+  NA_integer_
+}
+
+wsi_prediction_vector_for_spatial_raw <- function(linked, ids, feature, points = NULL) {
+  source <- linked$expression_source %||% list()
+  object <- source$object %||% NULL
+  if (is.null(object)) {
+    wsi_abort("Raw expression lookup needs the original live R object. Reopen the viewer from R with `live = TRUE`.")
+  }
+  matrices <- wsi_seurat_collect_expression_matrices(object)
+  if (!length(matrices)) {
+    wsi_abort("No expression matrix was found in the live spatial object.")
+  }
+  ids <- as.character(ids)
+  id_candidates <- wsi_prediction_expression_id_candidates(ids, points = points)
+  for (entry in matrices) {
+    mat <- entry$matrix
+    rn <- tryCatch(rownames(mat), error = function(e) NULL)
+    cn <- tryCatch(colnames(mat), error = function(e) NULL)
+    if (!length(rn) || !length(cn)) {
+      next
+    }
+    feature_idx <- wsi_prediction_feature_match(feature, rn)
+    if (!is.na(feature_idx)) {
+      for (candidate_name in names(id_candidates)) {
+        sample_ids <- id_candidates[[candidate_name]]
+        sample_idx <- match(sample_ids, cn)
+        if (any(!is.na(sample_idx))) {
+          out <- rep(NA_real_, length(ids))
+          keep <- !is.na(sample_idx)
+          values <- as.numeric(as.matrix(mat[feature_idx, sample_idx[keep], drop = FALSE]))
+          out[keep] <- values
+          attr(out, "feature") <- as.character(rn[[feature_idx]])
+          attr(out, "source_name") <- entry$name %||% "expression"
+          attr(out, "id_source") <- candidate_name
+          return(out)
+        }
+      }
+    }
+    feature_idx <- wsi_prediction_feature_match(feature, cn)
+    if (!is.na(feature_idx)) {
+      for (candidate_name in names(id_candidates)) {
+        sample_ids <- id_candidates[[candidate_name]]
+        sample_idx <- match(sample_ids, rn)
+        if (any(!is.na(sample_idx))) {
+          out <- rep(NA_real_, length(ids))
+          keep <- !is.na(sample_idx)
+          values <- as.numeric(as.matrix(mat[sample_idx[keep], feature_idx, drop = FALSE]))
+          out[keep] <- values
+          attr(out, "feature") <- as.character(cn[[feature_idx]])
+          attr(out, "source_name") <- entry$name %||% "expression"
+          attr(out, "id_source") <- candidate_name
+          return(out)
+        }
+      }
+    }
+  }
+  wsi_abort(sprintf("Feature `%s` was not found or could not be aligned to the viewer spot IDs.", feature))
+}
+
+wsi_prediction_vector_for_spatial_project <- function(linked, ids, feature,
+                                                      points = NULL) {
+  if (!is.data.frame(points) || !nrow(points)) {
+    wsi_abort("Project-scoped feature lookup needs point metadata.")
+  }
+  sections <- linked$project_sections
+  ids <- as.character(ids)
+  out <- rep(NA_real_, length(ids))
+  actual <- character()
+  source_names <- character()
+  for (section in sections) {
+    section_key <- as.character(section$project_key %||% NA_character_)
+    if (is.na(section_key) || !nzchar(section_key)) {
+      next
+    }
+    rows <- which(as.character(points$project_key %||% "") == section_key)
+    if (!length(rows)) {
+      next
+    }
+    feature_ids <- if ("feature_id" %in% names(points)) {
+      as.character(points$feature_id[rows])
+    } else {
+      ids[rows]
+    }
+    value <- tryCatch(
+      wsi_prediction_vector_for_spatial_raw(
+        section,
+        ids = feature_ids,
+        feature = feature,
+        points = points[rows, , drop = FALSE]
+      ),
+      error = function(e) NULL
+    )
+    if (is.null(value)) {
+      next
+    }
+    out[rows] <- as.numeric(value)
+    actual <- c(actual, attr(value, "feature", exact = TRUE) %||% character())
+    source_names <- c(source_names, attr(value, "source_name", exact = TRUE) %||% character())
+  }
+  if (!any(is.finite(out))) {
+    wsi_abort(sprintf("Feature `%s` was not found in the project-scoped spatial expression data.", feature))
+  }
+  actual <- unique(actual[nzchar(actual) & !is.na(actual)])
+  source_names <- unique(source_names[nzchar(source_names) & !is.na(source_names)])
+  attr(out, "feature") <- if (length(actual)) actual[[1L]] else as.character(feature)
+  attr(out, "source_name") <- if (length(source_names)) paste(source_names, collapse = " / ") else "project-scoped expression"
+  out
+}
+
+wsi_prediction_vector_for_cells <- function(project, ids, feature) {
+  cells <- project$cells %||% NULL
+  if (!is.data.frame(cells) || !nrow(cells)) {
+    wsi_abort("No CellPhenotyper cell table is attached to this live viewer session.")
+  }
+  cell_ids <- as.character(cells$id %||% cells$cell_id %||% cells$label %||% seq_len(nrow(cells)))
+  idx <- match(as.character(ids), cell_ids)
+  if (!any(!is.na(idx))) {
+    wsi_abort("Could not align CellPhenotyper cell table rows to viewer cell IDs.")
+  }
+  numeric_cols <- names(cells)[vapply(cells, is.numeric, logical(1))]
+  excluded <- c(
+    "x", "y", "x_orig", "y_orig", "global_x", "global_y", "slide_x", "slide_y",
+    "centroid_x", "centroid_y", "center_x", "center_y", "centre_x", "centre_y",
+    "cellphenotyper_x", "cellphenotyper_y"
+  )
+  numeric_cols <- setdiff(numeric_cols, excluded)
+  feature_idx <- wsi_prediction_feature_match(feature, numeric_cols)
+  if (is.na(feature_idx)) {
+    wsi_abort(sprintf("Feature `%s` was not found in the CellPhenotyper numeric cell table.", feature))
+  }
+  out <- rep(NA_real_, length(ids))
+  out[!is.na(idx)] <- as.numeric(cells[[numeric_cols[[feature_idx]]]][idx[!is.na(idx)]])
+  attr(out, "feature") <- numeric_cols[[feature_idx]]
+  attr(out, "source_name") <- "CellPhenotyper numeric cell table"
+  out
+}
+
+wsi_prediction_feature_vector <- function(context, source_id, ids, feature,
+                                          points = NULL,
+                                          reduction_dims = NULL) {
+  context <- context %||% list()
+  source_id <- as.character(source_id %||% "spatial:raw")
+  if (identical(source_id, "cellphenotyper:numeric")) {
+    return(wsi_prediction_vector_for_cells(
+      context$cellphenotyper_project %||% context$cellphenotyper,
+      ids,
+      feature
+    ))
+  }
+  linked <- context$spatial %||% context$seurat %||% NULL
+  if (!inherits(linked, "wsi_seurat_spatial") && !inherits(linked, "wsi_spatial_object")) {
+    wsi_abort("No live spatial object is attached to this viewer session.")
+  }
+  if (wsi_prediction_is_spatial_project(linked) && identical(source_id, "spatial:raw")) {
+    return(wsi_prediction_vector_for_spatial_project(linked, ids, feature, points = points))
+  }
+  if (identical(source_id, "spatial:raw")) {
+    return(wsi_prediction_vector_for_spatial_raw(linked, ids, feature, points = points))
+  }
+  x <- wsi_prediction_feature_matrix(
+    context,
+    source_id,
+    ids,
+    reduction_dims = reduction_dims,
+    points = points,
+    max_features = NULL
+  )
+  idx <- wsi_prediction_feature_match(feature, colnames(x))
+  if (is.na(idx)) {
+    wsi_abort(sprintf("Feature `%s` was not found in `%s`.", feature, source_id))
+  }
+  out <- as.numeric(x[, idx])
+  attr(out, "feature") <- colnames(x)[[idx]]
+  attr(out, "source_name") <- attr(x, "source_name", exact = TRUE) %||% source_id
+  out
+}
+
+wsi_prediction_feature_payload <- function(context, feature,
+                                           source_id = "spatial:raw",
+                                           point_source = NULL,
+                                           reduction_dims = NULL) {
+  feature <- as.character(feature %||% "")
+  if (!nzchar(feature)) {
+    wsi_abort("Provide a single non-empty feature or gene name.")
+  }
+  source_id <- as.character(source_id %||% "spatial:raw")
+  point_source <- as.character(point_source %||% if (startsWith(source_id, "cellphenotyper:")) "cellphenotyper:cells" else "spatial:points")
+  points <- wsi_prediction_points(context, point_source)
+  ids <- as.character(points$id %||% character())
+  if (!length(ids)) {
+    wsi_abort("No point identifiers are available for live feature lookup.")
+  }
+  values <- wsi_prediction_feature_vector(
+    context,
+    source_id = source_id,
+    ids = ids,
+    feature = feature,
+    points = points,
+    reduction_dims = reduction_dims
+  )
+  actual <- attr(values, "feature", exact = TRUE) %||% feature
+  feature_type <- if (startsWith(point_source, "cellphenotyper:") ||
+    any(as.character(points$unit %||% "") == "cell")) "cell" else "spot"
+  feature_label <- if (identical(feature_type, "cell")) "cell" else "spot"
+  gene_expression <- list(
+    enabled = TRUE,
+    genes = as.character(actual),
+    default_gene = as.character(actual),
+    values = matrix(as.numeric(values), ncol = 1L, dimnames = list(NULL, as.character(actual))),
+    ranges = wsi_seurat_gene_ranges(matrix(as.numeric(values), ncol = 1L, dimnames = list(NULL, as.character(actual))))
+  )
+  colours <- wsi_seurat_gene_colours(gene_expression, actual)
+  point_value <- function(name, i) {
+    if (name %in% names(points)) points[[name]][[i]] else NULL
+  }
+  point_rows <- lapply(seq_len(nrow(points)), function(i) {
+    x <- suppressWarnings(as.numeric(point_value("x", i) %||% point_value("slide_x", i) %||% NA_real_))
+    y <- suppressWarnings(as.numeric(point_value("y", i) %||% point_value("slide_y", i) %||% NA_real_))
+    radius <- suppressWarnings(as.numeric(point_value("radius", i) %||% point_value("spot_radius", i) %||% NA_real_))
+    list(
+      id = as.character(point_value("id", i) %||% ""),
+      label = as.character(point_value("label", i) %||% point_value("id", i) %||% ""),
+      barcode = as.character(point_value("feature_id", i) %||% point_value("barcode", i) %||% point_value("id", i) %||% ""),
+      feature_type = feature_type,
+      x = if (is.finite(x)) x else NA_real_,
+      y = if (is.finite(y)) y else NA_real_,
+      slide_x = if (is.finite(x)) x else NA_real_,
+      slide_y = if (is.finite(y)) y else NA_real_,
+      radius = if (is.finite(radius)) radius else NA_real_,
+      value = if (is.finite(values[[i]])) values[[i]] else NA_real_,
+      colour = as.character(colours[[i]] %||% "#d1d5db")
+    )
+  })
+  list(
+    ok = TRUE,
+    gene = as.character(actual),
+    requested_gene = as.character(feature),
+    feature_type = feature_type,
+    feature_label = feature_label,
+    feature_plural = paste0(feature_label, "s"),
+    feature_source = source_id,
+    point_source = point_source,
+    source_name = attr(values, "source_name", exact = TRUE) %||% source_id,
+    range = gene_expression$ranges[[as.character(actual)]] %||% list(min = NA_real_, max = NA_real_),
+    count = length(point_rows),
+    points = point_rows
+  )
+}
+
 wsi_prediction_reduction_dim_count <- function(dimensions = NULL, max_dim = 2L, default = 2L) {
   max_dim <- suppressWarnings(as.integer(max_dim %||% default))
   if (!is.finite(max_dim) || max_dim < 1L) {

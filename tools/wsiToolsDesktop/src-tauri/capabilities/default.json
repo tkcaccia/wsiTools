@@ -2,6 +2,9 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default permissions for the wsiTools desktop launcher.",
-  "windows": ["main"],
+  "windows": ["main", "viewer-*"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*", "http://localhost:*"]
+  },
   "permissions": ["core:default", "dialog:default"]
 }

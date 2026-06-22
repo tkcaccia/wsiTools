@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::{
     env, fs,
@@ -9,6 +10,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{path::BaseDirectory, AppHandle, Manager, State};
+use tauri_plugin_dialog::DialogExt;
 
 #[derive(Default)]
 struct RViewerState {
@@ -79,6 +81,13 @@ struct SpatialInspection {
     file_path: String,
     tissues: Vec<SpatialTissueInfo>,
     message: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveFilter {
+    name: String,
+    extensions: Vec<String>,
 }
 
 fn push_log(logs: &Arc<Mutex<Vec<String>>>, line: impl Into<String>) {
@@ -455,6 +464,51 @@ fn save_launcher_log(app: AppHandle, log_text: String) -> Result<String, String>
     fs::write(&file, log_text)
         .map_err(|err| format!("Could not write launcher log {}: {err}", file.display()))?;
     Ok(file.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn save_viewer_file(
+    app: AppHandle,
+    file_name: String,
+    data_base64: String,
+    filters: Vec<SaveFilter>,
+) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut dialog = app.dialog().file().set_file_name(file_name);
+        for filter in filters {
+            let extensions: Vec<&str> = filter
+                .extensions
+                .iter()
+                .map(|x| x.trim().trim_start_matches('.'))
+                .filter(|x| !x.is_empty())
+                .collect();
+            if !extensions.is_empty() {
+                dialog = dialog.add_filter(filter.name, &extensions);
+            }
+        }
+        let Some(path) = dialog.blocking_save_file() else {
+            return Ok(None);
+        };
+        let path = path
+            .into_path()
+            .map_err(|err| format!("Could not resolve selected save path: {err}"))?;
+        let bytes = general_purpose::STANDARD
+            .decode(data_base64.as_bytes())
+            .map_err(|err| format!("Could not decode viewer file data: {err}"))?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|err| {
+                format!(
+                    "Could not create selected output directory {}: {err}",
+                    parent.display()
+                )
+            })?;
+        }
+        fs::write(&path, bytes)
+            .map_err(|err| format!("Could not write viewer file {}: {err}", path.display()))?;
+        Ok(Some(path.to_string_lossy().to_string()))
+    })
+    .await
+    .map_err(|err| format!("Viewer save task failed: {err}"))?
 }
 
 fn recent_log_tail(logs: &Arc<Mutex<Vec<String>>>) -> String {
@@ -1138,7 +1192,8 @@ fn main() {
             open_viewer_window,
             stop_r_viewer,
             viewer_logs,
-            save_launcher_log
+            save_launcher_log,
+            save_viewer_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running wsiTools Desktop");
