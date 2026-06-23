@@ -2714,6 +2714,9 @@ test_that("live CZI tiles use persistent native readers when available", {
 
   region_code <- paste(deparse(wsiTools:::wsi_dynamic_czi_section_region_to_file), collapse = "\n")
   expect_match(region_code, "wsi_native_czi_handle_read_region", fixed = TRUE)
+  expect_match(region_code, "scene = if (is.finite(scene) &&", fixed = TRUE)
+  expect_match(region_code, "scene >= 0L", fixed = TRUE)
+  expect_match(region_code, "x = source$x + region$x", fixed = TRUE)
 
   cleanup_code <- paste(deparse(wsiTools:::wsi_dynamic_tile_cleanup), collapse = "\n")
   expect_match(cleanup_code, "wsi_native_czi_close_handle", fixed = TRUE)

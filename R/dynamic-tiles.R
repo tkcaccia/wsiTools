@@ -1102,29 +1102,48 @@ wsi_dynamic_czi_section_region_to_file <- function(source, region, output, forma
   full_width <- max(1L, as.integer(ceiling(region$width * region$downsample)))
   full_height <- max(1L, as.integer(ceiling(region$height * region$downsample)))
   reader <- source$czi_handle %||% NULL
-  array <- if (!is.null(reader)) {
-    wsi_native_czi_handle_read_region(
-      reader,
-      x = as.integer(round(source$x + region$x)),
-      y = as.integer(round(source$y + region$y)),
-      width = full_width,
-      height = full_height,
-      zoom = 1 / max(region$downsample, 1e-9),
-      channel = source$channel %||% 0L,
-      scene = NA_integer_
-    )
-  } else {
-    wsi_native_czi_read_region(
-      source$path,
-      x = as.integer(round(source$x + region$x)),
-      y = as.integer(round(source$y + region$y)),
-      width = full_width,
-      height = full_height,
-      zoom = 1 / max(region$downsample, 1e-9),
-      channel = source$channel %||% 0L,
-      scene = NA_integer_
-    )
+  read_czi <- function(x, y, scene) {
+    if (!is.null(reader)) {
+      wsi_native_czi_handle_read_region(
+        reader,
+        x = as.integer(round(x)),
+        y = as.integer(round(y)),
+        width = full_width,
+        height = full_height,
+        zoom = 1 / max(region$downsample, 1e-9),
+        channel = source$channel %||% 0L,
+        scene = scene
+      )
+    } else {
+      wsi_native_czi_read_region(
+        source$path,
+        x = as.integer(round(x)),
+        y = as.integer(round(y)),
+        width = full_width,
+        height = full_height,
+        zoom = 1 / max(region$downsample, 1e-9),
+        channel = source$channel %||% 0L,
+        scene = scene
+      )
+    }
   }
+  scene <- suppressWarnings(as.integer(source$scene %||% NA_integer_))
+  array <- tryCatch(
+    read_czi(
+      x = region$x,
+      y = region$y,
+      scene = if (is.finite(scene) && scene >= 0L) scene else NA_integer_
+    ),
+    error = function(err) {
+      # Some older/atypical CZI files expose only global mosaic coordinates.
+      # Keep the previous global-coordinate path as a compatibility fallback.
+      read_czi(
+        x = source$x + region$x,
+        y = source$y + region$y,
+        scene = NA_integer_
+      )
+    }
+  )
   tmp <- tempfile(fileext = paste0(".", format), tmpdir = dirname(output))
   on.exit(unlink(tmp), add = TRUE)
   wsi_dynamic_array_to_file(array, tmp, format = format)
