@@ -123,6 +123,13 @@ The native CZI backend is intended for faster CZI first visualization without
 using Python. It calls ZEISS libCZI/libCZIAPI through the package's compiled
 bridge.
 
+In live CZI viewers, wsiTools keeps a small native reader/accessor handle open
+for the viewer session and requests only the tile or region needed by
+OpenSeadragon. The full CZI scene is not loaded into R memory. Generated tiles
+are cached temporarily and the native handle/cache are cleaned up when the live
+viewer session stops. Set `WSITOOLS_CZI_PERSISTENT_TILE_READER=false` only when
+debugging a native CZI installation problem.
+
 Check:
 
 ```r

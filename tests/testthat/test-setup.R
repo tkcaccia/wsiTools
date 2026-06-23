@@ -39,6 +39,14 @@ test_that("Bio-Formats setup points to OME bftools", {
   expect_match(brew_plan$notes, "bftools.zip", fixed = TRUE)
 })
 
+test_that("auto setup can resolve Bio-Formats separately from winget-only tools", {
+  resolver_code <- paste(deparse(wsiTools:::wsi_setup_tool_method), collapse = "\n")
+
+  expect_match(resolver_code, 'identical(tool, "bioformats")', fixed = TRUE)
+  expect_match(resolver_code, 'return("conda")', fixed = TRUE)
+  expect_match(resolver_code, 'return("manual")', fixed = TRUE)
+})
+
 test_that("native CZI setup is explicit and CRAN-safe", {
   backend_plan <- wsi_dependency_plan(tools = "native_czi", method = "manual")
 

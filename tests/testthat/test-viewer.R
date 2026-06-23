@@ -2703,6 +2703,36 @@ test_that("live CZI project opening keeps section previews lazy by default", {
   expect_match(live_item_code, "Section previews are lazy so the viewer opens quickly", fixed = TRUE)
 })
 
+test_that("live CZI tiles use persistent native readers when available", {
+  source_formals <- formals(wsiTools:::wsi_dynamic_czi_section_tile_source)
+  expect_true("persistent_reader" %in% names(source_formals))
+  expect_true(isTRUE(eval(source_formals$persistent_reader)))
+
+  source_code <- paste(deparse(wsiTools:::wsi_dynamic_czi_section_tile_source), collapse = "\n")
+  expect_match(source_code, "wsi_native_czi_open_handle(path)", fixed = TRUE)
+  expect_match(source_code, "WSITOOLS_CZI_PERSISTENT_TILE_READER", fixed = TRUE)
+
+  region_code <- paste(deparse(wsiTools:::wsi_dynamic_czi_section_region_to_file), collapse = "\n")
+  expect_match(region_code, "wsi_native_czi_handle_read_region", fixed = TRUE)
+
+  cleanup_code <- paste(deparse(wsiTools:::wsi_dynamic_tile_cleanup), collapse = "\n")
+  expect_match(cleanup_code, "wsi_native_czi_close_handle", fixed = TRUE)
+})
+
+test_that("desktop launcher routes CZI files to the CZI live project viewer", {
+  launcher <- readLines(
+    test_path("../../tools/wsiToolsDesktop/src-tauri/resources/launch-viewer.R"),
+    warn = FALSE
+  )
+  launcher <- paste(launcher, collapse = "\n")
+
+  expect_match(launcher, "desktop_is_czi_path", fixed = TRUE)
+  expect_match(launcher, "desktop_open_czi_project", fixed = TRUE)
+  expect_match(launcher, "wsi_viewer_czi_project_live", fixed = TRUE)
+  expect_match(launcher, "czi_preview = \"lazy\"", fixed = TRUE)
+  expect_match(launcher, "all(czi_paths)", fixed = TRUE)
+})
+
 test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
   html <- wsiTools:::wsi_tiled_viewer_html(list(
     title = "synthetic tiled viewer",

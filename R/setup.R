@@ -33,6 +33,48 @@ wsi_setup_method <- function(method = c("auto", "homebrew", "apt", "dnf", "winge
   "manual"
 }
 
+wsi_setup_tool_method <- function(tool, method = c("auto", "homebrew", "apt", "dnf", "winget", "conda", "manual")) {
+  method <- match.arg(method)
+  tool <- as.character(tool %||% "")
+  if (!identical(method, "auto")) {
+    return(method)
+  }
+
+  if (identical(tool, "bioformats")) {
+    if (wsi_command_exists("conda")) {
+      return("conda")
+    }
+    return("manual")
+  }
+
+  if (identical(tool, "native_czi")) {
+    return("manual")
+  }
+
+  if (.Platform$OS.type == "windows") {
+    if (wsi_command_exists("winget") && length(wsi_setup_tool_packages(tool, "winget"))) {
+      return("winget")
+    }
+    if (wsi_command_exists("conda") && length(wsi_setup_tool_packages(tool, "conda"))) {
+      return("conda")
+    }
+    return("manual")
+  }
+
+  candidates <- c(
+    if (wsi_command_exists("brew")) "homebrew",
+    if (wsi_command_exists("apt-get")) "apt",
+    if (wsi_command_exists("dnf")) "dnf",
+    if (wsi_command_exists("conda")) "conda"
+  )
+  for (candidate in candidates) {
+    if (length(wsi_setup_tool_packages(tool, candidate))) {
+      return(candidate)
+    }
+  }
+  "manual"
+}
+
 wsi_setup_normalize_tools <- function(tools = NULL, include_optional = FALSE) {
   if (is.null(tools)) {
     tools <- wsi_setup_default_tools(include_optional = include_optional)
@@ -903,15 +945,16 @@ print.wsi_stardist_installation <- function(x, ...) {
 wsi_dependency_plan <- function(tools = NULL,
                                 method = c("auto", "homebrew", "apt", "dnf", "winget", "conda", "manual"),
                                 include_optional = FALSE) {
-  method <- wsi_setup_method(method)
+  method <- match.arg(method)
   tools <- wsi_setup_normalize_tools(tools, include_optional = include_optional)
   rows <- lapply(tools, function(tool) {
-    command <- wsi_setup_tool_command(tool, method)
+    tool_method <- wsi_setup_tool_method(tool, method)
+    command <- wsi_setup_tool_command(tool, tool_method)
     args <- command$args[[1L]]
     data.frame(
       tool = tool,
       installed = wsi_setup_tool_installed(tool),
-      method = method,
+      method = tool_method,
       command = command$command,
       command_line = wsi_setup_command_line(command$command, args),
       notes = command$notes,
@@ -919,7 +962,9 @@ wsi_dependency_plan <- function(tools = NULL,
     )
   })
   out <- do.call(rbind, rows)
-  out$args <- I(lapply(tools, function(tool) wsi_setup_tool_command(tool, method)$args[[1L]]))
+  out$args <- I(lapply(seq_along(tools), function(i) {
+    wsi_setup_tool_command(tools[[i]], out$method[[i]])$args[[1L]]
+  }))
   out
 }
 
@@ -1028,7 +1073,7 @@ wsi_setup <- function(tools = NULL,
                       install_system_tools = install,
                       allow_sudo = FALSE,
                       ask = interactive()) {
-  method <- wsi_setup_method(method)
+  method <- match.arg(method)
   plan <- structure(
     list(
       method = method,

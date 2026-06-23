@@ -470,6 +470,142 @@ void set_rgb(SEXP out, int height, int width, int row, int col, double r, double
   ptr[idx + 2 * plane] = b;
 }
 
+SEXP bitmap_to_rgb_array(BitmapObjectHandle bitmap,
+                         BitmapGetInfoFn bitmap_info_fn,
+                         BitmapLockFn bitmap_lock,
+                         BitmapUnlockFn bitmap_unlock,
+                         ReleaseBitmapFn release_bitmap) {
+  BitmapInfoInterop info;
+  std::memset(&info, 0, sizeof(info));
+  int32_t err = bitmap_info_fn(bitmap, &info);
+  if (err != 0 || info.width == 0 || info.height == 0) {
+    release_bitmap(bitmap);
+    Rf_error("libCZIAPI could not inspect the decoded CZI bitmap (error %d).", err);
+  }
+
+  BitmapLockInfoInterop lock;
+  std::memset(&lock, 0, sizeof(lock));
+  err = bitmap_lock(bitmap, &lock);
+  if (err != 0 || !lock.ptrDataRoi) {
+    release_bitmap(bitmap);
+    Rf_error("libCZIAPI could not lock the decoded CZI bitmap (error %d).", err);
+  }
+
+  int out_w = static_cast<int>(info.width);
+  int out_h = static_cast<int>(info.height);
+  SEXP out = PROTECT(Rf_allocVector(REALSXP, static_cast<R_xlen_t>(out_w) * out_h * 3));
+  SEXP dim = PROTECT(Rf_allocVector(INTSXP, 3));
+  INTEGER(dim)[0] = out_h;
+  INTEGER(dim)[1] = out_w;
+  INTEGER(dim)[2] = 3;
+  Rf_setAttrib(out, R_DimSymbol, dim);
+
+  const unsigned char* base = static_cast<const unsigned char*>(lock.ptrDataRoi);
+  for (int row = 0; row < out_h; ++row) {
+    const unsigned char* line = base + static_cast<size_t>(row) * lock.stride;
+    for (int col = 0; col < out_w; ++col) {
+      if (info.pixelType == 0 || info.pixelType == 1 || info.pixelType == 2) {
+        int bytes = info.pixelType == 0 ? 1 : (info.pixelType == 1 ? 2 : 4);
+        double v = pixel_to_unit_gray(line + static_cast<size_t>(col) * bytes, info.pixelType);
+        set_rgb(out, out_h, out_w, row, col, v, v, v);
+      } else if (info.pixelType == 3) {  // Bgr24
+        const unsigned char* p = line + static_cast<size_t>(col) * 3;
+        set_rgb(out, out_h, out_w, row, col, p[2] / 255.0, p[1] / 255.0, p[0] / 255.0);
+      } else if (info.pixelType == 4) {  // Bgr48
+        const uint16_t* p = reinterpret_cast<const uint16_t*>(line + static_cast<size_t>(col) * 6);
+        set_rgb(out, out_h, out_w, row, col, p[2] / 65535.0, p[1] / 65535.0, p[0] / 65535.0);
+      } else if (info.pixelType == 9) {  // Bgra32
+        const unsigned char* p = line + static_cast<size_t>(col) * 4;
+        set_rgb(out, out_h, out_w, row, col, p[2] / 255.0, p[1] / 255.0, p[0] / 255.0);
+      } else {
+        bitmap_unlock(bitmap);
+        release_bitmap(bitmap);
+        UNPROTECT(2);
+        Rf_error("Unsupported CZI pixel type in native preview: %d.", info.pixelType);
+      }
+    }
+  }
+
+  bitmap_unlock(bitmap);
+  release_bitmap(bitmap);
+  UNPROTECT(2);
+  return out;
+}
+
+struct CziTileHandle {
+  DynamicLibrary* lib;
+  OpenedCzi czi;
+  SingleChannelScalingTileAccessorObjectHandle accessor;
+  SingleChannelTileAccessorGetFn accessor_get;
+  ReleaseSingleChannelTileAccessorFn release_accessor;
+  BitmapGetInfoFn bitmap_info_fn;
+  BitmapLockFn bitmap_lock;
+  BitmapUnlockFn bitmap_unlock;
+  ReleaseBitmapFn release_bitmap;
+};
+
+void czi_tile_handle_finalizer(SEXP ext) {
+  CziTileHandle* handle = reinterpret_cast<CziTileHandle*>(R_ExternalPtrAddr(ext));
+  if (!handle) return;
+  if (handle->release_accessor && handle->accessor != 0) {
+    handle->release_accessor(handle->accessor);
+    handle->accessor = 0;
+  }
+  if (handle->lib) {
+    close_czi(*handle->lib, handle->czi);
+    delete handle->lib;
+    handle->lib = nullptr;
+  }
+  delete handle;
+  R_ClearExternalPtr(ext);
+}
+
+SEXP czi_read_region_from_accessor(SingleChannelScalingTileAccessorObjectHandle accessor,
+                                   SingleChannelTileAccessorGetFn accessor_get,
+                                   BitmapGetInfoFn bitmap_info_fn,
+                                   BitmapLockFn bitmap_lock,
+                                   BitmapUnlockFn bitmap_unlock,
+                                   ReleaseBitmapFn release_bitmap,
+                                   int x,
+                                   int y,
+                                   int width,
+                                   int height,
+                                   double zoom_d,
+                                   int channel,
+                                   int scene) {
+  CoordinateInterop coord;
+  std::memset(&coord, 0, sizeof(coord));
+  int coord_pos = 0;
+  if (channel != NA_INTEGER && channel >= 0) {
+    coord.dimensions_valid |= (1u << (2 - 1));
+    coord.value[coord_pos++] = channel;
+  }
+  if (scene != NA_INTEGER && scene >= 0) {
+    coord.dimensions_valid |= (1u << (5 - 1));
+    coord.value[coord_pos++] = scene;
+  }
+
+  IntRectInterop roi;
+  roi.x = x;
+  roi.y = y;
+  roi.w = width;
+  roi.h = height;
+  AccessorOptionsInterop options;
+  options.back_ground_color_r = 1.0f;
+  options.back_ground_color_g = 1.0f;
+  options.back_ground_color_b = 1.0f;
+  options.sort_by_m = true;
+  options.use_visibility_check_optimization = true;
+  options.additional_parameters = nullptr;
+
+  BitmapObjectHandle bitmap = 0;
+  int32_t err = accessor_get(accessor, &coord, &roi, static_cast<float>(zoom_d), &options, &bitmap);
+  if (err != 0 || bitmap == 0) {
+    Rf_error("libCZIAPI could not read the requested CZI region (error %d).", err);
+  }
+  return bitmap_to_rgb_array(bitmap, bitmap_info_fn, bitmap_lock, bitmap_unlock, release_bitmap);
+}
+
 }  // namespace
 
 extern "C" SEXP wsi_native_czi_available() {
@@ -618,97 +754,89 @@ extern "C" SEXP wsi_native_czi_read_region(SEXP path_, SEXP x_, SEXP y_, SEXP wi
     Rf_error("libCZIAPI could not create a tile accessor (error %d).", err);
   }
 
-  CoordinateInterop coord;
-  std::memset(&coord, 0, sizeof(coord));
-  int coord_pos = 0;
-  if (channel != NA_INTEGER && channel >= 0) {
-    coord.dimensions_valid |= (1u << (2 - 1));
-    coord.value[coord_pos++] = channel;
-  }
-  if (scene != NA_INTEGER && scene >= 0) {
-    coord.dimensions_valid |= (1u << (5 - 1));
-    coord.value[coord_pos++] = scene;
-  }
-
-  IntRectInterop roi;
-  roi.x = x;
-  roi.y = y;
-  roi.w = width;
-  roi.h = height;
-  AccessorOptionsInterop options;
-  options.back_ground_color_r = 1.0f;
-  options.back_ground_color_g = 1.0f;
-  options.back_ground_color_b = 1.0f;
-  options.sort_by_m = true;
-  options.use_visibility_check_optimization = true;
-  options.additional_parameters = nullptr;
-
-  BitmapObjectHandle bitmap = 0;
-  err = accessor_get(accessor, &coord, &roi, static_cast<float>(zoom_d), &options, &bitmap);
+  SEXP out = R_NilValue;
+  out = PROTECT(czi_read_region_from_accessor(
+    accessor, accessor_get, bitmap_info_fn, bitmap_lock, bitmap_unlock, release_bitmap,
+    x, y, width, height, zoom_d, channel, scene
+  ));
   release_accessor(accessor);
-  if (err != 0 || bitmap == 0) {
-    close_czi(lib, czi);
-    Rf_error("libCZIAPI could not read the requested CZI region (error %d).", err);
-  }
-
-  BitmapInfoInterop info;
-  std::memset(&info, 0, sizeof(info));
-  err = bitmap_info_fn(bitmap, &info);
-  if (err != 0 || info.width == 0 || info.height == 0) {
-    release_bitmap(bitmap);
-    close_czi(lib, czi);
-    Rf_error("libCZIAPI could not inspect the decoded CZI bitmap (error %d).", err);
-  }
-
-  BitmapLockInfoInterop lock;
-  std::memset(&lock, 0, sizeof(lock));
-  err = bitmap_lock(bitmap, &lock);
-  if (err != 0 || !lock.ptrDataRoi) {
-    release_bitmap(bitmap);
-    close_czi(lib, czi);
-    Rf_error("libCZIAPI could not lock the decoded CZI bitmap (error %d).", err);
-  }
-
-  int out_w = static_cast<int>(info.width);
-  int out_h = static_cast<int>(info.height);
-  SEXP out = PROTECT(Rf_allocVector(REALSXP, static_cast<R_xlen_t>(out_w) * out_h * 3));
-  SEXP dim = PROTECT(Rf_allocVector(INTSXP, 3));
-  INTEGER(dim)[0] = out_h;
-  INTEGER(dim)[1] = out_w;
-  INTEGER(dim)[2] = 3;
-  Rf_setAttrib(out, R_DimSymbol, dim);
-
-  const unsigned char* base = static_cast<const unsigned char*>(lock.ptrDataRoi);
-  for (int row = 0; row < out_h; ++row) {
-    const unsigned char* line = base + static_cast<size_t>(row) * lock.stride;
-    for (int col = 0; col < out_w; ++col) {
-      if (info.pixelType == 0 || info.pixelType == 1 || info.pixelType == 2) {
-        int bytes = info.pixelType == 0 ? 1 : (info.pixelType == 1 ? 2 : 4);
-        double v = pixel_to_unit_gray(line + static_cast<size_t>(col) * bytes, info.pixelType);
-        set_rgb(out, out_h, out_w, row, col, v, v, v);
-      } else if (info.pixelType == 3) {  // Bgr24
-        const unsigned char* p = line + static_cast<size_t>(col) * 3;
-        set_rgb(out, out_h, out_w, row, col, p[2] / 255.0, p[1] / 255.0, p[0] / 255.0);
-      } else if (info.pixelType == 4) {  // Bgr48
-        const uint16_t* p = reinterpret_cast<const uint16_t*>(line + static_cast<size_t>(col) * 6);
-        set_rgb(out, out_h, out_w, row, col, p[2] / 65535.0, p[1] / 65535.0, p[0] / 65535.0);
-      } else if (info.pixelType == 9) {  // Bgra32
-        const unsigned char* p = line + static_cast<size_t>(col) * 4;
-        set_rgb(out, out_h, out_w, row, col, p[2] / 255.0, p[1] / 255.0, p[0] / 255.0);
-      } else {
-        bitmap_unlock(bitmap);
-        release_bitmap(bitmap);
-        close_czi(lib, czi);
-        UNPROTECT(2);
-        Rf_error("Unsupported CZI pixel type in native preview: %d.", info.pixelType);
-      }
-    }
-  }
-
-  bitmap_unlock(bitmap);
-  release_bitmap(bitmap);
   close_czi(lib, czi);
+  UNPROTECT(1);
+  return out;
+}
+
+extern "C" SEXP wsi_native_czi_open_handle(SEXP path_) {
+  if (!Rf_isString(path_) || Rf_length(path_) != 1 || STRING_ELT(path_, 0) == NA_STRING) {
+    Rf_error("`path` must be a single file path.");
+  }
+  const char* path = CHAR(STRING_ELT(path_, 0));
+  DynamicLibrary* lib = new DynamicLibrary();
+  if (!load_libczi(*lib) || !has_required_symbols(*lib)) {
+    delete lib;
+    Rf_error("Native CZI support requires libCZIAPI on the dynamic library path or `WSITOOLS_LIBCZIAPI`.");
+  }
+  OpenedCzi czi = open_czi(*lib, path);
+  CreateSingleChannelTileAccessorFn create_accessor = sym<CreateSingleChannelTileAccessorFn>(*lib, "libCZI_CreateSingleChannelTileAccessor");
+  SingleChannelTileAccessorGetFn accessor_get = sym<SingleChannelTileAccessorGetFn>(*lib, "libCZI_SingleChannelTileAccessorGet");
+  ReleaseSingleChannelTileAccessorFn release_accessor = sym<ReleaseSingleChannelTileAccessorFn>(*lib, "libCZI_ReleaseCreateSingleChannelTileAccessor");
+  BitmapGetInfoFn bitmap_info_fn = sym<BitmapGetInfoFn>(*lib, "libCZI_BitmapGetInfo");
+  BitmapLockFn bitmap_lock = sym<BitmapLockFn>(*lib, "libCZI_BitmapLock");
+  BitmapUnlockFn bitmap_unlock = sym<BitmapUnlockFn>(*lib, "libCZI_BitmapUnlock");
+  ReleaseBitmapFn release_bitmap = sym<ReleaseBitmapFn>(*lib, "libCZI_ReleaseBitmap");
+
+  SingleChannelScalingTileAccessorObjectHandle accessor = 0;
+  int32_t err = create_accessor(czi.reader, &accessor);
+  if (err != 0 || accessor == 0) {
+    close_czi(*lib, czi);
+    delete lib;
+    Rf_error("libCZIAPI could not create a persistent tile accessor (error %d).", err);
+  }
+
+  CziTileHandle* handle = new CziTileHandle();
+  handle->lib = lib;
+  handle->czi = czi;
+  handle->accessor = accessor;
+  handle->accessor_get = accessor_get;
+  handle->release_accessor = release_accessor;
+  handle->bitmap_info_fn = bitmap_info_fn;
+  handle->bitmap_lock = bitmap_lock;
+  handle->bitmap_unlock = bitmap_unlock;
+  handle->release_bitmap = release_bitmap;
+
+  SEXP ext = PROTECT(R_MakeExternalPtr(handle, Rf_install("wsi_native_czi_handle"), R_NilValue));
+  R_RegisterCFinalizerEx(ext, czi_tile_handle_finalizer, TRUE);
+  SEXP cls = PROTECT(Rf_mkString("wsi_native_czi_handle"));
+  Rf_setAttrib(ext, R_ClassSymbol, cls);
   UNPROTECT(2);
+  return ext;
+}
+
+extern "C" SEXP wsi_native_czi_close_handle(SEXP handle_) {
+  czi_tile_handle_finalizer(handle_);
+  return Rf_ScalarLogical(TRUE);
+}
+
+extern "C" SEXP wsi_native_czi_handle_read_region(SEXP handle_, SEXP x_, SEXP y_, SEXP width_,
+                                                  SEXP height_, SEXP zoom_, SEXP channel_, SEXP scene_) {
+  CziTileHandle* handle = reinterpret_cast<CziTileHandle*>(R_ExternalPtrAddr(handle_));
+  if (!handle || handle->accessor == 0) {
+    Rf_error("The native CZI handle is closed or invalid.");
+  }
+  int x = Rf_asInteger(x_);
+  int y = Rf_asInteger(y_);
+  int width = Rf_asInteger(width_);
+  int height = Rf_asInteger(height_);
+  double zoom_d = Rf_asReal(zoom_);
+  int channel = Rf_asInteger(channel_);
+  int scene = Rf_asInteger(scene_);
+  if (width <= 0 || height <= 0 || !R_finite(zoom_d) || zoom_d <= 0) {
+    Rf_error("Invalid CZI region request.");
+  }
+  SEXP out = czi_read_region_from_accessor(
+    handle->accessor, handle->accessor_get, handle->bitmap_info_fn,
+    handle->bitmap_lock, handle->bitmap_unlock, handle->release_bitmap,
+    x, y, width, height, zoom_d, channel, scene
+  );
   return out;
 }
 
@@ -717,6 +845,9 @@ static const R_CallMethodDef CallEntries[] = {
   {"wsi_native_czi_version", reinterpret_cast<DL_FUNC>(&wsi_native_czi_version), 0},
   {"wsi_native_czi_info", reinterpret_cast<DL_FUNC>(&wsi_native_czi_info), 1},
   {"wsi_native_czi_read_region", reinterpret_cast<DL_FUNC>(&wsi_native_czi_read_region), 8},
+  {"wsi_native_czi_open_handle", reinterpret_cast<DL_FUNC>(&wsi_native_czi_open_handle), 1},
+  {"wsi_native_czi_close_handle", reinterpret_cast<DL_FUNC>(&wsi_native_czi_close_handle), 1},
+  {"wsi_native_czi_handle_read_region", reinterpret_cast<DL_FUNC>(&wsi_native_czi_handle_read_region), 8},
   {NULL, NULL, 0}
 };
 

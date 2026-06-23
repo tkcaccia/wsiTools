@@ -186,6 +186,12 @@ wsi_install_backends(
 )
 ```
 
+On Windows, `method = "auto"` may use more than one installer in the same plan:
+for example, `libvips` and ImageMagick can use `winget`, while Bio-Formats uses
+the OME `bftools` package through `conda` when conda is available. Bio-Formats
+does not have a configured `winget` package in wsiTools, so use
+`method = "conda"` or install `bftools.zip` manually if conda is not available.
+
 For conda or mamba, prefer conda-forge/OME channels and avoid default Anaconda
 channels if Terms of Service are not accepted on the machine:
 

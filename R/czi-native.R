@@ -475,6 +475,51 @@ wsi_native_czi_read_region <- function(path, x, y, width, height, zoom = 1,
   )
 }
 
+wsi_native_czi_open_handle <- function(path) {
+  path <- wsi_validate_input_path(path)
+  if (!wsi_native_available("wsi_native_czi_open_handle")) {
+    wsi_abort(
+      "This wsiTools build does not include persistent native CZI tile handles.",
+      class = "wsi_backend_unavailable"
+    )
+  }
+  .Call("wsi_native_czi_open_handle", path, PACKAGE = "wsiTools")
+}
+
+wsi_native_czi_close_handle <- function(handle) {
+  if (is.null(handle) || !wsi_native_available("wsi_native_czi_close_handle")) {
+    return(invisible(FALSE))
+  }
+  .Call("wsi_native_czi_close_handle", handle, PACKAGE = "wsiTools")
+  invisible(TRUE)
+}
+
+wsi_native_czi_handle_read_region <- function(handle, x, y, width, height,
+                                              zoom = 1, channel = 0,
+                                              scene = NA_integer_) {
+  if (is.null(handle)) {
+    wsi_abort("`handle` must be an open native CZI handle.")
+  }
+  if (!wsi_native_available("wsi_native_czi_handle_read_region")) {
+    wsi_abort(
+      "This wsiTools build does not include persistent native CZI tile handles.",
+      class = "wsi_backend_unavailable"
+    )
+  }
+  .Call(
+    "wsi_native_czi_handle_read_region",
+    handle,
+    as.integer(x),
+    as.integer(y),
+    as.integer(width),
+    as.integer(height),
+    as.numeric(zoom),
+    as.integer(channel),
+    as.integer(scene),
+    PACKAGE = "wsiTools"
+  )
+}
+
 wsi_native_czi_open <- function(path) {
   if (!wsi_has_native_czi()) {
     wsi_abort(

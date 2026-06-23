@@ -368,7 +368,8 @@ wsi_dynamic_czi_section_tile_source <- function(path, section, source_id = NULL,
                                                 route = "/tiles",
                                                 channel = 0,
                                                 pyramid_factors = NULL,
-                                                metadata = list()) {
+                                                metadata = list(),
+                                                persistent_reader = TRUE) {
   if (!wsi_has_native_czi()) {
     wsi_abort("Full-resolution CZI section tiles require the optional native CZI backend. Run `wsi_install_native_czi()` first.", class = "wsi_backend_unavailable")
   }
@@ -427,9 +428,24 @@ wsi_dynamic_czi_section_tile_source <- function(path, section, source_id = NULL,
     tile_overlap = tile_overlap,
     route = route,
     cache_dir = cache_dir,
+    czi_handle = NULL,
     metadata = metadata %||% list(),
     created = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS%z")
   )
+  persistent_reader <- isTRUE(persistent_reader) &&
+    !tolower(Sys.getenv("WSITOOLS_CZI_PERSISTENT_TILE_READER", unset = "true")) %in% c("0", "false", "no", "off")
+  if (isTRUE(persistent_reader) && wsi_native_available("wsi_native_czi_open_handle")) {
+    source$czi_handle <- tryCatch(
+      wsi_native_czi_open_handle(path),
+      error = function(err) {
+        cli::cli_warn(c(
+          "Could not open persistent native CZI tile reader; falling back to per-tile reader setup.",
+          "x" = conditionMessage(err)
+        ))
+        NULL
+      }
+    )
+  }
   class(source) <- c("wsi_dynamic_czi_section_tile_source", "wsi_dynamic_tile_source", "list")
   source
 }
@@ -1085,16 +1101,30 @@ wsi_dynamic_rgba_to_file <- function(array, output, format = "png") {
 wsi_dynamic_czi_section_region_to_file <- function(source, region, output, format = "png") {
   full_width <- max(1L, as.integer(ceiling(region$width * region$downsample)))
   full_height <- max(1L, as.integer(ceiling(region$height * region$downsample)))
-  array <- wsi_native_czi_read_region(
-    source$path,
-    x = as.integer(round(source$x + region$x)),
-    y = as.integer(round(source$y + region$y)),
-    width = full_width,
-    height = full_height,
-    zoom = 1 / max(region$downsample, 1e-9),
-    channel = source$channel %||% 0L,
-    scene = NA_integer_
-  )
+  reader <- source$czi_handle %||% NULL
+  array <- if (!is.null(reader)) {
+    wsi_native_czi_handle_read_region(
+      reader,
+      x = as.integer(round(source$x + region$x)),
+      y = as.integer(round(source$y + region$y)),
+      width = full_width,
+      height = full_height,
+      zoom = 1 / max(region$downsample, 1e-9),
+      channel = source$channel %||% 0L,
+      scene = NA_integer_
+    )
+  } else {
+    wsi_native_czi_read_region(
+      source$path,
+      x = as.integer(round(source$x + region$x)),
+      y = as.integer(round(source$y + region$y)),
+      width = full_width,
+      height = full_height,
+      zoom = 1 / max(region$downsample, 1e-9),
+      channel = source$channel %||% 0L,
+      scene = NA_integer_
+    )
+  }
   tmp <- tempfile(fileext = paste0(".", format), tmpdir = dirname(output))
   on.exit(unlink(tmp), add = TRUE)
   wsi_dynamic_array_to_file(array, tmp, format = format)
@@ -1273,6 +1303,9 @@ wsi_dynamic_tile_response <- function(source, level, col, row, format = NULL,
 }
 
 wsi_dynamic_tile_cleanup <- function(source) {
+  if (inherits(source, "wsi_dynamic_czi_section_tile_source") && !is.null(source$czi_handle)) {
+    try(wsi_native_czi_close_handle(source$czi_handle), silent = TRUE)
+  }
   if (inherits(source, "wsi_dynamic_tile_source") &&
       is.character(source$cache_dir) && length(source$cache_dir) == 1L &&
       nzchar(source$cache_dir) && dir.exists(source$cache_dir)) {

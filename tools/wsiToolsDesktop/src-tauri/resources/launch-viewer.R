@@ -77,6 +77,39 @@ desktop_content_type <- function(path) {
   )
 }
 
+desktop_is_czi_path <- function(path) {
+  identical(tolower(tools::file_ext(path)), "czi")
+}
+
+desktop_open_czi_project <- function(image_paths, output, log_file, title = "wsiTools desktop CZI viewer") {
+  image_paths <- normalizePath(image_paths, winslash = "/", mustWork = TRUE)
+  desktop_log(
+    "Opening CZI project through the live native CZI tile server with ",
+    length(image_paths),
+    " file(s).",
+    log_file = log_file
+  )
+  viewer <- wsiTools::wsi_viewer_czi_project_live(
+    image_paths,
+    output = output,
+    open = FALSE,
+    wait = FALSE,
+    overwrite = TRUE,
+    title = title,
+    czi_preview = "lazy",
+    sections = TRUE,
+    transport = "auto"
+  )
+  if (!inherits(viewer, "wsi_viewer_session")) {
+    stop(
+      "The desktop app requires a live CZI viewer session. ",
+      "Install the optional R package httpuv and native CZI backend, then try again.",
+      call. = FALSE
+    )
+  }
+  viewer
+}
+
 desktop_http_response <- function(status, body = raw(), content_type = "text/plain; charset=utf-8") {
   list(
     status = as.integer(status),
@@ -552,6 +585,23 @@ desktop_open_live_image_project <- function(image_paths, output, log_file) {
   if (!length(image_paths)) {
     stop("No image paths were supplied for the desktop project.", call. = FALSE)
   }
+  image_paths <- normalizePath(image_paths, winslash = "/", mustWork = TRUE)
+  czi_paths <- vapply(image_paths, desktop_is_czi_path, logical(1))
+  if (all(czi_paths)) {
+    return(desktop_open_czi_project(
+      image_paths,
+      output = output,
+      log_file = log_file,
+      title = "wsiTools desktop CZI project viewer"
+    ))
+  }
+  if (any(czi_paths)) {
+    stop(
+      "Mixed CZI and non-CZI desktop image projects are not opened through one route yet. ",
+      "Open the CZI files as a CZI project, or convert them to pyramidal OME-TIFF first.",
+      call. = FALSE
+    )
+  }
   desktop_log(
     "Opening live tiled image project with ",
     length(image_paths),
@@ -673,6 +723,20 @@ desktop_open_target <- function(target_path, mode, output, log_file) {
   } else {
     image_path <- normalizePath(target_path, winslash = "/", mustWork = TRUE)
     desktop_log("Opening image: ", image_path, log_file = log_file)
+  }
+
+  if (desktop_is_czi_path(image_path)) {
+    viewer <- desktop_open_czi_project(
+      image_path,
+      output = output,
+      log_file = log_file,
+      title = "wsiTools desktop CZI viewer"
+    )
+    if (inherits(project, "wsi_project")) {
+      wsiTools::restore_project_state(viewer, project, service = FALSE)
+      desktop_log("Restored project state.", log_file = log_file)
+    }
+    return(viewer)
   }
 
   slide <- wsiTools::wsi_open(image_path)

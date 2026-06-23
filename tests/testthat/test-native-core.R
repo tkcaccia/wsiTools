@@ -45,3 +45,9 @@ test_that("mask helper fallbacks do not require compiled code", {
   expect_type(wsiTools:::wsi_native_available("wsi_cpp_binary_dilate"), "logical")
   expect_type(wsiTools:::wsi_native_available("wsi_cpp_mask_components"), "logical")
 })
+
+test_that("native CZI persistent tile handle symbols are registered", {
+  expect_type(wsiTools:::wsi_native_available("wsi_native_czi_open_handle"), "logical")
+  expect_type(wsiTools:::wsi_native_available("wsi_native_czi_close_handle"), "logical")
+  expect_type(wsiTools:::wsi_native_available("wsi_native_czi_handle_read_region"), "logical")
+})

@@ -466,6 +466,13 @@ wsi_install_backends(
   method = "winget"
 )
 
+# Windows mixed setup. In auto mode, libvips/ImageMagick can use winget,
+# while Bio-Formats uses conda/OME bftools when conda is available.
+wsi_install_backends(
+  tools = c("libvips", "imagemagick", "bioformats"),
+  method = "auto"
+)
+
 # Conda or mamba environment
 wsi_install_backends(
   tools = c("openslide", "libvips", "imagemagick", "bioformats"),
@@ -659,6 +666,8 @@ If you already use conda for R, you can install into the active environment
 from R:
 
 ```r
+wsi_install_backends(tools = "bioformats", install = FALSE)
+
 wsi_install_backends(
   tools = "bioformats",
   method = "conda"
