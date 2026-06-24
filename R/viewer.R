@@ -1266,11 +1266,36 @@ wsi_viewer_cell_controls <- function(config) {
   )
 }
 
+wsi_viewer_has_spatial_transcriptomics <- function(config) {
+  seurat_enabled <- function(x) {
+    isTRUE((x %||% list())$enabled)
+  }
+  if (seurat_enabled(config$seurat)) {
+    return(TRUE)
+  }
+  items <- (config$project %||% list())$items %||% list()
+  if (!length(items)) {
+    return(FALSE)
+  }
+  any(vapply(items, function(item) {
+    if (seurat_enabled(item$seurat)) {
+      return(TRUE)
+    }
+    sections <- item$sections %||% list()
+    length(sections) > 0L && any(vapply(sections, function(section) {
+      seurat_enabled(section$seurat)
+    }, logical(1)))
+  }, logical(1)))
+}
+
 wsi_viewer_seurat_controls <- function(config) {
   seurat <- config$seurat %||% list(enabled = FALSE, spot_count = 0L, plots = list())
   source_name <- as.character(seurat$source_name %||% "Seurat")
   menu_label <- wsi_spatial_menu_label(source_name)
   enabled <- isTRUE(seurat$enabled)
+  if (!wsi_viewer_has_spatial_transcriptomics(config)) {
+    return("")
+  }
   plots <- seurat$plots %||% list()
   plot_count <- length(plots)
   spot_count <- as.integer(seurat$displayed_spot_count %||% seurat$spot_count %||% 0L)
