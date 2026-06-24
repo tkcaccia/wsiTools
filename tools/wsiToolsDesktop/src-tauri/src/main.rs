@@ -2,7 +2,8 @@ use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::{
     env, fs,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Read, Write},
+    net::TcpStream,
     path::PathBuf,
     process::{Child, Command, Stdio},
     sync::{mpsc, Arc, Mutex},
@@ -574,6 +575,70 @@ fn wait_for_viewer_url(rx: &mpsc::Receiver<()>, state: &Arc<RViewerState>) -> Re
     }
 }
 
+fn parse_http_local_url(url: &str) -> Option<(String, u16, String)> {
+    let raw = url.trim();
+    let rest = raw.strip_prefix("http://")?;
+    let (host_port, path) = match rest.split_once('/') {
+        Some((host_port, path)) => (host_port, format!("/{path}")),
+        None => (rest, "/".to_string()),
+    };
+    let (host, port) = match host_port.rsplit_once(':') {
+        Some((host, port)) => (host.to_string(), port.parse::<u16>().ok()?),
+        None => (host_port.to_string(), 80),
+    };
+    if !matches!(host.as_str(), "127.0.0.1" | "localhost") {
+        return None;
+    }
+    Some((host, port, path))
+}
+
+fn viewer_url_ready(url: &str) -> bool {
+    let Some((host, port, path)) = parse_http_local_url(url) else {
+        return true;
+    };
+    let Ok(mut stream) = TcpStream::connect((host.as_str(), port)) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+    let request = format!(
+        "GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n"
+    );
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+    let mut buf = [0_u8; 256];
+    let Ok(n) = stream.read(&mut buf) else {
+        return false;
+    };
+    let head = String::from_utf8_lossy(&buf[..n]);
+    head.starts_with("HTTP/1.1 2")
+        || head.starts_with("HTTP/1.1 3")
+        || head.starts_with("HTTP/1.0 2")
+        || head.starts_with("HTTP/1.0 3")
+}
+
+fn wait_for_viewer_http_ready(url: &str, logs: &Arc<Mutex<Vec<String>>>) -> Result<(), String> {
+    if parse_http_local_url(url).is_none() {
+        return Ok(());
+    }
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(20) {
+        if viewer_url_ready(url) {
+            push_log(logs, format!("Viewer HTTP URL is ready: {url}"));
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
+    push_log(
+        logs,
+        format!("Viewer HTTP URL did not answer before opening the WebView: {url}"),
+    );
+    Err(format!(
+        "R returned a viewer URL, but the local viewer server did not answer: {url}. Check whether firewall/security software is blocking localhost or whether R exited after creating the viewer."
+    ))
+}
+
 fn validate_file(path: &str, label: &str) -> Result<PathBuf, String> {
     if path.trim().is_empty() {
         return Err(format!("Choose {label} first."));
@@ -951,6 +1016,7 @@ fn launch_r_new_project_target(
         stop_existing_child(&state);
         return Err("R started but did not return a viewer URL.".to_string());
     }
+    wait_for_viewer_http_ready(&result.viewer_url, &state.logs)?;
     Ok(result)
 }
 
@@ -1102,6 +1168,7 @@ fn launch_r_target(
         stop_existing_child(&state);
         return Err("R started but did not return a viewer URL.".to_string());
     }
+    wait_for_viewer_http_ready(&result.viewer_url, &state.logs)?;
     Ok(result)
 }
 

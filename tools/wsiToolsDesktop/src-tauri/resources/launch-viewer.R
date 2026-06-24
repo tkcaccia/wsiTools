@@ -207,6 +207,47 @@ load_wsitools <- function() {
   )
 }
 
+desktop_log_runtime_diagnostics <- function(log_file = NULL) {
+  desktop_log(
+    "R runtime: ",
+    paste(R.version$major, R.version$minor, sep = "."),
+    " (",
+    R.version$platform,
+    ")",
+    log_file = log_file
+  )
+  wsitools_version <- tryCatch(
+    as.character(utils::packageVersion("wsiTools")),
+    error = function(err) {
+      desc <- utils::packageDescription("wsiTools", fields = "Version")
+      if (is.na(desc) || !nzchar(desc)) "unknown" else desc
+    }
+  )
+  desktop_log("wsiTools version: ", wsitools_version, log_file = log_file)
+  commands <- c(
+    "Rscript",
+    "vips",
+    "vipsheader",
+    "openslide-show-properties",
+    "openslide-write-png",
+    "magick",
+    "java",
+    "showinf",
+    "bfconvert"
+  )
+  paths <- Sys.which(commands)
+  desktop_log("Executable paths:", log_file = log_file)
+  for (name in names(paths)) {
+    desktop_log("  ", name, ": ", if (nzchar(paths[[name]])) paths[[name]] else "<not found>", log_file = log_file)
+  }
+  backend_text <- tryCatch(
+    paste(capture.output(print(wsiTools::wsi_backends())), collapse = "\n"),
+    error = function(err) paste("Could not run wsi_backends():", conditionMessage(err))
+  )
+  desktop_log("Backend status:\n", backend_text, log_file = log_file)
+  invisible(TRUE)
+}
+
 desktop_parse_args <- function(args) {
   mode <- "image"
   path <- character()
@@ -776,6 +817,7 @@ main <- function() {
   desktop_emit("LOG_FILE", normalizePath(log_file, winslash = "/", mustWork = FALSE))
 
   load_wsitools()
+  desktop_log_runtime_diagnostics(log_file = log_file)
 
   output <- file.path(session_dir, "wsiTools_desktop_live_viewer.html")
   viewer <- if (identical(mode, "new-project")) {
