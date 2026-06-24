@@ -357,6 +357,8 @@ wsi_dynamic_image_tile_source <- function(path, source_id = NULL, name = NULL,
 #' @param channel Zero-based CZI channel index.
 #' @param pyramid_factors Optional native pyramid downsample factors.
 #' @param metadata Optional source metadata.
+#' @param persistent_reader Keep a native CZI reader handle open for faster
+#'   repeated tile reads when the native backend supports persistent handles.
 #'
 #' @return A `wsi_dynamic_czi_section_tile_source` object.
 #' @export

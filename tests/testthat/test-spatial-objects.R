@@ -263,6 +263,58 @@ test_that("SpatialExperiment-like objects can be linked with explicit coordinate
 	  expect_equal(linked$component_names, c("UMAP_1", "UMAP_2"))
 	})
 
+test_that("SpatialExperiment gene symbols are resolved from rowData aliases", {
+  skip_if_not_installed("SpatialExperiment")
+  skip_if_not_installed("S4Vectors")
+
+  slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 800)
+  ids <- paste0("spot", 1:4, "-151507")
+  assays <- matrix(
+    c(0, 1, 2, 3, 5, 0, 4, 1),
+    nrow = 2,
+    dimnames = list(c("ENSG000001", "ENSG000002"), ids)
+  )
+  spe <- SpatialExperiment::SpatialExperiment(
+    assays = list(logcounts = assays),
+    rowData = S4Vectors::DataFrame(
+      gene_id = c("ENSG000001", "ENSG000002"),
+      gene_name = c("GeneA", "GeneB"),
+      gene_search = c("GeneA; ENSG000001", "GeneB; ENSG000002")
+    ),
+    colData = S4Vectors::DataFrame(sample_id = rep("151507", length(ids))),
+    spatialCoords = matrix(
+      c(10, 20, 30, 40, 40, 50, 60, 70),
+      ncol = 2,
+      dimnames = list(sub("-151507$", "-1", ids), c("pxl_col_in_fullres", "pxl_row_in_fullres"))
+    )
+  )
+  embeddings <- matrix(
+    c(1, 2, 3, 4, 4, 3, 2, 1),
+    ncol = 2,
+    dimnames = list(ids, c("PCA_1", "PCA_2"))
+  )
+
+  linked <- wsi_link_spatialexperiment_image(
+    spe,
+    slide,
+    sample_id = "151507",
+    embeddings = embeddings
+  )
+  payload <- wsiTools:::wsi_seurat_dynamic_gene_payload(linked, "GeneB")
+  expect_equal(payload$gene, "GeneB")
+  expect_equal(vapply(payload$points, `[[`, numeric(1), "value"), c(1, 3, 0, 1))
+
+  values <- wsiTools:::wsi_prediction_feature_vector(
+    wsi_prediction_context(spatial = linked),
+    source_id = "spatial:raw",
+    ids = linked$spots$id,
+    feature = "GeneB",
+    points = wsiTools:::wsi_prediction_points(wsi_prediction_context(spatial = linked), "spatial:points")
+  )
+  expect_equal(as.numeric(values), c(1, 3, 0, 1))
+  expect_equal(attr(values, "feature"), "GeneB")
+})
+
 test_that("spatial-object spot tile previews are centered on spots and respect selected ROIs", {
   slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 800, levels = c(1, 4))
   linked <- list(

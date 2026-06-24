@@ -354,10 +354,19 @@ wsi_proximity_run <- function(context, rois, point_source = "spatial:points",
   }
 
   points <- wsi_prediction_points(context, point_source)
+  unit <- as.character(points$unit %||% "point")
+  unit <- unit[nzchar(unit) & !is.na(unit)]
+  unit_label <- if (length(unit) && identical(unit[[1L]], "spot")) {
+    "spots"
+  } else if (length(unit) && identical(unit[[1L]], "cell")) {
+    "cells"
+  } else {
+    "points"
+  }
   ok <- is.finite(points$x) & is.finite(points$y)
   points <- points[ok, , drop = FALSE]
   if (!nrow(points)) {
-    wsi_abort("No spatial spots or cells with finite coordinates are available for proximity analysis.")
+    wsi_abort(sprintf("No %s with finite coordinates are available for proximity analysis.", unit_label))
   }
 
   query <- wsi_prediction_assign_points(points, rois, query_ids)
@@ -365,10 +374,10 @@ wsi_proximity_run <- function(context, rois, point_source = "spatial:points",
   query_rows <- which(!is.na(query$label) & nzchar(query$label))
   target_rows <- which(!is.na(target$label) & nzchar(target$label))
   if (!length(query_rows)) {
-    wsi_abort("No spots/cells were found inside the selected query annotation(s).")
+    wsi_abort(sprintf("No %s were found inside the selected query annotation(s).", unit_label))
   }
   if (!length(target_rows)) {
-    wsi_abort("No spots/cells were found inside the selected reference annotation(s).")
+    wsi_abort(sprintf("No %s were found inside the selected reference annotation(s).", unit_label))
   }
 
   query_points <- points[query_rows, , drop = FALSE]
@@ -710,9 +719,12 @@ wsi_proximity_response <- function(context, state, payload) {
     rois = rois,
     force = TRUE
   )$result
+  result_unit <- unique(as.character(result$unit %||% character()))
+  result_unit <- result_unit[nzchar(result_unit) & !is.na(result_unit)]
   detail <- list(
     count = nrow(result),
     point_source = source,
+    point_unit = result_unit[[1L]] %||% "point",
     query_count = attr(result, "query_count") %||% nrow(result),
     target_count = attr(result, "target_count") %||% NA_integer_,
     min_distance_px = wsi_proximity_stat(result$distance_px, min),

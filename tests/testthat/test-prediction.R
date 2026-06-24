@@ -421,6 +421,71 @@ test_that("prediction layer items retain project scope metadata", {
   expect_equal(layer$items[[1]]$feature_id, "spot1")
 })
 
+test_that("project raw prediction keeps all sections on shared features", {
+  make_linked <- function(name, expr) {
+    ids <- colnames(expr)
+    linked <- list(
+      image_name = name,
+      source_name = "SpatialExperiment",
+      expression_source = list(object = expr),
+      spots = data.frame(
+        id = ids,
+        label = ids,
+        barcode = ids,
+        x = c(10, 30, 50, 70),
+        y = c(10, 30, 50, 70),
+        stringsAsFactors = FALSE
+      )
+    )
+    class(linked) <- c("wsi_seurat_spatial", "wsi_spatial_object", "list")
+    linked
+  }
+  expr_a <- matrix(
+    c(
+      1, 2, 4, 8,
+      5, 5, 6, 6,
+      2, 3, 2, 3
+    ),
+    nrow = 3,
+    byrow = TRUE,
+    dimnames = list(c("GeneA", "GeneB", "GeneC"), paste0("a", 1:4))
+  )
+  expr_b <- matrix(
+    c(
+      2, 2, 3, 3,
+      1, 3, 6, 10,
+      8, 7, 8, 7
+    ),
+    nrow = 3,
+    byrow = TRUE,
+    dimnames = list(c("GeneA", "GeneB", "GeneC"), paste0("b", 1:4))
+  )
+  records <- list(
+    list(id = "seurat_project_a", label = "a", path = "a.tif"),
+    list(id = "seurat_project_b", label = "b", path = "b.tif")
+  )
+  project_linked <- wsiTools:::wsi_seurat_project_prediction_context(
+    list(make_linked("a", expr_a), make_linked("b", expr_b)),
+    records
+  )
+  points <- wsiTools:::wsi_prediction_points(
+    wsi_prediction_context(spatial = project_linked),
+    "spatial:raw"
+  )
+  x <- wsiTools:::wsi_prediction_feature_matrix(
+    wsi_prediction_context(spatial = project_linked),
+    "spatial:raw",
+    points$id,
+    points = points,
+    max_features = 1L
+  )
+
+  expect_equal(nrow(x), 8L)
+  expect_setequal(colnames(x), c("GeneA", "GeneB", "GeneC"))
+  expect_true(all(stats::complete.cases(x)))
+  expect_equal(sort(unique(points$project_key)), c("seurat_project_a::image", "seurat_project_b::image"))
+})
+
 test_that("raw spatial expression uses point barcodes and limits features before dense output", {
   expr <- matrix(
     c(

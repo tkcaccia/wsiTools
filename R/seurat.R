@@ -1534,6 +1534,131 @@ wsi_seurat_gene_match <- function(requested, available) {
   idx
 }
 
+wsi_seurat_feature_alias_table <- function(object) {
+  if (!requireNamespace("SummarizedExperiment", quietly = TRUE)) {
+    return(NULL)
+  }
+  row_data <- tryCatch(
+    as.data.frame(SummarizedExperiment::rowData(object), stringsAsFactors = FALSE),
+    error = function(e) NULL
+  )
+  if (!is.data.frame(row_data) || !nrow(row_data)) {
+    return(NULL)
+  }
+  feature_ids <- rownames(row_data)
+  if (!length(feature_ids) || any(!nzchar(feature_ids))) {
+    feature_ids <- as.character(row_data$gene_id %||% row_data$id %||% row_data$feature_id %||% character())
+  }
+  if (length(feature_ids) != nrow(row_data) || !any(nzchar(feature_ids))) {
+    return(NULL)
+  }
+  alias_columns <- intersect(
+    c(
+      "gene_name", "gene_symbol", "symbol", "external_gene_name", "feature_name",
+      "name", "gene_id", "id", "feature_id", "gene_search"
+    ),
+    names(row_data)
+  )
+  alias_columns <- alias_columns[vapply(row_data[alias_columns], function(x) {
+    is.character(x) || is.factor(x) || is.numeric(x) || is.integer(x)
+  }, logical(1))]
+  if (!length(alias_columns)) {
+    return(NULL)
+  }
+  list(
+    feature_ids = as.character(feature_ids),
+    data = row_data[alias_columns],
+    preferred = intersect(
+      c("gene_name", "gene_symbol", "symbol", "external_gene_name", "feature_name", "name"),
+      alias_columns
+    )
+  )
+}
+
+wsi_seurat_alias_values <- function(x) {
+  values <- as.character(x %||% character())
+  values <- unlist(strsplit(values, "\\s*[;,|]\\s*"), use.names = FALSE)
+  values <- unique(trimws(values))
+  values[nzchar(values) & !is.na(values)]
+}
+
+wsi_seurat_feature_alias_index <- function(alias_table, available) {
+  if (is.null(alias_table) || !length(available)) {
+    return(integer())
+  }
+  rows <- match(as.character(available), alias_table$feature_ids)
+  ok <- which(!is.na(rows))
+  if (!length(ok)) {
+    return(integer())
+  }
+  index <- integer()
+  add_alias <- function(alias, value) {
+    alias <- tolower(wsi_seurat_alias_values(alias))
+    alias <- alias[!alias %in% names(index)]
+    if (length(alias)) {
+      index[alias] <<- as.integer(value)
+    }
+  }
+  for (i in ok) {
+    add_alias(available[[i]], i)
+    for (column in names(alias_table$data)) {
+      add_alias(alias_table$data[[column]][[rows[[i]]]], i)
+    }
+  }
+  index
+}
+
+wsi_seurat_gene_match_with_alias <- function(requested, available, alias_table = NULL) {
+  idx <- wsi_seurat_gene_match(requested, available)
+  if (!length(idx) || is.null(alias_table) || !any(is.na(idx))) {
+    return(idx)
+  }
+  alias_index <- wsi_seurat_feature_alias_index(alias_table, available)
+  if (!length(alias_index)) {
+    return(idx)
+  }
+  missing <- which(is.na(idx))
+  for (i in missing) {
+    aliases <- unique(c(
+      requested[[i]],
+      gsub("_", "-", requested[[i]], fixed = TRUE),
+      gsub("-", "_", requested[[i]], fixed = TRUE),
+      gsub("\\.", "-", requested[[i]]),
+      gsub("\\.", "_", requested[[i]])
+    ))
+    hit <- unname(alias_index[tolower(wsi_seurat_alias_values(aliases))])
+    hit <- hit[!is.na(hit)]
+    if (length(hit)) {
+      idx[[i]] <- as.integer(hit[[1L]])
+    }
+  }
+  idx
+}
+
+wsi_seurat_feature_display_names <- function(available, alias_table = NULL) {
+  available <- as.character(available %||% character())
+  if (is.null(alias_table) || !length(available)) {
+    return(available)
+  }
+  rows <- match(available, alias_table$feature_ids)
+  out <- available
+  preferred <- alias_table$preferred %||% character()
+  for (i in seq_along(out)) {
+    row <- rows[[i]]
+    if (is.na(row)) {
+      next
+    }
+    for (column in preferred) {
+      values <- wsi_seurat_alias_values(alias_table$data[[column]][[row]])
+      if (length(values)) {
+        out[[i]] <- values[[1L]]
+        break
+      }
+    }
+  }
+  make.unique(out)
+}
+
 wsi_seurat_fetch_gene_expression <- function(seurat, genes, spot_ids) {
   for (namespace in c("SeuratObject", "Seurat")) {
     fetched <- wsi_seurat_try_accessor(namespace, "FetchData", object = seurat, vars = genes, cells = spot_ids)
@@ -1589,6 +1714,7 @@ wsi_seurat_collect_expression_matrices <- function(seurat) {
   } else {
     requested_assay_name <- NULL
   }
+  feature_aliases <- wsi_seurat_feature_alias_table(seurat)
   add_matrix <- function(x, name) {
     if (!wsi_seurat_matrix_like(x)) {
       return(invisible(NULL))
@@ -1598,7 +1724,11 @@ wsi_seurat_collect_expression_matrices <- function(seurat) {
     if (!length(rn) || !length(cn)) {
       return(invisible(NULL))
     }
-    matrices[[length(matrices) + 1L]] <<- list(name = name, matrix = x)
+    matrices[[length(matrices) + 1L]] <<- list(
+      name = name,
+      matrix = x,
+      feature_aliases = feature_aliases
+    )
     invisible(NULL)
   }
   add_seurat_layers <- function(x, prefix, assay_name = NULL) {
@@ -1776,13 +1906,13 @@ wsi_seurat_matrix_gene_expression <- function(seurat, genes, spot_ids) {
     mat <- entry$matrix
     rn <- rownames(mat)
     cn <- colnames(mat)
-    gene_idx <- wsi_seurat_gene_match(genes, rn)
+    gene_idx <- wsi_seurat_gene_match_with_alias(genes, rn, entry$feature_aliases)
     spot_idx <- match(spot_ids, cn)
     if (any(!is.na(gene_idx)) && any(!is.na(spot_idx))) {
       keep_gene <- !is.na(gene_idx)
       keep_spot <- !is.na(spot_idx)
       out <- matrix(NA_real_, nrow = length(spot_ids), ncol = sum(keep_gene))
-      colnames(out) <- rn[gene_idx[keep_gene]]
+      colnames(out) <- genes[keep_gene]
       rownames(out) <- spot_ids
       sub <- as.matrix(mat[gene_idx[keep_gene], spot_idx[keep_spot], drop = FALSE])
       storage.mode(sub) <- "double"

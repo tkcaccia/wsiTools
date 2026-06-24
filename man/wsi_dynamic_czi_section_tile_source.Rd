@@ -16,7 +16,8 @@ wsi_dynamic_czi_section_tile_source(
   route = "/tiles",
   channel = 0,
   pyramid_factors = NULL,
-  metadata = list()
+  metadata = list(),
+  persistent_reader = TRUE
 )
 }
 \arguments{
@@ -42,6 +43,9 @@ wsi_dynamic_czi_section_tile_source(
 \item{pyramid_factors}{Optional native pyramid downsample factors.}
 
 \item{metadata}{Optional source metadata.}
+
+\item{persistent_reader}{Keep a native CZI reader handle open for faster
+repeated tile reads when the native backend supports persistent handles.}
 }
 \value{
 A \code{wsi_dynamic_czi_section_tile_source} object.

@@ -325,7 +325,7 @@ wsi_prediction_matrix_for_spatial_raw <- function(linked, ids, points = NULL,
         )
         out <- matrix(NA_real_, nrow = length(ids), ncol = length(feature_idx))
         rownames(out) <- ids
-        colnames(out) <- make.unique(as.character(rn[feature_idx]))
+        colnames(out) <- wsi_seurat_feature_display_names(rn[feature_idx], entry$feature_aliases)
         sub <- as.matrix(mat[feature_idx, sample_idx[keep], drop = FALSE])
         storage.mode(sub) <- "double"
         out[keep, ] <- t(sub)
@@ -406,7 +406,7 @@ wsi_prediction_vector_for_spatial_raw <- function(linked, ids, feature, points =
     if (!length(rn) || !length(cn)) {
       next
     }
-    feature_idx <- wsi_prediction_feature_match(feature, rn)
+    feature_idx <- wsi_seurat_gene_match_with_alias(feature, rn, entry$feature_aliases)
     if (!is.na(feature_idx)) {
       for (candidate_name in names(id_candidates)) {
         sample_ids <- id_candidates[[candidate_name]]
@@ -416,7 +416,7 @@ wsi_prediction_vector_for_spatial_raw <- function(linked, ids, feature, points =
           keep <- !is.na(sample_idx)
           values <- as.numeric(as.matrix(mat[feature_idx, sample_idx[keep], drop = FALSE]))
           out[keep] <- values
-          attr(out, "feature") <- as.character(rn[[feature_idx]])
+          attr(out, "feature") <- wsi_seurat_feature_display_names(rn[[feature_idx]], entry$feature_aliases)[[1L]]
           attr(out, "source_name") <- entry$name %||% "expression"
           attr(out, "id_source") <- candidate_name
           return(out)
@@ -673,7 +673,7 @@ wsi_prediction_object_reduction_embeddings <- function(linked, reduction) {
   if (is.null(object)) {
     return(NULL)
   }
-  type <- tryCatch(wsi_infer_spatial_object_type(object), error = function(e) "")
+  type <- tryCatch(wsi_spatial_object_type(object), error = function(e) "")
   tryCatch(
     switch(
       type,
@@ -802,10 +802,13 @@ wsi_prediction_align_feature_matrices <- function(parts, ids) {
   if (!length(parts)) {
     wsi_abort("No project-scoped feature rows were found for the selected spots/cells.")
   }
-  columns <- unique(unlist(lapply(parts, function(part) colnames(part$x)), use.names = FALSE))
-  columns <- columns[nzchar(columns) & !is.na(columns)]
+  column_sets <- lapply(parts, function(part) {
+    columns <- colnames(part$x)
+    unique(columns[nzchar(columns) & !is.na(columns)])
+  })
+  columns <- Reduce(intersect, column_sets)
   if (!length(columns)) {
-    wsi_abort("Project-scoped feature matrices do not share usable feature names.")
+    wsi_abort("Project-scoped feature matrices do not share usable feature names across sections.")
   }
   out <- matrix(NA_real_, nrow = length(ids), ncol = length(columns))
   rownames(out) <- as.character(ids)
@@ -813,8 +816,8 @@ wsi_prediction_align_feature_matrices <- function(parts, ids) {
   source_names <- character()
   for (part in parts) {
     idx <- part$rows
-    cols <- match(colnames(part$x), columns)
-    out[idx, cols] <- part$x
+    cols <- match(columns, colnames(part$x))
+    out[idx, ] <- part$x[, cols, drop = FALSE]
     source_names <- c(source_names, attr(part$x, "source_name", exact = TRUE) %||% character())
   }
   source_names <- unique(source_names[nzchar(source_names) & !is.na(source_names)])
@@ -854,7 +857,7 @@ wsi_prediction_matrix_for_spatial_project <- function(linked, source_id, ids,
       wsi_prediction_matrix_for_spatial_raw(
         section,
         feature_ids,
-        max_features = max_features
+        max_features = NULL
       )
     } else if (startsWith(source_id, "spatial:reduction:")) {
       wsi_prediction_matrix_for_spatial_reduction(
@@ -1536,6 +1539,7 @@ wsi_prediction_run <- function(context, rois, source_id, train_ids, test_ids = c
   attr(result, "method") <- method
   attr(result, "scaling") <- scaling
   attr(result, "feature_count") <- ncol(x)
+  attr(result, "point_unit") <- unique(as.character(points$unit %||% "point"))[[1L]] %||% "point"
   attr(result, "reduction_dimensions") <- attr(x, "reduction_dimensions", exact = TRUE) %||% NA_integer_
   attr(result, "svm_refined") <- svm_refined
   result
@@ -1598,7 +1602,8 @@ wsi_prediction_response <- function(context, state, payload) {
     feature_count = attr(result, "feature_count") %||% NA_integer_,
     ncomp = as.integer(payload$ncomp %||% 2L),
     reduction_dims = attr(result, "reduction_dimensions") %||% NA_integer_,
-    svm_refined = isTRUE(attr(result, "svm_refined") %||% FALSE)
+    svm_refined = isTRUE(attr(result, "svm_refined") %||% FALSE),
+    point_unit = attr(result, "point_unit") %||% "point"
   )
   wsi_viewer_state_record_event(state, "prediction_finished", detail)
   response <- wsi_viewer_state_response(state)
