@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { LogicalSize } from "@tauri-apps/api/dpi";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 const homeScreen = document.getElementById("homeScreen");
 const appShell = document.getElementById("appShell");
@@ -36,6 +38,14 @@ let rAvailable = false;
 let rDownloadUrl = "https://cran.r-project.org/";
 const localLogs = [];
 const spatialInspections = new Map();
+const launcherWindow = getCurrentWindow();
+const launcherWindowSizes = {
+  home: { width: 620, height: 380, minWidth: 520, minHeight: 320, maxHeight: 720 },
+  images: { width: 760, height: 460, minWidth: 620, minHeight: 380, maxHeight: 760 },
+  associations: { width: 860, height: 620, minWidth: 700, minHeight: 460, maxHeight: 860 },
+  runtime: { width: 860, height: 720, minWidth: 700, minHeight: 520, maxHeight: 900 }
+};
+let launcherResizeTimer = null;
 
 function timestamp() {
   return new Date().toLocaleTimeString();
@@ -72,6 +82,50 @@ function setStatus(message, kind = "info") {
   appendLog(`Status: ${message}`);
 }
 
+function activeLauncherLayout() {
+  if (!homeScreen.hidden) return "home";
+  if (!runtimePanel.hidden) return "runtime";
+  if (!associationStep.hidden) return "associations";
+  return "images";
+}
+
+function activeLauncherContent() {
+  if (!homeScreen.hidden) return document.querySelector(".homeCard");
+  return document.querySelector(".launcherPanel");
+}
+
+function launcherTargetSize(layout = activeLauncherLayout()) {
+  const preset = launcherWindowSizes[layout] || launcherWindowSizes.home;
+  const content = activeLauncherContent();
+  const rect = content?.getBoundingClientRect();
+  const padding = layout === "home" ? 44 : 48;
+  const contentWidth = Math.ceil(rect?.width || preset.width - padding) + padding;
+  const contentHeight = Math.ceil(content?.scrollHeight || rect?.height || preset.height - padding) + padding;
+  return {
+    width: Math.max(preset.minWidth, Math.min(1040, Math.max(preset.width, contentWidth))),
+    height: Math.max(preset.minHeight, Math.min(preset.maxHeight, Math.max(preset.height, contentHeight))),
+    minWidth: preset.minWidth,
+    minHeight: preset.minHeight
+  };
+}
+
+async function fitLauncherWindow(layout = activeLauncherLayout(), center = false) {
+  if (!launcherWindow) return;
+  const size = launcherTargetSize(layout);
+  try {
+    await launcherWindow.setMinSize(new LogicalSize(size.minWidth, size.minHeight));
+    await launcherWindow.setSize(new LogicalSize(size.width, size.height));
+    if (center) await launcherWindow.center();
+  } catch (error) {
+    appendLog(`Could not resize launcher window: ${error}`);
+  }
+}
+
+function scheduleLauncherWindowFit(layout = activeLauncherLayout(), center = false) {
+  window.clearTimeout(launcherResizeTimer);
+  launcherResizeTimer = window.setTimeout(() => fitLauncherWindow(layout, center), 40);
+}
+
 function setBusy(isBusy) {
   openProjectHome.disabled = isBusy || !rAvailable;
   createProjectHome.disabled = isBusy || !rAvailable;
@@ -105,6 +159,7 @@ function showHome() {
   appShell.hidden = true;
   runtimePanel.hidden = true;
   setBusy(false);
+  scheduleLauncherWindowFit("home", true);
 }
 
 function showCreateProject() {
@@ -118,6 +173,7 @@ function showCreateProject() {
   workspaceSubtitle.textContent = "Create a new project";
   renderProjectImages();
   setBusy(false);
+  scheduleLauncherWindowFit("images");
 }
 
 function showAssociations() {
@@ -129,6 +185,7 @@ function showAssociations() {
   workspaceSubtitle.textContent = "Associate data to each image";
   renderAssociations();
   setBusy(false);
+  scheduleLauncherWindowFit("associations");
 }
 
 function showOpenProjectLog() {
@@ -142,6 +199,7 @@ function showOpenProjectLog() {
   workspaceSubtitle.textContent = "Open saved project";
   renderProjectImages("Opening saved project...");
   setBusy(false);
+  scheduleLauncherWindowFit("runtime");
 }
 
 function basename(path) {
@@ -253,10 +311,12 @@ function renderProjectImages(message = null) {
   runR.disabled = !rAvailable || projectImages.length === 0;
   if (message) {
     imageList.textContent = message;
+    scheduleLauncherWindowFit(activeLauncherLayout());
     return;
   }
   if (!projectImages.length) {
     imageList.textContent = "No images selected.";
+    scheduleLauncherWindowFit(activeLauncherLayout());
     return;
   }
   imageList.replaceChildren(...projectImages.map((item, index) => {
@@ -274,12 +334,14 @@ function renderProjectImages(message = null) {
     row.append(text, remove);
     return row;
   }));
+  scheduleLauncherWindowFit(activeLauncherLayout());
 }
 
 function renderAssociations() {
   runR.disabled = projectImages.length === 0;
   if (!projectImages.length) {
     associationList.textContent = "No images selected.";
+    scheduleLauncherWindowFit(activeLauncherLayout());
     return;
   }
   associationList.replaceChildren(...projectImages.map((item, index) => {
@@ -348,6 +410,7 @@ function renderAssociations() {
     }
     return card;
   }));
+  scheduleLauncherWindowFit(activeLauncherLayout());
 }
 
 function quoteRString(value) {

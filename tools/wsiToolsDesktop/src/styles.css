@@ -13,6 +13,7 @@ body {
   margin: 0;
   min-height: 100vh;
   background: #0b1020;
+  overflow: auto;
 }
 
 [hidden] {
@@ -43,7 +44,7 @@ button:disabled {
   min-height: 100vh;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: 18px;
   background: #0b1020;
 }
 
@@ -102,7 +103,7 @@ button:disabled {
   display: grid;
   place-items: center;
   min-height: 100vh;
-  padding: 24px;
+  padding: 18px;
 }
 
 .launcherPanel {
@@ -118,7 +119,7 @@ button:disabled {
 }
 
 .projectBuilderPanel {
-  min-height: min(860px, calc(100vh - 48px));
+  min-height: 0;
 }
 
 .brand {
