@@ -2686,6 +2686,15 @@ wsi_attach_viewer_session_methods <- function(session) {
   session$get_spot_annotation_table <- function(service = TRUE) {
     session$get_annotation_spots(service = service)
   }
+  session$get_annotation_spot_matrix <- function(service = TRUE,
+                                                 by = c("annotation", "class"),
+                                                 include_unassigned = FALSE) {
+    wsi_annotation_association_matrix(
+      session$get_annotation_spots(service = service),
+      by = by,
+      include_unassigned = include_unassigned
+    )
+  }
   session$get_selected_spots <- function(service = TRUE) {
     selection <- session$get_state(service = service)$seurat_selection %||%
       list(labels = character(), count = 0L, matched_count = 0L)
@@ -4701,7 +4710,7 @@ print.wsi_viewer_session <- function(x, ...) {
   if (!is.null(x$stardist_server)) {
     cat(sprintf("  stardist: %s\n", x$stardist_server$url))
   }
-  cat("  methods: capabilities(), on(), get_rois(), get_selected_roi(), get_selected_rois(), get_selected_object(), get_selected_spots(), get_spot_annotation_table(), get_measurements(), get_trajectories(), get_roi_summary(), get_cell_summary(), get_ihc_summary(), get_segmentation(), get_layers(), get_channel_settings(), get_kodama_selection(), get_annotation_spots(), get_history(), get_logs(), get_tile_preview(), get_prediction(), get_proximity(), get_proximity_stats(), get_trajectory_profile(), colour_spots_by_gene(), add_rois(), add_layer(), add_channel_source(), measure_ihc_intensity(), preview_tiles(), extract_tile_preview(), list_jobs(), run_tiles_async(), save_project(), autosave_start()\n")
+  cat("  methods: capabilities(), on(), get_rois(), get_selected_roi(), get_selected_rois(), get_selected_object(), get_selected_spots(), get_spot_annotation_table(), get_annotation_spot_matrix(), get_measurements(), get_trajectories(), get_roi_summary(), get_cell_summary(), get_ihc_summary(), get_segmentation(), get_layers(), get_channel_settings(), get_kodama_selection(), get_annotation_spots(), get_history(), get_logs(), get_tile_preview(), get_prediction(), get_proximity(), get_proximity_stats(), get_trajectory_profile(), colour_spots_by_gene(), add_rois(), add_layer(), add_channel_source(), measure_ihc_intensity(), preview_tiles(), extract_tile_preview(), list_jobs(), run_tiles_async(), save_project(), autosave_start()\n")
   cat("  stop with: wsi_viewer_stop(x)\n")
   invisible(x)
 }
