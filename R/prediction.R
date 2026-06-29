@@ -967,20 +967,46 @@ wsi_prediction_selected_roi_indices <- function(rois, ids, include_all = FALSE) 
   if (!length(ids)) {
     return(integer())
   }
+  prefixed_roi <- sub("^roi:", "", ids[startsWith(ids, "roi:")])
+  prefixed_roi_index <- sub("^roi_index:", "", ids[startsWith(ids, "roi_index:")])
+  prefixed_class <- sub("^class:", "", ids[startsWith(ids, "class:")])
+  indices <- integer()
+  if (length(prefixed_roi_index)) {
+    roi_index <- suppressWarnings(as.integer(prefixed_roi_index))
+    roi_index <- roi_index[is.finite(roi_index) & roi_index >= 0L & roi_index < nrow(rois)]
+    indices <- c(indices, roi_index + 1L)
+  }
+  if (length(prefixed_roi)) {
+    roi_keys <- cbind(
+      as.character(rois$roi_id %||% ""),
+      as.character(rois$name %||% "")
+    )
+    indices <- c(indices, which(apply(roi_keys, 1L, function(row) any(row %in% prefixed_roi))))
+  }
+  if (length(prefixed_class)) {
+    class_keys <- wsi_roi_class(rois$class %||% rep(NA_character_, nrow(rois)))
+    wanted <- wsi_roi_class(prefixed_class)
+    indices <- c(indices, which(tolower(class_keys) %in% tolower(wanted)))
+  }
+  ids <- ids[!startsWith(ids, "roi:") & !startsWith(ids, "roi_index:") & !startsWith(ids, "class:")]
   keys <- cbind(
     as.character(rois$roi_id %||% ""),
     as.character(rois$name %||% ""),
     as.character(rois$class %||% "")
   )
-  which(apply(keys, 1L, function(row) any(row %in% ids)))
+  if (length(ids)) {
+    indices <- c(indices, which(apply(keys, 1L, function(row) any(row %in% ids))))
+  }
+  sort(unique(indices))
 }
 
 wsi_prediction_assign_points <- function(points, rois, ids, include_all = FALSE) {
   label <- rep(NA_character_, nrow(points))
   roi_id <- rep(NA_character_, nrow(points))
+  roi_index <- rep(NA_integer_, nrow(points))
   indices <- wsi_prediction_selected_roi_indices(rois, ids, include_all = include_all)
   if (!length(indices)) {
-    return(list(label = label, roi_id = roi_id, indices = indices))
+    return(list(label = label, roi_id = roi_id, roi_index = roi_index, indices = indices))
   }
   for (i in indices) {
     scope_keep <- wsi_prediction_scope_keep(points, wsi_prediction_roi_scope(rois, i))
@@ -994,8 +1020,9 @@ wsi_prediction_assign_points <- function(points, rois, ids, include_all = FALSE)
     }
     label[inside] <- wsi_prediction_roi_label(rois, i)
     roi_id[inside] <- as.character(rois$roi_id[[i]] %||% i)
+    roi_index[inside] <- i
   }
-  list(label = label, roi_id = roi_id, indices = indices)
+  list(label = label, roi_id = roi_id, roi_index = roi_index, indices = indices)
 }
 
 wsi_prediction_scope_scalar <- function(...) {

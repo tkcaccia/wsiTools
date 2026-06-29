@@ -139,8 +139,10 @@ wsi_proximity_same_selection <- function(result, point_source, query_ids, target
     b <- sort(unique(as.character(b[nzchar(b) & !is.na(b)])))
     identical(a, b)
   }
-  same_set(result$query_annotation_id, query_ids) &&
-    same_set(result$target_annotation_id, target_ids)
+  existing_query <- attr(result, "query_selectors", exact = TRUE) %||% result$query_annotation_id
+  existing_target <- attr(result, "target_selectors", exact = TRUE) %||% result$target_annotation_id
+  same_set(existing_query, query_ids) &&
+    same_set(existing_target, target_ids)
 }
 
 wsi_proximity_result_from_payload <- function(context, state, payload, rois = NULL,
@@ -176,11 +178,17 @@ wsi_proximity_result_from_payload <- function(context, state, payload, rois = NU
   list(result = result, rois = rois, source = source, recomputed = TRUE)
 }
 
-wsi_proximity_roi_metadata <- function(rois, roi_id) {
-  if (!inherits(rois, "wsi_roi") || !nrow(rois) || is.na(roi_id) || !nzchar(roi_id)) {
+wsi_proximity_roi_metadata <- function(rois, roi_id, roi_index = NA_integer_) {
+  if (!inherits(rois, "wsi_roi") || !nrow(rois)) {
     return(list(name = NA_character_, class = NA_character_))
   }
-  idx <- match(roi_id, as.character(rois$roi_id))
+  idx <- suppressWarnings(as.integer(roi_index %||% NA_integer_))
+  if (!is.finite(idx) || idx < 1L || idx > nrow(rois)) {
+    if (is.na(roi_id) || !nzchar(roi_id)) {
+      return(list(name = NA_character_, class = NA_character_))
+    }
+    idx <- match(roi_id, as.character(rois$roi_id))
+  }
   if (is.na(idx)) {
     return(list(name = NA_character_, class = NA_character_))
   }
@@ -386,8 +394,16 @@ wsi_proximity_run <- function(context, rois, point_source = "spatial:points",
   target_nearest_rows <- target_rows[nearest$index]
   px <- tryCatch(wsi_pixel_size_xy(pixel_size), error = function(err) NULL)
 
-  query_meta <- lapply(query$roi_id[query_rows], function(id) wsi_proximity_roi_metadata(rois, id))
-  target_meta <- lapply(target$roi_id[target_nearest_rows], function(id) wsi_proximity_roi_metadata(rois, id))
+  query_meta <- Map(
+    function(id, index) wsi_proximity_roi_metadata(rois, id, index),
+    query$roi_id[query_rows],
+    query$roi_index[query_rows]
+  )
+  target_meta <- Map(
+    function(id, index) wsi_proximity_roi_metadata(rois, id, index),
+    target$roi_id[target_nearest_rows],
+    target$roi_index[target_nearest_rows]
+  )
   unit <- as.character(query_points$unit %||% points$unit %||% "point")
 
   out <- data.frame(
@@ -415,6 +431,8 @@ wsi_proximity_run <- function(context, rois, point_source = "spatial:points",
   attr(out, "query_count") <- length(query_rows)
   attr(out, "target_count") <- length(target_rows)
   attr(out, "point_source") <- as.character(point_source)
+  attr(out, "query_selectors") <- query_ids
+  attr(out, "target_selectors") <- target_ids
   out
 }
 

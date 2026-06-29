@@ -69,6 +69,109 @@ test_that("proximity analysis computes nearest target spot distances", {
   expect_equal(result$distance_um[[1]], 4.5)
 })
 
+test_that("proximity analysis supports annotation category selectors", {
+  rois <- wsiTools:::wsi_roi_from_geojson(list(
+    type = "FeatureCollection",
+    features = list(
+      list(
+        type = "Feature",
+        id = "tumour_a",
+        properties = list(name = "Tumour A", classification = list(name = "tumour")),
+        geometry = list(type = "Polygon", coordinates = list(list(
+          c(0, 0), c(3, 0), c(3, 3), c(0, 3), c(0, 0)
+        )))
+      ),
+      list(
+        type = "Feature",
+        id = "tumour_b",
+        properties = list(name = "Tumour B", classification = list(name = "tumour")),
+        geometry = list(type = "Polygon", coordinates = list(list(
+          c(0, 5), c(3, 5), c(3, 8), c(0, 8), c(0, 5)
+        )))
+      ),
+      list(
+        type = "Feature",
+        id = "stroma_a",
+        properties = list(name = "Stroma A", classification = list(name = "stroma")),
+        geometry = list(type = "Polygon", coordinates = list(list(
+          c(10, 0), c(13, 0), c(13, 8), c(10, 8), c(10, 0)
+        )))
+      )
+    )
+  ))
+  linked <- list(
+    source_name = "Seurat",
+    spots = data.frame(
+      id = c("t1", "t2", "s1", "outside"),
+      label = c("t1", "t2", "s1", "outside"),
+      x = c(1, 1, 11, 30),
+      y = c(1, 6, 1, 30),
+      stringsAsFactors = FALSE
+    )
+  )
+  class(linked) <- c("wsi_spatial_object", "list")
+
+  result <- wsiTools:::wsi_proximity_run(
+    context = list(spatial = linked),
+    rois = rois,
+    point_source = "spatial:points",
+    query_ids = "class:tumour",
+    target_ids = "class:stroma"
+  )
+
+  expect_equal(nrow(result), 2L)
+  expect_setequal(result$query_annotation_id, c("tumour_a", "tumour_b"))
+  expect_true(all(result$query_class == "tumour"))
+  expect_true(all(result$target_class == "stroma"))
+})
+
+test_that("proximity analysis supports stable viewer ROI index selectors", {
+  rois <- wsiTools:::wsi_roi_from_geojson(list(
+    type = "FeatureCollection",
+    features = list(
+      list(
+        type = "Feature",
+        id = "duplicate",
+        properties = list(name = "Region", classification = list(name = "query")),
+        geometry = list(type = "Polygon", coordinates = list(list(
+          c(0, 0), c(3, 0), c(3, 3), c(0, 3), c(0, 0)
+        )))
+      ),
+      list(
+        type = "Feature",
+        id = "duplicate",
+        properties = list(name = "Region", classification = list(name = "target")),
+        geometry = list(type = "Polygon", coordinates = list(list(
+          c(10, 0), c(13, 0), c(13, 3), c(10, 3), c(10, 0)
+        )))
+      )
+    )
+  ))
+  linked <- list(
+    spots = data.frame(
+      id = c("q", "t"),
+      label = c("q", "t"),
+      x = c(1, 11),
+      y = c(1, 1),
+      stringsAsFactors = FALSE
+    )
+  )
+  class(linked) <- c("wsi_spatial_object", "list")
+
+  result <- wsiTools:::wsi_proximity_run(
+    context = list(spatial = linked),
+    rois = rois,
+    point_source = "spatial:points",
+    query_ids = "roi_index:0",
+    target_ids = "roi_index:1"
+  )
+
+  expect_equal(result$id, "q")
+  expect_equal(result$nearest_target_id, "t")
+  expect_equal(result$query_class, "query")
+  expect_equal(result$target_class, "target")
+})
+
 test_that("proximity response stores result and queues viewer layer", {
   rois <- wsiTools:::wsi_roi_from_geojson(list(
     type = "FeatureCollection",
@@ -242,6 +345,11 @@ test_that("proximity controls are rendered only for managed point sources", {
   expect_match(html, "<span>Points</span><select id=\"proximityPointSource\"", fixed = TRUE)
   expect_match(html, "<span>Measure inside</span><select id=\"proximityQueryAnnotations\"", fixed = TRUE)
   expect_match(html, "<span>Distance from</span><select id=\"proximityTargetAnnotations\"", fixed = TRUE)
+  expect_match(html, "function proximityCategoryOptions", fixed = TRUE)
+  expect_match(html, "classGroup.label='Categories'", fixed = TRUE)
+  expect_match(html, "roiGroup.label='Geometries'", fixed = TRUE)
+  expect_match(html, "const value='class:'+cat.className", fixed = TRUE)
+  expect_match(html, "value='roi_index:'+entry.index", fixed = TRUE)
   expect_match(html, "if(typeof syncProximityAnnotations==='function')syncProximityAnnotations(false)", fixed = TRUE)
   expect_match(html, "applyProximityStatsFeature", fixed = TRUE)
   expect_match(html, "feature_source:source", fixed = TRUE)
