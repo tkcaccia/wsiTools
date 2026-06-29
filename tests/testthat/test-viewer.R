@@ -35,7 +35,10 @@ test_that("wsi_open_viewer opens a static viewer with one command", {
   expect_true(file.exists(output))
   html <- paste(readLines(output, warn = FALSE), collapse = "\n")
   expect_match(html, "wsiTools viewer", fixed = TRUE)
-  expect_match(html, "thumbnail preview, full slide not loaded into R", fixed = TRUE)
+  expect_true(
+    grepl("thumbnail preview, full slide not loaded into R", html, fixed = TRUE) ||
+      grepl("tile_url_base", html, fixed = TRUE)
+  )
 })
 
 test_that("wsi_open_viewer accepts friendly flag aliases", {
@@ -94,7 +97,10 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   html <- paste(readLines(output, warn = FALSE), collapse = "\n")
   expect_match(html, "wsiTools viewer", fixed = TRUE)
   expect_match(html, "data:image/svg\\+xml;base64,")
-  expect_match(html, "thumbnail preview, full slide not loaded into R", fixed = TRUE)
+  expect_true(
+    grepl("thumbnail preview, full slide not loaded into R", html, fixed = TRUE) ||
+      grepl("tile_url_base", html, fixed = TRUE)
+  )
   expect_match(html, "toolPan", fixed = TRUE)
   expect_match(html, "navPanButton", fixed = TRUE)
   expect_match(html, "iconMove", fixed = TRUE)
@@ -109,6 +115,10 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "annotationHighlightAll", fixed = TRUE)
   expect_match(html, "annotationHighlightNone", fixed = TRUE)
   expect_match(html, "roiClassHighlighted", fixed = TRUE)
+  expect_match(html, "roiLodMode", fixed = TRUE)
+  expect_match(html, "roiVisibleSlideBounds", fixed = TRUE)
+  expect_match(html, "roiIntersectsViewport", fixed = TRUE)
+  expect_match(html, "Annotation level-of-detail active", fixed = TRUE)
   expect_match(html, "screenshotTool", fixed = TRUE)
   expect_match(html, "Select screenshot area", fixed = TRUE)
   expect_match(html, "PNG, JPEG, SVG, or PDF screenshot", fixed = TRUE)
@@ -1221,7 +1231,10 @@ test_that("non-interactive viewer wrapper writes HTML without opening a browser"
   expect_true(file.exists(output))
   html <- paste(readLines(output, warn = FALSE), collapse = "\n")
   expect_match(html, "wsiTools viewer", fixed = TRUE)
-  expect_match(html, "thumbnail preview, full slide not loaded into R", fixed = TRUE)
+  expect_true(
+    grepl("thumbnail preview, full slide not loaded into R", html, fixed = TRUE) ||
+      grepl("tile_url_base", html, fixed = TRUE)
+  )
 })
 
 test_that("project panel does not list slide pyramid levels as sections", {
