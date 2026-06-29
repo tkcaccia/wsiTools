@@ -1137,6 +1137,9 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "geojsonImportSummary", fixed = TRUE)
   expect_match(html, "bindGeojsonImportControls", fixed = TRUE)
   expect_match(html, "addImportedGeojson", fixed = TRUE)
+  expect_match(html, "geojsonMaskUrl", fixed = TRUE)
+  expect_match(html, "geojsonShouldImportAsMask", fixed = TRUE)
+  expect_match(html, "addImportedGeojsonAsMask", fixed = TRUE)
   expect_match(html, "importedRoiFromFeature", fixed = TRUE)
   expect_match(html, "geojsonGeometryParts", fixed = TRUE)
   expect_false(grepl("roiLabelInput", html, fixed = TRUE))
@@ -2454,7 +2457,8 @@ test_that("viewer event validation allowlists live WebSocket events", {
     "kodama_cells_selected", "seurat_cluster_coloured",
     "seurat_plot_scope_changed",
     "viewer_log_updated", "viewer_log_cleared", "viewer_log_exported",
-    "multi_view_layout_updated", "multi_view_pane_replaced", "multi_view_sync_updated"
+    "multi_view_layout_updated", "multi_view_pane_replaced", "multi_view_sync_updated",
+    "geojson_mask_overlay_created"
   )
 
   expect_true(all(expected %in% wsiTools:::wsi_viewer_allowed_events()))

@@ -149,7 +149,7 @@ wsi_viewer_allowed_events <- function() {
     "roi_smoothed", "roi_simplified", "roi_holes_filled", "roi_split",
     "roi_same_label_merged", "rois_merged", "brush_selection_updated",
     "brush_committed", "viewport_changed",
-    "geojson_imported", "class_export_rules_updated",
+    "geojson_imported", "geojson_mask_overlay_created", "class_export_rules_updated",
     "annotations_dirty", "annotations_saved",
     "annotation_history_updated", "annotation_history_cleared",
     "viewer_log_updated", "viewer_log_cleared", "viewer_log_exported",
@@ -3566,6 +3566,100 @@ wsi_viewer_image_export_response <- function(slide, payload, state = NULL,
   result
 }
 
+wsi_viewer_geojson_mask_response <- function(slide, payload, state = NULL,
+                                             output_dir = getwd(),
+                                             output_html = NULL) {
+  if (is.null(slide)) {
+    wsi_abort("No slide is attached to this live viewer session.")
+  }
+  if (!is.list(payload)) {
+    wsi_abort("GeoJSON mask overlay request must be a JSON object.")
+  }
+  unknown <- setdiff(names(payload), c(
+    "geojson", "file", "name", "id", "downsample", "label_by",
+    "opacity", "visible", "rebuild", "smooth", "smooth_iterations",
+    "smooth_max_vertices"
+  ))
+  if (length(unknown)) {
+    wsi_abort(sprintf(
+      "Unsupported GeoJSON mask field%s: %s.",
+      if (length(unknown) == 1L) "" else "s",
+      paste(unknown, collapse = ", ")
+    ))
+  }
+  geojson <- payload$geojson %||% NULL
+  if (is.null(geojson) || !is.list(geojson)) {
+    wsi_abort("GeoJSON mask overlay requires a `geojson` FeatureCollection.")
+  }
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+  }
+  if (!dir.exists(output_dir)) {
+    wsi_abort(sprintf("Could not create GeoJSON mask output directory: %s", output_dir))
+  }
+  file_label <- as.character(payload$file %||% payload$name %||% "imported_cells")
+  id <- wsi_safe_id(as.character(payload$id %||% file_label), fallback = "imported_cells")
+  work_dir <- file.path(output_dir, id)
+  dir.create(work_dir, recursive = TRUE, showWarnings = FALSE)
+  geojson_file <- file.path(work_dir, paste0(id, ".geojson"))
+  jsonlite::write_json(geojson, geojson_file, auto_unbox = TRUE, null = "null")
+  downsample <- suppressWarnings(as.numeric(payload$downsample %||% 4))
+  if (!is.finite(downsample) || downsample < 1) {
+    downsample <- 4
+  }
+  label_by <- as.character(payload$label_by %||% "class")
+  if (!label_by %in% c("class", "name", "roi_id", "index", "constant")) {
+    label_by <- "class"
+  }
+  opacity <- suppressWarnings(as.numeric(payload$opacity %||% 0.45))
+  if (!is.finite(opacity)) {
+    opacity <- 0.45
+  }
+  source_result <- wsi_geojson_mask_channel_source(
+    geojson = geojson_file,
+    slide = slide,
+    output_dir = work_dir,
+    name = as.character(payload$name %||% sprintf("Mask: %s", basename(file_label))),
+    id = id,
+    output_html = output_html,
+    downsample = downsample,
+    label_by = label_by,
+    visible = isTRUE(payload$visible %||% TRUE),
+    opacity = opacity,
+    rebuild = isTRUE(payload$rebuild),
+    overwrite = TRUE,
+    smooth = isTRUE(payload$smooth %||% TRUE),
+    smooth_iterations = as.integer(payload$smooth_iterations %||% 1L),
+    smooth_max_vertices = as.integer(payload$smooth_max_vertices %||% 4000L)
+  )
+  source <- wsi_channel_source_payload(source_result$source)
+  if (inherits(state, "wsi_viewer_state")) {
+    sources <- state$channel_sources %||% list()
+    keys <- vapply(sources, function(x) as.character(x$id %||% ""), character(1))
+    idx <- match(source$id, keys)
+    if (is.na(idx)) {
+      sources[[length(sources) + 1L]] <- source
+    } else {
+      sources[[idx]] <- source
+    }
+    names(sources) <- vapply(sources, function(x) as.character(x$id %||% ""), character(1))
+    state$channel_sources <- sources
+    state$channel_settings <- wsi_channel_settings_from_sources(sources)
+    wsi_viewer_state_record_event(
+      state,
+      "geojson_mask_overlay_created",
+      list(file = file_label, id = source$id, labels = length(source$metadata$legend %||% list()))
+    )
+  }
+  list(
+    ok = TRUE,
+    source = source,
+    mask = source_result$mask,
+    tiles = source_result$tiles,
+    file = file_label
+  )
+}
+
 wsi_start_viewer_state_server <- function(state, slide = NULL,
                                           host = "127.0.0.1", port = 8788,
                                           path = "/viewer-state", max_tries = 20L,
@@ -3577,6 +3671,9 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	                                          image_export_path = "/image-export",
 	                                          image_export_dir = getwd(),
 	                                          image_export_max_pixels = 50000000,
+	                                          geojson_mask_path = "/geojson-mask-overlay",
+	                                          geojson_mask_dir = file.path(tempdir(), "wsiTools_geojson_masks"),
+	                                          output_html = NULL,
 	                                          prediction_context = NULL,
 	                                          prediction_path = "/prediction",
 	                                          proximity_context = NULL,
@@ -3598,9 +3695,12 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	  if (!startsWith(spatial_tile_path, "/")) {
 	    spatial_tile_path <- paste0("/", spatial_tile_path)
 	  }
-	  if (!startsWith(image_export_path, "/")) {
-	    image_export_path <- paste0("/", image_export_path)
-	  }
+  if (!startsWith(image_export_path, "/")) {
+    image_export_path <- paste0("/", image_export_path)
+  }
+  if (!startsWith(geojson_mask_path, "/")) {
+    geojson_mask_path <- paste0("/", geojson_mask_path)
+  }
 	  if (!startsWith(prediction_path, "/")) {
 	    prediction_path <- paste0("/", prediction_path)
 	  }
@@ -3765,6 +3865,40 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	    })
 	  }
 
+	  geojson_mask_response <- function(req) {
+	    method <- req$REQUEST_METHOD %||% "GET"
+	    if (!identical(method, "POST")) {
+	      return(wsi_http_json_response(status = 405L, body = list(error = "Use POST for GeoJSON mask overlay conversion.")))
+	    }
+	    if (is.null(slide)) {
+	      return(wsi_http_json_response(status = 404L, body = list(error = "No slide is attached to this live viewer session.")))
+	    }
+	    tryCatch({
+	      body <- wsi_http_request_body(req)
+	      payload <- if (nzchar(body)) jsonlite::fromJSON(body, simplifyVector = FALSE) else list()
+	      result <- wsi_viewer_geojson_mask_response(
+	        slide,
+	        payload,
+	        state = state,
+	        output_dir = geojson_mask_dir,
+	        output_html = output_html %||% state$html %||% NULL
+	      )
+	      response <- wsi_viewer_state_response(state)
+	      response$geojson_mask_overlay <- result
+	      response$commands <- c(
+	        response$commands %||% list(),
+	        list(list(
+	          id = paste0("geojson_mask_", result$source$id, "_", as.integer(Sys.time())),
+	          type = "add_channel_source",
+	          payload = list(source = result$source)
+	        ))
+	      )
+	      wsi_http_json_response(body = response)
+	    }, error = function(err) {
+	      wsi_http_json_response(status = 500L, body = list(ok = FALSE, error = conditionMessage(err)))
+	    })
+	  }
+
 	  prediction_response <- function(req) {
 	    method <- req$REQUEST_METHOD %||% "GET"
 	    if (!identical(method, "POST")) {
@@ -3835,6 +3969,9 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	      }
 	      if (identical(request_path, image_export_path)) {
 	        return(image_export_response(req))
+	      }
+	      if (identical(request_path, geojson_mask_path)) {
+	        return(geojson_mask_response(req))
 	      }
 	      if (identical(request_path, prediction_path)) {
 	        return(prediction_response(req))
@@ -3933,6 +4070,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	        seurat_gene_path = seurat_gene_path,
 	        spatial_tile_path = spatial_tile_path,
 	        image_export_path = image_export_path,
+	        geojson_mask_path = geojson_mask_path,
 	        prediction_path = prediction_path,
 	        proximity_path = proximity_path,
 	        seurat_gene_url = if (wsi_seurat_live_gene_available(seurat) ||
@@ -3943,6 +4081,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
           },
 	        spatial_tile_export_url = sprintf("http://%s:%d%s", host, candidate, spatial_tile_path),
 	        image_export_url = if (!is.null(slide)) sprintf("http://%s:%d%s", host, candidate, image_export_path) else NULL,
+	        geojson_mask_url = if (!is.null(slide)) sprintf("http://%s:%d%s", host, candidate, geojson_mask_path) else NULL,
 	        prediction_url = if (wsi_prediction_context_enabled(prediction_context %||% list(spatial = seurat))) sprintf("http://%s:%d%s", host, candidate, prediction_path) else NULL,
 	        proximity_url = if (wsi_prediction_context_enabled(proximity_context %||% prediction_context %||% list(spatial = seurat))) sprintf("http://%s:%d%s", host, candidate, proximity_path) else NULL,
 	        tile_sources = tile_sources
@@ -4224,6 +4363,8 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
 	                               image_export_path = "/image-export",
 	                               image_export_dir = getwd(),
 	                               image_export_max_pixels = 50000000,
+	                               geojson_mask_path = "/geojson-mask-overlay",
+	                               geojson_mask_dir = file.path(tempdir(), "wsiTools_geojson_masks"),
 	                               prediction_path = "/prediction",
 	                               prediction_context = NULL,
 	                               proximity_path = "/proximity",
@@ -4364,6 +4505,8 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
 	    image_export_path = image_export_path,
 	    image_export_dir = image_export_dir,
 	    image_export_max_pixels = image_export_max_pixels,
+	    geojson_mask_path = geojson_mask_path,
+	    geojson_mask_dir = geojson_mask_dir,
 	    prediction_context = live_prediction_context,
 	    prediction_path = prediction_path,
 	    proximity_context = live_proximity_context,
@@ -4463,6 +4606,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
 	  dots$seurat_gene_url <- bridge$seurat_gene_url %||% NULL
 	  dots$spatial_tile_export_url <- bridge$spatial_tile_export_url %||% NULL
 	  dots$image_export_url <- bridge$image_export_url %||% NULL
+	  dots$geojson_mask_url <- bridge$geojson_mask_url %||% NULL
 	  dots$prediction_url <- bridge$prediction_url %||% NULL
 	  dots$proximity_url <- bridge$proximity_url %||% NULL
   if (!is.null(dots$channel_sources)) {
@@ -4475,6 +4619,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   dots$open <- open
   dots$slide <- slide
   html <- do.call(wsi_viewer, dots)
+  state$html <- html
 
   session <- structure(
     c(
