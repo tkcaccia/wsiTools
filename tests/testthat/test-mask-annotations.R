@@ -313,3 +313,50 @@ test_that("GeoJSON masks can be written as coloured TIFF layers", {
   expect_true(all(grepl("^#[0-9A-F]{6}$", result$labels$colour)))
   expect_match(paste(system2("vipsheader", output, stdout = TRUE), collapse = " "), "3 bands")
 })
+
+test_that("dense GeoJSON masks can be prepared as tiled channel overlays", {
+  skip_if_not(wsi_has_vips())
+  skip_if_not_installed("magick")
+
+  geojson <- tempfile(fileext = ".geojson")
+  jsonlite::write_json(
+    list(
+      type = "FeatureCollection",
+      features = list(
+        list(
+          type = "Feature",
+          id = "cell-1",
+          properties = list(name = "Cell 1", classification = list(name = "tumour"), color = "#FF0000"),
+          geometry = list(
+            type = "Polygon",
+            coordinates = list(list(c(0, 0), c(64, 0), c(64, 64), c(0, 64), c(0, 0)))
+          )
+        )
+      )
+    ),
+    geojson,
+    auto_unbox = TRUE
+  )
+  output_dir <- tempfile("mask-overlay-")
+  slide <- wsi_mock_slide(width = 128, height = 128)
+  slide$backend <- "magick"
+  slide$path <- tempfile(fileext = ".png")
+  magick::image_write(magick::image_blank(128, 128, "white"), slide$path)
+
+  result <- wsi_geojson_mask_channel_source(
+    geojson = geojson,
+    slide = slide,
+    output_dir = output_dir,
+    id = "cells",
+    downsample = 1,
+    label_by = "class",
+    overwrite = TRUE
+  )
+
+  expect_s3_class(result$source, "wsi_channel_source")
+  expect_true(file.exists(result$mask$output))
+  expect_true(dir.exists(result$tiles$tiles))
+  expect_equal(result$source$metadata$kind, "mask")
+  expect_true(result$source$metadata$transparent_background)
+  expect_equal(result$source$metadata$legend[[1]]$label, "tumour")
+})

@@ -1008,6 +1008,188 @@ wsi_geojson_to_mask_tiff <- function(geojson,
 #' @export
 geojson_to_mask_tiff <- wsi_geojson_to_mask_tiff
 
+#' Create a tiled mask overlay from dense GeoJSON annotations
+#'
+#' Dense cell-level GeoJSON files can contain thousands to millions of polygon
+#' vertices, which is too expensive to draw interactively as vector annotations.
+#' This helper converts the GeoJSON into a coloured, pyramidal OME-TIFF mask,
+#' creates Deep Zoom tiles, and returns a [wsi_channel_source()] that the viewer
+#' can display as a transparent image overlay with a class legend. Keep ordinary
+#' editable tissue ROIs as GeoJSON; use this for dense cell annotations.
+#'
+#' @param geojson Dense cell annotation GeoJSON file.
+#' @param slide A `wsi_slide`, image path, or slide-like object used to derive
+#'   slide dimensions and mask extent.
+#' @param output_dir Directory where the OME-TIFF mask, legend CSV, and tile
+#'   pyramid are written.
+#' @param name,id Display name and stable layer id for the mask overlay.
+#' @param output_html Optional viewer HTML path. When supplied, tile URLs are
+#'   made relative to that HTML file for portable static viewers.
+#' @param downsample Full-resolution pixels represented by one mask pixel.
+#' @param label_by Annotation field used to define mask classes.
+#' @param visible,opacity Initial overlay visibility and opacity.
+#' @param tile_size Deep Zoom tile size for the generated mask overlay. The
+#'   default 254 is the standard Deep Zoom size and works reliably for small
+#'   and large masks.
+#' @param rebuild Rebuild existing mask/tiles.
+#' @param overwrite Overwrite an existing mask file when rebuilding.
+#' @param ... Additional arguments passed to [wsi_geojson_to_mask_tiff()].
+#'
+#' @return A list with `source`, `mask`, and `tiles`. The `source` element is a
+#'   `wsi_channel_source` suitable for `channel_sources = list(source)` or
+#'   `viewer$add_channel_source(source)`.
+#' @export
+wsi_geojson_mask_channel_source <- function(geojson,
+                                            slide,
+                                            output_dir,
+                                            name = "Cell annotation mask",
+                                            id = "cell_annotation_mask",
+                                            output_html = NULL,
+                                            downsample = 4,
+                                            label_by = c("class", "name", "roi_id", "index", "constant"),
+                                            visible = TRUE,
+                                            opacity = 0.45,
+                                            tile_size = 254,
+                                            rebuild = FALSE,
+                                            overwrite = FALSE,
+                                            ...) {
+  geojson <- wsi_validate_input_path(geojson)
+  label_by <- match.arg(label_by)
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+  }
+  if (!dir.exists(output_dir)) {
+    wsi_abort(sprintf("Could not create output directory: %s", output_dir))
+  }
+  tile_size <- as.integer(wsi_check_scalar_number(tile_size, "tile_size", allow_zero = FALSE))
+  slide_obj <- if (inherits(slide, "wsi_slide")) slide else wsi_open(slide)
+  slide_width <- as.numeric(slide_obj$dimensions[["width"]] %||% NA_real_)
+  slide_height <- as.numeric(slide_obj$dimensions[["height"]] %||% NA_real_)
+  if (!is.finite(slide_width) || !is.finite(slide_height)) {
+    wsi_abort("Could not determine slide dimensions for the mask overlay.")
+  }
+  downsample_xy <- wsi_mask_scale(downsample)
+  mask_width_est <- max(1L, as.integer(ceiling(slide_width / downsample_xy[["x"]])))
+  mask_height_est <- max(1L, as.integer(ceiling(slide_height / downsample_xy[["y"]])))
+  ome_tile_size <- max(16L, min(512L, tile_size, mask_width_est, mask_height_est))
+
+  id <- wsi_channel_source_id(id, name)
+  stem <- wsi_safe_id(id)
+  mask_output <- file.path(output_dir, paste0(stem, ".ome.tif"))
+  tile_dir <- file.path(output_dir, paste0(stem, "_deepzoom"))
+  mask_result <- NULL
+
+  if (file.exists(mask_output) && !isTRUE(rebuild)) {
+    legend_file <- sub("\\.ome\\.tiff?$", "_labels.csv", mask_output, ignore.case = TRUE)
+    labels <- if (file.exists(legend_file)) utils::read.csv(legend_file, stringsAsFactors = FALSE) else data.frame()
+    mask_result <- list(
+      output = normalizePath(mask_output, winslash = "/", mustWork = FALSE),
+      legend = normalizePath(legend_file, winslash = "/", mustWork = FALSE),
+      geojson = normalizePath(geojson, winslash = "/", mustWork = TRUE),
+      format = "ome-tiff",
+      pyramid = TRUE,
+      slide_width = slide_width,
+      slide_height = slide_height,
+      mask_width = mask_width_est,
+      mask_height = mask_height_est,
+      downsample = downsample_xy,
+      origin = c(x = 0, y = 0),
+      labels = labels
+    )
+    class(mask_result) <- c("wsi_geojson_mask_tiff", "list")
+  } else {
+    mask_result <- wsi_geojson_to_mask_tiff(
+      geojson = geojson,
+      output = mask_output,
+      slide = slide_obj,
+      downsample = downsample,
+      label_by = label_by,
+      colour = TRUE,
+      background_colour = "#000000",
+      format = "ome-tiff",
+      pyramid = TRUE,
+      tile_size = ome_tile_size,
+      overwrite = isTRUE(overwrite) || isTRUE(rebuild),
+      return_mask = FALSE,
+      ...
+    )
+  }
+
+  mask_slide <- wsi_open(mask_result$output)
+  tiles <- wsi_create_deepzoom_tiles(
+    slide = mask_slide,
+    tile_dir = tile_dir,
+    tile_size = tile_size,
+    tile_overlap = 1,
+    tile_format = "png",
+    quality = 90,
+    rebuild = isTRUE(rebuild)
+  )
+  tile_url_base <- if (!is.null(output_html)) {
+    wsi_tile_base_url(tile_dir, output_html)
+  } else {
+    wsi_file_url(tiles$tiles)
+  }
+  legend <- wsi_mask_channel_legend(mask_result$labels)
+  source <- wsi_channel_source(
+    name = name,
+    id = id,
+    type = "deepzoom",
+    tile_url_base = tile_url_base,
+    width = mask_result$mask_width,
+    height = mask_result$mask_height,
+    tile_size = tile_size,
+    tile_format = "png",
+    max_level = wsi_dz_max_level(mask_result$mask_width, mask_result$mask_height),
+    tile_overlap = as.integer(tiles$overlap %||% 1L),
+    visible = visible,
+    opacity = opacity,
+    colour = "#ffffff",
+    metadata = list(
+      kind = "mask",
+      transparent_background = TRUE,
+      legend = legend,
+      selected_values = vapply(legend, function(x) as.character(x$value), character(1)),
+      extent = list(x = 0, y = 0, width = slide_width, height = slide_height),
+      mask_downsample = unname(mask_result$downsample),
+      source_geojson = normalizePath(geojson, winslash = "/", mustWork = TRUE),
+      source_mask = mask_result$output,
+      legend_csv = mask_result$legend
+    )
+  )
+  list(source = source, mask = mask_result, tiles = tiles)
+}
+
+#' @rdname wsi_geojson_mask_channel_source
+#' @export
+wsi_add_geojson_mask_overlay <- function(viewer, geojson, slide, output_dir, ..., service = TRUE) {
+  result <- wsi_geojson_mask_channel_source(
+    geojson = geojson,
+    slide = slide,
+    output_dir = output_dir,
+    ...
+  )
+  wsi_add_channel_source(viewer, result$source, service = service)
+  invisible(result)
+}
+
+wsi_mask_channel_legend <- function(labels) {
+  if (is.null(labels) || !nrow(labels)) {
+    return(list())
+  }
+  lapply(seq_len(nrow(labels)), function(i) {
+    key <- as.character(labels$key[[i]] %||% labels$name[[i]] %||% labels$class[[i]] %||% labels$value[[i]])
+    value <- as.character(labels$value[[i]] %||% i)
+    colour <- as.character(labels$colour[[i]] %||% labels$color[[i]] %||% wsi_stain_palette(nrow(labels))[[i]])
+    list(
+      value = value,
+      label = key,
+      class = key,
+      colour = wsi_colour_to_hex(colour, "colour")
+    )
+  })
+}
+
 #' Rasterise ROI polygons into a mask
 #'
 #' Converts polygon or multipolygon ROI annotations into a small labelled mask.
