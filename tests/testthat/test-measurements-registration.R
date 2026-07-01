@@ -204,3 +204,36 @@ test_that("orientation transform mirrors ROI coordinates in slide space", {
   expect_equal(flipped$xmax[1], 100)
   expect_equal(flipped$ymax[1], 80)
 })
+
+test_that("tissue translation estimator recovers global centroid offsets", {
+  tissue <- matrix(FALSE, nrow = 100, ncol = 100)
+  tissue[35:70, 45:80] <- TRUE
+  grid <- expand.grid(
+    x = seq(48, 76, by = 7),
+    y = seq(38, 66, by = 7)
+  )
+  points <- data.frame(
+    x = grid$x * 10 - 100,
+    y = grid$y * 10 + 100
+  )
+
+  fit <- wsi_estimate_tissue_translation(
+    thumbnail = tissue,
+    points = points,
+    slide_width = 1000,
+    slide_height = 1000,
+    sample_n = nrow(points),
+    max_shift = 25,
+    coarse_step = 5,
+    refine_radius = 6,
+    refine_step = 1,
+    seed = NULL
+  )
+
+  expect_s3_class(fit, "wsi_annotation_translation")
+  expect_equal(round(fit$dx), 100)
+  expect_equal(round(fit$dy), -100)
+  expect_s3_class(fit$transform, "wsi_affine_transform")
+  expect_equal(round(fit$transform$matrix[1, 3]), 100)
+  expect_equal(round(fit$transform$matrix[2, 3]), -100)
+})
