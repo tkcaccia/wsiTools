@@ -163,6 +163,124 @@ wsi_dzi_overlap <- function(dzi_file, default = 0L) {
   as.integer(value)
 }
 
+wsi_dzi_dimensions <- function(dzi_file) {
+  if (!file.exists(dzi_file)) {
+    return(c(width = NA_real_, height = NA_real_))
+  }
+  text <- tryCatch(paste(readLines(dzi_file, warn = FALSE), collapse = " "), error = function(err) "")
+  width <- suppressWarnings(as.numeric(sub(".*\\bWidth=\"([0-9.]+)\".*", "\\1", text)))
+  height <- suppressWarnings(as.numeric(sub(".*\\bHeight=\"([0-9.]+)\".*", "\\1", text)))
+  c(
+    width = if (length(width) == 1L && is.finite(width)) width else NA_real_,
+    height = if (length(height) == 1L && is.finite(height)) height else NA_real_
+  )
+}
+
+wsi_deepzoom_metadata_file <- function(tile_dir) {
+  file.path(tile_dir, "slide.wsiTools.json")
+}
+
+wsi_deepzoom_env_flag <- function(name, default = FALSE) {
+  value <- Sys.getenv(name, unset = NA_character_)
+  if (is.na(value) || !nzchar(value)) {
+    return(isTRUE(default))
+  }
+  tolower(value) %in% c("1", "true", "yes", "y", "on")
+}
+
+wsi_deepzoom_slide_signature <- function(slide) {
+  path <- as.character(slide$path %||% "")
+  path_norm <- if (nzchar(path)) normalizePath(path, winslash = "/", mustWork = FALSE) else ""
+  info <- if (nzchar(path) && file.exists(path)) file.info(path) else NULL
+  list(
+    path = path_norm,
+    basename = basename(path_norm),
+    size = if (!is.null(info)) unname(as.numeric(info$size)) else NA_real_,
+    mtime = if (!is.null(info)) format(info$mtime, tz = "UTC", usetz = TRUE) else NA_character_,
+    width = unname(as.numeric(slide$dimensions[["width"]] %||% NA_real_)),
+    height = unname(as.numeric(slide$dimensions[["height"]] %||% NA_real_)),
+    backend = as.character(slide$backend %||% "")
+  )
+}
+
+wsi_deepzoom_metadata <- function(slide, tile_size, tile_overlap, tile_format, quality) {
+  c(
+    wsi_deepzoom_slide_signature(slide),
+    list(
+      tile_size = as.integer(tile_size),
+      tile_overlap = as.integer(tile_overlap),
+      tile_format = as.character(tile_format),
+      quality = as.integer(quality),
+      wsiTools_version = as.character(utils::packageVersion("wsiTools")),
+      created = format(Sys.time(), tz = "UTC", usetz = TRUE)
+    )
+  )
+}
+
+wsi_write_deepzoom_metadata <- function(tile_dir, metadata) {
+  metadata_file <- wsi_deepzoom_metadata_file(tile_dir)
+  tryCatch(
+    jsonlite::write_json(metadata, metadata_file, auto_unbox = TRUE, pretty = TRUE, null = "null"),
+    error = function(err) {
+      wsi_warn(sprintf("Could not write Deep Zoom cache metadata `%s`: %s", metadata_file, conditionMessage(err)))
+    }
+  )
+  invisible(metadata_file)
+}
+
+wsi_read_deepzoom_metadata <- function(tile_dir) {
+  metadata_file <- wsi_deepzoom_metadata_file(tile_dir)
+  if (!file.exists(metadata_file)) {
+    return(NULL)
+  }
+  tryCatch(jsonlite::read_json(metadata_file, simplifyVector = TRUE), error = function(err) NULL)
+}
+
+wsi_deepzoom_metadata_matches <- function(existing, expected) {
+  if (is.null(existing)) {
+    return(FALSE)
+  }
+  keys <- c("path", "size", "mtime", "width", "height", "backend",
+            "tile_size", "tile_overlap", "tile_format", "quality")
+  for (key in keys) {
+    lhs <- existing[[key]]
+    rhs <- expected[[key]]
+    if (is.null(lhs) || is.null(rhs)) {
+      return(FALSE)
+    }
+    if (key %in% c("size", "width", "height")) {
+      if (!isTRUE(all.equal(as.numeric(lhs), as.numeric(rhs), tolerance = 1e-8))) {
+        return(FALSE)
+      }
+    } else if (!identical(as.character(lhs), as.character(rhs))) {
+      return(FALSE)
+    }
+  }
+  TRUE
+}
+
+wsi_deepzoom_cache_status <- function(slide, tile_dir, dzi_file, tile_files,
+                                      tile_size, tile_overlap, tile_format, quality) {
+  if (!file.exists(dzi_file) || !dir.exists(tile_files)) {
+    return(list(valid = FALSE, reason = "missing"))
+  }
+  expected <- wsi_deepzoom_metadata(slide, tile_size, tile_overlap, tile_format, quality)
+  existing <- wsi_read_deepzoom_metadata(tile_dir)
+  if (wsi_deepzoom_metadata_matches(existing, expected)) {
+    return(list(valid = TRUE, reason = "metadata", expected = expected, existing = existing))
+  }
+
+  dzi_dims <- wsi_dzi_dimensions(dzi_file)
+  expected_dims <- c(width = expected$width, height = expected$height)
+  dims_match <- isTRUE(all.equal(unname(dzi_dims), unname(expected_dims), tolerance = 1e-8))
+  if (is.null(existing) && dims_match &&
+      isTRUE(wsi_deepzoom_env_flag("WSITOOLS_TRUST_LEGACY_DEEPZOOM_CACHE", FALSE))) {
+    return(list(valid = TRUE, reason = "legacy-trusted", expected = expected, existing = existing))
+  }
+  reason <- if (is.null(existing)) "missing metadata" else "metadata mismatch"
+  list(valid = FALSE, reason = reason, expected = expected, existing = existing)
+}
+
 wsi_create_deepzoom_tiles <- function(slide, tile_dir, tile_size = 512,
                                       tile_overlap = 1,
                                       tile_format = c("jpg", "png"),
@@ -203,7 +321,25 @@ wsi_create_deepzoom_tiles <- function(slide, tile_dir, tile_size = 512,
   tile_files <- paste0(dzi_base, "_files")
 
   if (file.exists(dzi_file) && dir.exists(tile_files) && !isTRUE(rebuild)) {
-    return(list(dzi = dzi_file, tiles = tile_files, overlap = wsi_dzi_overlap(dzi_file, default = tile_overlap)))
+    cache_status <- wsi_deepzoom_cache_status(
+      slide = slide,
+      tile_dir = tile_dir,
+      dzi_file = dzi_file,
+      tile_files = tile_files,
+      tile_size = tile_size,
+      tile_overlap = tile_overlap,
+      tile_format = tile_format,
+      quality = quality
+    )
+    if (isTRUE(cache_status$valid)) {
+      return(list(dzi = dzi_file, tiles = tile_files, overlap = wsi_dzi_overlap(dzi_file, default = tile_overlap)))
+    }
+    wsi_warn(sprintf(
+      "Existing Deep Zoom tiles in `%s` do not match the requested image (%s); rebuilding the cache.",
+      tile_dir,
+      cache_status$reason %||% "stale cache"
+    ))
+    rebuild <- TRUE
   }
 
   if (isTRUE(rebuild)) {
@@ -212,6 +348,10 @@ wsi_create_deepzoom_tiles <- function(slide, tile_dir, tile_size = 512,
     }
     if (dir.exists(tile_files)) {
       unlink(tile_files, recursive = TRUE)
+    }
+    metadata_file <- wsi_deepzoom_metadata_file(tile_dir)
+    if (file.exists(metadata_file)) {
+      unlink(metadata_file)
     }
   } else if (file.exists(dzi_file) || dir.exists(tile_files)) {
     wsi_abort(
@@ -246,6 +386,11 @@ wsi_create_deepzoom_tiles <- function(slide, tile_dir, tile_size = 512,
   if (!file.exists(dzi_file) || !dir.exists(tile_files)) {
     wsi_abort("libvips completed but did not create the expected Deep Zoom output.")
   }
+
+  wsi_write_deepzoom_metadata(
+    tile_dir,
+    wsi_deepzoom_metadata(slide, tile_size, tile_overlap, tile_format, quality)
+  )
 
   list(dzi = dzi_file, tiles = tile_files, overlap = tile_overlap)
 }

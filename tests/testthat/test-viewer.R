@@ -2651,6 +2651,7 @@ test_that("interactive tiled viewer writes Deep Zoom HTML when libvips is availa
   expect_true(file.exists(output))
   expect_true(file.exists(file.path(tile_dir, "slide.dzi")))
   expect_true(dir.exists(file.path(tile_dir, "slide_files")))
+  expect_true(file.exists(file.path(tile_dir, "slide.wsiTools.json")))
   expect_match(paste(readLines(file.path(tile_dir, "slide.dzi"), warn = FALSE), collapse = " "), "Overlap=\"1\"", fixed = TRUE)
 
   html <- paste(readLines(output, warn = FALSE), collapse = "\n")
@@ -2693,6 +2694,46 @@ test_that("interactive tiled viewer writes Deep Zoom HTML when libvips is availa
   expect_match(html, "saveGeojson", fixed = TRUE)
   expect_match(html, "annotationExportDialog", fixed = TRUE)
   expect_match(html, "bindAnnotationExportDialogControls", fixed = TRUE)
+})
+
+test_that("Deep Zoom tile cache is rebuilt when the source image changes", {
+  skip_if_not(wsi_has_vips())
+
+  input1 <- tempfile(fileext = ".ppm")
+  input2 <- tempfile(fileext = ".ppm")
+  pixels1 <- paste(rep("255 0 0", 48 * 32), collapse = " ")
+  pixels2 <- paste(rep("0 0 255", 48 * 32), collapse = " ")
+  writeLines(c("P3", "48 32", "255", pixels1), input1)
+  writeLines(c("P3", "48 32", "255", pixels2), input2)
+
+  slide1 <- wsi_open(input1, backend = "vips")
+  slide2 <- wsi_open(input2, backend = "vips")
+  on.exit(wsi_close(slide1), add = TRUE)
+  on.exit(wsi_close(slide2), add = TRUE)
+
+  tile_dir <- tempfile("wsi-viewer-stale-tiles-")
+  wsi_create_deepzoom_tiles(
+    slide1,
+    tile_dir = tile_dir,
+    tile_size = 16,
+    tile_format = "png",
+    rebuild = FALSE
+  )
+  metadata1 <- jsonlite::read_json(file.path(tile_dir, "slide.wsiTools.json"), simplifyVector = TRUE)
+  expect_identical(metadata1$path, normalizePath(input1, winslash = "/", mustWork = FALSE))
+
+  expect_warning(
+    wsi_create_deepzoom_tiles(
+      slide2,
+      tile_dir = tile_dir,
+      tile_size = 16,
+      tile_format = "png",
+      rebuild = FALSE
+    ),
+    "do not match the requested image"
+  )
+  metadata2 <- jsonlite::read_json(file.path(tile_dir, "slide.wsiTools.json"), simplifyVector = TRUE)
+  expect_identical(metadata2$path, normalizePath(input2, winslash = "/", mustWork = FALSE))
 })
 
 test_that("project items carry slide scale metadata for the scale bar", {
