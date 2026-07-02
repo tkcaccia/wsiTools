@@ -110,6 +110,7 @@ test_that("cell-level centroid coordinates in Seurat metadata can be used for im
   expect_equal(linked$spots$x, c(50, 150))
   expect_equal(linked$spots$y, c(75, 175))
   expect_equal(linked$coordinate_mapping$method, "auto_fullres")
+  expect_equal(linked$coordinate_mapping$coordinate_space, "unknown")
 })
 
 test_that("Seurat Visium spot spacing supplies scale when image metadata has no mpp", {

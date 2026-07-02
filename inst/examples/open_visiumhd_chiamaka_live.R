@@ -307,6 +307,7 @@ if (!is.null(geojson_file)) {
       colour = "#ffffff",
       metadata = list(
         kind = "mask",
+        transparent_background = TRUE,
         legend = legend,
         selected_values = vapply(legend, function(x) as.character(x$value), character(1)),
         extent = list(
@@ -319,7 +320,10 @@ if (!is.null(geojson_file)) {
         coordinate_orientation = list(flip = coordinate_flip, rotation = coordinate_rotation),
         source_geojson = geojson_file,
         source_mask = mask_result$output,
-        legend_csv = mask_result$legend
+        legend_csv = mask_result$legend,
+        target_path = normalizePath(slide$path, winslash = "/", mustWork = FALSE),
+        base_slide_path = normalizePath(slide$path, winslash = "/", mustWork = FALSE),
+        project_image_id = "active_project_image"
       )
     ))
   }

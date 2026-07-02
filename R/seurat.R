@@ -742,6 +742,13 @@ wsi_seurat_spots_layer <- function(linked, visible = TRUE, opacity = 0.85) {
     colour = "#2B6CB0",
     radius = linked$spot_radius
   )
+  if (length(layer$items)) {
+    fill_alpha <- if (identical(feature_type, "cell")) 0.08 else 0.18
+    for (i in seq_along(layer$items)) {
+      item_colour <- layer$items[[i]]$colour %||% layer$items[[i]]$color %||% layer$colour
+      layer$items[[i]]$fill <- wsi_hex_to_rgba(item_colour, fill_alpha)
+    }
+  }
   gene_values <- wsi_seurat_gene_value_items(linked$gene_expression)
   cluster_values <- wsi_spatial_cluster_value_items(linked$cluster_values %||% data.frame())
   if (length(gene_values) && length(layer$items)) {
@@ -1450,7 +1457,7 @@ wsi_seurat_coordinates_from_metadata <- function(seurat) {
          space = "fullres", registered = TRUE),
     list(x = c("centroid_x", "x_centroid", "cell_x", "x_cell", "center_x", "x_center"),
          y = c("centroid_y", "y_centroid", "cell_y", "y_cell", "center_y", "y_center"),
-         space = "fullres", registered = TRUE),
+         space = "unknown", registered = TRUE),
     list(x = c("image_x", "x_image", "imagecol", "col"),
          y = c("image_y", "y_image", "imagerow", "row"),
          space = "unknown", registered = FALSE),

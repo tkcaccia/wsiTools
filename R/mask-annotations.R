@@ -1131,6 +1131,11 @@ wsi_geojson_mask_channel_source <- function(geojson,
     wsi_file_url(tiles$tiles)
   }
   legend <- wsi_mask_channel_legend(mask_result$labels)
+  slide_path <- if (!is.null(slide_obj$path) && nzchar(slide_obj$path)) {
+    normalizePath(slide_obj$path, winslash = "/", mustWork = FALSE)
+  } else {
+    NULL
+  }
   source <- wsi_channel_source(
     name = name,
     id = id,
@@ -1154,7 +1159,10 @@ wsi_geojson_mask_channel_source <- function(geojson,
       mask_downsample = unname(mask_result$downsample),
       source_geojson = normalizePath(geojson, winslash = "/", mustWork = TRUE),
       source_mask = mask_result$output,
-      legend_csv = mask_result$legend
+      legend_csv = mask_result$legend,
+      target_path = slide_path,
+      base_slide_path = slide_path,
+      project_image_id = "active_project_image"
     )
   )
   list(source = source, mask = mask_result, tiles = tiles)
