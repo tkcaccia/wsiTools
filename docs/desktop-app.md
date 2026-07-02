@@ -11,7 +11,7 @@ desktop window.
 
 Prebuilt desktop installers are available from the GitHub release:
 
-[Download wsiTools Desktop 0.1.0](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.0)
+[Download wsiTools Desktop 0.1.1](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.1)
 
 See [Desktop Downloads](downloads.md) for platform-specific installers,
 required R setup, and optional backend notes.

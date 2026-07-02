@@ -1,12 +1,15 @@
 name: Desktop release
 
 on:
+  push:
+    tags:
+      - "desktop-v*"
   workflow_dispatch:
     inputs:
       tag:
         description: "GitHub release tag to update"
         required: true
-        default: "desktop-v0.1.0"
+        default: "desktop-v0.1.1"
       upload_release:
         description: "Upload built installers to the GitHub release"
         required: true
@@ -73,7 +76,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ../../release-artifacts
-          version="0.1.0"
+          version="0.1.1"
           case "${{ runner.os }}" in
             macOS)
               cp src-tauri/target/release/bundle/dmg/*.dmg \
@@ -110,7 +113,7 @@ jobs:
     name: Upload installers to release
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ inputs.upload_release == 'true' }}
+    if: ${{ github.event_name == 'push' || inputs.upload_release == 'true' }}
 
     steps:
       - name: Check out repository
@@ -125,10 +128,21 @@ jobs:
       - name: Write checksums
         run: |
           cd release-artifacts
-          sha256sum wsiTools-Desktop_0.1.0_* > SHA256SUMS.txt
+          sha256sum wsiTools-Desktop_0.1.1_* > SHA256SUMS.txt
           cat SHA256SUMS.txt
+
+      - name: Create release if needed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+        run: |
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || \
+            gh release create "$RELEASE_TAG" \
+              --title "wsiTools Desktop $RELEASE_TAG" \
+              --notes "Desktop installers built from ${GITHUB_SHA}."
 
       - name: Upload release assets
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ inputs.tag }}" release-artifacts/* --clobber
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+        run: gh release upload "$RELEASE_TAG" release-artifacts/* --clobber
