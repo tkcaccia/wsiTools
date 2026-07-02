@@ -32,6 +32,29 @@ desktop_error_log_file <- function() {
 }
 
 desktop_prepare_backend_path <- function() {
+  windows_conda_candidates <- function() {
+    roots <- character()
+    for (key in c("CONDA_PREFIX", "MAMBA_ROOT_PREFIX")) {
+      value <- Sys.getenv(key, unset = "")
+      if (nzchar(value)) {
+        roots <- c(roots, value)
+      }
+    }
+    userprofile <- Sys.getenv("USERPROFILE", unset = "")
+    if (nzchar(userprofile)) {
+      roots <- c(
+        roots,
+        file.path(userprofile, "miniconda3"),
+        file.path(userprofile, "anaconda3"),
+        file.path(userprofile, "miniforge3"),
+        file.path(userprofile, "mambaforge"),
+        file.path(userprofile, "micromamba")
+      )
+    }
+    unique(unlist(lapply(roots, function(root) {
+      file.path(root, c("Library/bin", "Scripts", "condabin"))
+    }), use.names = FALSE))
+  }
   candidates <- switch(
     Sys.info()[["sysname"]],
     Darwin = c(
@@ -49,7 +72,8 @@ desktop_prepare_backend_path <- function() {
       "C:/Program Files/openslide-win64/bin",
       "C:/Program Files/Git/cmd",
       "C:/rtools44/x86_64-w64-mingw32.static.posix/bin",
-      "C:/rtools44/usr/bin"
+      "C:/rtools44/usr/bin",
+      windows_conda_candidates()
     ),
     character()
   )

@@ -232,6 +232,32 @@ fn backend_path_candidates() -> Vec<PathBuf> {
             PathBuf::from(r"C:\rtools44\x86_64-w64-mingw32.static.posix\bin"),
             PathBuf::from(r"C:\rtools44\usr\bin"),
         ]);
+        for key in ["CONDA_PREFIX", "MAMBA_ROOT_PREFIX"] {
+            if let Ok(root) = env::var(key) {
+                let root = PathBuf::from(root);
+                out.extend([
+                    root.join("Library").join("bin"),
+                    root.join("Scripts"),
+                    root.join("condabin"),
+                ]);
+            }
+        }
+        if let Ok(userprofile) = env::var("USERPROFILE") {
+            let userprofile = PathBuf::from(userprofile);
+            for root in [
+                userprofile.join("miniconda3"),
+                userprofile.join("anaconda3"),
+                userprofile.join("miniforge3"),
+                userprofile.join("mambaforge"),
+                userprofile.join("micromamba"),
+            ] {
+                out.extend([
+                    root.join("Library").join("bin"),
+                    root.join("Scripts"),
+                    root.join("condabin"),
+                ]);
+            }
+        }
     }
     out
 }
@@ -1231,6 +1257,17 @@ fn open_viewer_window(app: AppHandle, url: String) -> Result<(), String> {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or(0);
+    #[cfg(target_family = "windows")]
+    {
+        let status = Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .status()
+            .map_err(|err| format!("Could not open viewer in the system browser: {err}"))?;
+        if status.success() {
+            return Ok(());
+        }
+    }
+
     tauri::WebviewWindowBuilder::new(
         &app,
         format!("viewer-{stamp}"),
