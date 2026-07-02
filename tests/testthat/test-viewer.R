@@ -2771,6 +2771,11 @@ test_that("live CZI project opening keeps section previews lazy by default", {
   expect_match(live_item_code, "preview <- match.arg(preview)", fixed = TRUE)
   expect_match(live_item_code, "if (identical(preview, \"all\"))", fixed = TRUE)
   expect_match(live_item_code, "Section previews are lazy so the viewer opens quickly", fixed = TRUE)
+
+  live_code <- paste(deparse(wsiTools:::wsi_viewer_czi_project_live), collapse = "\n")
+  expect_match(live_code, "tile_prefetch_margin = -1L", fixed = TRUE)
+  expect_match(live_code, "tile_timeout_ms = 120000L", fixed = TRUE)
+  expect_match(live_code, "tile_image_loader_limit = 2L", fixed = TRUE)
 })
 
 test_that("live CZI tiles use persistent native readers when available", {
@@ -2790,6 +2795,14 @@ test_that("live CZI tiles use persistent native readers when available", {
 
   cleanup_code <- paste(deparse(wsiTools:::wsi_dynamic_tile_cleanup), collapse = "\n")
   expect_match(cleanup_code, "wsi_native_czi_close_handle", fixed = TRUE)
+})
+
+test_that("tiled viewer JavaScript exposes live tile timeout and loader limit controls", {
+  html_code <- paste(deparse(wsiTools:::wsi_tiled_viewer_html), collapse = "\n")
+  expect_match(html_code, "function tileTimeoutMs()", fixed = TRUE)
+  expect_match(html_code, "function tileImageLoaderLimit()", fixed = TRUE)
+  expect_match(html_code, "timeout:tileTimeoutMs()", fixed = TRUE)
+  expect_match(html_code, "options.imageLoaderLimit", fixed = TRUE)
 })
 
 test_that("desktop launcher routes CZI files to the CZI live project viewer", {
