@@ -1413,13 +1413,96 @@ wsi_seurat_read_tissue_positions <- function(path) {
   out
 }
 
+wsi_seurat_coordinates_from_metadata <- function(seurat) {
+  meta <- wsi_seurat_slot(seurat, "meta.data")
+  if (is.null(meta) || !is.data.frame(meta) || !nrow(meta)) {
+    return(NULL)
+  }
+  coords <- as.data.frame(meta, stringsAsFactors = FALSE)
+  id_col <- wsi_seurat_first_column(coords, c(
+    "barcode", "barcodes", "cell", "cells", "cell_id", "cellid",
+    "spot", "spot_id", "feature_id"
+  ))
+  ids <- if (!is.null(id_col)) {
+    as.character(coords[[id_col]])
+  } else {
+    rownames(coords) %||% as.character(seq_len(nrow(coords)))
+  }
+  name_map <- stats::setNames(names(coords), tolower(gsub("[^[:alnum:]]+", "", names(coords))))
+  find_col <- function(candidates) {
+    keys <- tolower(gsub("[^[:alnum:]]+", "", candidates))
+    hit <- name_map[keys]
+    hit <- hit[!is.na(hit)]
+    if (length(hit)) unname(hit[[1L]]) else NULL
+  }
+  pairs <- list(
+    list(x = c("registered_x", "registration_x", "x_registered", "x_registration"),
+         y = c("registered_y", "registration_y", "y_registered", "y_registration"),
+         space = "fullres", registered = TRUE),
+    list(x = c("slide_x", "x_slide", "slide_col", "slide_column"),
+         y = c("slide_y", "y_slide", "slide_row"),
+         space = "fullres", registered = TRUE),
+    list(x = c("global_x", "x_global"),
+         y = c("global_y", "y_global"),
+         space = "fullres", registered = TRUE),
+    list(x = c("fullres_x", "x_fullres", "pxl_col_in_fullres"),
+         y = c("fullres_y", "y_fullres", "pxl_row_in_fullres"),
+         space = "fullres", registered = TRUE),
+    list(x = c("centroid_x", "x_centroid", "cell_x", "x_cell", "center_x", "x_center"),
+         y = c("centroid_y", "y_centroid", "cell_y", "y_cell", "center_y", "y_center"),
+         space = "fullres", registered = TRUE),
+    list(x = c("image_x", "x_image", "imagecol", "col"),
+         y = c("image_y", "y_image", "imagerow", "row"),
+         space = "unknown", registered = FALSE),
+    list(x = c("x"),
+         y = c("y"),
+         space = "unknown", registered = FALSE)
+  )
+  for (pair in pairs) {
+    x_col <- find_col(pair$x)
+    y_col <- find_col(pair$y)
+    if (is.null(x_col) || is.null(y_col)) {
+      next
+    }
+    out <- data.frame(
+      barcode = ids,
+      x = suppressWarnings(as.numeric(coords[[x_col]])),
+      y = suppressWarnings(as.numeric(coords[[y_col]])),
+      stringsAsFactors = FALSE
+    )
+    out <- out[is.finite(out$x) & is.finite(out$y) & nzchar(out$barcode), , drop = FALSE]
+    if (!nrow(out)) {
+      next
+    }
+    row.names(out) <- NULL
+    attr(out, "coordinate_space") <- pair$space
+    attr(out, "coordinate_source") <- "seurat_meta.data"
+    attr(out, "registered_coordinates") <- isTRUE(pair$registered)
+    attr(out, "id_column") <- id_col %||% "rownames(meta.data)"
+    attr(out, "x_column") <- x_col
+    attr(out, "y_column") <- y_col
+    return(out)
+  }
+  NULL
+}
+
 wsi_seurat_coordinate_table <- function(seurat, image_name, image_obj = NULL, tissue_positions = NULL) {
   coords <- wsi_seurat_read_tissue_positions(tissue_positions)
+  meta_coords <- NULL
+  if (is.null(coords)) {
+    meta_coords <- wsi_seurat_coordinates_from_metadata(seurat)
+    if (isTRUE(attr(meta_coords, "registered_coordinates", exact = TRUE))) {
+      coords <- meta_coords
+    }
+  }
   if (is.null(coords)) {
     coords <- wsi_seurat_coordinates_from_accessor(seurat, image_name)
   }
   if (is.null(coords)) {
     coords <- wsi_seurat_slot(image_obj, "coordinates")
+  }
+  if (is.null(coords)) {
+    coords <- meta_coords %||% wsi_seurat_coordinates_from_metadata(seurat)
   }
   if (is.null(coords) || !is.data.frame(coords)) {
     wsi_abort("Could not extract spatial coordinates from the Seurat object.")

@@ -50,6 +50,68 @@ test_that("Seurat spatial objects can be linked to high-resolution slide coordin
   expect_true(length(unique(vapply(layer$items, `[[`, character(1), "colour"))) > 1)
 })
 
+test_that("registered Seurat metadata coordinates override stale image-slot coordinates", {
+  embeddings <- matrix(
+    c(-2, 0.5, 1, -0.5, 2, 1.5),
+    ncol = 2,
+    byrow = TRUE,
+    dimnames = list(c("cell_a", "cell_b", "cell_c"), c("PC_1", "PC_2"))
+  )
+  seurat_like <- list(
+    meta.data = data.frame(
+      registered_x = c(1100, 2200, 3300),
+      registered_y = c(600, 1600, 2600),
+      row.names = c("cell_a", "cell_b", "cell_c")
+    ),
+    reductions = list(pca = list(cell.embeddings = embeddings)),
+    images = list(
+      ovarian = list(
+        coordinates = data.frame(
+          barcode = c("cell_a", "cell_b", "cell_c"),
+          imagecol = c(10, 20, 30),
+          imagerow = c(5, 15, 25)
+        ),
+        image = array(0, dim = c(50, 100, 3))
+      )
+    )
+  )
+  slide <- wsi_mock_slide(width = 4000, height = 3000, levels = c(1, 2))
+
+  linked <- wsi_link_seurat_image(seurat_like, slide)
+
+  expect_equal(linked$image_name, "ovarian")
+  expect_equal(linked$coordinate_mapping$method, "auto_fullres")
+  expect_equal(linked$coordinate_mapping$coordinate_space, "fullres")
+  expect_equal(linked$spots$x, c(1100, 2200, 3300))
+  expect_equal(linked$spots$y, c(600, 1600, 2600))
+})
+
+test_that("cell-level centroid coordinates in Seurat metadata can be used for image registration", {
+  embeddings <- matrix(
+    c(1, 0, 0, 1),
+    nrow = 2,
+    byrow = TRUE,
+    dimnames = list(c("cellid_001", "cellid_002"), c("PC_1", "PC_2"))
+  )
+  seurat_like <- list(
+    meta.data = data.frame(
+      centroid_x = c(50, 150),
+      centroid_y = c(75, 175),
+      row.names = c("cellid_001", "cellid_002")
+    ),
+    reductions = list(pca = list(cell.embeddings = embeddings)),
+    images = list(anterior1 = list(image = array(0, dim = c(100, 100, 3))))
+  )
+  slide <- wsi_mock_slide(width = 200, height = 200, levels = c(1, 2))
+
+  linked <- wsi_link_seurat_image(seurat_like, slide)
+
+  expect_equal(linked$feature_type, "cell")
+  expect_equal(linked$spots$x, c(50, 150))
+  expect_equal(linked$spots$y, c(75, 175))
+  expect_equal(linked$coordinate_mapping$method, "auto_fullres")
+})
+
 test_that("Seurat Visium spot spacing supplies scale when image metadata has no mpp", {
   embeddings <- matrix(
     c(-1, 0, 1, 0, 0, -1, 0, 1),
