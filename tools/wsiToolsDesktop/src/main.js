@@ -436,7 +436,7 @@ function rNewProjectLaunchCode() {
     "  project_images$image,",
     '  live = "yes",',
     '  tiled = "yes",',
-    "  dynamic_tiles = TRUE,",
+    "  dynamic_tiles = FALSE,",
     "  open = FALSE,",
     "  wait = FALSE",
     ")"
@@ -452,7 +452,7 @@ function rProjectLaunchCode(projectPath) {
     "  project$slide_path,",
     '  live = "yes",',
     '  tiled = "yes",',
-    "  dynamic_tiles = TRUE,",
+    "  dynamic_tiles = FALSE,",
     "  open = FALSE,",
     "  wait = FALSE",
     ")",

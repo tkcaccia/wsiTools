@@ -78,6 +78,13 @@ wsi_viewer_project <- function(images, output = NULL, open = interactive(),
   first_width <- as.numeric(first$width %||% width)
   first_height <- as.numeric(first$height %||% (height %||% max(1L, round(width * 0.7))))
   items[[1L]]$active <- TRUE
+  preference_identity <- paste(
+    "wsiTools.viewer.preferences.v1.project",
+    wsi_safe_id(title %||% "project", "project"),
+    length(items),
+    wsi_safe_id(first$path %||% first$label %||% "image", "image"),
+    sep = "."
+  )
 
   config <- list(
     title = title,
@@ -87,7 +94,7 @@ wsi_viewer_project <- function(images, output = NULL, open = interactive(),
       if (length(items) == 1L) "" else "s"
     ),
     viewer_mode = "project",
-    preference_key = "wsiTools.viewer.preferences.v1",
+    preference_key = preference_identity,
     slide_width = first_width,
     slide_height = first_height,
     mpp = wsi_viewer_project_mpp(first, first_section),
@@ -300,6 +307,13 @@ wsi_viewer_czi_project_live <- function(images, output = NULL, open = interactiv
     wsi_abort("The first CZI image did not provide an openable section.")
   }
   state$tile_sources <- tile_metadata
+  preference_identity <- paste(
+    "wsiTools.viewer.preferences.v1.czi",
+    wsi_safe_id(title %||% "czi_project", "czi_project"),
+    length(items),
+    wsi_safe_id(items[[1L]]$path %||% items[[1L]]$label %||% "czi", "czi"),
+    sep = "."
+  )
 
   config <- list(
     title = title,
@@ -310,7 +324,7 @@ wsi_viewer_czi_project_live <- function(images, output = NULL, open = interactiv
       if (isTRUE(sections)) "sectioned scenes" else "whole CZI bounding boxes"
     ),
     viewer_mode = "tiles",
-    preference_key = "wsiTools.viewer.preferences.v1",
+    preference_key = preference_identity,
     slide_width = first_section$width,
     slide_height = first_section$height,
     mpp = wsi_viewer_project_mpp(items[[1L]], first_section),

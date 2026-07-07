@@ -521,6 +521,34 @@ desktop_open_spatial_target <- function(object, image_paths, output, log_file,
   desktop_open_live_image_project(image_paths, output = output, log_file = log_file)
 }
 
+desktop_spatial_fallback_message <- function(err, items) {
+  msg <- conditionMessage(err)
+  lower <- tolower(msg)
+  has_cell_annotation <- any(vapply(items, function(item) {
+    nzchar(item$cell_annotation %||% "")
+  }, logical(1)))
+  if (grepl("could not extract spatial coordinates|spatial coordinates", lower)) {
+    extra <- paste(
+      "This usually means the selected spatial object does not contain slide x/y coordinates.",
+      "For cell-level Seurat/VisiumHD projects, associate a cell annotation GeoJSON,",
+      "cell-centroid CSV, or cell mask generated from the segmentation so wsiTools can",
+      "place cells on the image."
+    )
+    if (!has_cell_annotation) {
+      extra <- paste(
+        extra,
+        "No cell annotation file was selected in this desktop project, so the viewer",
+        "will open the microscopy image without a spatial/cell overlay."
+      )
+    }
+    return(paste(msg, extra))
+  }
+  paste(
+    msg,
+    "The desktop app will open the microscopy image project without the spatial overlay."
+  )
+}
+
 desktop_project_source_id <- function(path, index) {
   base <- tools::file_path_sans_ext(basename(path))
   base <- gsub("[^A-Za-z0-9_]+", "_", base)
@@ -593,15 +621,49 @@ desktop_create_deepzoom_project_item <- function(slide, index, output, log_file,
   )
 }
 
+desktop_create_dynamic_project_source <- function(slide, index, log_file,
+                                                  active = FALSE,
+                                                  tile_format = "jpg") {
+  source_id <- desktop_project_source_id(slide$path %||% sprintf("image_%d", index), index)
+  source <- wsiTools::wsi_dynamic_tile_source(
+    slide,
+    slide_id = source_id,
+    tile_size = 512,
+    tile_overlap = 1,
+    format = tile_format
+  )
+  label <- basename(slide$path %||% source_id)
+  source$name <- label
+  source$metadata <- list(
+    project_item_id = source_id,
+    id = source_id,
+    label = label,
+    path = slide$path %||% "",
+    backend = slide$backend %||% "dynamic",
+    type = "slide",
+    status = if (isTRUE(active)) "active" else "live dynamic tiles",
+    message = "Full-resolution tiles are served on demand by the live R session.",
+    active = isTRUE(active)
+  )
+  desktop_log(
+    "Using live dynamic tiles for ",
+    label,
+    ".",
+    log_file = log_file
+  )
+  source
+}
+
 desktop_open_live_slide_prebuilt <- function(slide, output, log_file,
                                              project_images = list(),
+                                             project_tile_sources = list(),
                                              title = "wsiTools desktop viewer") {
   base_id <- desktop_project_source_id(slide$path %||% "image", 1L)
   base_tile_dir <- file.path(dirname(output), base_id)
   tryCatch(
     {
       desktop_log(
-        "Opening with fast prebuilt Deep Zoom tiles: ",
+        "Opening with fast prebuilt Deep Zoom tiles and live R synchronization: ",
         basename(slide$path %||% base_id),
         log_file = log_file
       )
@@ -612,9 +674,9 @@ desktop_open_live_slide_prebuilt <- function(slide, output, log_file,
         tile_dir = base_tile_dir,
         tile_format = "jpg",
         tile_overlap = 1,
-        quality = 90,
         rebuild = FALSE,
         project_images = project_images,
+        project_tile_sources = project_tile_sources,
         open = FALSE,
         wait = FALSE,
         output = output,
@@ -624,24 +686,13 @@ desktop_open_live_slide_prebuilt <- function(slide, output, log_file,
     },
     error = function(err) {
       desktop_log(
-        "Could not create prebuilt tiles for ",
+        "Could not start live prebuilt tiled viewer for ",
         basename(slide$path %||% base_id),
-        "; falling back to live on-demand tiles: ",
+        ": ",
         conditionMessage(err),
         log_file = log_file
       )
-      wsiTools::wsi_viewer_live(
-        slide,
-        mode = "tiles",
-        dynamic_tiles = TRUE,
-        dynamic_tile_format = "jpg",
-        project_images = project_images,
-        open = FALSE,
-        wait = FALSE,
-        output = output,
-        overwrite = TRUE,
-        title = title
-      )
+      stop(err)
     }
   )
 }
@@ -677,6 +728,7 @@ desktop_open_live_image_project <- function(image_paths, output, log_file) {
     wsiTools::wsi_open(path)
   })
   project_items <- list()
+  project_tile_sources <- list()
   if (length(slides) > 1L) {
     for (i in seq.int(2L, length(slides))) {
       slide <- slides[[i]]
@@ -685,11 +737,12 @@ desktop_open_live_image_project <- function(image_paths, output, log_file) {
           slide,
           index = i,
           output = output,
-          log_file = log_file
+          log_file = log_file,
+          active = FALSE
         ),
         error = function(err) {
           desktop_log(
-            "Could not prebuild tiles for ",
+            "Could not prepare fast prebuilt tiles for ",
             basename(slide$path %||% image_paths[[i]]),
             ": ",
             conditionMessage(err),
@@ -719,6 +772,7 @@ desktop_open_live_image_project <- function(image_paths, output, log_file) {
     output = output,
     log_file = log_file,
     project_images = project_items,
+    project_tile_sources = project_tile_sources,
     title = "wsiTools desktop project viewer"
   )
 }
@@ -734,12 +788,26 @@ desktop_open_new_project <- function(items, output, log_file) {
   if (length(spatial_paths) == 1L) {
     desktop_log("Loading spatial transcriptomics object: ", spatial_paths[[1L]], log_file = log_file)
     spatial_object <- desktop_load_spatial_object(spatial_paths[[1L]])
-    viewer <- desktop_open_spatial_target(
-      spatial_object,
-      image_paths,
-      output,
-      log_file,
-      sample_ids = sample_ids
+    viewer <- tryCatch(
+      desktop_open_spatial_target(
+        spatial_object,
+        image_paths,
+        output,
+        log_file,
+        sample_ids = sample_ids
+      ),
+      error = function(err) {
+        desktop_log(
+          "Spatial overlay could not be created: ",
+          desktop_spatial_fallback_message(err, items),
+          log_file = log_file
+        )
+        desktop_log(
+          "Opening the image project without the spatial overlay so the viewer can still start.",
+          log_file = log_file
+        )
+        desktop_open_live_image_project(image_paths, output = output, log_file = log_file)
+      }
     )
   } else if (length(spatial_paths) > 1L) {
     desktop_log(
@@ -861,6 +929,19 @@ main <- function() {
     normalizePath(viewer, winslash = "/", mustWork = FALSE)
   } else {
     stop("The desktop R launcher did not receive a valid viewer object.", call. = FALSE)
+  }
+  if (is_live && identical(Sys.getenv("WSITOOLS_DESKTOP_PREWARM_TILES", unset = "false"), "true")) {
+    warmed <- tryCatch(
+      getFromNamespace("wsi_dynamic_prewarm_tiles", "wsiTools")(
+        viewer$dynamic_tile_sources %||% list(),
+        timeout_warning = FALSE
+      ),
+      error = function(err) {
+        desktop_log("Dynamic tile prewarm skipped: ", conditionMessage(err), log_file = log_file)
+        0L
+      }
+    )
+    desktop_log("Prewarmed ", as.integer(warmed), " dynamic tile cache entries.", log_file = log_file)
   }
   html_server <- desktop_start_html_server(html)
   session_token <- paste(Sys.getpid(), format(Sys.time(), "%Y%m%d%H%M%OS3"), sep = "-")

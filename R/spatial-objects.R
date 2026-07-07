@@ -55,7 +55,7 @@ wsi_link_spatial_image <- function(object, image,
 #' @export
 wsi_viewer_spatial <- function(object, image, linked = NULL,
                                object_type = c("auto", "seurat", "giotto", "spatialexperiment"),
-                               live = TRUE, dynamic_tiles = live,
+                               live = TRUE, dynamic_tiles = FALSE,
                                mode = c("tiles", "thumbnail"),
                                output = NULL, open = interactive(),
                                overwrite = FALSE, ...) {
@@ -470,7 +470,7 @@ wsi_link_giotto_image <- function(giotto, image, image_name = NULL,
 #'   static HTML path.
 #' @export
 wsi_viewer_giotto <- function(giotto, image, linked = NULL,
-                              live = TRUE, dynamic_tiles = live,
+                              live = TRUE, dynamic_tiles = FALSE,
                               mode = c("tiles", "thumbnail"),
                               output = NULL, open = interactive(),
                               overwrite = FALSE, ...) {
@@ -580,7 +580,7 @@ wsi_link_spatialexperiment_image <- function(spe, image, image_name = NULL,
 #'   static HTML path.
 #' @export
 wsi_viewer_spatialexperiment <- function(spe, image, linked = NULL,
-                                         live = TRUE, dynamic_tiles = live,
+                                         live = TRUE, dynamic_tiles = FALSE,
                                          mode = c("tiles", "thumbnail"),
                                          output = NULL, open = interactive(),
                                          overwrite = FALSE, ...) {
@@ -692,6 +692,9 @@ wsi_viewer_spatialexperiment_project <- function(spe = NULL, images = NULL,
   if (!is.logical(dynamic_tiles) || length(dynamic_tiles) != 1L || is.na(dynamic_tiles)) {
     wsi_abort("`dynamic_tiles` must be `TRUE` or `FALSE`.")
   }
+  if (isTRUE(live) && identical(mode, "tiles")) {
+    dynamic_tiles <- wsi_prefer_static_spatial_tiles(dynamic_tiles, context = "SpatialExperiment project viewer")
+  }
   if (!is.logical(wait) || length(wait) != 1L || is.na(wait)) {
     wsi_abort("`wait` must be `TRUE` or `FALSE`.")
   }
@@ -756,7 +759,8 @@ wsi_viewer_spatialexperiment_project <- function(spe = NULL, images = NULL,
     tile_format = tile_format,
     quality = quality,
     rebuild = rebuild,
-    tile_overlap = tile_overlap
+    tile_overlap = tile_overlap,
+    dynamic_channel_sources = FALSE
   )
 
   project_prediction <- wsi_prediction_context(
@@ -770,8 +774,18 @@ wsi_viewer_spatialexperiment_project <- function(spe = NULL, images = NULL,
     section_index = -1L
   )
   first_record <- records[[1L]]
-  first_layer <- first_record$layers[[1L]] %||% wsi_seurat_spots_layer(first)
-  first_layer$project_scoped <- TRUE
+  first$spot_layer_id <- first_record$seurat$spot_layer_id %||% "seurat_spots"
+  project_channel_sources <- unlist(lapply(records, function(record) record$channel_sources %||% list()), recursive = FALSE)
+  project_tile_sources <- if (isTRUE(live) && isTRUE(dynamic_tiles) && identical(mode, "tiles")) {
+    wsi_seurat_project_dynamic_tile_sources(linked, records)
+  } else {
+    NULL
+  }
+  records <- lapply(records, function(record) {
+    record$channel_sources <- NULL
+    record$spot_mask <- NULL
+    record
+  })
 
   if (identical(mode, "thumbnail")) {
     viewer_args <- list(
@@ -785,7 +799,8 @@ wsi_viewer_spatialexperiment_project <- function(spe = NULL, images = NULL,
       mode = "thumbnail",
       roi_class_presets = roi_class_presets,
       project_images = records,
-      layers = list(first_layer),
+      layers = list(),
+      channel_sources = project_channel_sources,
       seurat = first
     )
     if (isTRUE(live)) {
@@ -819,16 +834,21 @@ wsi_viewer_spatialexperiment_project <- function(spe = NULL, images = NULL,
     tile_source_label = "SpatialExperiment project Deep Zoom tiles",
     roi_class_presets = roi_class_presets,
     project_images = records,
-    layers = list(first_layer),
+    layers = list(),
+    channel_sources = project_channel_sources,
     seurat = first
   )
   if (isTRUE(live)) {
     viewer_args$dynamic_tiles <- dynamic_tiles
+    if (isTRUE(dynamic_tiles)) {
+      viewer_args$dynamic_tile_format <- "jpg"
+    }
     viewer_args$wait <- wait
     viewer_args$transport <- transport
     viewer_args$name <- "wsi_spatialexperiment_project_live_state"
     viewer_args$prediction_context <- project_prediction
     viewer_args$proximity_context <- project_prediction
+    viewer_args$project_tile_sources <- project_tile_sources
     return(do.call(wsi_viewer_live, viewer_args))
   }
   do.call(wsi_viewer, viewer_args)
@@ -859,15 +879,39 @@ wsi_viewer_spatial_linked <- function(object, image, linked, linker, source_name
       spot_ids = as.character(linked$spots$barcode %||% linked$spots$id)
     )
   }
+  if (isTRUE(live) && identical(mode, "tiles")) {
+    dynamic_tiles <- wsi_prefer_static_spatial_tiles(dynamic_tiles, context = sprintf("%s viewer", source_name))
+  }
 
   layers <- dots$layers %||% list()
   if (!is.list(layers) || inherits(layers, "data.frame")) {
     layers <- list(layers)
   }
-  dots$layers <- if (isTRUE(show_spots)) {
-    c(list(wsi_seurat_spots_layer(linked)), layers)
-  } else {
-    layers
+  dots$layers <- layers
+  if (isTRUE(show_spots)) {
+    if (is.null(output)) {
+      output <- tempfile(fileext = ".html")
+      overwrite <- TRUE
+    }
+    spot_source <- wsi_seurat_spots_channel_source(
+      linked = linked,
+      output_dir = file.path(dirname(output), paste0(tools::file_path_sans_ext(basename(output)), "_spatial_masks")),
+      output_html = output,
+      id = "seurat_spots",
+      visible = TRUE,
+      opacity = 0.85,
+      dynamic = isTRUE(dots$spatial_mask_dynamic %||% FALSE),
+      rebuild = isTRUE(dots$rebuild %||% FALSE)
+    )
+    if (!is.null(spot_source)) {
+      channel_sources <- dots$channel_sources %||% list()
+      if (!is.list(channel_sources) || inherits(channel_sources, "data.frame")) {
+        channel_sources <- list(channel_sources)
+      }
+      dots$channel_sources <- c(list(spot_source$source), channel_sources)
+      linked$spot_layer_id <- spot_source$source$id
+      linked$spot_mask <- spot_source$mask
+    }
   }
   dots$seurat <- linked
   dots$output <- output
@@ -877,6 +921,9 @@ wsi_viewer_spatial_linked <- function(object, image, linked, linker, source_name
 
   if (isTRUE(live)) {
     dots$dynamic_tiles <- dynamic_tiles
+    if (isTRUE(dynamic_tiles) && is.null(dots$dynamic_tile_format)) {
+      dots$dynamic_tile_format <- "jpg"
+    }
     dots$mode <- mode
     dots$slide <- linked$slide
     return(do.call(wsi_viewer_live, dots))

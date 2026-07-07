@@ -6,15 +6,21 @@ wsi_array_data_uri <- function(image) {
   }
   dims <- dim(raster)
   tmp <- tempfile(fileext = ".png")
-  grDevices::png(tmp, width = dims[[2L]], height = dims[[1L]])
+  grDevices::png(tmp, width = dims[[2L]], height = dims[[1L]], bg = "transparent")
+  device_open <- TRUE
   old_par <- graphics::par(mar = c(0, 0, 0, 0))
   on.exit({
-    graphics::par(old_par)
-    grDevices::dev.off()
+    if (isTRUE(device_open)) {
+      graphics::par(old_par)
+      grDevices::dev.off()
+    }
     unlink(tmp)
   }, add = TRUE)
   graphics::plot.new()
   graphics::rasterImage(raster, 0, 0, 1, 1)
+  graphics::par(old_par)
+  grDevices::dev.off()
+  device_open <- FALSE
   wsi_image_data_uri(tmp, mime = "image/png")
 }
 

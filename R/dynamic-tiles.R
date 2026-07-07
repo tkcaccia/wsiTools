@@ -912,6 +912,58 @@ wsi_dynamic_vips_cached_level_tile_to_file <- function(source, level, region, ou
   TRUE
 }
 
+wsi_dynamic_mask_region_to_file <- function(source, region, output,
+                                            format = "png") {
+  if (!wsi_has_vips()) {
+    wsi_abort("Dynamic mask tiles require libvips (`vips` and `vipsheader`) on PATH.", class = "wsi_backend_unavailable")
+  }
+  format <- wsi_dynamic_tile_format(format)
+  if (!identical(format, "png")) {
+    format <- "png"
+  }
+  input <- source$slide$path %||% source$path %||% NULL
+  if (is.null(input) || !nzchar(input) || !file.exists(input)) {
+    wsi_abort("Dynamic mask tile source does not have a readable mask image path.")
+  }
+  subifd <- region$subifd
+  if (!is.null(subifd) && (!is.finite(subifd) || subifd < 0L)) {
+    subifd <- NULL
+  }
+  input <- wsi_vips_image_input(input, page = 0L, subifd = subifd)
+  crop_x <- as.integer(floor(region$x / region$downsample))
+  crop_y <- as.integer(floor(region$y / region$downsample))
+  tmp_crop <- tempfile(fileext = ".png", tmpdir = dirname(output))
+  tmp_resized <- tempfile(fileext = ".png", tmpdir = dirname(output))
+  on.exit(unlink(c(tmp_crop, tmp_resized)), add = TRUE)
+  wsi_run_command(
+    "vips",
+    args = c(
+      "crop",
+      input,
+      tmp_crop,
+      as.character(crop_x),
+      as.character(crop_y),
+      as.character(region$width),
+      as.character(region$height)
+    ),
+    error_message = "libvips failed to crop a dynamic mask tile."
+  )
+  current <- tmp_crop
+  current_width <- suppressWarnings(as.numeric(wsi_vips_field(current, "width")))
+  current_height <- suppressWarnings(as.numeric(wsi_vips_field(current, "height")))
+  needs_resize <- !is.finite(current_width) || !is.finite(current_height) ||
+    as.integer(round(current_width)) != region$desired_width ||
+    as.integer(round(current_height)) != region$desired_height
+  if (isTRUE(needs_resize)) {
+    wsi_dynamic_resize_tile(current, tmp_resized, region$desired_width, region$desired_height, "png")
+    current <- tmp_resized
+  }
+  if (!file.copy(current, output, overwrite = TRUE)) {
+    wsi_abort(sprintf("Could not write dynamic mask tile cache file: %s", output))
+  }
+  invisible(output)
+}
+
 wsi_dynamic_image_tile_settings <- function(source, settings = list()) {
   settings <- settings %||% list()
   contrast <- wsi_channel_contrast(
@@ -1248,6 +1300,10 @@ wsi_dynamic_tile_file <- function(source, level, col, row, format = NULL,
     wsi_dynamic_image_region_to_file(source, region, output, settings = settings)
     return(output)
   }
+  if (identical(source$kind %||% "slide", "mask")) {
+    wsi_dynamic_mask_region_to_file(source, region, output, format = "png")
+    return(output)
+  }
   if (identical(source$kind %||% "slide", "czi_section")) {
     wsi_dynamic_czi_section_region_to_file(source, region, output, format = format)
     return(output)
@@ -1321,6 +1377,84 @@ wsi_dynamic_tile_response <- function(source, level, col, row, format = NULL,
   format <- wsi_dynamic_tile_format(format %||% source$tile_format)
   file <- wsi_dynamic_tile_file(source, level, col, row, format = format, settings = settings)
   wsi_http_file_response(file, wsi_dynamic_tile_content_type(format))
+}
+
+wsi_dynamic_prewarm_tiles <- function(sources, levels = NULL,
+                                      max_sources = 8L,
+                                      timeout_warning = TRUE) {
+  if (inherits(sources, "wsi_dynamic_tile_source")) {
+    sources <- list(sources)
+  }
+  if (!is.list(sources) || !length(sources)) {
+    return(invisible(0L))
+  }
+  sources <- sources[vapply(sources, inherits, logical(1), "wsi_dynamic_tile_source")]
+  if (!length(sources)) {
+    return(invisible(0L))
+  }
+  sources <- sources[seq_len(min(length(sources), as.integer(max_sources)))]
+  warmed <- 0L
+  for (source in sources) {
+    kind <- source$kind %||% "slide"
+    if (!kind %in% c("slide", "image")) {
+      next
+    }
+    max_level <- as.integer(source$max_level %||% NA_integer_)
+    min_level <- as.integer(source$min_level %||% 0L)
+    if (!is.finite(max_level) || max_level < min_level) {
+      next
+    }
+    source_levels <- levels
+    if (is.null(source_levels)) {
+      source_levels <- unique(pmax(min_level, max_level - c(5L, 4L)))
+    }
+    source_levels <- sort(unique(as.integer(source_levels)))
+    source_levels <- source_levels[is.finite(source_levels) & source_levels >= min_level & source_levels <= max_level]
+    for (level in source_levels) {
+      downsample <- 2^(max_level - level)
+      level_width <- ceiling(source$width / downsample)
+      level_height <- ceiling(source$height / downsample)
+      cols <- seq.int(0L, max(0L, ceiling(level_width / source$tile_size) - 1L))
+      rows <- seq.int(0L, max(0L, ceiling(level_height / source$tile_size) - 1L))
+      grid <- expand.grid(col = cols, row = rows)
+      center_col <- floor(max(cols) / 2)
+      center_row <- floor(max(rows) / 2)
+      grid$distance <- abs(grid$col - center_col) + abs(grid$row - center_row)
+      grid <- grid[order(grid$distance, grid$row, grid$col), , drop = FALSE]
+      grid <- head(grid, 8L)
+      for (idx in seq_len(nrow(grid))) {
+        ok <- tryCatch(
+          {
+            wsi_dynamic_tile_file(
+              source,
+              level = level,
+              col = grid$col[[idx]],
+              row = grid$row[[idx]],
+              format = source$tile_format %||% "jpg"
+            )
+            TRUE
+          },
+          error = function(err) {
+            if (isTRUE(timeout_warning)) {
+              wsi_warn(paste0(
+                "Could not prewarm dynamic tile cache for `",
+                source$id %||% "slide",
+                "` level ",
+                level,
+                ": ",
+                conditionMessage(err)
+              ))
+            }
+            FALSE
+          }
+        )
+        if (isTRUE(ok)) {
+          warmed <- warmed + 1L
+        }
+      }
+    }
+  }
+  invisible(warmed)
 }
 
 wsi_dynamic_tile_cleanup <- function(source) {

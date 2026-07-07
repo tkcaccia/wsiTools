@@ -1,8 +1,10 @@
 #' Link a Seurat spatial object to a high-resolution image
 #'
-#' `wsi_link_seurat_image()` extracts spatial spot coordinates and a dimensional
-#' reduction from a Seurat object and maps the spots onto a high-resolution
-#' image. Seurat remains an optional dependency: when
+#' `wsi_link_seurat_image()` extracts spatial spot coordinates and, when
+#' available, a dimensional reduction from a Seurat object and maps the spots
+#' or cells onto a high-resolution image. If no reduction is present, wsiTools
+#' falls back to a coordinate-based spatial plot so the image overlay and live
+#' gene lookup still work. Seurat remains an optional dependency: when
 #' `SeuratObject` or `Seurat` is installed their accessors are used; otherwise
 #' the function falls back to Seurat-like object slots/lists.
 #'
@@ -27,6 +29,8 @@
 #'   CSV file. These files contain full-resolution pixel coordinates and are the
 #'   preferred source for alignment to an external high-resolution image.
 #' @param reduction Dimensional reduction to extract, for example `"pca"`.
+#'   If the reduction is absent but spatial coordinates are available, the
+#'   viewer uses the slide x/y coordinates as a fallback `"spatial"` plot.
 #' @param dims Two reduction dimensions to plot.
 #' @param coordinate_scale How to map Seurat image coordinates onto `image`.
 #'   `"auto"` rescales from the stored Seurat image dimensions when coordinates
@@ -151,20 +155,40 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
     image_obj = image_obj,
     tissue_positions = spatial$tissue_positions
   )
-  embeddings <- wsi_seurat_embeddings(seurat, reduction = reduction)
-  if (ncol(embeddings) < max(dims)) {
-    wsi_abort(sprintf(
-      "Reduction `%s` has %d dimension%s, but `dims` requests dimension %d.",
-      reduction,
-      ncol(embeddings),
-      if (ncol(embeddings) == 1L) "" else "s",
-      max(dims)
-    ))
+  embeddings <- tryCatch(
+    wsi_seurat_embeddings(seurat, reduction = reduction),
+    error = function(err) NULL
+  )
+  if (is.null(embeddings)) {
+    seurat_ids <- tryCatch(colnames(seurat), error = function(err) NULL)
+    if (is.null(seurat_ids) || !length(seurat_ids)) {
+      meta <- wsi_seurat_slot(seurat, "meta.data")
+      seurat_ids <- rownames(meta) %||% character()
+    }
+    if (length(seurat_ids)) {
+      coordinates <- coordinates[coordinates$barcode %in% seurat_ids, , drop = FALSE]
+    }
+    if (!nrow(coordinates)) {
+      wsi_abort("No shared spot/cell identifiers were found between Seurat coordinates and the object.")
+    }
+    embeddings <- cbind(slide_x = coordinates$x, slide_y = coordinates$y)
+    rownames(embeddings) <- coordinates$barcode
+    reduction <- "spatial"
+    dims <- c(1L, 2L)
+  } else {
+    if (ncol(embeddings) < max(dims)) {
+      wsi_abort(sprintf(
+        "Reduction `%s` has %d dimension%s, but `dims` requests dimension %d.",
+        reduction,
+        ncol(embeddings),
+        if (ncol(embeddings) == 1L) "" else "s",
+        max(dims)
+      ))
+    }
+    matched <- wsi_seurat_match_spots(coordinates, embeddings)
+    coordinates <- matched$coordinates
+    embeddings <- matched$embeddings
   }
-
-  matched <- wsi_seurat_match_spots(coordinates, embeddings)
-  coordinates <- matched$coordinates
-  embeddings <- matched$embeddings
   if (!nrow(coordinates)) {
     wsi_abort("No shared spot/barcode identifiers were found between Seurat coordinates and the reduction.")
   }
@@ -380,6 +404,10 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
 #'   default is `TRUE` so R and the browser stay synchronized while the session
 #'   is active; set `live = FALSE` to write a static HTML viewer.
 #' @param dynamic_tiles When `live = TRUE`, serve the image as dynamic tiles.
+#'   The default is `FALSE`: live synchronization stays active, while the base
+#'   image and dense spatial masks use prebuilt Deep Zoom tiles for smoother
+#'   zooming and panning. Use `TRUE` only as a fallback when prebuilt tiles
+#'   cannot be created.
 #' @param show_spots Whether to draw the spatial spot layer on top of the
 #'   tissue image. Set this to `FALSE` for very dense assays such as Visium HD
 #'   when a tiled mask or other aggregate layer is more appropriate than sending
@@ -404,7 +432,7 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
 #' )
 #' }
 wsi_viewer_seurat <- function(seurat, image, linked = NULL,
-                              live = TRUE, dynamic_tiles = live,
+                              live = TRUE, dynamic_tiles = FALSE,
                               show_spots = TRUE,
                               mode = c("tiles", "thumbnail"),
                               output = NULL, open = interactive(),
@@ -433,15 +461,39 @@ wsi_viewer_seurat <- function(seurat, image, linked = NULL,
       spot_ids = as.character(linked$spots$barcode %||% linked$spots$id)
     )
   }
+  if (isTRUE(live) && identical(mode, "tiles")) {
+    dynamic_tiles <- wsi_prefer_static_spatial_tiles(dynamic_tiles, context = "Seurat viewer")
+  }
 
   layers <- dots$layers %||% list()
   if (!is.list(layers) || inherits(layers, "data.frame")) {
     layers <- list(layers)
   }
-  dots$layers <- if (isTRUE(show_spots)) {
-    c(list(wsi_seurat_spots_layer(linked)), layers)
-  } else {
-    layers
+  dots$layers <- layers
+  if (isTRUE(show_spots)) {
+    if (is.null(output)) {
+      output <- tempfile(fileext = ".html")
+      overwrite <- TRUE
+    }
+    spot_source <- wsi_seurat_spots_channel_source(
+      linked = linked,
+      output_dir = file.path(dirname(output), paste0(tools::file_path_sans_ext(basename(output)), "_spatial_masks")),
+      output_html = output,
+      id = "seurat_spots",
+      visible = TRUE,
+      opacity = 0.85,
+      dynamic = isTRUE(dots$spatial_mask_dynamic %||% FALSE),
+      rebuild = isTRUE(dots$rebuild %||% FALSE)
+    )
+    if (!is.null(spot_source)) {
+      channel_sources <- dots$channel_sources %||% list()
+      if (!is.list(channel_sources) || inherits(channel_sources, "data.frame")) {
+        channel_sources <- list(channel_sources)
+      }
+      dots$channel_sources <- c(list(spot_source$source), channel_sources)
+      linked$spot_layer_id <- spot_source$source$id
+      linked$spot_mask <- spot_source$mask
+    }
   }
   dots$seurat <- linked
   dots$output <- output
@@ -451,6 +503,9 @@ wsi_viewer_seurat <- function(seurat, image, linked = NULL,
 
   if (isTRUE(live)) {
     dots$dynamic_tiles <- dynamic_tiles
+    if (isTRUE(dynamic_tiles) && is.null(dots$dynamic_tile_format)) {
+      dots$dynamic_tile_format <- "jpg"
+    }
     dots$mode <- mode
     dots$slide <- linked$slide
     return(do.call(wsi_viewer_live, dots))
@@ -562,6 +617,9 @@ wsi_viewer_seurat_project <- function(seurat = NULL, images = NULL, linked = NUL
   if (!is.logical(dynamic_tiles) || length(dynamic_tiles) != 1L || is.na(dynamic_tiles)) {
     wsi_abort("`dynamic_tiles` must be `TRUE` or `FALSE`.")
   }
+  if (isTRUE(live) && identical(mode, "tiles")) {
+    dynamic_tiles <- wsi_prefer_static_spatial_tiles(dynamic_tiles, context = "Seurat project viewer")
+  }
   if (!is.logical(wait) || length(wait) != 1L || is.na(wait)) {
     wsi_abort("`wait` must be `TRUE` or `FALSE`.")
   }
@@ -627,7 +685,8 @@ wsi_viewer_seurat_project <- function(seurat = NULL, images = NULL, linked = NUL
     tile_format = tile_format,
     quality = quality,
     rebuild = rebuild,
-    tile_overlap = tile_overlap
+    tile_overlap = tile_overlap,
+    dynamic_channel_sources = FALSE
   )
 
   project_prediction <- wsi_prediction_context(
@@ -641,8 +700,18 @@ wsi_viewer_seurat_project <- function(seurat = NULL, images = NULL, linked = NUL
     section_index = -1L
   )
   first_record <- records[[1L]]
-  first_layer <- first_record$layers[[1L]] %||% wsi_seurat_spots_layer(first)
-  first_layer$project_scoped <- TRUE
+  first$spot_layer_id <- first_record$seurat$spot_layer_id %||% "seurat_spots"
+  project_channel_sources <- unlist(lapply(records, function(record) record$channel_sources %||% list()), recursive = FALSE)
+  project_tile_sources <- if (isTRUE(live) && isTRUE(dynamic_tiles) && identical(mode, "tiles")) {
+    wsi_seurat_project_dynamic_tile_sources(linked, records)
+  } else {
+    NULL
+  }
+  records <- lapply(records, function(record) {
+    record$channel_sources <- NULL
+    record$spot_mask <- NULL
+    record
+  })
 
   if (identical(mode, "thumbnail")) {
     viewer_args <- list(
@@ -656,7 +725,8 @@ wsi_viewer_seurat_project <- function(seurat = NULL, images = NULL, linked = NUL
       mode = "thumbnail",
       roi_class_presets = roi_class_presets,
       project_images = records,
-      layers = list(first_layer),
+      layers = list(),
+      channel_sources = project_channel_sources,
       seurat = first
     )
     if (isTRUE(live)) {
@@ -690,19 +760,54 @@ wsi_viewer_seurat_project <- function(seurat = NULL, images = NULL, linked = NUL
     tile_source_label = "Seurat project Deep Zoom tiles",
     roi_class_presets = roi_class_presets,
     project_images = records,
-    layers = list(first_layer),
+    layers = list(),
+    channel_sources = project_channel_sources,
     seurat = first
   )
   if (isTRUE(live)) {
     viewer_args$dynamic_tiles <- dynamic_tiles
+    if (isTRUE(dynamic_tiles)) {
+      viewer_args$dynamic_tile_format <- "jpg"
+    }
     viewer_args$wait <- wait
     viewer_args$transport <- transport
     viewer_args$name <- "wsi_seurat_project_live_state"
     viewer_args$prediction_context <- project_prediction
     viewer_args$proximity_context <- project_prediction
+    viewer_args$project_tile_sources <- project_tile_sources
     return(do.call(wsi_viewer_live, viewer_args))
   }
   do.call(wsi_viewer, viewer_args)
+}
+
+wsi_seurat_project_dynamic_tile_sources <- function(linked, records,
+                                                    tile_size = 512,
+                                                    tile_overlap = 1,
+                                                    format = "jpg") {
+  Map(function(item, record) {
+    source <- wsi_dynamic_tile_source(
+      item$slide,
+      slide_id = record$id %||% record$path %||% item$image_name %||% NULL,
+      tile_size = record$tile_size %||% tile_size,
+      tile_overlap = record$tile_overlap %||% tile_overlap,
+      format = record$tile_format %||% format
+    )
+    source$name <- record$label %||% source$id
+    source$metadata <- list(
+      project_item_id = record$id %||% source$id,
+      id = record$id %||% source$id,
+      label = record$label %||% source$name,
+      path = record$path %||% item$image_path %||% "",
+      backend = record$backend %||% item$slide$backend %||% "dynamic",
+      type = record$type %||% "seurat_spatial_section",
+      status = "live dynamic tiles",
+      message = "Full-resolution image tiles are served on demand by the live R session.",
+      active = isTRUE(record$active),
+      mpp = record$mpp %||% item$mpp %||% item$pixel_size %||% NULL,
+      objective_power = record$objective_power %||% NULL
+    )
+    source
+  }, linked, records)
 }
 
 #' @export
@@ -729,62 +834,377 @@ print.wsi_seurat_spatial <- function(x, ...) {
   invisible(x)
 }
 
+wsi_prefer_static_spatial_tiles <- function(dynamic_tiles, context = "spatial viewer") {
+  if (!isTRUE(dynamic_tiles)) {
+    return(FALSE)
+  }
+  force_dynamic <- identical(Sys.getenv("WSITOOLS_FORCE_DYNAMIC_TILES", unset = "false"), "true")
+  if (isTRUE(force_dynamic)) {
+    return(TRUE)
+  }
+  if (wsi_has_vips()) {
+    wsi_warn(paste0(
+      "Using prebuilt Deep Zoom tiles for smoother ",
+      context,
+      " performance. Dynamic tiles remain available only when ",
+      "`Sys.setenv(WSITOOLS_FORCE_DYNAMIC_TILES = \"true\")` is set."
+    ))
+    return(FALSE)
+  }
+  TRUE
+}
+
 wsi_seurat_spots_layer <- function(linked, visible = TRUE, opacity = 0.85) {
   source_name <- linked$source_name %||% "Seurat"
   feature_type <- linked$feature_type %||% "spot"
   feature_plural <- if (identical(feature_type, "cell")) "cells" else "spots"
-  layer <- wsi_viewer_layer_payload(
+  feature_count <- suppressWarnings(as.integer(linked$spot_count %||% nrow(linked$spots) %||% 0L))
+  layer <- wsi_seurat_spatial_mask_layer(
+    linked = linked,
     name = paste(source_name, "spatial", feature_plural),
-    data = linked$spots,
-    type = "points",
+    id = "seurat_spots",
     visible = visible,
     opacity = opacity,
-    colour = "#2B6CB0",
-    radius = linked$spot_radius
+    feature_count = feature_count
   )
-  if (length(layer$items)) {
-    fill_alpha <- if (identical(feature_type, "cell")) 0.08 else 0.18
-    for (i in seq_along(layer$items)) {
-      item_colour <- layer$items[[i]]$colour %||% layer$items[[i]]$color %||% layer$colour
-      layer$items[[i]]$fill <- wsi_hex_to_rgba(item_colour, fill_alpha)
-    }
-  }
-  gene_values <- wsi_seurat_gene_value_items(linked$gene_expression)
-  cluster_values <- wsi_spatial_cluster_value_items(linked$cluster_values %||% data.frame())
-  if (length(gene_values) && length(layer$items)) {
-    n <- min(length(gene_values), length(layer$items))
-    for (i in seq_len(n)) {
-      layer$items[[i]]$gene_values <- gene_values[[i]]
-      layer$items[[i]]$base_colour <- linked$spots$base_colour[[i]] %||% layer$items[[i]]$colour
-      layer$items[[i]]$base_color <- layer$items[[i]]$base_colour
-    }
-  } else if (length(layer$items) && "base_colour" %in% names(linked$spots)) {
-    n <- min(nrow(linked$spots), length(layer$items))
-    for (i in seq_len(n)) {
-      layer$items[[i]]$base_colour <- linked$spots$base_colour[[i]] %||% layer$items[[i]]$colour
-      layer$items[[i]]$base_color <- layer$items[[i]]$base_colour
-    }
-  }
-  if (length(cluster_values) && length(layer$items)) {
-    n <- min(length(cluster_values), length(layer$items))
-    for (i in seq_len(n)) {
-      layer$items[[i]]$cluster_values <- cluster_values[[i]]
-    }
-  }
-  layer$id <- "seurat_spots"
-  layer$name <- paste(source_name, "spatial", feature_plural)
-  layer$source_type <- "seurat_spots"
-  layer$metadata <- list(
-    source_name = source_name,
-    feature_type = feature_type,
-    feature_label = feature_plural,
-    reduction = linked$reduction,
-    image_name = linked$image_name,
-    coordinate_mapping = linked$coordinate_mapping,
-    mpp = linked$mpp %||% linked$pixel_size %||% NULL,
-    scale_metadata = linked$scale_metadata %||% NULL
+  layer$metadata <- c(
+    layer$metadata %||% list(),
+    list(
+      source_name = source_name,
+      feature_type = feature_type,
+      feature_label = feature_plural,
+      reduction = linked$reduction,
+      image_name = linked$image_name,
+      coordinate_mapping = linked$coordinate_mapping,
+      mpp = linked$mpp %||% linked$pixel_size %||% NULL,
+      scale_metadata = linked$scale_metadata %||% NULL,
+      feature_count = feature_count,
+      display_mode = "raster_mask",
+      vector_rendering = FALSE
+    )
   )
   layer
+}
+
+wsi_seurat_spots_channel_source <- function(linked,
+                                            output_dir,
+                                            output_html = NULL,
+                                            name = NULL,
+                                            id = "seurat_spots",
+                                            visible = TRUE,
+                                            opacity = 0.85,
+                                            tile_size = 254,
+                                            max_dimension = 8192L,
+                                            radius_scale = 0.5,
+                                            alpha = 0.65,
+                                            dynamic = FALSE,
+                                            rebuild = FALSE,
+                                            overwrite = FALSE,
+                                            target_path = NULL,
+                                            project_image_id = NULL) {
+  if (!wsi_has_vips()) {
+    wsi_warn(
+      wsi_backend_action_message(
+        "Spatial coordinate OME-TIFF overlays require libvips. The viewer will open without the tiled coordinate mask.",
+        backend = "vips"
+      )
+    )
+    return(NULL)
+  }
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+  }
+  if (!dir.exists(output_dir)) {
+    wsi_abort(sprintf("Could not create spatial coordinate mask directory: %s", output_dir))
+  }
+  source_name <- linked$source_name %||% "Spatial"
+  feature_type <- linked$feature_type %||% "spot"
+  feature_plural <- if (identical(feature_type, "cell")) "cells" else "spots"
+  name <- name %||% paste(source_name, "spatial", feature_plural, "mask")
+  id <- wsi_channel_source_id(id, name)
+  stem <- wsi_safe_id(id, "seurat_spots")
+  mask_output <- file.path(output_dir, paste0(stem, ".ome.tif"))
+  tile_dir <- file.path(output_dir, paste0(stem, "_deepzoom"))
+  raster_result <- wsi_seurat_spatial_mask_raster(
+    linked = linked,
+    max_dimension = max_dimension,
+    radius_scale = radius_scale,
+    alpha = alpha
+  )
+  ome_tile_size <- max(16L, min(512L, tile_size, raster_result$mask_width, raster_result$mask_height))
+  ome_tile_size <- max(16L, as.integer(floor(ome_tile_size / 16L) * 16L))
+  if (!file.exists(mask_output) || isTRUE(rebuild)) {
+    temp_png <- tempfile(fileext = ".png")
+    on.exit(unlink(temp_png), add = TRUE)
+    old_par <- NULL
+    grDevices::png(temp_png, width = raster_result$mask_width, height = raster_result$mask_height, bg = "transparent")
+    tryCatch({
+      old_par <- graphics::par(no.readonly = TRUE)
+      graphics::par(mar = c(0, 0, 0, 0), xaxs = "i", yaxs = "i")
+      graphics::plot.new()
+      graphics::plot.window(xlim = c(0, 1), ylim = c(0, 1), asp = NA)
+      graphics::rasterImage(grDevices::as.raster(raster_result$raster), 0, 0, 1, 1, interpolate = FALSE)
+    }, finally = {
+      if (!is.null(old_par)) {
+        try(graphics::par(old_par), silent = TRUE)
+      }
+      grDevices::dev.off()
+    })
+    wsi_convert(
+      input = temp_png,
+      output = mask_output,
+      format = "ome-tiff",
+      backend = "vips",
+      tile_size = ome_tile_size,
+      compression = "lzw",
+      pyramid = TRUE,
+      bigtiff = TRUE,
+      overwrite = TRUE
+    )
+  }
+  mask_slide <- wsi_open(mask_output)
+  slide_path <- target_path %||% linked$image_path %||% linked$slide$path %||% NULL
+  if (!is.null(slide_path) && nzchar(slide_path)) {
+    slide_path <- normalizePath(slide_path, winslash = "/", mustWork = FALSE)
+  }
+  legend <- list(list(
+    label = feature_plural,
+    value = "1",
+    colour = "#2B6CB0",
+    count = raster_result$feature_count
+  ))
+  source_metadata <- list(
+    kind = "mask",
+    source_type = "seurat_spots",
+    transparent_background = TRUE,
+    legend = legend,
+    selected_values = "1",
+    extent = list(x = 0, y = 0, width = raster_result$slide_width, height = raster_result$slide_height),
+    mask_downsample = raster_result$downsample,
+    source_mask = normalizePath(mask_output, winslash = "/", mustWork = FALSE),
+    target_path = slide_path,
+    base_slide_path = slide_path,
+    project_image_id = project_image_id %||% "active_project_image",
+    feature_type = feature_type,
+    feature_count = raster_result$feature_count,
+    represented_count = raster_result$represented_count,
+    display_mode = "ome_tiff_mask"
+  )
+  if (isTRUE(dynamic)) {
+    source <- wsi_dynamic_tile_source(
+      mask_slide,
+      slide_id = id,
+      tile_size = tile_size,
+      tile_overlap = 1,
+      format = "png"
+    )
+    source$name <- name
+    source$kind <- "mask"
+    source$visible <- visible
+    source$opacity <- opacity
+    source$colour <- "#ffffff"
+    source$extent <- source_metadata$extent
+    source$metadata <- source_metadata
+    return(list(
+      source = source,
+      mask = list(
+        output = normalizePath(mask_output, winslash = "/", mustWork = FALSE),
+        mask_width = raster_result$mask_width,
+        mask_height = raster_result$mask_height,
+        slide_width = raster_result$slide_width,
+        slide_height = raster_result$slide_height,
+        downsample = raster_result$downsample,
+        represented_count = raster_result$represented_count
+      ),
+      tiles = NULL
+    ))
+  }
+  tiles <- wsi_create_deepzoom_tiles(
+    slide = mask_slide,
+    tile_dir = tile_dir,
+    tile_size = tile_size,
+    tile_overlap = 1,
+    tile_format = "png",
+    quality = 90,
+    rebuild = isTRUE(rebuild)
+  )
+  source <- wsi_channel_source(
+    name = name,
+    id = id,
+    type = "deepzoom",
+    tile_url_base = if (!is.null(output_html)) wsi_tile_base_url(tile_dir, output_html) else wsi_file_url(tiles$tiles),
+    width = raster_result$mask_width,
+    height = raster_result$mask_height,
+    tile_size = tile_size,
+    tile_format = "png",
+    max_level = wsi_dz_max_level(raster_result$mask_width, raster_result$mask_height),
+    tile_overlap = as.integer(tiles$overlap %||% 1L),
+    visible = visible,
+    opacity = opacity,
+    colour = "#ffffff",
+    metadata = source_metadata
+  )
+  list(
+    source = source,
+    mask = list(
+      output = normalizePath(mask_output, winslash = "/", mustWork = FALSE),
+      mask_width = raster_result$mask_width,
+      mask_height = raster_result$mask_height,
+      slide_width = raster_result$slide_width,
+      slide_height = raster_result$slide_height,
+      downsample = raster_result$downsample,
+      represented_count = raster_result$represented_count
+    ),
+    tiles = tiles
+  )
+}
+
+wsi_seurat_spatial_mask_raster <- function(linked,
+                                           colours = NULL,
+                                           max_dimension = 4096L,
+                                           radius_scale = 0.5,
+                                           alpha = 0.65) {
+  spots <- linked$spots
+  feature_count <- suppressWarnings(as.integer(linked$spot_count %||% nrow(spots) %||% 0L))
+  slide_width <- suppressWarnings(as.numeric(linked$slide$dimensions[["width"]] %||% max(spots$x, na.rm = TRUE)))
+  slide_height <- suppressWarnings(as.numeric(linked$slide$dimensions[["height"]] %||% max(spots$y, na.rm = TRUE)))
+  if (!is.finite(slide_width) || slide_width <= 0) {
+    slide_width <- max(1, suppressWarnings(max(as.numeric(spots$x), na.rm = TRUE)))
+  }
+  if (!is.finite(slide_height) || slide_height <= 0) {
+    slide_height <- max(1, suppressWarnings(max(as.numeric(spots$y), na.rm = TRUE)))
+  }
+  max_dimension <- max(256L, as.integer(max_dimension %||% 4096L))
+  downsample <- max(1, ceiling(max(slide_width, slide_height) / max_dimension))
+  mask_width <- max(1L, as.integer(ceiling(slide_width / downsample)))
+  mask_height <- max(1L, as.integer(ceiling(slide_height / downsample)))
+  raster <- matrix("#00000000", nrow = mask_height, ncol = mask_width)
+  x <- suppressWarnings(as.numeric(spots$x %||% spots$slide_x))
+  y <- suppressWarnings(as.numeric(spots$y %||% spots$slide_y))
+  keep <- is.finite(x) & is.finite(y) & x >= 0 & y >= 0 & x <= slide_width & y <= slide_height
+  if (any(keep)) {
+    x <- x[keep]
+    y <- y[keep]
+    if (is.null(colours)) {
+      colours <- spots$colour %||% spots$color %||% spots$base_colour %||% spots$base_color %||% "#2B6CB0"
+      colours <- as.character(colours)[keep]
+    } else {
+      colours <- rep(as.character(colours), length.out = nrow(spots))[keep]
+    }
+    colours <- vapply(colours, wsi_colour_to_hex, character(1), name = "colour")
+    colours <- grDevices::adjustcolor(colours, alpha.f = max(0, min(1, alpha)))
+    px <- pmin(mask_width, pmax(1L, as.integer(round(x / downsample)) + 1L))
+    py <- pmin(mask_height, pmax(1L, as.integer(round(y / downsample)) + 1L))
+    radius_values <- suppressWarnings(as.numeric(spots$radius %||% spots$spot_radius %||% linked$spot_radius %||% NA_real_))
+    if (length(radius_values) != nrow(spots)) {
+      fallback_radius <- if (length(radius_values) && is.finite(radius_values[[1L]])) {
+        radius_values[[1L]]
+      } else {
+        linked$spot_radius %||% 2
+      }
+      radius_values <- rep(fallback_radius, nrow(spots))
+    }
+    radius_values <- radius_values[keep]
+    radius_values[!is.finite(radius_values) | radius_values <= 0] <- linked$spot_radius %||% 2
+    pr <- pmax(1L, as.integer(round(radius_values * radius_scale / downsample)))
+    for (i in seq_along(px)) {
+      rr <- pr[[i]]
+      x0 <- max(1L, px[[i]] - rr)
+      x1 <- min(mask_width, px[[i]] + rr)
+      y0 <- max(1L, py[[i]] - rr)
+      y1 <- min(mask_height, py[[i]] + rr)
+      if (rr <= 1L) {
+        raster[py[[i]], px[[i]]] <- colours[[i]]
+      } else {
+        xs <- x0:x1
+        ys <- y0:y1
+        disk <- outer(ys - py[[i]], xs - px[[i]], function(a, b) a * a + b * b <= rr * rr)
+        sub <- raster[ys, xs, drop = FALSE]
+        sub[disk] <- colours[[i]]
+        raster[ys, xs] <- sub
+      }
+    }
+  }
+  list(
+    raster = raster,
+    slide_width = slide_width,
+    slide_height = slide_height,
+    mask_width = mask_width,
+    mask_height = mask_height,
+    downsample = downsample,
+    feature_count = feature_count,
+    represented_count = sum(keep)
+  )
+}
+
+wsi_seurat_spatial_mask_layer <- function(linked, name, id = "seurat_spots",
+                                          colours = NULL, visible = TRUE,
+                                          opacity = 0.85,
+                                          feature_count = NULL,
+                                          max_dimension = 4096L,
+                                          radius_scale = 0.5,
+                                          alpha = 0.65) {
+  raster_result <- wsi_seurat_spatial_mask_raster(
+    linked = linked,
+    colours = colours,
+    max_dimension = max_dimension,
+    radius_scale = radius_scale,
+    alpha = alpha
+  )
+  feature_count <- feature_count %||% raster_result$feature_count
+  layer <- wsi_viewer_layer_payload(
+    name = name,
+    data = grDevices::as.raster(raster_result$raster),
+    type = "image",
+    slide = linked$slide,
+    visible = visible,
+    opacity = opacity,
+    extent = c(xmin = 0, ymin = 0, xmax = raster_result$slide_width, ymax = raster_result$slide_height)
+  )
+  layer$id <- id
+  layer$source_type <- "seurat_spots"
+  layer$count <- feature_count
+  layer$metadata <- list(
+    kind = "spatial_coordinate_mask",
+    raster_width = raster_result$mask_width,
+    raster_height = raster_result$mask_height,
+    downsample = raster_result$downsample,
+    represented_count = raster_result$represented_count,
+    feature_count = feature_count,
+    radius_scale = radius_scale,
+    transparent_background = TRUE
+  )
+  layer
+}
+
+wsi_seurat_plot_browser_payload <- function(plot, max_points = 20000L) {
+  if (!is.list(plot)) {
+    return(plot)
+  }
+  points <- plot$points %||% NULL
+  if (!is.data.frame(points) || !nrow(points)) {
+    return(plot)
+  }
+  original_count <- nrow(points)
+  drop_cols <- intersect(
+    names(points),
+    c("cluster_values", "base_colour", "base_color")
+  )
+  if (length(drop_cols)) {
+    points[drop_cols] <- NULL
+  }
+  max_points <- max(1000L, as.integer(max_points %||% 20000L))
+  if (nrow(points) > max_points) {
+    idx <- unique(as.integer(round(seq(1, nrow(points), length.out = max_points))))
+    points <- points[idx, , drop = FALSE]
+    plot$sampled <- TRUE
+  } else {
+    plot$sampled <- FALSE
+  }
+  plot$points <- points
+  plot$point_count <- as.integer(original_count)
+  plot$displayed_point_count <- as.integer(nrow(points))
+  plot
 }
 
 wsi_viewer_seurat_config <- function(seurat = NULL) {
@@ -798,6 +1218,8 @@ wsi_viewer_seurat_config <- function(seurat = NULL) {
   if (!length(plots) && !is.null(seurat$pca)) {
     plots <- list(seurat$pca)
   }
+  plot_max_points <- if (!is.null(seurat$spot_mask)) 15000L else 50000L
+  plots <- lapply(plots, wsi_seurat_plot_browser_payload, max_points = plot_max_points)
   list(
     enabled = TRUE,
     source_name = seurat$source_name %||% "Seurat",
@@ -807,7 +1229,7 @@ wsi_viewer_seurat_config <- function(seurat = NULL) {
     reduction = seurat$reduction,
     dims = as.integer(seurat$dims),
     component_names = as.character(seurat$component_names),
-    spot_layer_id = "seurat_spots",
+    spot_layer_id = seurat$spot_layer_id %||% "seurat_spots",
     spot_count = as.integer(seurat$spot_count),
     displayed_spot_count = as.integer(seurat$displayed_spot_count),
     spot_radius = as.numeric(seurat$spot_radius),
@@ -1091,7 +1513,8 @@ wsi_seurat_project_records <- function(linked, output, labels,
                                        tile_dir = NULL, tile_size = 512,
                                        tile_format = c("jpg", "png"),
                                        quality = 90, rebuild = FALSE,
-                                       tile_overlap = NULL) {
+                                       tile_overlap = NULL,
+                                       dynamic_channel_sources = FALSE) {
   mode <- match.arg(mode)
   tile_format <- match.arg(tile_format)
   if (identical(mode, "tiles")) {
@@ -1163,10 +1586,28 @@ wsi_seurat_project_records <- function(linked, output, labels,
       section = NULL,
       section_index = -1L
     )
-    layer <- wsi_seurat_spots_layer(scoped_item)
-    layer$project_scoped <- TRUE
+    spot_channel <- NULL
+    spot_channel_id <- paste0(record$id, "_seurat_spots")
+    scoped_item$spot_layer_id <- spot_channel_id
+    if (identical(mode, "tiles")) {
+      spot_channel <- wsi_seurat_spots_channel_source(
+        linked = scoped_item,
+        output_dir = file.path(tile_dir, "spatial_masks"),
+        output_html = output,
+        id = spot_channel_id,
+        name = paste(label, scoped_item$source_name %||% "Spatial", "mask"),
+        visible = i == 1L,
+        opacity = 0.85,
+        dynamic = isTRUE(dynamic_channel_sources),
+        rebuild = isTRUE(rebuild),
+        target_path = record$path,
+        project_image_id = record$id
+      )
+    }
     record$project_key <- scoped_item$project_key
-    record$layers <- list(layer)
+    record$layers <- list()
+    record$channel_sources <- if (is.null(spot_channel)) list() else list(spot_channel$source)
+    record$spot_mask <- if (is.null(spot_channel)) NULL else spot_channel$mask
     record$seurat <- wsi_viewer_seurat_config(scoped_item)
     records[[i]] <- record
   }
@@ -1373,6 +1814,58 @@ wsi_seurat_coordinates_from_accessor <- function(seurat, image_name) {
     wsi_seurat_try_accessor("Seurat", "GetTissueCoordinates", object = seurat)
 }
 
+wsi_seurat_coordinates_from_boundaries <- function(image_obj) {
+  boundaries <- wsi_seurat_slot(image_obj, "boundaries")
+  if (is.null(boundaries) || !length(boundaries)) {
+    return(NULL)
+  }
+  candidates <- c("centroids", "Centroids", names(boundaries))
+  candidates <- unique(candidates[nzchar(candidates %||% "")])
+  for (name in candidates) {
+    boundary <- boundaries[[name]]
+    if (is.null(boundary)) {
+      next
+    }
+    coords <- wsi_seurat_slot(boundary, "coords")
+    cells <- wsi_seurat_slot(boundary, "cells")
+    if (is.null(coords) || (!is.matrix(coords) && !is.data.frame(coords))) {
+      next
+    }
+    coords <- as.data.frame(coords, stringsAsFactors = FALSE)
+    if (!nrow(coords) || ncol(coords) < 2L) {
+      next
+    }
+    x_col <- wsi_seurat_first_column(coords, c("x", "X", "imagecol", "col"))
+    y_col <- wsi_seurat_first_column(coords, c("y", "Y", "imagerow", "row"))
+    if (is.null(x_col) || is.null(y_col)) {
+      x_col <- names(coords)[[1L]]
+      y_col <- names(coords)[[2L]]
+    }
+    if (is.null(cells) || length(cells) != nrow(coords)) {
+      cells <- rownames(coords) %||% as.character(seq_len(nrow(coords)))
+    }
+    out <- data.frame(
+      barcode = as.character(cells),
+      x = suppressWarnings(as.numeric(coords[[x_col]])),
+      y = suppressWarnings(as.numeric(coords[[y_col]])),
+      stringsAsFactors = FALSE
+    )
+    out <- out[is.finite(out$x) & is.finite(out$y) & nzchar(out$barcode), , drop = FALSE]
+    if (!nrow(out)) {
+      next
+    }
+    row.names(out) <- NULL
+    attr(out, "coordinate_space") <- "fullres"
+    attr(out, "coordinate_source") <- paste0("seurat_image_boundaries$", name)
+    attr(out, "registered_coordinates") <- TRUE
+    attr(out, "id_column") <- "cells"
+    attr(out, "x_column") <- x_col
+    attr(out, "y_column") <- y_col
+    return(out)
+  }
+  NULL
+}
+
 wsi_seurat_read_tissue_positions <- function(path) {
   if (is.null(path)) {
     return(NULL)
@@ -1507,6 +2000,9 @@ wsi_seurat_coordinate_table <- function(seurat, image_name, image_obj = NULL, ti
   }
   if (is.null(coords)) {
     coords <- wsi_seurat_slot(image_obj, "coordinates")
+  }
+  if (is.null(coords)) {
+    coords <- wsi_seurat_coordinates_from_boundaries(image_obj)
   }
   if (is.null(coords)) {
     coords <- meta_coords %||% wsi_seurat_coordinates_from_metadata(seurat)
@@ -2206,6 +2702,37 @@ wsi_seurat_dynamic_gene_payload <- function(linked, gene) {
       colour = as.character(colours[[i]] %||% "#d1d5db")
     )
   })
+  gene_layer <- tryCatch({
+    linked_for_layer <- linked
+    linked_for_layer$spots$colour <- colours
+    linked_for_layer$spots$color <- colours
+    linked_for_layer$spots$radius <- suppressWarnings(as.numeric(linked_for_layer$spots$radius %||% linked$spot_radius %||% NA_real_))
+    layer <- wsi_seurat_spatial_mask_layer(
+      linked = linked_for_layer,
+      name = sprintf("%s %s %s expression", source_name, feature_plural, actual_gene),
+      id = if (identical(feature_type, "cell")) "seurat_cell_gene_expression" else "seurat_gene_expression",
+      colours = colours,
+      visible = TRUE,
+      opacity = 0.9,
+      feature_count = nrow(spots),
+      radius_scale = 0.5,
+      alpha = 0.85
+    )
+    layer$source_type <- if (identical(feature_type, "cell")) "seurat_cell_gene_expression" else "seurat_gene_expression"
+    layer$metadata <- c(
+      layer$metadata %||% list(),
+      list(
+        gene = actual_gene,
+        feature_type = feature_type,
+        feature_label = feature_plural,
+        range = gene_expression$ranges[[actual_gene]] %||% list(min = NA_real_, max = NA_real_),
+        positive_count = sum(values > 0, na.rm = TRUE),
+        display_mode = "raster_mask",
+        vector_rendering = FALSE
+      )
+    )
+    unclass(layer)
+  }, error = function(err) NULL)
   list(
     ok = TRUE,
     gene = as.character(actual_gene),
@@ -2215,6 +2742,7 @@ wsi_seurat_dynamic_gene_payload <- function(linked, gene) {
     feature_plural = feature_plural,
     range = gene_expression$ranges[[actual_gene]] %||% list(min = NA_real_, max = NA_real_),
     count = length(points),
+    image_layer = gene_layer,
     points = points
   )
 }

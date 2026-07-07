@@ -948,7 +948,7 @@ fn launch_r_new_project_target(
     push_log(&state.logs, "  project_images$image,");
     push_log(&state.logs, "  live = \"yes\",");
     push_log(&state.logs, "  tiled = \"yes\",");
-    push_log(&state.logs, "  dynamic_tiles = TRUE,");
+    push_log(&state.logs, "  dynamic_tiles = FALSE,");
     push_log(&state.logs, "  open = FALSE,");
     push_log(&state.logs, "  wait = FALSE");
     push_log(&state.logs, ")");
@@ -1117,7 +1117,7 @@ fn launch_r_target(
     }
     push_log(&state.logs, "  live = \"yes\",");
     push_log(&state.logs, "  tiled = \"yes\",");
-    push_log(&state.logs, "  dynamic_tiles = TRUE,");
+    push_log(&state.logs, "  dynamic_tiles = FALSE,");
     push_log(&state.logs, "  open = FALSE,");
     push_log(&state.logs, "  wait = FALSE");
     push_log(&state.logs, ")");

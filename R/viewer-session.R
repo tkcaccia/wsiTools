@@ -4170,10 +4170,23 @@ wsi_project_images_with_dynamic_tiles <- function(project_images = NULL,
   existing_ids <- existing_ids[nzchar(existing_ids)]
   for (record in records) {
     record_ids <- c(record$id %||% "", record$path %||% "")
-    if (any(nzchar(record_ids) & record_ids %in% existing_ids)) {
+    match_index <- which(vapply(existing, function(item) {
+      if (!is.list(item)) {
+        return(FALSE)
+      }
+      item_ids <- c(item$id %||% "", item$path %||% "")
+      any(nzchar(record_ids) & nzchar(item_ids) & record_ids %in% item_ids)
+    }, logical(1)))
+    if (length(match_index)) {
+      existing[[match_index[[1L]]]] <- utils::modifyList(
+        existing[[match_index[[1L]]]],
+        record,
+        keep.null = TRUE
+      )
       next
     }
     existing[[length(existing) + 1L]] <- record
+    existing_ids <- c(existing_ids, record_ids[nzchar(record_ids)])
   }
   existing
 }
@@ -4444,6 +4457,10 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   dynamic_project_sources <- wsi_dynamic_channel_sources(project_tile_sources)
   dynamic_source <- NULL
   if (isTRUE(dynamic_tiles)) {
+    dots$tile_image_loader_limit <- dots$tile_image_loader_limit %||% 4L
+    dots$tile_prefetch_margin <- dots$tile_prefetch_margin %||% 0L
+    dots$tile_prefetch_cache_count <- dots$tile_prefetch_cache_count %||% 0L
+    dots$tile_timeout_ms <- dots$tile_timeout_ms %||% 60000L
     dynamic_source <- wsi_dynamic_tile_source(
       slide,
       slide_id = wsi_safe_id(name, "slide"),
@@ -4489,6 +4506,13 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
     dynamic_channel_sources,
     dynamic_project_sources
   )
+  if (length(all_dynamic_sources) &&
+      identical(Sys.getenv("WSITOOLS_DYNAMIC_PREWARM_TILES", unset = "false"), "true")) {
+    try(
+      wsi_dynamic_prewarm_tiles(all_dynamic_sources, timeout_warning = FALSE),
+      silent = TRUE
+    )
+  }
 
   bridge <- wsi_start_viewer_state_server(
     state = state,

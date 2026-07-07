@@ -46,8 +46,11 @@ test_that("Seurat spatial objects can be linked to high-resolution slide coordin
   layer <- wsiTools:::wsi_seurat_spots_layer(linked)
   expect_equal(layer$id, "seurat_spots")
   expect_equal(layer$source_type, "seurat_spots")
-  expect_equal(length(layer$items), 3)
-  expect_true(length(unique(vapply(layer$items, `[[`, character(1), "colour"))) > 1)
+  expect_equal(layer$type, "image")
+  expect_true(grepl("^data:image/png;base64,", layer$data_uri))
+  expect_equal(layer$count, 3)
+  expect_equal(layer$metadata$display_mode, "raster_mask")
+  expect_false(layer$metadata$vector_rendering)
 })
 
 test_that("registered Seurat metadata coordinates override stale image-slot coordinates", {
@@ -111,6 +114,43 @@ test_that("cell-level centroid coordinates in Seurat metadata can be used for im
   expect_equal(linked$spots$y, c(75, 175))
   expect_equal(linked$coordinate_mapping$method, "auto_fullres")
   expect_equal(linked$coordinate_mapping$coordinate_space, "unknown")
+})
+
+test_that("Seurat image boundary centroids work without dimensional reductions", {
+  seurat_like <- list(
+    meta.data = data.frame(
+      nCount_RNA = c(10, 20, 30),
+      row.names = c("cellid_001", "cellid_002", "cellid_003")
+    ),
+    images = list(
+      polygons = list(
+        boundaries = list(
+          centroids = list(
+            cells = c("cellid_001", "cellid_002", "cellid_003"),
+            coords = matrix(
+              c(50, 75, 150, 175, 250, 275),
+              ncol = 2,
+              byrow = TRUE,
+              dimnames = list(NULL, c("x", "y"))
+            )
+          )
+        ),
+        image = array(0, dim = c(100, 100, 3))
+      )
+    )
+  )
+  slide <- wsi_mock_slide(width = 300, height = 300, levels = c(1, 2))
+
+  linked <- wsi_link_seurat_image(seurat_like, slide, image_name = "polygons")
+
+  expect_equal(linked$feature_type, "cell")
+  expect_equal(linked$reduction, "spatial")
+  expect_equal(linked$reduction_embedding_name, "spatial")
+  expect_equal(linked$spots$x, c(50, 150, 250))
+  expect_equal(linked$spots$y, c(75, 175, 275))
+  expect_equal(linked$pca$x_label, "slide_x")
+  expect_equal(linked$pca$y_label, "slide_y")
+  expect_equal(linked$coordinate_mapping$method, "auto_fullres")
 })
 
 test_that("Seurat Visium spot spacing supplies scale when image metadata has no mpp", {
@@ -207,8 +247,11 @@ test_that("Seurat spots can be coloured by selected gene expression values", {
   expect_equal(linked$pca$points$gene_values[[1]]$Mbp, 0)
 
   layer <- wsiTools:::wsi_seurat_spots_layer(linked)
-  expect_equal(layer$items[[2]]$gene_values$Mbp, 2)
-  expect_match(layer$items[[2]]$base_colour, "^#")
+  expect_equal(layer$type, "image")
+  expect_true(grepl("^data:image/png;base64,", layer$data_uri))
+  expect_equal(layer$metadata$display_mode, "raster_mask")
+  expect_equal(linked$pca$points$gene_values[[2]]$Mbp, 2)
+  expect_match(linked$spots$base_colour[[2]], "^#")
 
   config <- wsiTools:::wsi_viewer_seurat_config(linked)
   expect_true(config$gene_expression$enabled)
@@ -259,7 +302,9 @@ test_that("Seurat clustering metadata is detected and exposed to the viewer", {
   expect_equal(linked$pca$points$cluster_values[[2]]$seurat_clusters, "tumour")
 
   layer <- wsiTools:::wsi_seurat_spots_layer(linked)
-  expect_equal(layer$items[[1]]$cluster_values$seurat_clusters, "stroma")
+  expect_equal(layer$type, "image")
+  expect_equal(layer$metadata$display_mode, "raster_mask")
+  expect_equal(linked$pca$points$cluster_values[[1]]$seurat_clusters, "stroma")
 
   config <- wsiTools:::wsi_viewer_seurat_config(linked)
   expect_true(config$clusters$enabled)
@@ -1090,7 +1135,8 @@ test_that("Seurat project records expose source tiles without reopening paths", 
 
   expect_length(records, 1)
   expect_true(records[[1]]$seurat$enabled)
-  expect_true(records[[1]]$layers[[1]]$project_scoped)
+  expect_equal(length(records[[1]]$layers), 0)
+  expect_equal(records[[1]]$seurat$spot_layer_id, "seurat_project_First_section_seurat_spots")
   expect_equal(records[[1]]$content_bbox$xmin, 64)
   expect_equal(records[[1]]$content_bbox$ymin, 84)
 })
@@ -1126,4 +1172,61 @@ test_that("Seurat gene overlay represents zero-expression cells", {
   expect_false(grepl("skipZero", js, fixed = TRUE))
   expect_true(grepl("represented_count:items.length", js, fixed = TRUE))
   expect_true(grepl("positive_count:positiveCount", js, fixed = TRUE))
+})
+
+test_that("live Seurat viewers prefer static tiles even when dynamic tiles are requested", {
+  skip_if_not(wsi_has_vips())
+  skip_if_not_installed("httpuv")
+
+  image <- tempfile(fileext = ".png")
+  grDevices::png(image, width = 256, height = 192)
+  graphics::par(mar = c(0, 0, 0, 0))
+  graphics::plot.new()
+  graphics::rect(0, 0, 1, 1, col = "#f8f8f8", border = NA)
+  graphics::rect(0.2, 0.2, 0.8, 0.8, col = "#b91c1c", border = NA)
+  grDevices::dev.off()
+
+  embeddings <- matrix(
+    c(0, 0, 1, 1),
+    ncol = 2,
+    byrow = TRUE,
+    dimnames = list(c("spot_a", "spot_b"), c("PC_1", "PC_2"))
+  )
+  seurat_like <- list(
+    reductions = list(pca = list(cell.embeddings = embeddings)),
+    images = list(
+      tiny = list(
+        coordinates = data.frame(
+          barcode = c("spot_a", "spot_b"),
+          imagecol = c(64, 128),
+          imagerow = c(48, 96)
+        ),
+        image = array(0, dim = c(192, 256, 3))
+      )
+    )
+  )
+
+  output <- tempfile(fileext = ".html")
+  viewer <- expect_warning(
+    wsi_viewer_seurat(
+      seurat_like,
+      image,
+      live = TRUE,
+      dynamic_tiles = TRUE,
+      output = output,
+      open = FALSE,
+      wait = FALSE,
+      port = 9877,
+      max_tries = 20L,
+      overwrite = TRUE
+    ),
+    "Using prebuilt Deep Zoom tiles"
+  )
+  on.exit(try(wsi_viewer_stop(viewer), silent = TRUE), add = TRUE)
+
+  html <- paste(readLines(output, warn = FALSE), collapse = "\n")
+  expect_false(grepl("/tiles/wsi_viewer_live_state/", html, fixed = TRUE))
+  expect_false(grepl("/tiles/seurat_spots/", html, fixed = TRUE))
+  expect_true(grepl("_tiles/slide_files", html, fixed = TRUE))
+  expect_true(grepl("_spatial_masks/seurat_spots_deepzoom/slide_files", html, fixed = TRUE))
 })

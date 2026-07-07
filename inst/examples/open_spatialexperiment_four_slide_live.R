@@ -218,7 +218,7 @@ if (nzchar(live_section)) {
     sample_id = live_section,
     image_name = live_section,
     reduction = reduction,
-    dynamic_tiles = TRUE,
+    dynamic_tiles = FALSE,
     output = file.path(dirname(output), paste0("open_spatialexperiment_", live_section, "_live.html")),
     open = open_browser,
     overwrite = TRUE,
