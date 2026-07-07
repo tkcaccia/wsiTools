@@ -41,8 +41,8 @@ const spatialInspections = new Map();
 const launcherWindow = getCurrentWindow();
 const launcherWindowSizes = {
   home: { width: 620, height: 380, minWidth: 520, minHeight: 320, maxHeight: 720 },
-  images: { width: 760, height: 460, minWidth: 620, minHeight: 380, maxHeight: 760 },
-  associations: { width: 860, height: 620, minWidth: 700, minHeight: 460, maxHeight: 860 },
+  images: { width: 760, height: 500, minWidth: 620, minHeight: 400, maxHeight: 720 },
+  associations: { width: 900, height: 760, minWidth: 720, minHeight: 620, maxHeight: 980 },
   runtime: { width: 860, height: 720, minWidth: 700, minHeight: 520, maxHeight: 900 }
 };
 let launcherResizeTimer = null;

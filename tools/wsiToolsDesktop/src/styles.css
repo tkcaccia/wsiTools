@@ -223,6 +223,18 @@ button:disabled {
   border-color: rgba(94, 234, 212, 0.52);
 }
 
+.projectActions #nextAssociations {
+  background: #2563eb;
+  border-color: rgba(147, 197, 253, 0.7);
+  box-shadow: 0 10px 26px rgba(37, 99, 235, 0.22);
+  font-weight: 700;
+}
+
+.projectActions #nextAssociations:hover:not(:disabled) {
+  background: #1d4ed8;
+  border-color: rgba(191, 219, 254, 0.95);
+}
+
 .wizardStep {
   display: flex;
   flex-direction: column;
@@ -262,6 +274,12 @@ button:disabled {
   gap: 10px;
   color: #94a3b8;
   font-size: 13px;
+}
+
+.associationList {
+  max-height: min(560px, calc(100vh - 220px));
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .imageRow,
