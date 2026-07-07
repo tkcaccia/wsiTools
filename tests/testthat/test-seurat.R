@@ -53,6 +53,44 @@ test_that("Seurat spatial objects can be linked to high-resolution slide coordin
   expect_false(layer$metadata$vector_rendering)
 })
 
+test_that("Seurat coordinates can be inspected as raw and viewer-mapped tables", {
+  embeddings <- matrix(
+    c(-2, 0.5, 1, -0.5, 2, 1.5),
+    ncol = 2,
+    byrow = TRUE,
+    dimnames = list(c("spot_a", "spot_b", "spot_c"), c("PC_1", "PC_2"))
+  )
+  seurat_like <- list(
+    reductions = list(pca = list(cell.embeddings = embeddings)),
+    images = list(
+      anterior1 = list(
+        coordinates = data.frame(
+          barcode = c("spot_a", "spot_b", "spot_c"),
+          imagecol = c(10, 20, 30),
+          imagerow = c(5, 15, 25)
+        ),
+        image = array(0, dim = c(50, 100, 3))
+      )
+    )
+  )
+  slide <- wsi_mock_slide(width = 1000, height = 500, levels = c(1, 2))
+
+  raw <- wsi_seurat_coordinates(seurat_like)
+  expect_equal(raw$barcode, c("spot_a", "spot_b", "spot_c"))
+  expect_equal(raw$x, c(10, 20, 30))
+  expect_equal(raw$y, c(5, 15, 25))
+  expect_equal(attr(raw, "coordinate_space"), "unknown")
+
+  mapped_file <- tempfile(fileext = ".csv")
+  mapped <- wsi_seurat_coordinates(seurat_like, image = slide, output = mapped_file)
+  expect_true(file.exists(mapped_file))
+  expect_equal(mapped$x, c(100, 200, 300))
+  expect_equal(mapped$y, c(50, 150, 250))
+  expect_equal(attr(mapped, "coordinate_space"), "level0_slide_pixels")
+  expect_equal(attr(mapped, "slide_width"), 1000)
+  expect_equal(attr(mapped, "slide_height"), 500)
+})
+
 test_that("registered Seurat metadata coordinates override stale image-slot coordinates", {
   embeddings <- matrix(
     c(-2, 0.5, 1, -0.5, 2, 1.5),

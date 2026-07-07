@@ -388,6 +388,153 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
   out
 }
 
+#' Extract Seurat spatial coordinates used by wsiTools
+#'
+#' `wsi_seurat_coordinates()` returns the spot or cell coordinates stored in a
+#' Seurat object. If `image` is supplied, the function applies the same scaling,
+#' flipping, rotation, and slide-coordinate mapping used by
+#' [wsi_link_seurat_image()] and the interactive viewer.
+#'
+#' @param seurat A Seurat or Seurat-like object.
+#' @param image Optional microscopy image path or `wsi_slide`. When supplied,
+#'   output `x` and `y` are level-0 slide coordinates used by the viewer.
+#' @param image_name Spatial image name inside the Seurat object. By default the
+#'   first spatial image is used when available.
+#' @param spatial_dir Optional 10x Genomics `spatial/` directory.
+#' @param scalefactors_json Optional 10x Genomics scalefactors JSON file.
+#' @param tissue_positions Optional 10x Genomics tissue positions CSV file.
+#' @param coordinate_scale,scale_x,scale_y,coordinate_flip,coordinate_rotation,coordinate_transform
+#'   Coordinate mapping arguments; see [wsi_link_seurat_image()].
+#' @param plot If `TRUE`, draw a quick base R coordinate plot.
+#' @param output Optional CSV file path where the coordinates are written.
+#'
+#' @return A data frame with at least `id`, `barcode`, `x`, and `y`. Attributes
+#'   describe the coordinate source, coordinate space, and mapping when known.
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' coords <- wsi_seurat_coordinates(seurat_object)
+#' head(coords)
+#'
+#' coords_slide <- wsi_seurat_coordinates(
+#'   seurat_object,
+#'   image = "tissue_image.btf",
+#'   plot = TRUE,
+#'   output = "seurat_coordinates.csv"
+#' )
+#' }
+wsi_seurat_coordinates <- function(seurat, image = NULL, image_name = NULL,
+                                   spatial_dir = NULL, scalefactors_json = NULL,
+                                   tissue_positions = NULL,
+                                   coordinate_scale = c("auto", "none", "fullres", "hires", "lowres", "seurat_image", "custom"),
+                                   scale_x = NULL, scale_y = NULL,
+                                   coordinate_flip = c("none", "vertical", "horizontal"),
+                                   coordinate_rotation = c(0, 90, 180, 270),
+                                   coordinate_transform = "none",
+                                   plot = FALSE,
+                                   output = NULL) {
+  coordinate_scale <- match.arg(coordinate_scale)
+  coordinate_flip <- wsi_seurat_coordinate_flip_arg(coordinate_flip)
+  coordinate_rotation <- wsi_seurat_coordinate_rotation_arg(coordinate_rotation)
+  coordinate_transform <- wsi_seurat_coordinate_transform_arg(coordinate_transform)
+  if (!is.logical(plot) || length(plot) != 1L || is.na(plot)) {
+    wsi_abort("`plot` must be `TRUE` or `FALSE`.")
+  }
+
+  if (!is.null(image)) {
+    linked <- wsi_link_seurat_image(
+      seurat = seurat,
+      image = image,
+      image_name = image_name,
+      spatial_dir = spatial_dir,
+      scalefactors_json = scalefactors_json,
+      tissue_positions = tissue_positions,
+      coordinate_scale = coordinate_scale,
+      scale_x = scale_x,
+      scale_y = scale_y,
+      coordinate_flip = coordinate_flip,
+      coordinate_rotation = coordinate_rotation,
+      coordinate_transform = coordinate_transform,
+      colour_by = "none",
+      max_points = .Machine$integer.max
+    )
+    spots <- linked$spots
+    out <- data.frame(
+      id = as.character(spots$id %||% spots$barcode),
+      barcode = as.character(spots$barcode %||% spots$id),
+      feature_type = as.character(spots$feature_type %||% linked$feature_type %||% "spot"),
+      x = suppressWarnings(as.numeric(spots$x)),
+      y = suppressWarnings(as.numeric(spots$y)),
+      stringsAsFactors = FALSE
+    )
+    attr(out, "coordinate_space") <- "level0_slide_pixels"
+    attr(out, "coordinate_source") <- attr(linked$coordinate_mapping, "source", exact = TRUE) %||%
+      linked$coordinate_mapping$coordinate_space %||% "viewer_mapped"
+    attr(out, "coordinate_mapping") <- linked$coordinate_mapping
+    attr(out, "slide_width") <- as.numeric(linked$slide$dimensions[["width"]] %||% NA_real_)
+    attr(out, "slide_height") <- as.numeric(linked$slide$dimensions[["height"]] %||% NA_real_)
+    attr(out, "image_name") <- linked$image_name
+    attr(out, "feature_type") <- linked$feature_type
+  } else {
+    spatial <- wsi_seurat_spatial_files(
+      spatial_dir = spatial_dir,
+      scalefactors_json = scalefactors_json,
+      tissue_positions = tissue_positions
+    )
+    resolved_image_name <- tryCatch(
+      wsi_seurat_image_name(seurat, image_name),
+      error = function(err) image_name
+    )
+    image_obj <- if (!is.null(resolved_image_name)) {
+      wsi_seurat_image_object(seurat, resolved_image_name)
+    } else {
+      NULL
+    }
+    coords <- wsi_seurat_coordinate_table(
+      seurat = seurat,
+      image_name = resolved_image_name,
+      image_obj = image_obj,
+      tissue_positions = spatial$tissue_positions
+    )
+    out <- data.frame(
+      id = as.character(coords$barcode),
+      barcode = as.character(coords$barcode),
+      x = suppressWarnings(as.numeric(coords$x)),
+      y = suppressWarnings(as.numeric(coords$y)),
+      stringsAsFactors = FALSE
+    )
+    attr(out, "coordinate_space") <- attr(coords, "coordinate_space", exact = TRUE) %||% "unknown"
+    attr(out, "coordinate_source") <- attr(coords, "coordinate_source", exact = TRUE) %||% "seurat"
+    attr(out, "id_column") <- attr(coords, "id_column", exact = TRUE)
+    attr(out, "x_column") <- attr(coords, "x_column", exact = TRUE)
+    attr(out, "y_column") <- attr(coords, "y_column", exact = TRUE)
+    attr(out, "image_name") <- resolved_image_name
+  }
+
+  out <- out[is.finite(out$x) & is.finite(out$y) & nzchar(out$barcode), , drop = FALSE]
+  row.names(out) <- NULL
+  if (!is.null(output)) {
+    output <- wsi_validate_output_path(output, overwrite = TRUE)
+    utils::write.csv(out, output, row.names = FALSE)
+    attr(out, "output") <- normalizePath(output, winslash = "/", mustWork = FALSE)
+  }
+  if (isTRUE(plot)) {
+    graphics::plot(
+      out$x,
+      out$y,
+      asp = 1,
+      pch = ".",
+      col = "#2563EB",
+      xlab = "x",
+      ylab = "y",
+      ylim = rev(range(out$y, finite = TRUE)),
+      main = sprintf("Seurat coordinates (%s)", attr(out, "coordinate_space") %||% "unknown")
+    )
+  }
+  out
+}
+
 #' Open a Seurat spatial object in the wsiTools viewer
 #'
 #' `wsi_viewer_seurat()` opens a high-resolution tissue image and overlays
@@ -1028,6 +1175,14 @@ wsi_seurat_spots_channel_source <- function(linked,
     quality = 90,
     rebuild = isTRUE(rebuild)
   )
+  mask_info <- file.info(mask_output)
+  mask_cache_key <- paste(
+    normalizePath(mask_output, winslash = "/", mustWork = FALSE),
+    suppressWarnings(as.numeric(mask_info$size %||% NA_real_)),
+    if (!is.null(mask_info$mtime)) format(mask_info$mtime, tz = "UTC", usetz = TRUE) else NA_character_,
+    sep = "|"
+  )
+  source_metadata$cache_key <- mask_cache_key
   source <- wsi_channel_source(
     name = name,
     id = id,
@@ -1044,6 +1199,7 @@ wsi_seurat_spots_channel_source <- function(linked,
     colour = "#ffffff",
     metadata = source_metadata
   )
+  source$cache_key <- mask_cache_key
   list(
     source = source,
     mask = list(
