@@ -1039,11 +1039,11 @@ wsi_seurat_spots_channel_source <- function(linked,
                                             name = NULL,
                                             id = "seurat_spots",
                                             visible = TRUE,
-                                            opacity = 0.85,
+                                            opacity = 1,
                                             tile_size = 254,
                                             max_dimension = 8192L,
                                             radius_scale = 0.5,
-                                            alpha = 0.65,
+                                            alpha = 1,
                                             dynamic = FALSE,
                                             rebuild = FALSE,
                                             overwrite = FALSE,
@@ -1070,10 +1070,12 @@ wsi_seurat_spots_channel_source <- function(linked,
   name <- name %||% paste(source_name, "spatial", feature_plural, "mask")
   id <- wsi_channel_source_id(id, name)
   stem <- wsi_safe_id(id, "seurat_spots")
+  coordinate_colour <- "#00D7FF"
   mask_output <- file.path(output_dir, paste0(stem, ".ome.tif"))
   tile_dir <- file.path(output_dir, paste0(stem, "_deepzoom"))
   raster_result <- wsi_seurat_spatial_mask_raster(
     linked = linked,
+    colours = coordinate_colour,
     max_dimension = max_dimension,
     radius_scale = radius_scale,
     alpha = alpha
@@ -1117,13 +1119,16 @@ wsi_seurat_spots_channel_source <- function(linked,
   legend <- list(list(
     label = feature_plural,
     value = "1",
-    colour = "#2B6CB0",
+    colour = coordinate_colour,
     count = raster_result$feature_count
   ))
   source_metadata <- list(
     kind = "mask",
     source_type = "seurat_spots",
     transparent_background = TRUE,
+    mask_filter_mode = "alpha",
+    mask_display_alpha = 230,
+    mask_display_colour = coordinate_colour,
     legend = legend,
     selected_values = "1",
     extent = list(x = 0, y = 0, width = raster_result$slide_width, height = raster_result$slide_height),

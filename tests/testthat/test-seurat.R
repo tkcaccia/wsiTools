@@ -1267,4 +1267,8 @@ test_that("live Seurat viewers prefer static tiles even when dynamic tiles are r
   expect_false(grepl("/tiles/seurat_spots/", html, fixed = TRUE))
   expect_true(grepl("_tiles/slide_files", html, fixed = TRUE))
   expect_true(grepl("_spatial_masks/seurat_spots_deepzoom/slide_files", html, fixed = TRUE))
+  expect_true(grepl('"mask_filter_mode":"alpha"', html, fixed = TRUE))
+  expect_true(grepl('"mask_display_alpha":230', html, fixed = TRUE))
+  expect_true(grepl("channelMaskUsesAlphaFilter", html, fixed = TRUE))
+  expect_true(grepl("meta.mask_filter_mode==='alpha'", html, fixed = TRUE))
 })

@@ -4444,6 +4444,10 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   wsi_assign_viewer_state(state)
 
   dots <- list(...)
+  if (is.null(dots$output)) {
+    dots$output <- tempfile(fileext = ".html")
+    dots$overwrite <- TRUE
+  }
   live_seurat <- dots$seurat %||% NULL
   live_prediction_context <- prediction_context %||% list()
   if (is.null(live_prediction_context$spatial) && !is.null(live_seurat)) {
@@ -4584,7 +4588,11 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
     dots$tile_source_label <- "dynamic tile server"
   }
   if (length(requested_channel_sources)) {
-    dots$channel_sources <- wsi_live_channel_sources(requested_channel_sources, base_url = base_url)
+    dots$channel_sources <- wsi_live_channel_sources(
+      requested_channel_sources,
+      base_url = base_url,
+      output = dots$output
+    )
   }
   if (isTRUE(stardist)) {
     stardist_bridge <- wsi_stardist_server(

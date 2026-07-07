@@ -175,6 +175,76 @@ wsi_channel_sources_payload <- function(channel_sources = NULL) {
   lapply(channel_sources, wsi_channel_source_payload)
 }
 
+wsi_file_url_to_local_path <- function(url) {
+  if (is.null(url) || length(url) != 1L || is.na(url) || !nzchar(url) ||
+      !grepl("^file://", url)) {
+    return(NULL)
+  }
+  path <- utils::URLdecode(sub("^file://", "", url))
+  if (.Platform$OS.type == "windows" && grepl("^/[A-Za-z]:/", path)) {
+    path <- substring(path, 2L)
+  }
+  normalizePath(path, winslash = "/", mustWork = FALSE)
+}
+
+wsi_file_url_relative_to_output <- function(url, output) {
+  path <- wsi_file_url_to_local_path(url)
+  if (is.null(path) || is.null(output) || length(output) != 1L ||
+      is.na(output) || !nzchar(output)) {
+    return(NULL)
+  }
+  output_dir <- normalizePath(dirname(output), winslash = "/", mustWork = FALSE)
+  prefix <- paste0(output_dir, "/")
+  if (!startsWith(path, prefix)) {
+    return(NULL)
+  }
+  relative <- substring(path, nchar(prefix) + 1L)
+  if (!nzchar(relative)) {
+    return(NULL)
+  }
+  wsi_url_encode_path(relative)
+}
+
+wsi_rebase_static_channel_source <- function(source, output = NULL) {
+  if (is.null(source) || inherits(source, "wsi_dynamic_tile_source") ||
+      is.null(output)) {
+    return(source)
+  }
+  old_class <- class(source)
+  if (inherits(source, "wsi_channel_source")) {
+    source <- unclass(source)
+  }
+  if (!is.list(source)) {
+    return(source)
+  }
+
+  relative <- wsi_file_url_relative_to_output(source$tile_url_base %||% NULL, output)
+  if (!is.null(relative)) {
+    source$tile_url_base <- relative
+    metadata <- source$metadata %||% list()
+    metadata$served_relative_to_viewer <- TRUE
+    source$metadata <- metadata
+  }
+
+  if (!is.null(old_class) && "wsi_channel_source" %in% old_class) {
+    class(source) <- old_class
+  }
+  source
+}
+
+wsi_rebase_static_channel_sources <- function(channel_sources = NULL, output = NULL) {
+  if (is.null(channel_sources) || is.null(output)) {
+    return(channel_sources)
+  }
+  if (inherits(channel_sources, "wsi_channel_source")) {
+    return(wsi_rebase_static_channel_source(channel_sources, output = output))
+  }
+  if (!is.list(channel_sources)) {
+    return(channel_sources)
+  }
+  lapply(channel_sources, wsi_rebase_static_channel_source, output = output)
+}
+
 wsi_channel_source_from_dynamic <- function(source, base_url = NULL) {
   if (!inherits(source, "wsi_dynamic_tile_source")) {
     wsi_abort("`source` must be a dynamic tile source.")
@@ -308,11 +378,13 @@ wsi_static_channel_sources <- function(channel_sources = NULL) {
   out
 }
 
-wsi_live_channel_sources <- function(channel_sources = NULL, base_url = NULL) {
-  c(
+wsi_live_channel_sources <- function(channel_sources = NULL, base_url = NULL,
+                                     output = NULL) {
+  sources <- c(
     wsi_static_channel_sources(channel_sources),
     lapply(wsi_dynamic_channel_sources(channel_sources), wsi_channel_source_from_dynamic, base_url = base_url)
   )
+  wsi_rebase_static_channel_sources(sources, output = output)
 }
 
 wsi_empty_channel_settings <- function() {

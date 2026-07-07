@@ -865,7 +865,7 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "image/jpeg", fixed = TRUE)
   expect_match(html, "screenshotFormatExtension", fixed = TRUE)
   expect_match(html, "Save As dialog", fixed = TRUE)
-  expect_match(html, "choose the local folder and filename", fixed = TRUE)
+  expect_match(html, "choose the folder and filename", fixed = TRUE)
   expect_match(html, "screenshotBlobFromCanvas", fixed = TRUE)
   expect_match(html, "screenshotOsdInternalCanvases", fixed = TRUE)
   expect_match(html, "screenshotBaseElements", fixed = TRUE)
@@ -2332,6 +2332,36 @@ test_that("H&E stain deconvolution can be served as dynamic channel tiles", {
   expect_gt(file.info(file)$size, 0)
 })
 
+test_that("live static channel sources beside the viewer use relative URLs", {
+  root <- tempfile("viewer-root-")
+  output <- file.path(root, "viewer.html")
+  tile_files <- file.path(root, "viewer_spatial_masks", "seurat_spots_deepzoom", "slide_files")
+  dir.create(tile_files, recursive = TRUE)
+
+  source <- wsi_channel_source(
+    name = "Seurat spots",
+    id = "seurat_spots",
+    type = "deepzoom",
+    tile_url_base = wsiTools:::wsi_file_url(tile_files),
+    width = 128,
+    height = 128,
+    tile_size = 64,
+    tile_format = "png",
+    max_level = 7,
+    metadata = list(kind = "mask", transparent_background = TRUE)
+  )
+  live_sources <- wsiTools:::wsi_live_channel_sources(list(source), output = output)
+
+  expect_length(live_sources, 1L)
+  expect_false(grepl("^file://", live_sources[[1L]]$tile_url_base))
+  expect_equal(
+    live_sources[[1L]]$tile_url_base,
+    "viewer_spatial_masks/seurat_spots_deepzoom/slide_files"
+  )
+  expect_true(isTRUE(live_sources[[1L]]$metadata$served_relative_to_viewer))
+  expect_null(live_sources[[1L]]$metadata$tile_url_base_original)
+})
+
 test_that("H&E mIHC live wrapper defaults the dynamic base image to JPEG tiles", {
   wsi_skip_if_no_httpuv_server()
   skip_if_not(wsi_has_vips())
@@ -2655,7 +2685,7 @@ test_that("interactive tiled viewer writes Deep Zoom HTML when libvips is availa
   expect_match(paste(readLines(file.path(tile_dir, "slide.dzi"), warn = FALSE), collapse = " "), "Overlap=\"1\"", fixed = TRUE)
 
   html <- paste(readLines(output, warn = FALSE), collapse = "\n")
-  expect_match(html, "full-resolution tiled viewer", fixed = TRUE)
+  expect_match(html, "Deep Zoom tiles", fixed = TRUE)
   expect_match(html, "slide_files", fixed = TRUE)
   expect_match(html, "openseadragon.min.js", fixed = TRUE)
   expect_match(html, "OpenSeadragon", fixed = TRUE)
@@ -2890,9 +2920,9 @@ test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
   expect_match(html, "multiViewFocusPane", fixed = TRUE)
   expect_match(html, "multiViewActivatePane", fixed = TRUE)
   expect_match(html, "multiViewEnsureEditingContext", fixed = TRUE)
-  expect_match(html, "multiViewFocusPane(index,false);if(pane&&pane.blank)", fixed = TRUE)
+  expect_match(html, "multiViewFocusPane(index,false);if(!pane||!pane.entry", fixed = TRUE)
   expect_match(html, "if(editMode&&!multiViewEnsureEditingContext(pane,index))", fixed = TRUE)
-  expect_match(html, "multiViewFocusPane(index,false);multiViewZoomAtEvent", fixed = TRUE)
+  expect_match(html, "multiViewFocusPane(index,true);multiViewZoomAtEvent", fixed = TRUE)
   expect_match(html, "multiViewPointerToSlide", fixed = TRUE)
   expect_match(html, "drawMultiViewOverlays", fixed = TRUE)
   expect_match(html, "multiViewDrawLayers", fixed = TRUE)
