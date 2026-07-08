@@ -1062,9 +1062,9 @@ wsi_seurat_spot_layer_items <- function(linked) {
   spots <- spots[keep, , drop = FALSE]
   x <- x[keep]
   y <- y[keep]
-  max_layer_points <- suppressWarnings(as.integer(Sys.getenv("WSITOOLS_SPATIAL_POINT_LAYER_MAX", "12000")))
+  max_layer_points <- suppressWarnings(as.integer(Sys.getenv("WSITOOLS_SPATIAL_POINT_LAYER_MAX", "100000")))
   if (!is.finite(max_layer_points) || max_layer_points < 1000L) {
-    max_layer_points <- 12000L
+    max_layer_points <- 100000L
   }
   if (nrow(spots) > max_layer_points) {
     idx <- unique(as.integer(round(seq(1, nrow(spots), length.out = max_layer_points))))
@@ -3161,9 +3161,9 @@ wsi_seurat_dynamic_gene_payload <- function(linked, gene) {
     values <- values[seq_len(nrow(spots))]
     colours <- colours[seq_len(nrow(spots))]
   }
-  max_payload_points <- suppressWarnings(as.integer(Sys.getenv("WSITOOLS_SPATIAL_POINT_PAYLOAD_MAX", "12000")))
+  max_payload_points <- suppressWarnings(as.integer(Sys.getenv("WSITOOLS_SPATIAL_POINT_PAYLOAD_MAX", "100000")))
   if (!is.finite(max_payload_points) || max_payload_points < 10000L) {
-    max_payload_points <- 12000L
+    max_payload_points <- 100000L
   }
   point_idx <- if (nrow(spots) > max_payload_points) {
     unique(as.integer(round(seq(1, nrow(spots), length.out = max_payload_points))))

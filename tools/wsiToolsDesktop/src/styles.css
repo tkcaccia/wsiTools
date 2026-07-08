@@ -287,13 +287,13 @@ body[data-layout="associations"] .launcherPanel {
 }
 
 .associationList {
-  max-height: min(760px, calc(100vh - 205px));
+  max-height: min(1292px, calc(100vh - 205px));
   overflow: auto;
   padding-right: 4px;
 }
 
 body[data-layout="associations"] .associationList {
-  max-height: min(1040px, calc(100vh - 170px));
+  max-height: min(1768px, calc(100vh - 170px));
 }
 
 .imageRow,

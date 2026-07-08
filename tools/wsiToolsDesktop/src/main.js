@@ -40,10 +40,10 @@ const localLogs = [];
 const spatialInspections = new Map();
 const launcherWindow = getCurrentWindow();
 const launcherWindowSizes = {
-  home: { width: 620, height: 380, minWidth: 520, minHeight: 320, maxHeight: 720 },
-  images: { width: 760, height: 500, minWidth: 620, minHeight: 400, maxHeight: 720 },
-  associations: { width: 1120, height: 1260, minWidth: 920, minHeight: 1040, maxHeight: 1600 },
-  runtime: { width: 860, height: 720, minWidth: 700, minHeight: 520, maxHeight: 900 }
+  home: { width: 620, height: 646, minWidth: 520, minHeight: 320, maxHeight: 1224 },
+  images: { width: 760, height: 850, minWidth: 620, minHeight: 400, maxHeight: 1224 },
+  associations: { width: 1120, height: 2142, minWidth: 920, minHeight: 1040, maxHeight: 2720 },
+  runtime: { width: 860, height: 1224, minWidth: 700, minHeight: 520, maxHeight: 1530 }
 };
 let launcherResizeTimer = null;
 

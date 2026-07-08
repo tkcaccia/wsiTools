@@ -1352,6 +1352,13 @@ test_that("live Seurat viewers prefer static tiles even when dynamic tiles are r
   expect_true(grepl('"vector_rendering":true', html, fixed = TRUE))
   expect_true(grepl('"opacity":1', html, fixed = TRUE))
   expect_true(grepl("densePointLayerStride", html, fixed = TRUE))
+  expect_true(grepl("viewerZoomRatio", html, fixed = TRUE))
+  expect_true(grepl("spatialPointLayerZoom", html, fixed = TRUE))
+  expect_true(grepl("multiViewPaneZoomRatio", html, fixed = TRUE))
+  expect_true(grepl("densePointLayerDrawContours", html, fixed = TRUE))
+  expect_true(grepl("zoom>=10)return 1", html, fixed = TRUE))
+  expect_true(grepl("zoom>=5)return 2", html, fixed = TRUE))
+  expect_true(grepl("return 10", html, fixed = TRUE))
   expect_true(grepl("pointLayerVisibleBounds", html, fixed = TRUE))
   signature <- file.path(
     dirname(output),
