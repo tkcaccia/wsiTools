@@ -275,6 +275,7 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
   )
   names(spots)[names(spots) == "component_1"] <- component_names[[1L]]
   names(spots)[names(spots) == "component_2"] <- component_names[[2L]]
+  mask_spots <- spots
 
   total <- nrow(spots)
   if (total > max_points) {
@@ -371,12 +372,13 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
     spot_count = total,
     displayed_spot_count = nrow(spots),
     spots = spots,
+    mask_spots = mask_spots,
     clusters = wsi_spatial_cluster_config(cluster_values),
     cluster_fields = attr(cluster_values, "fields", exact = TRUE) %||% wsi_empty_spatial_cluster_fields(),
     cluster_values = cluster_values,
     expression_source = list(
       object = seurat,
-      spot_ids = as.character(spots$barcode %||% spots$id),
+      spot_ids = as.character(mask_spots$barcode %||% mask_spots$id),
       feature_type = feature_type
     ),
     reduction_embeddings = embeddings,
@@ -618,29 +620,16 @@ wsi_viewer_seurat <- function(seurat, image, linked = NULL,
   }
   dots$layers <- layers
   if (isTRUE(show_spots)) {
-    if (is.null(output)) {
-      output <- tempfile(fileext = ".html")
-      overwrite <- TRUE
-    }
-    spot_source <- wsi_seurat_spots_channel_source(
-      linked = linked,
-      output_dir = file.path(dirname(output), paste0(tools::file_path_sans_ext(basename(output)), "_spatial_masks")),
-      output_html = output,
-      id = "seurat_spots",
-      visible = TRUE,
-      opacity = 0.85,
-      dynamic = isTRUE(dots$spatial_mask_dynamic %||% FALSE),
-      rebuild = isTRUE(dots$rebuild %||% FALSE)
-    )
-    if (!is.null(spot_source)) {
-      channel_sources <- dots$channel_sources %||% list()
-      if (!is.list(channel_sources) || inherits(channel_sources, "data.frame")) {
-        channel_sources <- list(channel_sources)
-      }
-      dots$channel_sources <- c(list(spot_source$source), channel_sources)
-      linked$spot_layer_id <- spot_source$source$id
-      linked$spot_mask <- spot_source$mask
-    }
+    spot_layer <- wsi_seurat_spots_layer(linked, visible = TRUE, opacity = 1)
+    linked$spot_layer_id <- spot_layer$id
+    dots$layers <- c(list(spot_layer), dots$layers)
+  }
+  if (is.null(output)) {
+    output <- tempfile(fileext = ".html")
+    overwrite <- TRUE
+  }
+  if (isTRUE(show_spots)) {
+    linked$viewer_output <- output
   }
   dots$seurat <- linked
   dots$output <- output
@@ -1001,36 +990,160 @@ wsi_prefer_static_spatial_tiles <- function(dynamic_tiles, context = "spatial vi
   TRUE
 }
 
-wsi_seurat_spots_layer <- function(linked, visible = TRUE, opacity = 0.85) {
+wsi_seurat_spots_layer <- function(linked, visible = TRUE, opacity = 1) {
   source_name <- linked$source_name %||% "Seurat"
   feature_type <- linked$feature_type %||% "spot"
   feature_plural <- if (identical(feature_type, "cell")) "cells" else "spots"
   feature_count <- suppressWarnings(as.integer(linked$spot_count %||% nrow(linked$spots) %||% 0L))
-  layer <- wsi_seurat_spatial_mask_layer(
-    linked = linked,
+  items <- wsi_seurat_spot_layer_items(linked)
+  layer <- list(
+    id = linked$spot_layer_id %||% "seurat_spots",
     name = paste(source_name, "spatial", feature_plural),
-    id = "seurat_spots",
+    type = "vector",
+    source_type = "seurat_spots",
     visible = visible,
     opacity = opacity,
-    feature_count = feature_count
+    colour = "#00D7FF",
+    radius = wsi_seurat_point_layer_radius(linked),
+    count = length(items),
+    total_count = feature_count,
+    items = items
   )
-  layer$metadata <- c(
-    layer$metadata %||% list(),
-    list(
-      source_name = source_name,
-      feature_type = feature_type,
-      feature_label = feature_plural,
-      reduction = linked$reduction,
-      image_name = linked$image_name,
-      coordinate_mapping = linked$coordinate_mapping,
-      mpp = linked$mpp %||% linked$pixel_size %||% NULL,
-      scale_metadata = linked$scale_metadata %||% NULL,
-      feature_count = feature_count,
-      display_mode = "raster_mask",
-      vector_rendering = FALSE
+  layer$metadata <- list(
+    source_name = source_name,
+    feature_type = feature_type,
+    feature_label = feature_plural,
+    reduction = linked$reduction,
+    image_name = linked$image_name,
+    coordinate_mapping = linked$coordinate_mapping,
+    mpp = linked$mpp %||% linked$pixel_size %||% NULL,
+    scale_metadata = linked$scale_metadata %||% NULL,
+    feature_count = feature_count,
+    represented_count = length(items),
+    display_mode = "adaptive_circles",
+    vector_rendering = TRUE,
+    lod = list(
+      enabled = TRUE,
+      far_sample_threshold = 10000L,
+      close_viewport_only = TRUE
     )
   )
   layer
+}
+
+wsi_seurat_point_layer_radius <- function(linked) {
+  feature_type <- tolower(as.character(linked$feature_type %||% "spot"))
+  radius <- suppressWarnings(as.numeric(linked$spot_radius %||% NA_real_))
+  if (!is.finite(radius) || radius <= 0) {
+    radius <- if (identical(feature_type, "cell")) 4 else 8
+  }
+  if (identical(feature_type, "cell")) {
+    return(max(1.5, min(5, radius * 0.18)))
+  }
+  max(3, radius)
+}
+
+wsi_seurat_spot_layer_items <- function(linked) {
+  spots <- linked$spots %||% linked$mask_spots %||% data.frame()
+  if (!is.data.frame(spots) || !nrow(spots)) {
+    return(list())
+  }
+  feature_type <- linked$feature_type %||% {
+    if ("feature_type" %in% names(spots)) as.character(spots$feature_type[[1L]]) else "spot"
+  }
+  feature_type <- if (identical(tolower(as.character(feature_type)), "cell")) "cell" else "spot"
+  radius <- wsi_seurat_point_layer_radius(linked)
+  x <- suppressWarnings(as.numeric(spots$x %||% spots$slide_x))
+  y <- suppressWarnings(as.numeric(spots$y %||% spots$slide_y))
+  keep <- is.finite(x) & is.finite(y)
+  if (!any(keep)) {
+    return(list())
+  }
+  spots <- spots[keep, , drop = FALSE]
+  x <- x[keep]
+  y <- y[keep]
+  max_layer_points <- suppressWarnings(as.integer(Sys.getenv("WSITOOLS_SPATIAL_POINT_LAYER_MAX", "12000")))
+  if (!is.finite(max_layer_points) || max_layer_points < 1000L) {
+    max_layer_points <- 12000L
+  }
+  if (nrow(spots) > max_layer_points) {
+    idx <- unique(as.integer(round(seq(1, nrow(spots), length.out = max_layer_points))))
+    spots <- spots[idx, , drop = FALSE]
+    x <- x[idx]
+    y <- y[idx]
+  }
+  ids <- as.character(spots$id %||% spots$barcode %||% spots$label %||% seq_len(nrow(spots)))
+  labels <- as.character(spots$label %||% spots$barcode %||% spots$id %||% ids)
+  barcodes <- as.character(spots$barcode %||% spots$id %||% ids)
+  colours <- rep(as.character(spots$colour %||% spots$color %||% spots$base_colour %||% spots$base_color %||% "#00D7FF"), length.out = nrow(spots))
+  base_colours <- rep(as.character(spots$base_colour %||% spots$base_color %||% colours), length.out = nrow(spots))
+  colours <- vapply(colours, wsi_colour_to_hex, character(1), name = "colour")
+  base_colours <- vapply(base_colours, wsi_colour_to_hex, character(1), name = "base_colour")
+  gene_values <- if ("gene_values" %in% names(spots)) spots$gene_values else vector("list", nrow(spots))
+  cluster_values <- if ("cluster_values" %in% names(spots)) spots$cluster_values else vector("list", nrow(spots))
+  if (length(gene_values) != nrow(spots)) {
+    gene_values <- vector("list", nrow(spots))
+  }
+  if (length(cluster_values) != nrow(spots)) {
+    cluster_values <- vector("list", nrow(spots))
+  }
+  optional_value <- function(column, i) {
+    if (column %in% names(spots)) {
+      spots[[column]][[i]]
+    } else {
+      NULL
+    }
+  }
+  lapply(seq_len(nrow(spots)), function(i) {
+    list(
+      id = ids[[i]],
+      name = labels[[i]],
+      label = labels[[i]],
+      barcode = barcodes[[i]],
+      feature_type = feature_type,
+      type = "point",
+      x = x[[i]],
+      y = y[[i]],
+      slide_x = x[[i]],
+      slide_y = y[[i]],
+      radius = radius,
+      colour = colours[[i]],
+      color = colours[[i]],
+      base_colour = base_colours[[i]],
+      base_color = base_colours[[i]],
+      fill = grDevices::adjustcolor(colours[[i]], alpha.f = 0.72),
+      gene_values = gene_values[[i]] %||% list(),
+      cluster_values = cluster_values[[i]] %||% list(),
+      project_key = optional_value("project_key", i),
+      wsi_project_key = optional_value("wsi_project_key", i),
+      project_image = optional_value("project_image", i),
+      project_section = optional_value("project_section", i),
+      image_id = optional_value("image_id", i),
+      section_id = optional_value("section_id", i),
+      sample_id = optional_value("sample_id", i),
+      project_image_index = optional_value("project_image_index", i),
+      project_section_index = optional_value("project_section_index", i)
+    )
+  })
+}
+
+wsi_seurat_coordinate_radius_scale <- function(linked, radius_scale = NULL) {
+  if (!is.null(radius_scale)) {
+    value <- suppressWarnings(as.numeric(radius_scale))
+    if (length(value) == 1L && is.finite(value) && value > 0) {
+      return(value)
+    }
+  }
+  feature_type <- as.character(linked$feature_type %||% "spot")
+  spot_count <- suppressWarnings(as.numeric(
+    linked$spot_count %||%
+      nrow(linked$mask_spots %||% linked$spots %||% data.frame())
+  ))
+  if (identical(tolower(feature_type), "cell") ||
+      (is.finite(spot_count) && spot_count >= 50000)) {
+    return(0.175)
+  }
+  0.5
 }
 
 wsi_seurat_spots_channel_source <- function(linked,
@@ -1041,14 +1154,22 @@ wsi_seurat_spots_channel_source <- function(linked,
                                             visible = TRUE,
                                             opacity = 1,
                                             tile_size = 254,
-                                            max_dimension = 8192L,
-                                            radius_scale = 0.5,
+                                            max_dimension = 32768L,
+                                            radius_scale = NULL,
                                             alpha = 1,
                                             dynamic = FALSE,
                                             rebuild = FALSE,
                                             overwrite = FALSE,
                                             target_path = NULL,
-                                            project_image_id = NULL) {
+                                            project_image_id = NULL,
+                                            colours = NULL,
+                                            source_type = "seurat_spots",
+                                            legend = NULL,
+                                            selected_values = NULL,
+                                            mask_filter_mode = "preserve",
+                                            mask_display_colour = NULL,
+                                            force_canvas_filter = TRUE,
+                                            cache_key_extra = NULL) {
   if (!wsi_has_vips()) {
     wsi_warn(
       wsi_backend_action_message(
@@ -1071,34 +1192,76 @@ wsi_seurat_spots_channel_source <- function(linked,
   id <- wsi_channel_source_id(id, name)
   stem <- wsi_safe_id(id, "seurat_spots")
   coordinate_colour <- "#00D7FF"
+  raster_colours <- if (is.null(colours)) coordinate_colour else as.character(colours)
+  colour_signature <- paste(
+    length(raster_colours),
+    paste(utils::head(raster_colours, 8L), collapse = ","),
+    paste(utils::tail(raster_colours, 8L), collapse = ","),
+    sep = "|"
+  )
   mask_output <- file.path(output_dir, paste0(stem, ".ome.tif"))
+  mask_signature_file <- file.path(output_dir, paste0(stem, ".mask.json"))
   tile_dir <- file.path(output_dir, paste0(stem, "_deepzoom"))
-  raster_result <- wsi_seurat_spatial_mask_raster(
+  radius_scale <- wsi_seurat_coordinate_radius_scale(linked, radius_scale)
+  raster_result <- wsi_seurat_spatial_mask_geometry(
     linked = linked,
-    colours = coordinate_colour,
+    colours = raster_colours,
     max_dimension = max_dimension,
     radius_scale = radius_scale,
     alpha = alpha
   )
   ome_tile_size <- max(16L, min(512L, tile_size, raster_result$mask_width, raster_result$mask_height))
   ome_tile_size <- max(16L, as.integer(floor(ome_tile_size / 16L) * 16L))
-  if (!file.exists(mask_output) || isTRUE(rebuild)) {
+  mask_signature <- list(
+    version = 4L,
+    alpha = as.numeric(alpha),
+    radius_scale = as.numeric(radius_scale),
+    outline = TRUE,
+    outline_colour = "#0F172A",
+    max_dimension = as.integer(max_dimension),
+    mask_width = as.integer(raster_result$mask_width),
+    mask_height = as.integer(raster_result$mask_height),
+    slide_width = as.numeric(raster_result$slide_width),
+    slide_height = as.numeric(raster_result$slide_height),
+    feature_count = as.integer(raster_result$feature_count),
+    represented_count = as.integer(raster_result$represented_count),
+    colour = colour_signature,
+    source_type = as.character(source_type %||% "seurat_spots"),
+    mask_filter_mode = as.character(mask_filter_mode %||% ""),
+    force_canvas_filter = isTRUE(force_canvas_filter),
+    cache_key_extra = cache_key_extra %||% NULL
+  )
+  old_signature <- if (file.exists(mask_signature_file)) {
+    tryCatch(
+      jsonlite::read_json(mask_signature_file, simplifyVector = TRUE),
+      error = function(err) NULL
+    )
+  } else {
+    NULL
+  }
+  signature_matches <- isTRUE(all.equal(
+    old_signature,
+    mask_signature,
+    tolerance = 1e-12,
+    check.attributes = FALSE
+  ))
+  rebuild_mask <- isTRUE(rebuild) || !file.exists(mask_output) || !signature_matches
+  if (rebuild_mask) {
+    if (dir.exists(tile_dir)) {
+      unlink(tile_dir, recursive = TRUE, force = TRUE)
+    }
     temp_png <- tempfile(fileext = ".png")
     on.exit(unlink(temp_png), add = TRUE)
-    old_par <- NULL
-    grDevices::png(temp_png, width = raster_result$mask_width, height = raster_result$mask_height, bg = "transparent")
-    tryCatch({
-      old_par <- graphics::par(no.readonly = TRUE)
-      graphics::par(mar = c(0, 0, 0, 0), xaxs = "i", yaxs = "i")
-      graphics::plot.new()
-      graphics::plot.window(xlim = c(0, 1), ylim = c(0, 1), asp = NA)
-      graphics::rasterImage(grDevices::as.raster(raster_result$raster), 0, 0, 1, 1, interpolate = FALSE)
-    }, finally = {
-      if (!is.null(old_par)) {
-        try(graphics::par(old_par), silent = TRUE)
-      }
-      grDevices::dev.off()
-    })
+      wsi_seurat_write_spatial_mask_png(
+        file = temp_png,
+        linked = linked,
+        colours = raster_colours,
+        max_dimension = max_dimension,
+        radius_scale = radius_scale,
+        alpha = alpha,
+        outline = TRUE,
+        outline_colour = "#0F172A"
+      )
     wsi_convert(
       input = temp_png,
       output = mask_output,
@@ -1110,27 +1273,41 @@ wsi_seurat_spots_channel_source <- function(linked,
       bigtiff = TRUE,
       overwrite = TRUE
     )
+    jsonlite::write_json(
+      mask_signature,
+      mask_signature_file,
+      auto_unbox = TRUE,
+      pretty = TRUE,
+      null = "null"
+    )
   }
   mask_slide <- wsi_open(mask_output)
   slide_path <- target_path %||% linked$image_path %||% linked$slide$path %||% NULL
   if (!is.null(slide_path) && nzchar(slide_path)) {
     slide_path <- normalizePath(slide_path, winslash = "/", mustWork = FALSE)
   }
-  legend <- list(list(
+  legend <- legend %||% list(list(
     label = feature_plural,
     value = "1",
     colour = coordinate_colour,
     count = raster_result$feature_count
   ))
+  selected_values <- selected_values %||% vapply(
+    legend,
+    function(entry) as.character(entry$value %||% entry$id %||% entry$label %||% ""),
+    character(1)
+  )
+  selected_values <- selected_values[nzchar(selected_values)]
   source_metadata <- list(
     kind = "mask",
-    source_type = "seurat_spots",
+    source_type = source_type,
     transparent_background = TRUE,
-    mask_filter_mode = "alpha",
-    mask_display_alpha = 230,
-    mask_display_colour = coordinate_colour,
+    mask_filter_mode = mask_filter_mode,
+    mask_display_alpha = 255,
+    mask_display_colour = mask_display_colour %||% coordinate_colour,
+    force_canvas_filter = isTRUE(force_canvas_filter),
     legend = legend,
-    selected_values = "1",
+    selected_values = selected_values,
     extent = list(x = 0, y = 0, width = raster_result$slide_width, height = raster_result$slide_height),
     mask_downsample = raster_result$downsample,
     source_mask = normalizePath(mask_output, winslash = "/", mustWork = FALSE),
@@ -1178,7 +1355,7 @@ wsi_seurat_spots_channel_source <- function(linked,
     tile_overlap = 1,
     tile_format = "png",
     quality = 90,
-    rebuild = isTRUE(rebuild)
+    rebuild = isTRUE(rebuild_mask)
   )
   mask_info <- file.info(mask_output)
   mask_cache_key <- paste(
@@ -1220,12 +1397,17 @@ wsi_seurat_spots_channel_source <- function(linked,
   )
 }
 
-wsi_seurat_spatial_mask_raster <- function(linked,
-                                           colours = NULL,
-                                           max_dimension = 4096L,
-                                           radius_scale = 0.5,
-                                           alpha = 0.65) {
-  spots <- linked$spots
+wsi_seurat_spatial_mask_geometry <- function(linked,
+                                             colours = NULL,
+                                             max_dimension = 4096L,
+                                             radius_scale = NULL,
+                                             alpha = 1,
+                                             min_radius_px = NULL,
+                                             max_radius_px = NULL) {
+  spots <- linked$mask_spots %||% linked$spots
+  radius_scale <- wsi_seurat_coordinate_radius_scale(linked, radius_scale)
+  feature_type <- tolower(as.character(linked$feature_type %||% "spot"))
+  is_cell <- identical(feature_type, "cell")
   feature_count <- suppressWarnings(as.integer(linked$spot_count %||% nrow(spots) %||% 0L))
   slide_width <- suppressWarnings(as.numeric(linked$slide$dimensions[["width"]] %||% max(spots$x, na.rm = TRUE)))
   slide_height <- suppressWarnings(as.numeric(linked$slide$dimensions[["height"]] %||% max(spots$y, na.rm = TRUE)))
@@ -1239,35 +1421,150 @@ wsi_seurat_spatial_mask_raster <- function(linked,
   downsample <- max(1, ceiling(max(slide_width, slide_height) / max_dimension))
   mask_width <- max(1L, as.integer(ceiling(slide_width / downsample)))
   mask_height <- max(1L, as.integer(ceiling(slide_height / downsample)))
-  raster <- matrix("#00000000", nrow = mask_height, ncol = mask_width)
   x <- suppressWarnings(as.numeric(spots$x %||% spots$slide_x))
   y <- suppressWarnings(as.numeric(spots$y %||% spots$slide_y))
   keep <- is.finite(x) & is.finite(y) & x >= 0 & y >= 0 & x <= slide_width & y <= slide_height
-  if (any(keep)) {
-    x <- x[keep]
-    y <- y[keep]
-    if (is.null(colours)) {
-      colours <- spots$colour %||% spots$color %||% spots$base_colour %||% spots$base_color %||% "#2B6CB0"
-      colours <- as.character(colours)[keep]
+  empty <- list(
+    x = numeric(),
+    y = numeric(),
+    colours = character(),
+    radius_slide = numeric(),
+    radius_mask = integer(),
+    slide_width = slide_width,
+    slide_height = slide_height,
+    mask_width = mask_width,
+    mask_height = mask_height,
+    downsample = downsample,
+    feature_count = feature_count,
+    represented_count = sum(keep),
+    feature_type = feature_type
+  )
+  if (!any(keep)) {
+    return(empty)
+  }
+  x <- x[keep]
+  y <- y[keep]
+  if (is.null(colours)) {
+    colours <- spots$colour %||% spots$color %||% spots$base_colour %||% spots$base_color %||% "#2B6CB0"
+    colours <- as.character(colours)[keep]
+  } else {
+    colours <- rep(as.character(colours), length.out = nrow(spots))[keep]
+  }
+  colours <- vapply(colours, wsi_colour_to_hex, character(1), name = "colour")
+  colours <- grDevices::adjustcolor(colours, alpha.f = max(0, min(1, alpha)))
+  radius_values <- suppressWarnings(as.numeric(spots$radius %||% spots$spot_radius %||% linked$spot_radius %||% NA_real_))
+  if (length(radius_values) != nrow(spots)) {
+    fallback_radius <- if (length(radius_values) && is.finite(radius_values[[1L]])) {
+      radius_values[[1L]]
     } else {
-      colours <- rep(as.character(colours), length.out = nrow(spots))[keep]
+      linked$spot_radius %||% 2
     }
-    colours <- vapply(colours, wsi_colour_to_hex, character(1), name = "colour")
-    colours <- grDevices::adjustcolor(colours, alpha.f = max(0, min(1, alpha)))
-    px <- pmin(mask_width, pmax(1L, as.integer(round(x / downsample)) + 1L))
-    py <- pmin(mask_height, pmax(1L, as.integer(round(y / downsample)) + 1L))
-    radius_values <- suppressWarnings(as.numeric(spots$radius %||% spots$spot_radius %||% linked$spot_radius %||% NA_real_))
-    if (length(radius_values) != nrow(spots)) {
-      fallback_radius <- if (length(radius_values) && is.finite(radius_values[[1L]])) {
-        radius_values[[1L]]
-      } else {
-        linked$spot_radius %||% 2
-      }
-      radius_values <- rep(fallback_radius, nrow(spots))
+    radius_values <- rep(fallback_radius, nrow(spots))
+  }
+  radius_values <- radius_values[keep]
+  radius_values[!is.finite(radius_values) | radius_values <= 0] <- linked$spot_radius %||% 2
+  min_radius_px <- min_radius_px %||% if (is_cell) 4 else 4
+  max_radius_px <- max_radius_px %||% if (is_cell) 10 else 24
+  min_radius_px <- max(1, suppressWarnings(as.numeric(min_radius_px)))
+  max_radius_px <- max(min_radius_px, suppressWarnings(as.numeric(max_radius_px)))
+  radius_slide <- radius_values * radius_scale
+  radius_slide <- pmax(radius_slide, min_radius_px * downsample)
+  radius_slide <- pmin(radius_slide, max_radius_px * downsample)
+  radius_mask <- pmax(1L, as.integer(round(radius_slide / downsample)))
+  empty$x <- x
+  empty$y <- y
+  empty$colours <- colours
+  empty$radius_slide <- radius_slide
+  empty$radius_mask <- radius_mask
+  empty$represented_count <- length(x)
+  empty
+}
+
+wsi_seurat_write_spatial_mask_png <- function(file,
+                                              linked,
+                                              colours = NULL,
+                                              max_dimension = 4096L,
+                                              radius_scale = NULL,
+                                              alpha = 1,
+                                              outline = TRUE,
+                                              outline_colour = "#0F172A") {
+  geom <- wsi_seurat_spatial_mask_geometry(
+    linked = linked,
+    colours = colours,
+    max_dimension = max_dimension,
+    radius_scale = radius_scale,
+    alpha = alpha
+  )
+  png_args <- list(
+    filename = file,
+    width = geom$mask_width,
+    height = geom$mask_height,
+    units = "px",
+    bg = "transparent"
+  )
+  if (isTRUE(capabilities("cairo"))) {
+    png_args$type <- "cairo"
+  }
+  do.call(grDevices::png, png_args)
+  old_par <- NULL
+  tryCatch({
+    old_par <- graphics::par(no.readonly = TRUE)
+    graphics::par(mar = c(0, 0, 0, 0), xaxs = "i", yaxs = "i")
+    graphics::plot.new()
+    graphics::plot.window(
+      xlim = c(0, geom$slide_width),
+      ylim = c(geom$slide_height, 0),
+      asp = 1
+    )
+    if (length(geom$x)) {
+      outline_colour <- grDevices::adjustcolor(
+        wsi_colour_to_hex(outline_colour, name = "outline_colour"),
+        alpha.f = 1
+      )
+      graphics::symbols(
+        geom$x,
+        geom$y,
+        circles = geom$radius_slide,
+        inches = FALSE,
+        add = TRUE,
+        bg = geom$colours,
+        fg = if (isTRUE(outline)) outline_colour else NA,
+        lwd = if (isTRUE(outline)) 1.15 else 0
+      )
     }
-    radius_values <- radius_values[keep]
-    radius_values[!is.finite(radius_values) | radius_values <= 0] <- linked$spot_radius %||% 2
-    pr <- pmax(1L, as.integer(round(radius_values * radius_scale / downsample)))
+  }, finally = {
+    if (!is.null(old_par)) {
+      try(graphics::par(old_par), silent = TRUE)
+    }
+    grDevices::dev.off()
+  })
+  invisible(geom)
+}
+
+wsi_seurat_spatial_mask_raster <- function(linked,
+                                           colours = NULL,
+                                           max_dimension = 4096L,
+                                           radius_scale = NULL,
+                                           alpha = 1,
+                                           outline = TRUE,
+                                           outline_colour = "#0F172A") {
+  geom <- wsi_seurat_spatial_mask_geometry(
+    linked = linked,
+    colours = colours,
+    max_dimension = max_dimension,
+    radius_scale = radius_scale,
+    alpha = alpha
+  )
+  raster <- matrix("#00000000", nrow = geom$mask_height, ncol = geom$mask_width)
+  if (length(geom$x)) {
+    mask_width <- geom$mask_width
+    mask_height <- geom$mask_height
+    downsample <- geom$downsample
+    px <- pmin(mask_width, pmax(1L, as.integer(round(geom$x / downsample)) + 1L))
+    py <- pmin(mask_height, pmax(1L, as.integer(round(geom$y / downsample)) + 1L))
+    colours <- geom$colours
+    outline_colour <- grDevices::adjustcolor(wsi_colour_to_hex(outline_colour, name = "outline_colour"), alpha.f = 1)
+    pr <- geom$radius_mask
     for (i in seq_along(px)) {
       rr <- pr[[i]]
       x0 <- max(1L, px[[i]] - rr)
@@ -1281,30 +1578,53 @@ wsi_seurat_spatial_mask_raster <- function(linked,
         ys <- y0:y1
         disk <- outer(ys - py[[i]], xs - px[[i]], function(a, b) a * a + b * b <= rr * rr)
         sub <- raster[ys, xs, drop = FALSE]
-        sub[disk] <- colours[[i]]
+        fill_rr <- if (isTRUE(outline)) max(0L, rr - 1L) else rr
+        fill <- if (fill_rr <= 0L) {
+          outer(ys - py[[i]], xs - px[[i]], function(a, b) a == 0 & b == 0)
+        } else {
+          outer(ys - py[[i]], xs - px[[i]], function(a, b) a * a + b * b <= fill_rr * fill_rr)
+        }
+        sub[fill] <- colours[[i]]
+        raster[ys, xs] <- sub
+      }
+    }
+    if (isTRUE(outline)) {
+      for (i in seq_along(px)) {
+        rr <- pr[[i]]
+        x0 <- max(1L, px[[i]] - rr)
+        x1 <- min(mask_width, px[[i]] + rr)
+        y0 <- max(1L, py[[i]] - rr)
+        y1 <- min(mask_height, py[[i]] + rr)
+        xs <- x0:x1
+        ys <- y0:y1
+        dist2 <- outer(ys - py[[i]], xs - px[[i]], function(a, b) a * a + b * b)
+        ring <- dist2 <= rr * rr & dist2 > max(0L, rr - 1L) * max(0L, rr - 1L)
+        sub <- raster[ys, xs, drop = FALSE]
+        sub[ring] <- outline_colour
         raster[ys, xs] <- sub
       }
     }
   }
   list(
     raster = raster,
-    slide_width = slide_width,
-    slide_height = slide_height,
-    mask_width = mask_width,
-    mask_height = mask_height,
-    downsample = downsample,
-    feature_count = feature_count,
-    represented_count = sum(keep)
+    slide_width = geom$slide_width,
+    slide_height = geom$slide_height,
+    mask_width = geom$mask_width,
+    mask_height = geom$mask_height,
+    downsample = geom$downsample,
+    feature_count = geom$feature_count,
+    represented_count = geom$represented_count
   )
 }
 
 wsi_seurat_spatial_mask_layer <- function(linked, name, id = "seurat_spots",
                                           colours = NULL, visible = TRUE,
-                                          opacity = 0.85,
+                                          opacity = 1,
                                           feature_count = NULL,
                                           max_dimension = 4096L,
-                                          radius_scale = 0.5,
-                                          alpha = 0.65) {
+                                          radius_scale = NULL,
+                                          alpha = 1) {
+  radius_scale <- wsi_seurat_coordinate_radius_scale(linked, radius_scale)
   raster_result <- wsi_seurat_spatial_mask_raster(
     linked = linked,
     colours = colours,
@@ -1594,12 +1914,9 @@ wsi_seurat_project_scoped_linked <- function(linked, record, item_index,
                                              section = NULL,
                                              section_index = -1L) {
   scoped <- linked
-  spots <- scoped$spots
-  if (is.data.frame(spots) && nrow(spots)) {
-    project_key <- wsi_seurat_project_record_key(record, section)
-    project_image <- as.character(record$label %||% record$id %||% record$path %||% "")
-    project_section <- if (is.null(section)) "" else {
-      as.character(section$label %||% section$id %||% "")
+  scope_spots <- function(spots, project_key, project_image, project_section) {
+    if (!is.data.frame(spots) || !nrow(spots)) {
+      return(spots)
     }
     original_id <- as.character(spots$original_id %||% spots$barcode %||% spots$id %||% spots$label %||% seq_len(nrow(spots)))
     spots$original_id <- original_id
@@ -1614,12 +1931,25 @@ wsi_seurat_project_scoped_linked <- function(linked, record, item_index,
     spots$project_image_index <- as.integer(item_index)
     spots$project_section_index <- as.integer(section_index)
     spots$id <- paste(project_key, original_id, sep = "::")
-    scoped$spots <- spots
-    scoped$displayed_spot_count <- nrow(spots)
+    spots
   }
-  scoped$project_key <- wsi_seurat_project_record_key(record, section)
-  scoped$project_image <- as.character(record$label %||% record$id %||% record$path %||% "")
-  scoped$project_section <- if (is.null(section)) "" else as.character(section$label %||% section$id %||% "")
+  project_key <- wsi_seurat_project_record_key(record, section)
+  project_image <- as.character(record$label %||% record$id %||% record$path %||% "")
+  project_section <- if (is.null(section)) "" else {
+    as.character(section$label %||% section$id %||% "")
+  }
+  spots <- scoped$spots
+  if (is.data.frame(spots) && nrow(spots)) {
+    scoped$spots <- scope_spots(spots, project_key, project_image, project_section)
+    scoped$displayed_spot_count <- nrow(scoped$spots)
+  }
+  mask_spots <- scoped$mask_spots
+  if (is.data.frame(mask_spots) && nrow(mask_spots)) {
+    scoped$mask_spots <- scope_spots(mask_spots, project_key, project_image, project_section)
+  }
+  scoped$project_key <- project_key
+  scoped$project_image <- project_image
+  scoped$project_section <- project_section
   scoped$project_image_index <- as.integer(item_index)
   scoped$project_section_index <- as.integer(section_index)
   scoped
@@ -1747,28 +2077,14 @@ wsi_seurat_project_records <- function(linked, output, labels,
       section = NULL,
       section_index = -1L
     )
-    spot_channel <- NULL
     spot_channel_id <- paste0(record$id, "_seurat_spots")
     scoped_item$spot_layer_id <- spot_channel_id
-    if (identical(mode, "tiles")) {
-      spot_channel <- wsi_seurat_spots_channel_source(
-        linked = scoped_item,
-        output_dir = file.path(tile_dir, "spatial_masks"),
-        output_html = output,
-        id = spot_channel_id,
-        name = paste(label, scoped_item$source_name %||% "Spatial", "mask"),
-        visible = i == 1L,
-        opacity = 0.85,
-        dynamic = isTRUE(dynamic_channel_sources),
-        rebuild = isTRUE(rebuild),
-        target_path = record$path,
-        project_image_id = record$id
-      )
-    }
+    scoped_item$viewer_output <- output
+    spot_layer <- wsi_seurat_spots_layer(scoped_item, visible = i == 1L, opacity = 1)
     record$project_key <- scoped_item$project_key
-    record$layers <- list()
-    record$channel_sources <- if (is.null(spot_channel)) list() else list(spot_channel$source)
-    record$spot_mask <- if (is.null(spot_channel)) NULL else spot_channel$mask
+    record$layers <- list(spot_layer)
+    record$channel_sources <- list()
+    record$spot_mask <- NULL
     record$seurat <- wsi_viewer_seurat_config(scoped_item)
     records[[i]] <- record
   }
@@ -2812,7 +3128,7 @@ wsi_seurat_dynamic_gene_payload <- function(linked, gene) {
       )
     )
   }
-  spots <- linked$spots
+  spots <- linked$mask_spots %||% linked$spots
   spot_ids <- as.character(source$spot_ids %||% spots$barcode %||% spots$id)
   if (!length(spot_ids)) {
     wsi_abort(sprintf("No %s spot/cell identifiers are available for dynamic gene lookup.", source_name))
@@ -2845,10 +3161,19 @@ wsi_seurat_dynamic_gene_payload <- function(linked, gene) {
     values <- values[seq_len(nrow(spots))]
     colours <- colours[seq_len(nrow(spots))]
   }
-  points <- lapply(seq_len(nrow(spots)), function(i) {
+  max_payload_points <- suppressWarnings(as.integer(Sys.getenv("WSITOOLS_SPATIAL_POINT_PAYLOAD_MAX", "12000")))
+  if (!is.finite(max_payload_points) || max_payload_points < 10000L) {
+    max_payload_points <- 12000L
+  }
+  point_idx <- if (nrow(spots) > max_payload_points) {
+    unique(as.integer(round(seq(1, nrow(spots), length.out = max_payload_points))))
+  } else {
+    seq_len(nrow(spots))
+  }
+  point_radius <- wsi_seurat_point_layer_radius(linked)
+  points <- lapply(point_idx, function(i) {
     x <- suppressWarnings(as.numeric(spots$x[[i]] %||% spots$slide_x[[i]] %||% NA_real_))
     y <- suppressWarnings(as.numeric(spots$y[[i]] %||% spots$slide_y[[i]] %||% NA_real_))
-    radius <- suppressWarnings(as.numeric(spots$radius[[i]] %||% spots$spot_radius[[i]] %||% linked$spot_radius %||% NA_real_))
     list(
       id = as.character(spots$id[[i]] %||% ""),
       label = as.character(spots$label[[i]] %||% spots$id[[i]] %||% ""),
@@ -2858,42 +3183,11 @@ wsi_seurat_dynamic_gene_payload <- function(linked, gene) {
       y = if (is.finite(y)) y else NA_real_,
       slide_x = if (is.finite(x)) x else NA_real_,
       slide_y = if (is.finite(y)) y else NA_real_,
-      radius = if (is.finite(radius)) radius else NA_real_,
+      radius = point_radius,
       value = if (is.finite(values[[i]])) values[[i]] else NA_real_,
       colour = as.character(colours[[i]] %||% "#d1d5db")
     )
   })
-  gene_layer <- tryCatch({
-    linked_for_layer <- linked
-    linked_for_layer$spots$colour <- colours
-    linked_for_layer$spots$color <- colours
-    linked_for_layer$spots$radius <- suppressWarnings(as.numeric(linked_for_layer$spots$radius %||% linked$spot_radius %||% NA_real_))
-    layer <- wsi_seurat_spatial_mask_layer(
-      linked = linked_for_layer,
-      name = sprintf("%s %s %s expression", source_name, feature_plural, actual_gene),
-      id = if (identical(feature_type, "cell")) "seurat_cell_gene_expression" else "seurat_gene_expression",
-      colours = colours,
-      visible = TRUE,
-      opacity = 0.9,
-      feature_count = nrow(spots),
-      radius_scale = 0.5,
-      alpha = 0.85
-    )
-    layer$source_type <- if (identical(feature_type, "cell")) "seurat_cell_gene_expression" else "seurat_gene_expression"
-    layer$metadata <- c(
-      layer$metadata %||% list(),
-      list(
-        gene = actual_gene,
-        feature_type = feature_type,
-        feature_label = feature_plural,
-        range = gene_expression$ranges[[actual_gene]] %||% list(min = NA_real_, max = NA_real_),
-        positive_count = sum(values > 0, na.rm = TRUE),
-        display_mode = "raster_mask",
-        vector_rendering = FALSE
-      )
-    )
-    unclass(layer)
-  }, error = function(err) NULL)
   list(
     ok = TRUE,
     gene = as.character(actual_gene),
@@ -2903,7 +3197,13 @@ wsi_seurat_dynamic_gene_payload <- function(linked, gene) {
     feature_plural = feature_plural,
     range = gene_expression$ranges[[actual_gene]] %||% list(min = NA_real_, max = NA_real_),
     count = length(points),
-    image_layer = gene_layer,
+    total_count = nrow(spots),
+    represented_count = length(points),
+    sampled = length(points) < nrow(spots),
+    display_mode = "adaptive_circles_gene_expression",
+    channel_source = NULL,
+    gene_mask = NULL,
+    image_layer = NULL,
     points = points
   )
 }

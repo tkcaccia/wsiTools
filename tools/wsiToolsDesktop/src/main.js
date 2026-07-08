@@ -42,7 +42,7 @@ const launcherWindow = getCurrentWindow();
 const launcherWindowSizes = {
   home: { width: 620, height: 380, minWidth: 520, minHeight: 320, maxHeight: 720 },
   images: { width: 760, height: 500, minWidth: 620, minHeight: 400, maxHeight: 720 },
-  associations: { width: 900, height: 760, minWidth: 720, minHeight: 620, maxHeight: 980 },
+  associations: { width: 1120, height: 1260, minWidth: 920, minHeight: 1040, maxHeight: 1600 },
   runtime: { width: 860, height: 720, minWidth: 700, minHeight: 520, maxHeight: 900 }
 };
 let launcherResizeTimer = null;
@@ -101,9 +101,12 @@ function launcherTargetSize(layout = activeLauncherLayout()) {
   const padding = layout === "home" ? 44 : 48;
   const contentWidth = Math.ceil(rect?.width || preset.width - padding) + padding;
   const contentHeight = Math.ceil(content?.scrollHeight || rect?.height || preset.height - padding) + padding;
+  const screenHeight = Number(window.screen?.availHeight || 0);
+  const screenSafeMax = screenHeight > 0 ? Math.max(preset.minHeight, screenHeight - 36) : preset.maxHeight;
+  const maxHeight = Math.min(preset.maxHeight, screenSafeMax);
   return {
-    width: Math.max(preset.minWidth, Math.min(1040, Math.max(preset.width, contentWidth))),
-    height: Math.max(preset.minHeight, Math.min(preset.maxHeight, Math.max(preset.height, contentHeight))),
+    width: Math.max(preset.minWidth, Math.min(layout === "associations" ? 1120 : 1040, Math.max(preset.width, contentWidth))),
+    height: Math.max(preset.minHeight, Math.min(maxHeight, Math.max(preset.height, contentHeight))),
     minWidth: preset.minWidth,
     minHeight: preset.minHeight
   };
@@ -111,6 +114,7 @@ function launcherTargetSize(layout = activeLauncherLayout()) {
 
 async function fitLauncherWindow(layout = activeLauncherLayout(), center = false) {
   if (!launcherWindow) return;
+  document.body.dataset.layout = layout;
   const size = launcherTargetSize(layout);
   try {
     await launcherWindow.setMinSize(new LogicalSize(size.minWidth, size.minHeight));
@@ -123,7 +127,13 @@ async function fitLauncherWindow(layout = activeLauncherLayout(), center = false
 
 function scheduleLauncherWindowFit(layout = activeLauncherLayout(), center = false) {
   window.clearTimeout(launcherResizeTimer);
+  document.body.dataset.layout = layout;
   launcherResizeTimer = window.setTimeout(() => fitLauncherWindow(layout, center), 40);
+  window.setTimeout(() => {
+    if (activeLauncherLayout() === layout) {
+      fitLauncherWindow(layout, false);
+    }
+  }, 260);
 }
 
 function setBusy(isBusy) {
@@ -306,6 +316,27 @@ function pathText(path) {
   return path ? path : "None";
 }
 
+function setAssociationFileRow(card, field, label, value, clearAction, id) {
+  const row = card.querySelector(`[data-row="${field}"]`);
+  if (!row) return;
+  const dd = row.querySelector("dd");
+  dd.replaceChildren();
+  const valueText = document.createElement("span");
+  valueText.className = value ? "associationFilePath" : "associationFileEmpty";
+  valueText.textContent = pathText(value);
+  dd.append(valueText);
+  if (!value) return;
+  const clear = document.createElement("button");
+  clear.type = "button";
+  clear.className = "associationClearButton";
+  clear.textContent = "×";
+  clear.title = `Clear ${label}`;
+  clear.setAttribute("aria-label", `Clear ${label}`);
+  clear.dataset.action = clearAction;
+  clear.dataset.id = id;
+  dd.append(clear);
+}
+
 function renderProjectImages(message = null) {
   nextAssociations.disabled = projectImages.length === 0;
   runR.disabled = !rAvailable || projectImages.length === 0;
@@ -358,22 +389,19 @@ function renderAssociations() {
       </div>
       <div class="associationActions">
         <button type="button" data-action="set-cell" data-id="${item.id}">Select cell annotation</button>
-        <button type="button" data-action="clear-cell" data-id="${item.id}">Clear</button>
         <button type="button" data-action="set-tissue" data-id="${item.id}">Select tissue annotation</button>
-        <button type="button" data-action="clear-tissue" data-id="${item.id}">Clear</button>
         <button type="button" data-action="set-spatial" data-id="${item.id}">Select spatial transcriptomics data</button>
-        <button type="button" data-action="clear-spatial" data-id="${item.id}">Clear</button>
       </div>
       <dl class="associationFiles">
-        <div><dt>Cell</dt><dd data-field="cell"></dd></div>
-        <div><dt>Tissue</dt><dd data-field="tissue"></dd></div>
-        <div><dt>Spatial</dt><dd data-field="spatial"></dd></div>
+        <div data-row="cell"><dt>Cell</dt><dd data-field="cell"></dd></div>
+        <div data-row="tissue"><dt>Tissue</dt><dd data-field="tissue"></dd></div>
+        <div data-row="spatial"><dt>Spatial</dt><dd data-field="spatial"></dd></div>
       </dl>
     `;
     card.querySelector(".associationHeader code").textContent = item.image;
-    card.querySelector('[data-field="cell"]').textContent = pathText(item.cellAnnotation);
-    card.querySelector('[data-field="tissue"]').textContent = pathText(item.tissueAnnotation);
-    card.querySelector('[data-field="spatial"]').textContent = pathText(item.spatialData);
+    setAssociationFileRow(card, "cell", "cell annotation", item.cellAnnotation, "clear-cell", item.id);
+    setAssociationFileRow(card, "tissue", "tissue annotation", item.tissueAnnotation, "clear-tissue", item.id);
+    setAssociationFileRow(card, "spatial", "spatial transcriptomics data", item.spatialData, "clear-spatial", item.id);
     const inspection = spatialInspectionFor(item.spatialData);
     const tissues = Array.isArray(inspection?.tissues) ? inspection.tissues : [];
     if (item.spatialData && tissues.length > 0) {

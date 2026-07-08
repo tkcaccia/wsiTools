@@ -331,6 +331,9 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "ROI merged with same label", fixed = TRUE)
   expect_match(html, "different-label overlap clipped", fixed = TRUE)
   expect_match(html, "maskContoursFromCanvas", fixed = TRUE)
+  expect_match(html, "brushContourTolerance", fixed = TRUE)
+  expect_match(html, "brushContourMaxPoints", fixed = TRUE)
+  expect_match(html, "simplifyBrushContourRing", fixed = TRUE)
   expect_match(html, "drawBrushStrokeOnMask", fixed = TRUE)
   expect_match(html, "brush_mask_contour", fixed = TRUE)
   expect_match(html, "addRoiFromBrushRings", fixed = TRUE)
@@ -1132,7 +1135,9 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_false(grepl("<summary title=\"ROI overlay and GeoJSON geometry list\">GeoJSON</summary>", html, fixed = TRUE))
   expect_false(grepl("id=\"layersToggle\"", html, fixed = TRUE))
   expect_match(html, "Import GeoJSON", fixed = TRUE)
+  expect_match(html, "Rasterize ROIs", fixed = TRUE)
   expect_match(html, "importGeojson", fixed = TRUE)
+  expect_match(html, "rasterizeAnnotations", fixed = TRUE)
   expect_match(html, "geojsonImportFile", fixed = TRUE)
   expect_match(html, "geojsonImportSummary", fixed = TRUE)
   expect_match(html, "bindGeojsonImportControls", fixed = TRUE)
@@ -1140,6 +1145,13 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "geojsonMaskUrl", fixed = TRUE)
   expect_match(html, "geojsonShouldImportAsMask", fixed = TRUE)
   expect_match(html, "addImportedGeojsonAsMask", fixed = TRUE)
+  expect_match(html, "rasterizeCurrentAnnotationsAsMask", fixed = TRUE)
+  expect_match(html, "Vector ROIs are hidden", fixed = TRUE)
+  expect_match(html, "annotationMaskBrushEnabled", fixed = TRUE)
+  expect_match(html, "paintAnnotationMaskStroke", fixed = TRUE)
+  expect_match(html, "drawAnnotationMasks", fixed = TRUE)
+  expect_match(html, "annotationMaskPayload", fixed = TRUE)
+  expect_match(html, "annotation_mask_updated", fixed = TRUE)
   expect_match(html, "importedRoiFromFeature", fixed = TRUE)
   expect_match(html, "geojsonGeometryParts", fixed = TRUE)
   expect_false(grepl("roiLabelInput", html, fixed = TRUE))
@@ -1438,6 +1450,7 @@ test_that("live viewer sessions expose R-native helper methods and command queue
   expect_true(is.function(session$get_ihc_class_summary))
   expect_true(is.function(session$get_segmentation))
   expect_true(is.function(session$get_layers))
+  expect_true(is.function(session$get_annotation_masks))
   expect_true(is.function(session$get_annotation_spots))
   expect_true(is.function(session$get_history))
   expect_true(is.function(session$get_logs))
@@ -2477,7 +2490,7 @@ test_that("live H&E viewer wires deconvolution as tiled channel layers", {
 test_that("viewer event validation allowlists live WebSocket events", {
   expected <- c(
     "roi_created", "roi_updated", "roi_curve_edited", "roi_deleted", "roi_selected",
-    "brush_committed", "viewport_changed", "layer_updated",
+    "brush_committed", "annotation_mask_updated", "viewport_changed", "layer_updated",
     "trajectory_deleted", "trajectory_area_created", "trajectory_area_updated",
     "trajectory_profile_started", "trajectory_profile_finished",
     "trajectory_profile_failed", "trajectory_profile_cleared",

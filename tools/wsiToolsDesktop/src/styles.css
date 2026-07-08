@@ -118,6 +118,16 @@ button:disabled {
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
 }
 
+body[data-layout="associations"] .appShell {
+  align-items: start;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+body[data-layout="associations"] .launcherPanel {
+  width: min(1080px, 100%);
+}
+
 .projectBuilderPanel {
   min-height: 0;
 }
@@ -277,9 +287,13 @@ button:disabled {
 }
 
 .associationList {
-  max-height: min(560px, calc(100vh - 220px));
+  max-height: min(760px, calc(100vh - 205px));
   overflow: auto;
   padding-right: 4px;
+}
+
+body[data-layout="associations"] .associationList {
+  max-height: min(1040px, calc(100vh - 170px));
 }
 
 .imageRow,
@@ -316,7 +330,8 @@ button:disabled {
 
 .imageRow button,
 .associationHeader button,
-.associationActions button {
+.associationActions button,
+.associationClearButton {
   min-height: 0;
   padding: 6px 8px;
   font-size: 12px;
@@ -335,7 +350,7 @@ button:disabled {
 
 .associationActions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 1fr;
   gap: 8px;
   margin-top: 10px;
 }
@@ -363,6 +378,41 @@ button:disabled {
   font-size: 12px;
   line-height: 1.35;
   word-break: break-word;
+}
+
+.associationFiles dd {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+}
+
+.associationFilePath,
+.associationFileEmpty {
+  min-width: 0;
+}
+
+.associationFileEmpty {
+  color: #94a3b8;
+}
+
+.associationClearButton {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  padding: 0;
+  line-height: 1;
+  font-size: 17px;
+  font-weight: 700;
+  color: #cbd5e1;
+  background: rgba(15, 23, 42, 0.82);
+  border-color: rgba(148, 163, 184, 0.42);
+}
+
+.associationClearButton:hover:not(:disabled) {
+  color: #fff;
+  background: rgba(127, 29, 29, 0.86);
+  border-color: rgba(248, 113, 113, 0.72);
 }
 
 .spatialMapping {

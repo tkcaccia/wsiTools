@@ -62,6 +62,7 @@ wsi_new_viewer_state <- function(name = "wsi_viewer_live_state", envir = parent.
   state$view <- list()
   state$stain <- NULL
   state$channel_sources <- list()
+  state$annotation_masks <- list()
   state$channel_settings <- wsi_empty_channel_settings()
   state$tile_sources <- list()
   state$kodama_selection <- list(labels = character(), count = 0L, matched_count = 0L)
@@ -148,7 +149,7 @@ wsi_viewer_allowed_events <- function() {
     "roi_color_updated", "roi_visibility_updated", "roi_lock_updated",
     "roi_smoothed", "roi_simplified", "roi_holes_filled", "roi_split",
     "roi_same_label_merged", "rois_merged", "brush_selection_updated",
-    "brush_committed", "viewport_changed",
+    "brush_committed", "annotation_mask_updated", "viewport_changed",
     "geojson_imported", "geojson_mask_overlay_created", "class_export_rules_updated",
     "annotations_dirty", "annotations_saved",
     "annotation_history_updated", "annotation_history_cleared",
@@ -196,7 +197,7 @@ wsi_viewer_allowed_payload_fields <- function() {
     "selected_roi", "selected_rois", "selected_object", "rois",
     "segmentation", "layers", "measurements", "trajectories",
     "artifacts", "view", "annotations", "history", "logs", "stain",
-    "channel_sources", "channel_settings",
+    "channel_sources", "annotation_masks", "channel_settings",
     "tile_sources", "kodama_selection", "seurat_selection",
     "annotation_spots", "detail"
   )
@@ -1420,6 +1421,7 @@ wsi_assign_viewer_state <- function(state) {
   assign(paste0(name, "_project"), state$project %||% list(), envir = envir)
   assign(paste0(name, "_project_snapshot"), state$project_snapshot %||% NULL, envir = envir)
   assign(paste0(name, "_channel_sources"), state$channel_sources %||% list(), envir = envir)
+  assign(paste0(name, "_annotation_masks"), state$annotation_masks %||% list(), envir = envir)
   assign(paste0(name, "_channel_settings"), state$channel_settings %||% wsi_empty_channel_settings(), envir = envir)
   assign(paste0(name, "_tile_sources"), state$tile_sources %||% list(), envir = envir)
   assign(paste0(name, "_tile_preview"), state$tile_preview %||% wsi_empty_tile_preview(), envir = envir)
@@ -1491,6 +1493,8 @@ wsi_viewer_state_apply <- function(state, payload) {
   if (!is.null(payload[["channel_sources", exact = TRUE]])) {
     state$channel_sources <- wsi_channel_sources_payload(payload[["channel_sources", exact = TRUE]])
   }
+  state$annotation_masks <- payload[["annotation_masks", exact = TRUE]] %||%
+    state$annotation_masks %||% list()
   if (!is.null(payload[["channel_settings", exact = TRUE]])) {
     state$channel_settings <- wsi_channel_settings_from_payload(payload[["channel_settings", exact = TRUE]])
   } else if (!is.null(state$stain$channels)) {
@@ -1547,6 +1551,7 @@ wsi_viewer_state_apply <- function(state, payload) {
     proximity_stats_count = nrow(state$proximity_stats %||% wsi_empty_proximity_stats_result()),
     trajectory_profile_count = nrow(state$trajectory_profile %||% wsi_empty_trajectory_profile()),
     layer_count = length(state$layers %||% list()),
+    annotation_mask_count = length(state$annotation_masks %||% list()),
     channel_count = nrow(state$channel_settings %||% wsi_empty_channel_settings())
   )
   state$events[[length(state$events) + 1L]] <- event
@@ -2673,6 +2678,9 @@ wsi_attach_viewer_session_methods <- function(session) {
   }
   session$get_channel_sources <- function(service = TRUE) {
     session$get_state(service = service)$channel_sources
+  }
+  session$get_annotation_masks <- function(service = TRUE) {
+    session$get_state(service = service)$annotation_masks
   }
   session$get_channel_settings <- function(service = TRUE) {
     session$get_state(service = service)$channel_settings
@@ -4773,6 +4781,7 @@ wsi_viewer_state <- function(x) {
     project = state$project %||% list(),
     project_snapshot = state$project_snapshot %||% NULL,
     channel_sources = state$channel_sources %||% list(),
+    annotation_masks = state$annotation_masks %||% list(),
     channel_settings = state$channel_settings %||% wsi_empty_channel_settings(),
     tile_sources = state$tile_sources %||% list(),
     kodama_selection = state$kodama_selection %||% list(labels = character(), count = 0L, matched_count = 0L),
@@ -4887,7 +4896,7 @@ print.wsi_viewer_session <- function(x, ...) {
   if (!is.null(x$stardist_server)) {
     cat(sprintf("  stardist: %s\n", x$stardist_server$url))
   }
-  cat("  methods: capabilities(), on(), get_rois(), get_selected_roi(), get_selected_rois(), get_selected_object(), get_selected_spots(), get_spot_annotation_table(), get_annotation_spot_matrix(), get_measurements(), get_trajectories(), get_roi_summary(), get_cell_summary(), get_ihc_summary(), get_segmentation(), get_layers(), get_channel_settings(), get_kodama_selection(), get_annotation_spots(), get_history(), get_logs(), get_tile_preview(), get_prediction(), get_proximity(), get_proximity_stats(), get_trajectory_profile(), colour_spots_by_gene(), add_rois(), add_layer(), add_channel_source(), measure_ihc_intensity(), preview_tiles(), extract_tile_preview(), list_jobs(), run_tiles_async(), save_project(), autosave_start()\n")
+  cat("  methods: capabilities(), on(), get_rois(), get_selected_roi(), get_selected_rois(), get_selected_object(), get_selected_spots(), get_spot_annotation_table(), get_annotation_spot_matrix(), get_measurements(), get_trajectories(), get_roi_summary(), get_cell_summary(), get_ihc_summary(), get_segmentation(), get_layers(), get_annotation_masks(), get_channel_settings(), get_kodama_selection(), get_annotation_spots(), get_history(), get_logs(), get_tile_preview(), get_prediction(), get_proximity(), get_proximity_stats(), get_trajectory_profile(), colour_spots_by_gene(), add_rois(), add_layer(), add_channel_source(), measure_ihc_intensity(), preview_tiles(), extract_tile_preview(), list_jobs(), run_tiles_async(), save_project(), autosave_start()\n")
   cat("  stop with: wsi_viewer_stop(x)\n")
   invisible(x)
 }

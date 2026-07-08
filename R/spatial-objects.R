@@ -889,29 +889,16 @@ wsi_viewer_spatial_linked <- function(object, image, linked, linker, source_name
   }
   dots$layers <- layers
   if (isTRUE(show_spots)) {
-    if (is.null(output)) {
-      output <- tempfile(fileext = ".html")
-      overwrite <- TRUE
-    }
-    spot_source <- wsi_seurat_spots_channel_source(
-      linked = linked,
-      output_dir = file.path(dirname(output), paste0(tools::file_path_sans_ext(basename(output)), "_spatial_masks")),
-      output_html = output,
-      id = "seurat_spots",
-      visible = TRUE,
-      opacity = 0.85,
-      dynamic = isTRUE(dots$spatial_mask_dynamic %||% FALSE),
-      rebuild = isTRUE(dots$rebuild %||% FALSE)
-    )
-    if (!is.null(spot_source)) {
-      channel_sources <- dots$channel_sources %||% list()
-      if (!is.list(channel_sources) || inherits(channel_sources, "data.frame")) {
-        channel_sources <- list(channel_sources)
-      }
-      dots$channel_sources <- c(list(spot_source$source), channel_sources)
-      linked$spot_layer_id <- spot_source$source$id
-      linked$spot_mask <- spot_source$mask
-    }
+    spot_layer <- wsi_seurat_spots_layer(linked, visible = TRUE, opacity = 1)
+    linked$spot_layer_id <- spot_layer$id
+    dots$layers <- c(list(spot_layer), dots$layers)
+  }
+  if (is.null(output)) {
+    output <- tempfile(fileext = ".html")
+    overwrite <- TRUE
+  }
+  if (isTRUE(show_spots)) {
+    linked$viewer_output <- output
   }
   dots$seurat <- linked
   dots$output <- output

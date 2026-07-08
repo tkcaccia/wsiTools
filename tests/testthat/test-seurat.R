@@ -46,11 +46,54 @@ test_that("Seurat spatial objects can be linked to high-resolution slide coordin
   layer <- wsiTools:::wsi_seurat_spots_layer(linked)
   expect_equal(layer$id, "seurat_spots")
   expect_equal(layer$source_type, "seurat_spots")
-  expect_equal(layer$type, "image")
-  expect_true(grepl("^data:image/png;base64,", layer$data_uri))
+  expect_equal(layer$type, "vector")
   expect_equal(layer$count, 3)
-  expect_equal(layer$metadata$display_mode, "raster_mask")
-  expect_false(layer$metadata$vector_rendering)
+  expect_equal(layer$metadata$display_mode, "adaptive_circles")
+  expect_true(layer$metadata$vector_rendering)
+  expect_equal(length(layer$items), 3)
+  expect_true(all(vapply(layer$items, `[[`, character(1), "type") == "point"))
+})
+
+test_that("Seurat coordinate circle layers expose sampled browser points and preserve full coordinate metadata", {
+  ids <- paste0("spot_", seq_len(8))
+  embeddings <- matrix(
+    seq_len(16),
+    ncol = 2,
+    dimnames = list(ids, c("PC_1", "PC_2"))
+  )
+  seurat_like <- list(
+    reductions = list(pca = list(cell.embeddings = embeddings)),
+    images = list(
+      section = list(
+        coordinates = data.frame(
+          barcode = ids,
+          imagecol = seq(10, 80, by = 10),
+          imagerow = rep(20, 8)
+        )
+      )
+    )
+  )
+  slide <- wsi_mock_slide(width = 100, height = 100, levels = c(1, 2))
+
+  linked <- wsi_link_seurat_image(
+    seurat_like,
+    slide,
+    coordinate_scale = "none",
+    max_points = 3
+  )
+  layer <- wsiTools:::wsi_seurat_spots_layer(linked)
+
+  expect_equal(linked$spot_count, 8)
+  expect_equal(linked$displayed_spot_count, 3)
+  expect_equal(nrow(linked$spots), 3)
+  expect_equal(nrow(linked$mask_spots), 8)
+  expect_equal(layer$count, 3)
+  expect_equal(layer$metadata$feature_count, 8)
+  expect_equal(layer$metadata$represented_count, 3)
+  expect_equal(length(layer$items), 3)
+  expect_equal(vapply(layer$items, `[[`, character(1), "barcode"), linked$spots$barcode)
+  expect_equal(layer$metadata$display_mode, "adaptive_circles")
+  expect_true(layer$metadata$lod$enabled)
 })
 
 test_that("Seurat coordinates can be inspected as raw and viewer-mapped tables", {
@@ -285,9 +328,9 @@ test_that("Seurat spots can be coloured by selected gene expression values", {
   expect_equal(linked$pca$points$gene_values[[1]]$Mbp, 0)
 
   layer <- wsiTools:::wsi_seurat_spots_layer(linked)
-  expect_equal(layer$type, "image")
-  expect_true(grepl("^data:image/png;base64,", layer$data_uri))
-  expect_equal(layer$metadata$display_mode, "raster_mask")
+  expect_equal(layer$type, "vector")
+  expect_equal(layer$metadata$display_mode, "adaptive_circles")
+  expect_true(all(grepl("^#", vapply(layer$items, `[[`, character(1), "colour"))))
   expect_equal(linked$pca$points$gene_values[[2]]$Mbp, 2)
   expect_match(linked$spots$base_colour[[2]], "^#")
 
@@ -340,8 +383,9 @@ test_that("Seurat clustering metadata is detected and exposed to the viewer", {
   expect_equal(linked$pca$points$cluster_values[[2]]$seurat_clusters, "tumour")
 
   layer <- wsiTools:::wsi_seurat_spots_layer(linked)
-  expect_equal(layer$type, "image")
-  expect_equal(layer$metadata$display_mode, "raster_mask")
+  expect_equal(layer$type, "vector")
+  expect_equal(layer$metadata$display_mode, "adaptive_circles")
+  expect_true(layer$metadata$vector_rendering)
   expect_equal(linked$pca$points$cluster_values[[1]]$seurat_clusters, "stroma")
 
   config <- wsiTools:::wsi_viewer_seurat_config(linked)
@@ -432,6 +476,40 @@ test_that("live Seurat gene payload identifies cell-level spatial data", {
   expect_equal(payload$feature_plural, "cells")
   expect_true(all(vapply(payload$points, `[[`, character(1), "feature_type") == "cell"))
   expect_equal(vapply(payload$points, `[[`, numeric(1), "value"), c(3, 9))
+})
+
+test_that("cell coordinate helpers keep compact circle radii", {
+  cell_linked <- list(feature_type = "cell")
+  spot_linked <- list(feature_type = "spot")
+
+  dense_spot_linked <- list(feature_type = "spot", spot_count = 60000)
+
+  expect_equal(wsiTools:::wsi_seurat_coordinate_radius_scale(cell_linked), 0.175)
+  expect_equal(wsiTools:::wsi_seurat_coordinate_radius_scale(spot_linked), 0.5)
+  expect_equal(wsiTools:::wsi_seurat_coordinate_radius_scale(dense_spot_linked), 0.175)
+  expect_equal(wsiTools:::wsi_seurat_coordinate_radius_scale(cell_linked, 0.25), 0.25)
+
+  linked <- list(
+    feature_type = "cell",
+    slide = wsi_mock_slide(width = 80, height = 80, levels = c(1, 2)),
+    spots = data.frame(
+      id = "cell_1",
+      label = "cell_1",
+      barcode = "cell_1",
+      x = 40,
+      y = 40,
+      radius = 8,
+      stringsAsFactors = FALSE
+    ),
+    spot_radius = 8,
+    spot_count = 1
+  )
+  layer <- wsiTools:::wsi_seurat_spots_layer(linked)
+
+  expect_equal(layer$type, "vector")
+  expect_equal(layer$items[[1]]$type, "point")
+  expect_lte(layer$items[[1]]$radius, 5)
+  expect_true(grepl("^#", layer$items[[1]]$fill))
 })
 
 test_that("live Seurat gene payload infers cells for manually constructed linked objects", {
@@ -1173,7 +1251,9 @@ test_that("Seurat project records expose source tiles without reopening paths", 
 
   expect_length(records, 1)
   expect_true(records[[1]]$seurat$enabled)
-  expect_equal(length(records[[1]]$layers), 0)
+  expect_equal(length(records[[1]]$layers), 1)
+  expect_equal(records[[1]]$layers[[1]]$type, "vector")
+  expect_equal(records[[1]]$layers[[1]]$source_type, "seurat_spots")
   expect_equal(records[[1]]$seurat$spot_layer_id, "seurat_project_First_section_seurat_spots")
   expect_equal(records[[1]]$content_bbox$xmin, 64)
   expect_equal(records[[1]]$content_bbox$ymin, 84)
@@ -1266,9 +1346,17 @@ test_that("live Seurat viewers prefer static tiles even when dynamic tiles are r
   expect_false(grepl("/tiles/wsi_viewer_live_state/", html, fixed = TRUE))
   expect_false(grepl("/tiles/seurat_spots/", html, fixed = TRUE))
   expect_true(grepl("_tiles/slide_files", html, fixed = TRUE))
-  expect_true(grepl("_spatial_masks/seurat_spots_deepzoom/slide_files", html, fixed = TRUE))
-  expect_true(grepl('"mask_filter_mode":"alpha"', html, fixed = TRUE))
-  expect_true(grepl('"mask_display_alpha":230', html, fixed = TRUE))
-  expect_true(grepl("channelMaskUsesAlphaFilter", html, fixed = TRUE))
-  expect_true(grepl("meta.mask_filter_mode==='alpha'", html, fixed = TRUE))
+  expect_false(grepl("_spatial_masks/seurat_spots_deepzoom/slide_files", html, fixed = TRUE))
+  expect_true(grepl('"source_type":"seurat_spots"', html, fixed = TRUE))
+  expect_true(grepl('"display_mode":"adaptive_circles"', html, fixed = TRUE))
+  expect_true(grepl('"vector_rendering":true', html, fixed = TRUE))
+  expect_true(grepl('"opacity":1', html, fixed = TRUE))
+  expect_true(grepl("densePointLayerStride", html, fixed = TRUE))
+  expect_true(grepl("pointLayerVisibleBounds", html, fixed = TRUE))
+  signature <- file.path(
+    dirname(output),
+    paste0(tools::file_path_sans_ext(basename(output)), "_spatial_masks"),
+    "seurat_spots.mask.json"
+  )
+  expect_false(file.exists(signature))
 })
