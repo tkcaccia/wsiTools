@@ -118,6 +118,8 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "roiLodMode", fixed = TRUE)
   expect_match(html, "roiVisibleSlideBounds", fixed = TRUE)
   expect_match(html, "roiIntersectsViewport", fixed = TRUE)
+  expect_match(html, "denseGeometryVisible", fixed = TRUE)
+  expect_match(html, "denseGeometryMinZoom", fixed = TRUE)
   expect_match(html, "Annotation level-of-detail active", fixed = TRUE)
   expect_match(html, "screenshotTool", fixed = TRUE)
   expect_match(html, "Select screenshot area", fixed = TRUE)
@@ -170,6 +172,16 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "spot_index_file", fixed = TRUE)
   expect_match(html, "spot index CSV", fixed = TRUE)
   expect_match(html, "Stains", fixed = TRUE)
+  expect_match(html, "Overlay layer", fixed = TRUE)
+  expect_match(html, "data-overlay-focus=\"coordinates\"", fixed = TRUE)
+  expect_match(html, "data-overlay-focus=\"cell_segmentation\"", fixed = TRUE)
+  expect_match(html, "data-overlay-focus=\"annotation\"", fixed = TRUE)
+  expect_match(html, "data-overlay-focus=\"trajectory\"", fixed = TRUE)
+  expect_match(html, "overlayFocusMode", fixed = TRUE)
+  expect_match(html, "overlayFocusLayerAllowed", fixed = TRUE)
+  expect_match(html, "overlayFocusRoiAllowed", fixed = TRUE)
+  expect_match(html, "overlayFocusChannelAllowed", fixed = TRUE)
+  expect_match(html, "overlayFocusTrajectoryVisible", fixed = TRUE)
   pos_annotations_menu <- regexpr("<summary title=\"Draw, select, import, export, and manage annotations\">Annotations</summary>", html, fixed = TRUE)[[1]]
   pos_segmentation_section <- regexpr("StarDist segmentation", html, fixed = TRUE)[[1]]
   expect_gt(pos_annotations_menu, 0)
@@ -842,6 +854,11 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "multiViewOverlayPixelForOsdDisplay({x:e.clientX-rect.left,y:e.clientY-rect.top},pane)", fixed = TRUE)
   expect_match(html, "annotationSpotLayer", fixed = TRUE)
   expect_match(html, "source_type||'')==='seurat_spots'", fixed = TRUE)
+  expect_match(html, "spatialPointLayer(layer)?2.25:1", fixed = TRUE)
+  expect_match(html, "zoom>=5)return 1", fixed = TRUE)
+  expect_match(html, "zoom>=2)return 2", fixed = TRUE)
+  expect_match(html, "pointZoom>=5)?1", fixed = TRUE)
+  expect_match(html, "pointZoom>=2)?2", fixed = TRUE)
   expect_match(html, "bindImageTransformControls", fixed = TRUE)
   expect_match(html, "beginScreenshotMode", fixed = TRUE)
   expect_match(html, "drawScreenshotSelection", fixed = TRUE)
@@ -1143,8 +1160,7 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "bindGeojsonImportControls", fixed = TRUE)
   expect_match(html, "addImportedGeojson", fixed = TRUE)
   expect_match(html, "geojsonMaskUrl", fixed = TRUE)
-  expect_match(html, "geojsonShouldImportAsMask", fixed = TRUE)
-  expect_match(html, "addImportedGeojsonAsMask", fixed = TRUE)
+  expect_match(html, "importGeojsonObject(obj,fileName){return addImportedGeojson(obj,fileName);}", fixed = TRUE)
   expect_match(html, "rasterizeCurrentAnnotationsAsMask", fixed = TRUE)
   expect_match(html, "Vector ROIs are hidden", fixed = TRUE)
   expect_match(html, "annotationMaskBrushEnabled", fixed = TRUE)
@@ -1657,6 +1673,60 @@ test_that("live viewer sessions expose R-native helper methods and command queue
   expect_equal(nrow(reopened$segmentation), 1)
   session$autosave_stop(service = FALSE)
   expect_false(session$autosave_status()$enabled)
+})
+
+test_that("live viewer ROI injection tolerates mixed polygon and line GeoJSON", {
+  env <- new.env(parent = emptyenv())
+  state <- wsiTools:::wsi_new_viewer_state(name = "live", envir = env)
+  session <- wsiTools:::wsi_attach_viewer_session_methods(structure(
+    list(
+      server = NULL,
+      url = "http://127.0.0.1:8788/viewer-state",
+      state = state,
+      slide = wsiTools:::wsi_mock_slide(width = 100, height = 100, levels = c(1, 4)),
+      html = tempfile(fileext = ".html"),
+      name = "live",
+      envir = env,
+      stardist_server = NULL
+    ),
+    class = "wsi_viewer_session"
+  ))
+
+  mixed_rois <- wsiTools:::wsi_roi_from_geojson(list(
+    type = "FeatureCollection",
+    features = list(
+      list(
+        type = "Feature",
+        id = "poly-1",
+        properties = list(name = "Dysplasia", classification = list(name = "dysplasia")),
+        geometry = list(
+          type = "Polygon",
+          coordinates = list(list(
+            c(20, 20), c(30, 20), c(30, 30), c(20, 30), c(20, 20)
+          ))
+        )
+      ),
+      list(
+        type = "Feature",
+        id = "line-1",
+        properties = list(name = "Mitotic figure", classification = list(name = "mitotic figure")),
+        geometry = list(
+          type = "LineString",
+          coordinates = list(c(22, 22), c(28, 28))
+        )
+      )
+    )
+  ))
+
+  expect_silent(session$add_rois(mixed_rois, service = FALSE))
+  expect_equal(nrow(session$get_rois(service = FALSE)), 2)
+  roi_summary <- session$get_roi_summary(service = FALSE)
+  expect_equal(nrow(roi_summary), 2)
+  expect_equal(roi_summary$area_px2[match("poly-1", roi_summary$roi_id)], 100)
+  expect_true(is.na(roi_summary$area_px2[match("line-1", roi_summary$roi_id)]))
+  response <- wsiTools:::wsi_viewer_state_response(state)
+  expect_equal(response$commands[[1]]$type, "add_rois")
+  expect_equal(length(response$commands[[1]]$payload$geojson$features), 2)
 })
 
 test_that("live viewer sessions dispatch event callbacks", {
@@ -2646,6 +2716,7 @@ test_that("interactive viewer overlays GeoJSON ROI polygons", {
   expect_match(html, "line-1", fixed = TRUE)
   expect_match(html, "Margin label", fixed = TRUE)
   expect_match(html, "LineString", fixed = TRUE)
+  expect_match(html, "overlayFocusMode='annotation'", fixed = TRUE)
   expect_match(html, "roiToggle", fixed = TRUE)
   expect_match(html, "layersToggle", fixed = TRUE)
   expect_match(html, "roiOpacity", fixed = TRUE)
@@ -3115,6 +3186,8 @@ test_that("tiled viewer HTML writes mIHC channel overlay controls", {
   expect_match(html, "buildChannelList", fixed = TRUE)
   expect_match(html, "visibleChannelSources", fixed = TRUE)
   expect_match(html, "channelSourceMatchesActive", fixed = TRUE)
+  expect_match(html, "channelSourceMinZoom", fixed = TRUE)
+  expect_match(html, "channelSourceZoomAllowed", fixed = TRUE)
   expect_match(html, "syncChannelSourcesForActiveImage", fixed = TRUE)
   expect_match(html, "removeChannelItem", fixed = TRUE)
   expect_match(html, "clearChannelItems", fixed = TRUE)
@@ -3126,6 +3199,7 @@ test_that("tiled viewer HTML writes mIHC channel overlay controls", {
   expect_match(html, "channelLegendEntries", fixed = TRUE)
   expect_match(html, "channelMaskFilterState", fixed = TRUE)
   expect_match(html, "channelMaskCanvasFilterActive", fixed = TRUE)
+  expect_match(html, "display_min_zoom", fixed = TRUE)
   expect_match(html, "drawFilteredMaskChannels", fixed = TRUE)
   expect_match(html, "multiViewDrawFilteredMaskChannels", fixed = TRUE)
   expect_match(html, "channelLegendTools", fixed = TRUE)

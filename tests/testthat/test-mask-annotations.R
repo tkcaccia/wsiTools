@@ -358,6 +358,8 @@ test_that("dense GeoJSON masks can be prepared as tiled channel overlays", {
   expect_true(dir.exists(result$tiles$tiles))
   expect_equal(result$source$metadata$kind, "mask")
   expect_true(result$source$metadata$transparent_background)
+  expect_true(result$source$metadata$force_canvas_filter)
+  expect_equal(result$source$metadata$display_min_zoom, 5)
   expect_equal(result$source$metadata$project_image_id, "active_project_image")
   expect_true(nzchar(result$source$metadata$target_path))
   expect_equal(result$source$metadata$legend[[1]]$label, "tumour")

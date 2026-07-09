@@ -17,6 +17,7 @@ wsi_geojson_mask_channel_source(
   tile_size = 254,
   rebuild = FALSE,
   overwrite = FALSE,
+  display_min_zoom = 5,
   ...
 )
 
@@ -54,6 +55,10 @@ relative to that HTML file for portable static viewers.}
 \item{rebuild}{Rebuild existing mask/tiles.}
 
 \item{overwrite}{Overwrite an existing mask file when rebuilding.}
+
+\item{display_min_zoom}{Minimum viewer zoom ratio before drawing the mask
+overlay. Dense cell masks default to \code{5} so opening a whole-slide overview
+does not request thousands of mask tiles.}
 
 \item{...}{Additional arguments passed to \code{wsi_geojson_to_mask_tiff()}.}
 

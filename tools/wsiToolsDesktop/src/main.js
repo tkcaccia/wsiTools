@@ -40,10 +40,10 @@ const localLogs = [];
 const spatialInspections = new Map();
 const launcherWindow = getCurrentWindow();
 const launcherWindowSizes = {
-  home: { width: 620, height: 646, minWidth: 520, minHeight: 320, maxHeight: 1224 },
-  images: { width: 760, height: 850, minWidth: 620, minHeight: 400, maxHeight: 1224 },
-  associations: { width: 1120, height: 2142, minWidth: 920, minHeight: 1040, maxHeight: 2720 },
-  runtime: { width: 860, height: 1224, minWidth: 700, minHeight: 520, maxHeight: 1530 }
+  home: { width: 620, height: 780, minWidth: 520, minHeight: 420, maxHeight: 1224 },
+  images: { width: 760, height: 1020, minWidth: 620, minHeight: 520, maxHeight: 1400 },
+  associations: { width: 1120, height: 1320, minWidth: 920, minHeight: 760, maxHeight: 1800 },
+  runtime: { width: 860, height: 1320, minWidth: 700, minHeight: 620, maxHeight: 1600 }
 };
 let launcherResizeTimer = null;
 
@@ -102,7 +102,7 @@ function launcherTargetSize(layout = activeLauncherLayout()) {
   const contentWidth = Math.ceil(rect?.width || preset.width - padding) + padding;
   const contentHeight = Math.ceil(content?.scrollHeight || rect?.height || preset.height - padding) + padding;
   const screenHeight = Number(window.screen?.availHeight || 0);
-  const screenSafeMax = screenHeight > 0 ? Math.max(preset.minHeight, screenHeight - 36) : preset.maxHeight;
+  const screenSafeMax = screenHeight > 0 ? Math.max(preset.minHeight, screenHeight - 8) : preset.maxHeight;
   const maxHeight = Math.min(preset.maxHeight, screenSafeMax);
   return {
     width: Math.max(preset.minWidth, Math.min(layout === "associations" ? 1120 : 1040, Math.max(preset.width, contentWidth))),

@@ -93,6 +93,259 @@ wsi_new_viewer_state <- function(name = "wsi_viewer_live_state", envir = parent.
   state
 }
 
+wsi_viewer_decimate_dense_ring <- function(ring, max_points = 500L) {
+  if (!is.list(ring)) {
+    return(ring)
+  }
+  n <- length(ring)
+  max_points <- suppressWarnings(as.numeric(max_points %||% 500L))
+  if (!is.finite(max_points) || max_points < 8L || n <= max_points) {
+    return(ring)
+  }
+  max_points <- as.integer(max_points)
+  point_xy <- function(point) {
+    c(
+      suppressWarnings(as.numeric(point$x %||% point[[1L]] %||% NA_real_)),
+      suppressWarnings(as.numeric(point$y %||% point[[2L]] %||% NA_real_))
+    )
+  }
+  closed <- n > 2L && isTRUE(all.equal(point_xy(ring[[1L]]), point_xy(ring[[n]]), tolerance = 1e-8))
+  core_n <- if (closed) n - 1L else n
+  target <- if (closed) max_points - 1L else max_points
+  idx <- unique(pmax(1L, pmin(core_n, round(seq(1, core_n, length.out = target)))))
+  out <- ring[idx]
+  if (closed && length(out)) {
+    out[[length(out) + 1L]] <- out[[1L]]
+  }
+  out
+}
+
+wsi_viewer_decimate_dense_ring_groups <- function(ring_groups, max_points_per_roi = 1200L) {
+  if (!length(ring_groups)) {
+    return(ring_groups)
+  }
+  ring_count <- sum(vapply(ring_groups, length, integer(1)))
+  if (!ring_count) {
+    return(ring_groups)
+  }
+  max_points_per_roi <- suppressWarnings(as.numeric(max_points_per_roi %||% 1200L))
+  if (!is.finite(max_points_per_roi) || max_points_per_roi <= 0) {
+    return(ring_groups)
+  }
+  per_ring <- max(16L, floor(as.integer(max_points_per_roi) / ring_count))
+  lapply(ring_groups, function(group) {
+    lapply(group, wsi_viewer_decimate_dense_ring, max_points = per_ring)
+  })
+}
+
+wsi_viewer_dense_point_xy <- function(point) {
+  c(
+    suppressWarnings(as.numeric(point$x %||% point[[1L]] %||% NA_real_)),
+    suppressWarnings(as.numeric(point$y %||% point[[2L]] %||% NA_real_))
+  )
+}
+
+wsi_viewer_dense_point <- function(x, y) {
+  list(x = unname(as.numeric(x)), y = unname(as.numeric(y)))
+}
+
+wsi_viewer_clip_dense_ring_edge <- function(points, edge, value) {
+  if (length(points) < 2L) {
+    return(points)
+  }
+  inside <- function(point) {
+    xy <- wsi_viewer_dense_point_xy(point)
+    if (any(!is.finite(xy))) {
+      return(FALSE)
+    }
+    switch(
+      edge,
+      xmin = xy[[1L]] >= value,
+      xmax = xy[[1L]] <= value,
+      ymin = xy[[2L]] >= value,
+      ymax = xy[[2L]] <= value,
+      FALSE
+    )
+  }
+  intersect_point <- function(start, end) {
+    a <- wsi_viewer_dense_point_xy(start)
+    b <- wsi_viewer_dense_point_xy(end)
+    if (any(!is.finite(c(a, b)))) {
+      return(end)
+    }
+    if (edge %in% c("xmin", "xmax")) {
+      denom <- b[[1L]] - a[[1L]]
+      if (abs(denom) < 1e-12) {
+        return(wsi_viewer_dense_point(value, b[[2L]]))
+      }
+      t <- (value - a[[1L]]) / denom
+      return(wsi_viewer_dense_point(value, a[[2L]] + t * (b[[2L]] - a[[2L]])))
+    }
+    denom <- b[[2L]] - a[[2L]]
+    if (abs(denom) < 1e-12) {
+      return(wsi_viewer_dense_point(b[[1L]], value))
+    }
+    t <- (value - a[[2L]]) / denom
+    wsi_viewer_dense_point(a[[1L]] + t * (b[[1L]] - a[[1L]]), value)
+  }
+  out <- list()
+  previous <- points[[length(points)]]
+  previous_inside <- inside(previous)
+  for (current in points) {
+    current_inside <- inside(current)
+    if (isTRUE(current_inside)) {
+      if (!isTRUE(previous_inside)) {
+        out[[length(out) + 1L]] <- intersect_point(previous, current)
+      }
+      out[[length(out) + 1L]] <- current
+    } else if (isTRUE(previous_inside)) {
+      out[[length(out) + 1L]] <- intersect_point(previous, current)
+    }
+    previous <- current
+    previous_inside <- current_inside
+  }
+  out
+}
+
+wsi_viewer_clip_dense_ring_to_rect <- function(ring, bounds) {
+  if (!is.list(ring) || length(ring) < 4L) {
+    return(list())
+  }
+  bounds <- suppressWarnings(as.numeric(bounds[c("xmin", "ymin", "xmax", "ymax")]))
+  names(bounds) <- c("xmin", "ymin", "xmax", "ymax")
+  if (any(!is.finite(bounds)) || bounds[["xmax"]] <= bounds[["xmin"]] ||
+      bounds[["ymax"]] <= bounds[["ymin"]]) {
+    return(ring)
+  }
+  points <- ring[vapply(ring, function(point) {
+    xy <- wsi_viewer_dense_point_xy(point)
+    all(is.finite(xy))
+  }, logical(1))]
+  if (length(points) < 4L) {
+    return(list())
+  }
+  first <- wsi_viewer_dense_point_xy(points[[1L]])
+  last <- wsi_viewer_dense_point_xy(points[[length(points)]])
+  if (isTRUE(all.equal(first, last, tolerance = 1e-8))) {
+    points <- points[-length(points)]
+  }
+  for (edge in c("xmin", "xmax", "ymin", "ymax")) {
+    points <- wsi_viewer_clip_dense_ring_edge(points, edge, bounds[[edge]])
+    if (length(points) < 3L) {
+      return(list())
+    }
+  }
+  points[[length(points) + 1L]] <- points[[1L]]
+  points
+}
+
+wsi_viewer_clip_dense_ring_groups_to_rect <- function(ring_groups, bounds) {
+  if (!length(ring_groups)) {
+    return(ring_groups)
+  }
+  out <- list()
+  for (group in ring_groups) {
+    if (!length(group)) {
+      next
+    }
+    clipped <- lapply(group, wsi_viewer_clip_dense_ring_to_rect, bounds = bounds)
+    clipped <- clipped[vapply(clipped, length, integer(1)) >= 4L]
+    if (length(clipped)) {
+      out[[length(out) + 1L]] <- clipped
+    }
+  }
+  out
+}
+
+wsi_viewer_dense_roi_features <- function(roi,
+                                          fill_alpha = 0.22,
+                                          colour = "#F97316",
+                                          source_name = "Cell annotation",
+                                          bounds_only = FALSE,
+                                          max_points_per_roi = 1200L,
+                                          clip_bounds = NULL) {
+  if (!inherits(roi, "wsi_roi") || !nrow(roi)) {
+    return(list())
+  }
+  features <- vector("list", nrow(roi))
+  class_colour_lookup <- wsi_viewer_roi_class_colour_lookup(roi)
+  for (i in seq_len(nrow(roi))) {
+    geometry_type <- as.character(roi$geometry_type[[i]] %||% "Polygon")
+    if (isTRUE(bounds_only)) {
+      xmin <- unname(as.numeric(roi$xmin[[i]]))
+      ymin <- unname(as.numeric(roi$ymin[[i]]))
+      xmax <- unname(as.numeric(roi$xmax[[i]]))
+      ymax <- unname(as.numeric(roi$ymax[[i]]))
+      if (all(is.finite(c(xmin, ymin, xmax, ymax))) && xmax > xmin && ymax > ymin) {
+        geometry_type <- "Polygon"
+        ring_groups <- list(list(list(
+          list(x = xmin, y = ymin),
+          list(x = xmax, y = ymin),
+          list(x = xmax, y = ymax),
+          list(x = xmin, y = ymax),
+          list(x = xmin, y = ymin)
+        )))
+      } else {
+        ring_groups <- list()
+      }
+    } else {
+      ring_groups <- wsi_viewer_roi_ring_groups(geometry_type, roi$coordinates[[i]])
+      if (!is.null(clip_bounds)) {
+        ring_groups <- wsi_viewer_clip_dense_ring_groups_to_rect(ring_groups, clip_bounds)
+      }
+      ring_groups <- wsi_viewer_decimate_dense_ring_groups(
+        ring_groups,
+        max_points_per_roi = max_points_per_roi
+      )
+    }
+    rings <- if (length(ring_groups)) ring_groups[[1L]] else list()
+    add_groups <- if (length(ring_groups) > 1L) ring_groups[-1L] else list()
+    drawable <- length(ring_groups) > 0L
+    roi_class <- as.character(roi$class[[i]] %||% "cell")
+    if (!nzchar(roi_class) || is.na(roi_class)) {
+      roi_class <- "cell"
+    }
+    class_colour <- wsi_viewer_lookup_class_colour(class_colour_lookup, roi_class, colour)
+    item_colour <- if ("color" %in% names(roi)) {
+      wsi_viewer_roi_colour(roi, i, class_colour)
+    } else {
+      class_colour
+    }
+    point_count <- if (drawable) {
+      sum(vapply(unlist(ring_groups, recursive = FALSE), length, integer(1)))
+    } else {
+      0L
+    }
+    features[[i]] <- list(
+      id = as.character(roi$roi_id[[i]] %||% i),
+      name = as.character(roi$name[[i]] %||% roi$roi_id[[i]] %||% paste0("cell_", i)),
+      label = as.character(roi$name[[i]] %||% roi$roi_id[[i]] %||% paste0("cell_", i)),
+      class = roi_class,
+      visible = TRUE,
+      locked = FALSE,
+      geometry_type = geometry_type,
+      source = source_name,
+      drawable = drawable,
+      dense_geometry = TRUE,
+      point_count = point_count,
+      area = if (drawable) wsi_viewer_ring_groups_area(ring_groups) else NA_real_,
+      bbox = list(
+        xmin = unname(as.numeric(roi$xmin[[i]])),
+        ymin = unname(as.numeric(roi$ymin[[i]])),
+        xmax = unname(as.numeric(roi$xmax[[i]])),
+        ymax = unname(as.numeric(roi$ymax[[i]]))
+      ),
+      colour = item_colour,
+      original_colour = item_colour,
+      fill = wsi_viewer_hex_to_rgba(item_colour, alpha = fill_alpha),
+      rings = rings,
+      add_groups = add_groups,
+      properties = list(wsiTools_dense_geometry = TRUE)
+    )
+  }
+  features
+}
+
 wsi_viewer_autosave_config <- function(autosave = FALSE, path = NULL,
                                        interval = 5, overwrite = TRUE,
                                        name = "wsi_viewer_live_state") {
@@ -3586,7 +3839,7 @@ wsi_viewer_geojson_mask_response <- function(slide, payload, state = NULL,
   unknown <- setdiff(names(payload), c(
     "geojson", "file", "name", "id", "downsample", "label_by",
     "opacity", "visible", "rebuild", "smooth", "smooth_iterations",
-    "smooth_max_vertices"
+    "smooth_max_vertices", "display_min_zoom", "min_display_zoom", "min_zoom"
   ))
   if (length(unknown)) {
     wsi_abort(sprintf(
@@ -3623,6 +3876,12 @@ wsi_viewer_geojson_mask_response <- function(slide, payload, state = NULL,
   if (!is.finite(opacity)) {
     opacity <- 0.45
   }
+  display_min_zoom <- suppressWarnings(as.numeric(
+    payload$display_min_zoom %||% payload$min_display_zoom %||% payload$min_zoom %||% 5
+  ))
+  if (!is.finite(display_min_zoom) || display_min_zoom < 0) {
+    display_min_zoom <- 5
+  }
   source_result <- wsi_geojson_mask_channel_source(
     geojson = geojson_file,
     slide = slide,
@@ -3636,6 +3895,7 @@ wsi_viewer_geojson_mask_response <- function(slide, payload, state = NULL,
     opacity = opacity,
     rebuild = isTRUE(payload$rebuild),
     overwrite = TRUE,
+    display_min_zoom = display_min_zoom,
     smooth = isTRUE(payload$smooth %||% TRUE),
     smooth_iterations = as.integer(payload$smooth_iterations %||% 1L),
     smooth_max_vertices = as.integer(payload$smooth_max_vertices %||% 4000L)
@@ -3682,6 +3942,8 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	                                          geojson_mask_path = "/geojson-mask-overlay",
 	                                          geojson_mask_dir = file.path(tempdir(), "wsiTools_geojson_masks"),
 	                                          output_html = NULL,
+	                                          dense_geojson_context = NULL,
+	                                          dense_geojson_path = "/dense-geojson",
 	                                          prediction_context = NULL,
 	                                          prediction_path = "/prediction",
 	                                          proximity_context = NULL,
@@ -3708,6 +3970,9 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
   }
   if (!startsWith(geojson_mask_path, "/")) {
     geojson_mask_path <- paste0("/", geojson_mask_path)
+  }
+  if (!startsWith(dense_geojson_path, "/")) {
+    dense_geojson_path <- paste0("/", dense_geojson_path)
   }
 	  if (!startsWith(prediction_path, "/")) {
 	    prediction_path <- paste0("/", prediction_path)
@@ -3742,6 +4007,202 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
     wsi_viewer_state_apply(state, payload)
     wsi_viewer_autosave_save(state, slide = slide, reason = state$last_event %||% "viewer_state")
     wsi_viewer_state_response(state, dequeue_commands = dequeue_commands)
+  }
+
+  dense_geojson_sources <- function() {
+    if (is.environment(dense_geojson_context)) {
+      sources <- dense_geojson_context$sources %||% list()
+    } else if (is.list(dense_geojson_context)) {
+      sources <- dense_geojson_context$sources %||% dense_geojson_context
+    } else {
+      sources <- list()
+    }
+    sources[vapply(sources, function(source) {
+      is.list(source) && inherits(source$rois, "wsi_roi") && nrow(source$rois) > 0L
+    }, logical(1))]
+  }
+
+  dense_geojson_payload <- function(payload) {
+    if (!is.list(payload)) {
+      wsi_abort("Dense GeoJSON viewport request must be a JSON object.")
+    }
+    unknown <- setdiff(
+      names(payload),
+      c("source_id", "id", "xmin", "ymin", "xmax", "ymax", "zoom", "limit")
+    )
+    if (length(unknown)) {
+      wsi_abort(sprintf(
+        "Unsupported dense GeoJSON request field%s: %s.",
+        if (length(unknown) == 1L) "" else "s",
+        paste(unknown, collapse = ", ")
+      ))
+    }
+    sources <- dense_geojson_sources()
+    if (!length(sources)) {
+      return(list(ok = TRUE, loaded = FALSE, retry_after_ms = 1500L, sources = list()))
+    }
+    source_id <- as.character(payload$source_id %||% payload$id %||% "")
+    source_names <- names(sources)
+    if (!nzchar(source_id)) {
+      source_id <- source_names[[1L]]
+    }
+    source <- sources[[source_id]]
+    if (is.null(source)) {
+      return(list(
+        ok = FALSE,
+        loaded = FALSE,
+        error = sprintf("Dense GeoJSON source not found: %s", source_id),
+        sources = source_names
+      ))
+    }
+    rois <- source$rois
+    bounds <- vapply(c("xmin", "ymin", "xmax", "ymax"), function(field) {
+      suppressWarnings(as.numeric(payload[[field]] %||% NA_real_))
+    }, numeric(1))
+    if (any(!is.finite(bounds)) || bounds[["xmax"]] <= bounds[["xmin"]] ||
+        bounds[["ymax"]] <= bounds[["ymin"]]) {
+      wsi_abort("Dense GeoJSON viewport request needs finite xmin, ymin, xmax, and ymax.")
+    }
+    zoom <- suppressWarnings(as.numeric(payload$zoom %||% NA_real_))
+    default_limit <- if (is.finite(zoom) && zoom >= 12) {
+      12000L
+    } else if (is.finite(zoom) && zoom >= 8) {
+      8000L
+    } else if (is.finite(zoom) && zoom >= 5) {
+      4000L
+    } else {
+      1500L
+    }
+    limit <- suppressWarnings(as.integer(payload$limit %||% default_limit))
+    if (!is.finite(limit) || limit < 100L) {
+      limit <- default_limit
+    }
+    limit <- min(limit, 15000L)
+    bbox_cols <- c("xmin", "ymin", "xmax", "ymax")
+    if (!all(bbox_cols %in% names(rois))) {
+      wsi_abort("Dense GeoJSON source is missing bounding-box columns.")
+    }
+    rxmin <- suppressWarnings(as.numeric(rois$xmin))
+    rymin <- suppressWarnings(as.numeric(rois$ymin))
+    rxmax <- suppressWarnings(as.numeric(rois$xmax))
+    rymax <- suppressWarnings(as.numeric(rois$ymax))
+    idx <- which(
+      is.finite(rxmin) & is.finite(rymin) & is.finite(rxmax) & is.finite(rymax) &
+        rxmin <= bounds[["xmax"]] & rxmax >= bounds[["xmin"]] &
+        rymin <= bounds[["ymax"]] & rymax >= bounds[["ymin"]]
+    )
+    viewport_count <- length(idx)
+    sampled <- FALSE
+    if (viewport_count > limit) {
+      sampled <- TRUE
+      hash <- (as.double(idx) * 1103515245 + 12345) %% 2147483647
+      keep <- order(hash, method = "radix")[seq_len(limit)]
+      idx <- idx[sort(keep)]
+    }
+    subset <- rois[idx, , drop = FALSE]
+    viewport_width <- bounds[["xmax"]] - bounds[["xmin"]]
+    viewport_height <- bounds[["ymax"]] - bounds[["ymin"]]
+    broad_view <- is.finite(viewport_width) && is.finite(viewport_height) &&
+      max(viewport_width, viewport_height) > 18000
+    source_cap <- suppressWarnings(as.numeric(source$max_points_per_roi %||% 1200L))
+    if (is.na(source_cap) || source_cap <= 0) {
+      source_cap <- 1200L
+    }
+    full_resolution_zoom <- suppressWarnings(as.numeric(source$full_resolution_zoom %||% Inf))
+    if (is.na(full_resolution_zoom) || full_resolution_zoom < 0) {
+      full_resolution_zoom <- Inf
+    }
+    zoom_cap <- if (is.finite(zoom) && zoom >= full_resolution_zoom) {
+      Inf
+    } else if (!is.finite(zoom) || zoom < 1.5) {
+      96L
+    } else if (isTRUE(broad_view) || zoom < 5) {
+      320L
+    } else if (zoom < 10) {
+      900L
+    } else if (zoom < 16) {
+      2200L
+    } else {
+      source_cap
+    }
+    max_points_per_roi <- min(source_cap, zoom_cap)
+    if (is.finite(max_points_per_roi)) {
+      max_points_per_roi <- max(32L, as.integer(max_points_per_roi))
+    }
+    source_type <- as.character(source$source_type %||% if (identical(source$kind %||% "", "tissue")) {
+      "annotation"
+    } else {
+      "cell_segmentation"
+    })
+    source_name <- as.character(source$name %||% "Cell annotation")
+    source_colour <- as.character(source$colour %||% "#F97316")
+    source_fill_alpha <- suppressWarnings(as.numeric(source$fill_alpha %||% 0.22))
+    decorate_items <- function(items) {
+      lapply(items, function(item) {
+        item$source_type <- source_type
+        item$dense_geometry <- TRUE
+        item$source <- source_name
+        item
+      })
+    }
+    bounds_only <- (!is.finite(zoom) || zoom < 1.05) && nrow(subset) > 0L
+    clip_pad <- max(viewport_width, viewport_height) * 0.08
+    if (!is.finite(clip_pad) || clip_pad < 0) {
+      clip_pad <- 0
+    }
+    clip_bounds <- c(
+      xmin = bounds[["xmin"]] - clip_pad,
+      ymin = bounds[["ymin"]] - clip_pad,
+      xmax = bounds[["xmax"]] + clip_pad,
+      ymax = bounds[["ymax"]] + clip_pad
+    )
+    items <- wsi_viewer_dense_roi_features(
+      subset,
+      fill_alpha = source_fill_alpha,
+      colour = source_colour,
+      source_name = source_name,
+      bounds_only = bounds_only,
+      max_points_per_roi = max_points_per_roi,
+      clip_bounds = if (isTRUE(bounds_only) || is.finite(max_points_per_roi)) NULL else clip_bounds
+    )
+    items <- decorate_items(items)
+    source_id <- as.character(source$id %||% source_id)
+    layer <- list(
+      id = source_id,
+      name = as.character(source$name %||% "Cell annotation"),
+      type = "vector",
+      source_type = source_type,
+      visible = isTRUE(source$visible %||% TRUE),
+      opacity = suppressWarnings(as.numeric(source$opacity %||% 0.92)),
+      colour = as.character(source$colour %||% "#F97316"),
+      line_width = suppressWarnings(as.numeric(source$line_width %||% 1.8)),
+      replace = TRUE,
+      count = length(items),
+      total_count = nrow(rois),
+      viewport_count = viewport_count,
+      items = items,
+      metadata = list(
+        viewport_only = TRUE,
+        sampled = sampled,
+        displayed_count = length(items),
+        viewport_count = viewport_count,
+        source_path = as.character(source$path %||% ""),
+        geometry_lod = if (isTRUE(bounds_only)) "bounds" else "detail",
+        max_points_per_roi = if (is.finite(max_points_per_roi)) max_points_per_roi else "full",
+        full_resolution_zoom = if (is.finite(full_resolution_zoom)) full_resolution_zoom else NA_real_,
+        zoom = zoom
+      )
+    )
+    list(
+      ok = TRUE,
+      loaded = TRUE,
+      source_id = source_id,
+      sources = source_names,
+      total_count = nrow(rois),
+      viewport_count = viewport_count,
+      returned_count = length(items),
+      layer = layer
+    )
   }
 
 	  seurat_gene_response <- function(req) {
@@ -3907,6 +4368,20 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	    })
 	  }
 
+	  dense_geojson_response <- function(req) {
+	    method <- req$REQUEST_METHOD %||% "GET"
+	    if (!identical(method, "POST")) {
+	      return(wsi_http_json_response(status = 405L, body = list(error = "Use POST for dense GeoJSON viewport requests.")))
+	    }
+	    tryCatch({
+	      body <- wsi_http_request_body(req)
+	      payload <- if (nzchar(body)) jsonlite::fromJSON(body, simplifyVector = FALSE) else list()
+	      wsi_http_json_response(body = dense_geojson_payload(payload))
+	    }, error = function(err) {
+	      wsi_http_json_response(status = 500L, body = list(ok = FALSE, loaded = FALSE, error = conditionMessage(err)))
+	    })
+	  }
+
 	  prediction_response <- function(req) {
 	    method <- req$REQUEST_METHOD %||% "GET"
 	    if (!identical(method, "POST")) {
@@ -3980,6 +4455,9 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	      }
 	      if (identical(request_path, geojson_mask_path)) {
 	        return(geojson_mask_response(req))
+	      }
+	      if (identical(request_path, dense_geojson_path)) {
+	        return(dense_geojson_response(req))
 	      }
 	      if (identical(request_path, prediction_path)) {
 	        return(prediction_response(req))
@@ -4079,6 +4557,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	        spatial_tile_path = spatial_tile_path,
 	        image_export_path = image_export_path,
 	        geojson_mask_path = geojson_mask_path,
+	        dense_geojson_path = dense_geojson_path,
 	        prediction_path = prediction_path,
 	        proximity_path = proximity_path,
 	        seurat_gene_url = if (wsi_seurat_live_gene_available(seurat) ||
@@ -4090,6 +4569,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	        spatial_tile_export_url = sprintf("http://%s:%d%s", host, candidate, spatial_tile_path),
 	        image_export_url = if (!is.null(slide)) sprintf("http://%s:%d%s", host, candidate, image_export_path) else NULL,
 	        geojson_mask_url = if (!is.null(slide)) sprintf("http://%s:%d%s", host, candidate, geojson_mask_path) else NULL,
+	        dense_geojson_url = sprintf("http://%s:%d%s", host, candidate, dense_geojson_path),
 	        prediction_url = if (wsi_prediction_context_enabled(prediction_context %||% list(spatial = seurat))) sprintf("http://%s:%d%s", host, candidate, prediction_path) else NULL,
 	        proximity_url = if (wsi_prediction_context_enabled(proximity_context %||% prediction_context %||% list(spatial = seurat))) sprintf("http://%s:%d%s", host, candidate, proximity_path) else NULL,
 	        tile_sources = tile_sources
@@ -4386,6 +4866,8 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
 	                               image_export_max_pixels = 50000000,
 	                               geojson_mask_path = "/geojson-mask-overlay",
 	                               geojson_mask_dir = file.path(tempdir(), "wsiTools_geojson_masks"),
+	                               dense_geojson_path = "/dense-geojson",
+	                               dense_geojson_context = NULL,
 	                               prediction_path = "/prediction",
 	                               prediction_context = NULL,
 	                               proximity_path = "/proximity",
@@ -4450,6 +4932,12 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   state$pixel_size <- tryCatch(wsi_mpp(slide), error = function(err) NULL)
   wsi_viewer_update_measurement_tables(state)
   wsi_assign_viewer_state(state)
+  if (is.null(dense_geojson_context)) {
+    dense_geojson_context <- new.env(parent = emptyenv())
+    dense_geojson_context$sources <- list()
+  } else if (is.environment(dense_geojson_context) && is.null(dense_geojson_context$sources)) {
+    dense_geojson_context$sources <- list()
+  }
 
   dots <- list(...)
   if (is.null(dots$output)) {
@@ -4543,6 +5031,8 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
 	    image_export_max_pixels = image_export_max_pixels,
 	    geojson_mask_path = geojson_mask_path,
 	    geojson_mask_dir = geojson_mask_dir,
+	    dense_geojson_context = dense_geojson_context,
+	    dense_geojson_path = dense_geojson_path,
 	    prediction_context = live_prediction_context,
 	    prediction_path = prediction_path,
 	    proximity_context = live_proximity_context,
@@ -4647,6 +5137,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
 	  dots$spatial_tile_export_url <- bridge$spatial_tile_export_url %||% NULL
 	  dots$image_export_url <- bridge$image_export_url %||% NULL
 	  dots$geojson_mask_url <- bridge$geojson_mask_url %||% NULL
+	  dots$dense_geojson_url <- bridge$dense_geojson_url %||% NULL
 	  dots$prediction_url <- bridge$prediction_url %||% NULL
 	  dots$proximity_url <- bridge$proximity_url %||% NULL
   if (!is.null(dots$channel_sources)) {
@@ -4674,6 +5165,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
         transport = transport,
         dynamic_tile_source = dynamic_source,
         dynamic_tile_sources = all_dynamic_sources,
+        dense_geojson_context = dense_geojson_context,
         dynamic_tile_cache_dir = if (!is.null(dynamic_source)) dynamic_source$cache_dir else NULL,
         dynamic_channel_cache_dirs = unique(vapply(dynamic_channel_sources, function(x) as.character(x$cache_dir %||% ""), character(1))),
         dynamic_project_cache_dirs = unique(vapply(dynamic_project_sources, function(x) as.character(x$cache_dir %||% ""), character(1)))

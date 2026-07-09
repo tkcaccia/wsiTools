@@ -96,6 +96,45 @@ test_that("Seurat coordinate circle layers expose sampled browser points and pre
   expect_true(layer$metadata$lod$enabled)
 })
 
+test_that("cell coordinate layers keep all browser points unless explicitly capped", {
+  old_cap <- Sys.getenv("WSITOOLS_SPATIAL_POINT_LAYER_MAX", NA_character_)
+  on.exit({
+    if (is.na(old_cap)) Sys.unsetenv("WSITOOLS_SPATIAL_POINT_LAYER_MAX")
+    else Sys.setenv(WSITOOLS_SPATIAL_POINT_LAYER_MAX = old_cap)
+  }, add = TRUE)
+  Sys.unsetenv("WSITOOLS_SPATIAL_POINT_LAYER_MAX")
+
+  n <- 20000L
+  linked <- structure(
+    list(
+      source_name = "Seurat",
+      feature_type = "cell",
+      spot_count = n,
+      spots = data.frame(
+        id = paste0("cell_", seq_len(n)),
+        barcode = paste0("cell_", seq_len(n)),
+        label = paste0("cell_", seq_len(n)),
+        feature_type = "cell",
+        x = seq_len(n),
+        y = seq_len(n),
+        stringsAsFactors = FALSE
+      )
+    ),
+    class = "wsi_seurat_spatial"
+  )
+
+  layer <- wsiTools:::wsi_seurat_spots_layer(linked)
+  expect_equal(layer$count, n)
+  expect_equal(layer$total_count, n)
+  expect_equal(layer$metadata$represented_count, n)
+  expect_equal(length(layer$items), n)
+
+  Sys.setenv(WSITOOLS_SPATIAL_POINT_LAYER_MAX = "5000")
+  capped <- wsiTools:::wsi_seurat_spots_layer(linked)
+  expect_equal(capped$count, 5000)
+  expect_equal(capped$metadata$represented_count, 5000)
+})
+
 test_that("Seurat coordinates can be inspected as raw and viewer-mapped tables", {
   embeddings <- matrix(
     c(-2, 0.5, 1, -0.5, 2, 1.5),
@@ -476,6 +515,53 @@ test_that("live Seurat gene payload identifies cell-level spatial data", {
   expect_equal(payload$feature_plural, "cells")
   expect_true(all(vapply(payload$points, `[[`, character(1), "feature_type") == "cell"))
   expect_equal(vapply(payload$points, `[[`, numeric(1), "value"), c(3, 9))
+})
+
+test_that("live Seurat gene payload keeps all cell coordinates unless explicitly capped", {
+  old_cap <- Sys.getenv("WSITOOLS_SPATIAL_POINT_PAYLOAD_MAX", NA_character_)
+  on.exit({
+    if (is.na(old_cap)) Sys.unsetenv("WSITOOLS_SPATIAL_POINT_PAYLOAD_MAX")
+    else Sys.setenv(WSITOOLS_SPATIAL_POINT_PAYLOAD_MAX = old_cap)
+  }, add = TRUE)
+  Sys.unsetenv("WSITOOLS_SPATIAL_POINT_PAYLOAD_MAX")
+
+  n <- 6000L
+  ids <- paste0("cell_", seq_len(n))
+  expression <- matrix(seq_len(n), nrow = 1, dimnames = list("CRABP2", ids))
+  spots <- data.frame(
+    id = ids,
+    barcode = ids,
+    label = ids,
+    feature_type = "cell",
+    x = seq_len(n),
+    y = seq_len(n),
+    stringsAsFactors = FALSE
+  )
+  linked <- structure(
+    list(
+      source_name = "Seurat",
+      feature_type = "cell",
+      spots = spots,
+      mask_spots = spots,
+      expression_source = list(
+        object = list(assays = list(Spatial = list(data = expression))),
+        spot_ids = ids,
+        feature_type = "cell"
+      )
+    ),
+    class = "wsi_seurat_spatial"
+  )
+
+  payload <- wsiTools:::wsi_seurat_dynamic_gene_payload(linked, "CRABP2")
+  expect_equal(payload$count, n)
+  expect_equal(payload$total_count, n)
+  expect_false(payload$sampled)
+
+  Sys.setenv(WSITOOLS_SPATIAL_POINT_PAYLOAD_MAX = "5000")
+  capped <- wsiTools:::wsi_seurat_dynamic_gene_payload(linked, "CRABP2")
+  expect_equal(capped$count, 5000)
+  expect_equal(capped$total_count, n)
+  expect_true(capped$sampled)
 })
 
 test_that("cell coordinate helpers keep compact circle radii", {
@@ -1356,8 +1442,8 @@ test_that("live Seurat viewers prefer static tiles even when dynamic tiles are r
   expect_true(grepl("spatialPointLayerZoom", html, fixed = TRUE))
   expect_true(grepl("multiViewPaneZoomRatio", html, fixed = TRUE))
   expect_true(grepl("densePointLayerDrawContours", html, fixed = TRUE))
-  expect_true(grepl("zoom>=10)return 1", html, fixed = TRUE))
-  expect_true(grepl("zoom>=5)return 2", html, fixed = TRUE))
+  expect_true(grepl("zoom>=5)return 1", html, fixed = TRUE))
+  expect_true(grepl("zoom>=2)return 2", html, fixed = TRUE))
   expect_true(grepl("return 10", html, fixed = TRUE))
   expect_true(grepl("pointLayerVisibleBounds", html, fixed = TRUE))
   signature <- file.path(

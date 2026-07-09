@@ -33,7 +33,7 @@ wsi_roi_measurement_table <- function(rois, pixel_size = NULL) {
   }
   area_px2 <- vapply(seq_len(nrow(rois)), function(i) wsi_roi_area_px(rois, i), numeric(1))
   area <- wsi_area_record(area_px2, pixel_size = pixel_size)
-  total_area <- sum(area_px2)
+  total_area <- sum(area_px2, na.rm = TRUE)
   data.frame(
     roi_id = rois$roi_id,
     roi_name = rois$name,
@@ -534,7 +534,11 @@ measure_cell_density <- function(cells, roi, pixel_size = NULL) {
   }
   px <- wsi_pixel_size_xy(pixel_size)
   rows <- lapply(seq_len(nrow(roi)), function(i) {
-    inside <- vapply(seq_len(nrow(pts)), function(j) wsi_point_in_roi(pts[j, ], roi, i), logical(1))
+    inside <- if (isTRUE(wsi_roi_polygonal(roi)[[i]])) {
+      vapply(seq_len(nrow(pts)), function(j) wsi_point_in_roi(pts[j, ], roi, i), logical(1))
+    } else {
+      rep(FALSE, nrow(pts))
+    }
     area_px2 <- wsi_roi_area_px(roi, i)
     area_um2 <- if (is.null(px)) NA_real_ else area_px2 * px[["x"]] * px[["y"]]
     area_mm2 <- if (is.null(px)) NA_real_ else area_um2 / 1e6
@@ -547,8 +551,8 @@ measure_cell_density <- function(cells, roi, pixel_size = NULL) {
       area_px2 = area_px2,
       area_um2 = area_um2,
       area_mm2 = area_mm2,
-      cells_per_px2 = if (area_px2 > 0) cell_count / area_px2 else NA_real_,
-      cells_per_mm2 = if (!is.null(px) && area_mm2 > 0) cell_count / area_mm2 else NA_real_,
+      cells_per_px2 = if (is.finite(area_px2) && area_px2 > 0) cell_count / area_px2 else NA_real_,
+      cells_per_mm2 = if (!is.null(px) && is.finite(area_mm2) && area_mm2 > 0) cell_count / area_mm2 else NA_real_,
       stringsAsFactors = FALSE
     )
   })
@@ -844,8 +848,10 @@ summarise_rois <- function(rois, cells = NULL, pixel_size = NULL, file = NULL, o
   roi_summary <- wsi_roi_measurement_table(rois, pixel_size = pixel_size)
   roi_classes <- roi_summary$roi_class
   area_px2 <- roi_summary$area_px2
-  total_area <- sum(area_px2)
-  base <- data.frame(class = roi_classes, area_px2 = area_px2, stringsAsFactors = FALSE)
+  area_for_summary <- area_px2
+  area_for_summary[is.na(area_for_summary)] <- 0
+  total_area <- sum(area_for_summary)
+  base <- data.frame(class = roi_classes, area_px2 = area_for_summary, stringsAsFactors = FALSE)
   summary <- stats::aggregate(area_px2 ~ class, data = base, sum)
   summary$roi_count <- as.integer(tabulate(match(roi_classes, summary$class), nbins = nrow(summary)))
   summary$percent_area <- if (total_area > 0) 100 * summary$area_px2 / total_area else NA_real_

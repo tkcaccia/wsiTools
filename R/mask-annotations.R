@@ -1033,6 +1033,9 @@ geojson_to_mask_tiff <- wsi_geojson_to_mask_tiff
 #'   and large masks.
 #' @param rebuild Rebuild existing mask/tiles.
 #' @param overwrite Overwrite an existing mask file when rebuilding.
+#' @param display_min_zoom Minimum viewer zoom ratio before drawing the mask
+#'   overlay. Dense cell masks default to `5` so opening a whole-slide overview
+#'   does not request thousands of mask tiles.
 #' @param ... Additional arguments passed to [wsi_geojson_to_mask_tiff()].
 #'
 #' @return A list with `source`, `mask`, and `tiles`. The `source` element is a
@@ -1052,6 +1055,7 @@ wsi_geojson_mask_channel_source <- function(geojson,
                                             tile_size = 254,
                                             rebuild = FALSE,
                                             overwrite = FALSE,
+                                            display_min_zoom = 5,
                                             ...) {
   geojson <- wsi_validate_input_path(geojson)
   label_by <- match.arg(label_by)
@@ -1062,6 +1066,10 @@ wsi_geojson_mask_channel_source <- function(geojson,
     wsi_abort(sprintf("Could not create output directory: %s", output_dir))
   }
   tile_size <- as.integer(wsi_check_scalar_number(tile_size, "tile_size", allow_zero = FALSE))
+  display_min_zoom <- suppressWarnings(as.numeric(display_min_zoom %||% 5))
+  if (!is.finite(display_min_zoom) || display_min_zoom < 0) {
+    display_min_zoom <- 5
+  }
   slide_obj <- if (inherits(slide, "wsi_slide")) slide else wsi_open(slide)
   slide_width <- as.numeric(slide_obj$dimensions[["width"]] %||% NA_real_)
   slide_height <- as.numeric(slide_obj$dimensions[["height"]] %||% NA_real_)
@@ -1153,6 +1161,8 @@ wsi_geojson_mask_channel_source <- function(geojson,
     metadata = list(
       kind = "mask",
       transparent_background = TRUE,
+      force_canvas_filter = TRUE,
+      display_min_zoom = display_min_zoom,
       legend = legend,
       selected_values = vapply(legend, function(x) as.character(x$value), character(1)),
       extent = list(x = 0, y = 0, width = slide_width, height = slide_height),

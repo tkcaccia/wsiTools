@@ -46,6 +46,22 @@ wsi_roi_polygons <- function(roi, index = 1L) {
   wsi_abort(sprintf("Geometry type `%s` is not polygonal.", geometry_type %||% NA_character_))
 }
 
+wsi_roi_polygonal <- function(roi) {
+  if (!inherits(roi, "wsi_roi") || !nrow(roi) || !"geometry_type" %in% names(roi)) {
+    return(rep(FALSE, if (is.data.frame(roi)) nrow(roi) else 0L))
+  }
+  tolower(as.character(roi$geometry_type)) %in% c("polygon", "multipolygon")
+}
+
+wsi_filter_polygonal_rois <- function(roi) {
+  if (!inherits(roi, "wsi_roi") || !nrow(roi)) {
+    return(wsi_empty_roi())
+  }
+  out <- roi[wsi_roi_polygonal(roi), , drop = FALSE]
+  class(out) <- unique(c("wsi_roi", class(out)))
+  out
+}
+
 wsi_roi_rings <- function(roi, index = 1L) {
   unlist(wsi_roi_polygons(roi, index), recursive = FALSE)
 }
@@ -61,6 +77,9 @@ wsi_ring_area <- function(ring) {
 }
 
 wsi_roi_area_px <- function(roi, index = 1L) {
+  if (!isTRUE(wsi_roi_polygonal(roi)[[index]])) {
+    return(NA_real_)
+  }
   polygons <- wsi_roi_polygons(roi, index)
   if (!length(polygons)) {
     return(0)

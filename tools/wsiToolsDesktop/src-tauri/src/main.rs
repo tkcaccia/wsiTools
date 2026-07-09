@@ -948,7 +948,10 @@ fn launch_r_new_project_target(
     push_log(&state.logs, "  project_images$image,");
     push_log(&state.logs, "  live = \"yes\",");
     push_log(&state.logs, "  tiled = \"yes\",");
-    push_log(&state.logs, "  dynamic_tiles = FALSE,");
+    push_log(
+        &state.logs,
+        "  dynamic_tiles = \"auto\"  # dynamic on first open; prebuilt when cache exists,",
+    );
     push_log(&state.logs, "  open = FALSE,");
     push_log(&state.logs, "  wait = FALSE");
     push_log(&state.logs, ")");

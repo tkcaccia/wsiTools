@@ -64,8 +64,10 @@
 #'   variable. The gene is automatically added to `spot_genes` when needed.
 #' @param spot_radius Spot marker radius, in slide pixels. When `NULL`, an
 #'   estimate is taken from Seurat scale factors when available.
-#' @param max_points Maximum number of spots to keep in the browser payload.
-#'   This protects interactive HTML viewers from very large objects.
+#' @param max_points Maximum number of spots/cells to keep in the linked
+#'   browser payload. The default keeps all coordinates and the viewer culls
+#'   by viewport while drawing. Set a smaller value only when an intentionally
+#'   sampled static payload is needed.
 #' @param colour_by Spot colour mode. `"component_1"` colours by the first
 #'   plotted reduction component; `"gene"` colours by `default_gene`; `"none"`
 #'   uses one colour.
@@ -97,7 +99,7 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
                                   coordinate_rotation = c(0, 90, 180, 270),
                                   coordinate_transform = "none",
                                   spot_genes = NULL, default_gene = NULL,
-                                  spot_radius = NULL, max_points = 100000L,
+                                  spot_radius = NULL, max_points = .Machine$integer.max,
                                   colour_by = c("component_1", "gene", "none")) {
   coordinate_flip_missing <- missing(coordinate_flip)
   coordinate_rotation_missing <- missing(coordinate_rotation)
@@ -725,7 +727,7 @@ wsi_viewer_seurat_project <- function(seurat = NULL, images = NULL, linked = NUL
                                       coordinate_rotation = c(0, 90, 180, 270),
                                       coordinate_transform = "none",
                                       spot_genes = NULL, default_gene = NULL,
-                                      spot_radius = NULL, max_points = 100000L,
+                                      spot_radius = NULL, max_points = .Machine$integer.max,
                                       colour_by = c("component_1", "gene", "none"),
                                       mode = c("tiles", "thumbnail"),
                                       live = TRUE, dynamic_tiles = FALSE,
@@ -1062,11 +1064,10 @@ wsi_seurat_spot_layer_items <- function(linked) {
   spots <- spots[keep, , drop = FALSE]
   x <- x[keep]
   y <- y[keep]
-  max_layer_points <- suppressWarnings(as.integer(Sys.getenv("WSITOOLS_SPATIAL_POINT_LAYER_MAX", "100000")))
-  if (!is.finite(max_layer_points) || max_layer_points < 1000L) {
-    max_layer_points <- 100000L
-  }
-  if (nrow(spots) > max_layer_points) {
+  max_layer_points <- suppressWarnings(
+    as.integer(Sys.getenv("WSITOOLS_SPATIAL_POINT_LAYER_MAX", NA_character_))
+  )
+  if (is.finite(max_layer_points) && max_layer_points >= 1000L && nrow(spots) > max_layer_points) {
     idx <- unique(as.integer(round(seq(1, nrow(spots), length.out = max_layer_points))))
     spots <- spots[idx, , drop = FALSE]
     x <- x[idx]
@@ -1079,8 +1080,20 @@ wsi_seurat_spot_layer_items <- function(linked) {
   base_colours <- rep(as.character(spots$base_colour %||% spots$base_color %||% colours), length.out = nrow(spots))
   colours <- vapply(colours, wsi_colour_to_hex, character(1), name = "colour")
   base_colours <- vapply(base_colours, wsi_colour_to_hex, character(1), name = "base_colour")
-  gene_values <- if ("gene_values" %in% names(spots)) spots$gene_values else vector("list", nrow(spots))
-  cluster_values <- if ("cluster_values" %in% names(spots)) spots$cluster_values else vector("list", nrow(spots))
+  embed_value_setting <- tolower(Sys.getenv("WSITOOLS_EMBED_SPATIAL_VALUES", "auto"))
+  embed_value_max <- suppressWarnings(as.integer(Sys.getenv("WSITOOLS_SPATIAL_EMBED_VALUES_MAX", "20000")))
+  if (!is.finite(embed_value_max) || embed_value_max < 0L) {
+    embed_value_max <- 20000L
+  }
+  embed_values <- if (embed_value_setting %in% c("1", "true", "yes", "on")) {
+    TRUE
+  } else if (embed_value_setting %in% c("0", "false", "no", "off")) {
+    FALSE
+  } else {
+    nrow(spots) <= embed_value_max
+  }
+  gene_values <- if (isTRUE(embed_values) && "gene_values" %in% names(spots)) spots$gene_values else vector("list", nrow(spots))
+  cluster_values <- if (isTRUE(embed_values) && "cluster_values" %in% names(spots)) spots$cluster_values else vector("list", nrow(spots))
   if (length(gene_values) != nrow(spots)) {
     gene_values <- vector("list", nrow(spots))
   }
@@ -1094,36 +1107,37 @@ wsi_seurat_spot_layer_items <- function(linked) {
       NULL
     }
   }
+  include_project_scope <- !is.null(linked$project_key) ||
+    !is.null(linked$project_image_index) ||
+    !is.null(linked$project_section_index)
   lapply(seq_len(nrow(spots)), function(i) {
-    list(
+    item <- list(
       id = ids[[i]],
-      name = labels[[i]],
       label = labels[[i]],
-      barcode = barcodes[[i]],
       feature_type = feature_type,
       type = "point",
       x = x[[i]],
       y = y[[i]],
-      slide_x = x[[i]],
-      slide_y = y[[i]],
       radius = radius,
       colour = colours[[i]],
-      color = colours[[i]],
-      base_colour = base_colours[[i]],
-      base_color = base_colours[[i]],
-      fill = grDevices::adjustcolor(colours[[i]], alpha.f = 0.72),
-      gene_values = gene_values[[i]] %||% list(),
-      cluster_values = cluster_values[[i]] %||% list(),
-      project_key = optional_value("project_key", i),
-      wsi_project_key = optional_value("wsi_project_key", i),
-      project_image = optional_value("project_image", i),
-      project_section = optional_value("project_section", i),
-      image_id = optional_value("image_id", i),
-      section_id = optional_value("section_id", i),
-      sample_id = optional_value("sample_id", i),
-      project_image_index = optional_value("project_image_index", i),
-      project_section_index = optional_value("project_section_index", i)
+      fill = grDevices::adjustcolor(colours[[i]], alpha.f = 0.72)
     )
+    item$barcode <- barcodes[[i]]
+    if (!identical(base_colours[[i]], colours[[i]])) {
+      item$base_colour <- base_colours[[i]]
+    }
+    if (isTRUE(include_project_scope)) {
+      item$project_key <- optional_value("project_key", i)
+      item$project_image <- optional_value("project_image", i)
+      item$project_section <- optional_value("project_section", i)
+      item$project_image_index <- optional_value("project_image_index", i)
+      item$project_section_index <- optional_value("project_section_index", i)
+    }
+    if (isTRUE(embed_values)) {
+      item$gene_values <- gene_values[[i]] %||% list()
+      item$cluster_values <- cluster_values[[i]] %||% list()
+    }
+    item
   })
 }
 
@@ -1669,7 +1683,7 @@ wsi_seurat_plot_browser_payload <- function(plot, max_points = 20000L) {
   original_count <- nrow(points)
   drop_cols <- intersect(
     names(points),
-    c("cluster_values", "base_colour", "base_color")
+    c("gene_values", "cluster_values", "base_colour", "base_color")
   )
   if (length(drop_cols)) {
     points[drop_cols] <- NULL
@@ -1699,13 +1713,20 @@ wsi_viewer_seurat_config <- function(seurat = NULL) {
   if (!length(plots) && !is.null(seurat$pca)) {
     plots <- list(seurat$pca)
   }
-  plot_max_points <- if (!is.null(seurat$spot_mask)) 15000L else 50000L
+  feature_type <- seurat$feature_type %||% "spot"
+  plot_max_points <- if (identical(feature_type, "cell")) {
+    10000L
+  } else if (!is.null(seurat$spot_mask)) {
+    15000L
+  } else {
+    50000L
+  }
   plots <- lapply(plots, wsi_seurat_plot_browser_payload, max_points = plot_max_points)
   list(
     enabled = TRUE,
     source_name = seurat$source_name %||% "Seurat",
-    feature_type = seurat$feature_type %||% "spot",
-    feature_label = if (identical(seurat$feature_type %||% "spot", "cell")) "cells" else "spots",
+    feature_type = feature_type,
+    feature_label = if (identical(feature_type, "cell")) "cells" else "spots",
     image_name = seurat$image_name,
     reduction = seurat$reduction,
     dims = as.integer(seurat$dims),
@@ -1752,7 +1773,7 @@ wsi_link_seurat_project_sections <- function(seurat, images, image_names = NULL,
                                              coordinate_rotation = 0,
                                              coordinate_transform = "none",
                                              spot_genes = NULL, default_gene = NULL,
-                                             spot_radius = NULL, max_points = 100000L,
+                                             spot_radius = NULL, max_points = .Machine$integer.max,
                                              colour_by = "component_1") {
   if (is.null(seurat)) {
     wsi_abort("`seurat` is required when `linked` is not supplied.")
@@ -3161,11 +3182,10 @@ wsi_seurat_dynamic_gene_payload <- function(linked, gene) {
     values <- values[seq_len(nrow(spots))]
     colours <- colours[seq_len(nrow(spots))]
   }
-  max_payload_points <- suppressWarnings(as.integer(Sys.getenv("WSITOOLS_SPATIAL_POINT_PAYLOAD_MAX", "100000")))
-  if (!is.finite(max_payload_points) || max_payload_points < 10000L) {
-    max_payload_points <- 100000L
-  }
-  point_idx <- if (nrow(spots) > max_payload_points) {
+  max_payload_points <- suppressWarnings(
+    as.integer(Sys.getenv("WSITOOLS_SPATIAL_POINT_PAYLOAD_MAX", NA_character_))
+  )
+  point_idx <- if (is.finite(max_payload_points) && max_payload_points >= 5000L && nrow(spots) > max_payload_points) {
     unique(as.integer(round(seq(1, nrow(spots), length.out = max_payload_points))))
   } else {
     seq_len(nrow(spots))
