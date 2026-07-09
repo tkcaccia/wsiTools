@@ -991,6 +991,21 @@ desktop_register_dense_geojson_source <- function(viewer, item, log_file = NULL)
   TRUE
 }
 
+desktop_viewer_ready_for_deferred_import <- function(viewer) {
+  if (!inherits(viewer, "wsi_viewer_session")) {
+    return(FALSE)
+  }
+  state <- viewer$state %||% NULL
+  if (is.null(state)) {
+    return(FALSE)
+  }
+  event <- as.character(state$last_event %||% "")
+  if (!nzchar(event) || startsWith(event, "r_")) {
+    return(FALSE)
+  }
+  !is.null(state$last_sync)
+}
+
 desktop_poll_pending_imports <- function(viewer, pending, log_file = NULL) {
   if (!length(pending) || !inherits(viewer, "wsi_viewer_session")) {
     return(pending)
@@ -1101,6 +1116,20 @@ desktop_poll_pending_imports <- function(viewer, pending, log_file = NULL) {
     }
     if (!is.data.frame(item$rois) || !nrow(item$rois)) {
       item$done <- TRUE
+      pending[[i]] <- item
+      next
+    }
+    if (!desktop_viewer_ready_for_deferred_import(viewer)) {
+      if (!isTRUE(item$waiting_for_viewer_logged)) {
+        desktop_log(
+          "Waiting for the browser viewer to finish loading before sending deferred ",
+          item$kind,
+          " GeoJSON: ",
+          item$path,
+          log_file = log_file
+        )
+        item$waiting_for_viewer_logged <- TRUE
+      }
       pending[[i]] <- item
       next
     }
@@ -1251,12 +1280,13 @@ desktop_open_spatial_target <- function(object, image_paths, output, log_file,
   if (length(image_paths) == 1L) {
     tile_dir <- file.path(dirname(output), desktop_project_source_id(image_paths[[1L]], 1L))
     slide_for_tiles <- tryCatch(wsiTools::wsi_open(image_paths[[1L]]), error = function(err) NULL)
-    use_prebuilt_tiles <- !is.null(slide_for_tiles) &&
+    use_prebuilt_tiles <- desktop_use_prebuilt_tiles() &&
+      !is.null(slide_for_tiles) &&
       desktop_deepzoom_cache_valid(slide_for_tiles, tile_dir)
     if (!is.null(slide_for_tiles)) {
       try(wsiTools::wsi_close(slide_for_tiles), silent = TRUE)
     }
-    if (!use_prebuilt_tiles && desktop_build_missing_tiles()) {
+    if (!use_prebuilt_tiles && desktop_use_prebuilt_tiles() && desktop_build_missing_tiles()) {
       use_prebuilt_tiles <- TRUE
     }
     single_args <- list(
@@ -1400,6 +1430,11 @@ desktop_build_missing_tiles <- function() {
     c("1", "true", "yes", "on")
 }
 
+desktop_use_prebuilt_tiles <- function() {
+  tolower(Sys.getenv("WSITOOLS_DESKTOP_USE_PREBUILT_TILES", "true")) %in%
+    c("1", "true", "yes", "on")
+}
+
 desktop_deepzoom_cache_valid <- function(slide, tile_dir,
                                          tile_size = 512,
                                          tile_overlap = 1,
@@ -1510,14 +1545,18 @@ desktop_open_live_slide_prebuilt <- function(slide, output, log_file,
                                              title = "wsiTools desktop viewer") {
   base_id <- desktop_project_source_id(slide$path %||% "image", 1L)
   base_tile_dir <- file.path(dirname(output), base_id)
-  use_prebuilt_tiles <- desktop_deepzoom_cache_valid(slide, base_tile_dir) ||
-    desktop_build_missing_tiles()
+  use_prebuilt_tiles <- desktop_use_prebuilt_tiles() &&
+    (desktop_deepzoom_cache_valid(slide, base_tile_dir) ||
+       desktop_build_missing_tiles())
   if (!use_prebuilt_tiles) {
     desktop_log(
       "No valid prebuilt Deep Zoom tile cache was found for ",
       basename(slide$path %||% base_id),
-      ". Starting immediately with live dynamic tiles to avoid desktop launch timeout. ",
-      "Set WSITOOLS_DESKTOP_BUILD_MISSING_TILES=true to build prebuilt tiles before opening.",
+      if (desktop_use_prebuilt_tiles()) {
+        ". Starting immediately with live dynamic tiles to avoid desktop launch timeout. Set WSITOOLS_DESKTOP_BUILD_MISSING_TILES=true to build prebuilt tiles before opening."
+      } else {
+        ". Dynamic tiles were requested with WSITOOLS_DESKTOP_USE_PREBUILT_TILES=false."
+      },
       log_file = log_file
     )
     return(wsiTools::wsi_viewer_live(
@@ -1611,7 +1650,8 @@ desktop_open_live_image_project <- function(image_paths, output, log_file,
     for (i in seq.int(2L, length(slides))) {
       slide <- slides[[i]]
       tile_dir <- file.path(dirname(output), desktop_project_source_id(slide$path %||% image_paths[[i]], i))
-      if (!desktop_deepzoom_cache_valid(slide, tile_dir) && !desktop_build_missing_tiles()) {
+      if (!desktop_use_prebuilt_tiles() ||
+          (!desktop_deepzoom_cache_valid(slide, tile_dir) && !desktop_build_missing_tiles())) {
         source <- desktop_create_dynamic_project_source(
           slide,
           index = i,
