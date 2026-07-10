@@ -1702,6 +1702,101 @@ wsi_spatial_object_metadata <- function(object) {
   as.data.frame(meta, stringsAsFactors = FALSE)
 }
 
+wsi_spatial_object_table_ids <- function(tab) {
+  candidates <- c(
+    "barcode", "barcodes", "cell", "cells", "cell_id", "cellid",
+    "spot", "spot_id", "feature_id", "id"
+  )
+  ids <- rownames(tab) %||% as.character(seq_len(nrow(tab)))
+  for (candidate in candidates) {
+    if (candidate %in% names(tab)) {
+      ids <- as.character(tab[[candidate]])
+      break
+    }
+  }
+  ids
+}
+
+wsi_spatial_object_registration_index <- function(tab, registration) {
+  ids <- wsi_spatial_object_table_ids(tab)
+  idx <- match(ids, as.character(registration$id))
+  if (!any(!is.na(idx)) && nrow(tab) == nrow(registration)) {
+    idx <- seq_len(nrow(tab))
+  }
+  idx
+}
+
+wsi_spatial_object_update_coordinate_frame <- function(coords, registration) {
+  if (is.null(coords) || !nrow(coords)) {
+    return(list(coordinates = coords, matched = 0L))
+  }
+  original_class <- class(coords)
+  out <- as.data.frame(coords, stringsAsFactors = FALSE)
+  idx <- wsi_spatial_object_registration_index(out, registration)
+  hit <- !is.na(idx)
+  matched <- sum(hit)
+  if (!matched) {
+    return(list(coordinates = coords, matched = 0L))
+  }
+  x_values <- registration$x[idx[hit]]
+  y_values <- registration$y[idx[hit]]
+  x_columns <- intersect(c("x", "image_x", "imagecol", "col", "pxl_col_in_fullres", "slide_x"), names(out))
+  y_columns <- intersect(c("y", "image_y", "imagerow", "row", "pxl_row_in_fullres", "slide_y"), names(out))
+  if (!length(x_columns)) {
+    out$x <- NA_real_
+    x_columns <- "x"
+  } else if (!"x" %in% names(out)) {
+    out$x <- NA_real_
+    x_columns <- unique(c(x_columns, "x"))
+  }
+  if (!length(y_columns)) {
+    out$y <- NA_real_
+    y_columns <- "y"
+  } else if (!"y" %in% names(out)) {
+    out$y <- NA_real_
+    y_columns <- unique(c(y_columns, "y"))
+  }
+  for (column in x_columns) {
+    out[[column]][hit] <- x_values
+  }
+  for (column in y_columns) {
+    out[[column]][hit] <- y_values
+  }
+  class(out) <- if (inherits(coords, "data.frame")) original_class else class(out)
+  list(coordinates = out, matched = matched)
+}
+
+wsi_spatial_object_update_image_coordinates <- function(object, spatial, registration) {
+  images <- tryCatch(wsi_seurat_slot(object, "images"), error = function(err) NULL)
+  if (is.null(images) || !is.list(images) || !length(images)) {
+    return(list(object = object, matched = 0L, images = character()))
+  }
+  source <- wsi_spatial_object_payload_source(spatial)
+  image_name <- if (is.list(source)) as.character(source$image_name %||% "") else ""
+  image_names <- names(images)
+  targets <- if (nzchar(image_name) && image_name %in% image_names) image_name else image_names
+  matched <- 0L
+  updated_names <- character()
+  for (name in targets) {
+    image_obj <- images[[name]]
+    coords <- tryCatch(wsi_seurat_slot(image_obj, "coordinates"), error = function(err) NULL)
+    if (is.null(coords) || !nrow(coords)) {
+      next
+    }
+    updated <- wsi_spatial_object_update_coordinate_frame(coords, registration)
+    if (updated$matched > 0L) {
+      image_obj <- wsi_spatial_object_set_slot(image_obj, "coordinates", updated$coordinates)
+      images[[name]] <- image_obj
+      matched <- matched + updated$matched
+      updated_names <- c(updated_names, name)
+    }
+  }
+  if (length(updated_names)) {
+    object <- wsi_spatial_object_set_slot(object, "images", images)
+  }
+  list(object = object, matched = matched, images = unique(updated_names))
+}
+
 wsi_spatial_object_with_registration <- function(spatial, registration) {
   object <- wsi_spatial_object_from_source(spatial)
   if (is.null(object)) {
@@ -1714,19 +1809,7 @@ wsi_spatial_object_with_registration <- function(spatial, registration) {
   meta <- wsi_spatial_object_metadata(updated)
   matched <- 0L
   if (!is.null(meta) && nrow(meta) && nrow(registration)) {
-    ids <- rownames(meta) %||% as.character(seq_len(nrow(meta)))
-    candidates <- unique(c(
-      "barcode", "barcodes", "cell", "cells", "cell_id", "cellid",
-      "spot", "spot_id", "feature_id", "id"
-    ))
-    for (candidate in candidates) {
-      if (candidate %in% names(meta)) {
-        ids <- as.character(meta[[candidate]])
-        break
-      }
-    }
-    key <- as.character(registration$id)
-    idx <- match(ids, key)
+    idx <- wsi_spatial_object_registration_index(meta, registration)
     matched <- sum(!is.na(idx))
     meta$registered_x <- NA_real_
     meta$registered_y <- NA_real_
@@ -1745,6 +1828,8 @@ wsi_spatial_object_with_registration <- function(spatial, registration) {
     }
     updated <- wsi_spatial_object_set_slot(updated, "meta.data", meta)
   }
+  image_update <- wsi_spatial_object_update_image_coordinates(updated, spatial, registration)
+  updated <- image_update$object
   misc <- tryCatch(wsi_seurat_slot(updated, "misc"), error = function(err) NULL)
   if (is.null(misc) || !is.list(misc)) {
     misc <- list()
@@ -1752,9 +1837,10 @@ wsi_spatial_object_with_registration <- function(spatial, registration) {
   misc$wsiTools <- misc$wsiTools %||% list()
   misc$wsiTools$spatial_registration <- registration
   misc$wsiTools$spatial_registration_saved_at <- Sys.time()
+  misc$wsiTools$spatial_registration_image_coordinates <- image_update$images
   updated <- wsi_spatial_object_set_slot(updated, "misc", misc)
   attr(updated, "wsi_spatial_registration") <- registration
-  list(object = updated, matched = matched)
+  list(object = updated, matched = matched, image_coordinate_matched = image_update$matched)
 }
 
 wsi_spatial_object_save_response <- function(spatial, payload, state = NULL) {
@@ -1778,6 +1864,7 @@ wsi_spatial_object_save_response <- function(spatial, payload, state = NULL) {
   if (!is.null(state) && inherits(state, "wsi_viewer_state")) {
     state$spatial_registration <- registration
   }
+  image_coordinate_matched <- NA_integer_
   if (identical(format, "csv")) {
     utils::write.csv(registration, output, row.names = FALSE)
     matched <- NA_integer_
@@ -1785,12 +1872,13 @@ wsi_spatial_object_save_response <- function(spatial, payload, state = NULL) {
     updated <- wsi_spatial_object_with_registration(spatial, registration)
     saveRDS(updated$object, output)
     matched <- updated$matched
+    image_coordinate_matched <- updated$image_coordinate_matched
   }
   if (!is.null(state) && inherits(state, "wsi_viewer_state")) {
     wsi_viewer_state_record_event(
       state,
       "spatial_object_save_requested",
-      list(file = output, format = format, count = nrow(registration), matched = matched)
+      list(file = output, format = format, count = nrow(registration), matched = matched, image_coordinate_matched = image_coordinate_matched %||% NA_integer_)
     )
     wsi_assign_viewer_state(state)
   }
@@ -1799,7 +1887,8 @@ wsi_spatial_object_save_response <- function(spatial, payload, state = NULL) {
     file = output,
     format = format,
     count = nrow(registration),
-    matched = matched
+    matched = matched,
+    image_coordinate_matched = image_coordinate_matched %||% NA_integer_
   )
 }
 

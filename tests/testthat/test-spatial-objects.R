@@ -272,7 +272,12 @@ test_that("spatial object save response writes CSV and full R object", {
   )
   spatial <- structure(
     list(expression_source = list(object = list(
-      meta.data = data.frame(value = c(1, 2), row.names = c("spot_1", "spot_2"))
+      meta.data = data.frame(value = c(1, 2), row.names = c("spot_1", "spot_2")),
+      images = list(slice1 = list(coordinates = data.frame(
+        imagecol = c(10, 20),
+        imagerow = c(30, 40),
+        row.names = c("spot_1", "spot_2")
+      )))
     ))),
     class = "wsi_seurat_spatial"
   )
@@ -295,6 +300,10 @@ test_that("spatial object save response writes CSV and full R object", {
   expect_equal(saved$meta.data$registered_x, c(12, 20))
   expect_equal(saved$meta.data$registered_y, c(34, 40))
   expect_equal(saved$meta.data$wsi_registration_changed, c(TRUE, FALSE))
+  expect_equal(saved$images$slice1$coordinates$x, c(12, 20))
+  expect_equal(saved$images$slice1$coordinates$y, c(34, 40))
+  expect_equal(saved$images$slice1$coordinates$imagecol, c(12, 20))
+  expect_equal(saved$images$slice1$coordinates$imagerow, c(34, 40))
   expect_s3_class(attr(saved, "wsi_spatial_registration"), "wsi_spatial_registration")
 })
 
