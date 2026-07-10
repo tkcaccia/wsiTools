@@ -7,7 +7,8 @@ test_that("dependency plans are CRAN-safe and copyable", {
   expect_s3_class(plan, "data.frame")
   expect_named(plan, c("tool", "installed", "method", "command", "command_line", "notes", "args"))
   expect_equal(plan$method, rep("homebrew", 3))
-  expect_true(all(grepl("^brew 'install'", plan$command_line)))
+  expect_true(all(startsWith(plan$command_line, "brew ")))
+  expect_true(all(vapply(plan$args, function(args) identical(args[[1L]], "install"), logical(1))))
   expect_true(all(vapply(plan$args, length, integer(1)) >= 2L))
 })
 

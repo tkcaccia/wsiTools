@@ -614,8 +614,12 @@ wsi_cellphenotyper_find_kodama_plots <- function(manifest, root) {
   } else {
     character()
   }
-  paths <- unique(c(manifest_candidates, fallback))
+  paths <- c(manifest_candidates, fallback)
   paths <- paths[file.exists(paths)]
+  if (length(paths)) {
+    normalized_paths <- normalizePath(paths, winslash = "/", mustWork = TRUE)
+    paths <- paths[!duplicated(normalized_paths)]
+  }
   if (!length(paths)) {
     return(wsi_cellphenotyper_empty_kodama_plots())
   }

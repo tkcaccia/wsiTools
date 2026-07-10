@@ -50,6 +50,17 @@ jobs:
           r-version: ${{ matrix.config.r }}
           use-public-rspm: true
 
+      - name: Use source packages for macOS R-devel
+        if: runner.os == 'macOS' && matrix.config.r == 'devel'
+        shell: bash
+        run: |
+          mkdir -p ~/.R
+          {
+            echo 'options(pkgType = "source")'
+            echo 'options(pkg.platforms = "source")'
+          } >> ~/.Rprofile
+          echo "R_PKG_TYPE=source" >> "$GITHUB_ENV"
+
       - name: Install macOS build libraries
         if: runner.os == 'macOS'
         shell: bash
