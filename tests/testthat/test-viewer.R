@@ -2988,10 +2988,12 @@ test_that("tiled viewer JavaScript exposes live tile timeout and loader limit co
 })
 
 test_that("desktop launcher routes CZI files to the CZI live project viewer", {
-  launcher <- readLines(
-    test_path("../../tools/wsiToolsDesktop/src-tauri/resources/launch-viewer.R"),
-    warn = FALSE
+  launcher_path <- test_path("../../tools/wsiToolsDesktop/src-tauri/resources/launch-viewer.R")
+  skip_if_not(
+    file.exists(launcher_path),
+    "Desktop launcher resources are not included in source-package checks."
   )
+  launcher <- readLines(launcher_path, warn = FALSE)
   launcher <- paste(launcher, collapse = "\n")
 
   expect_match(launcher, "desktop_is_czi_path", fixed = TRUE)

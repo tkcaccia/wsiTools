@@ -1421,7 +1421,7 @@ wsi_dynamic_prewarm_tiles <- function(sources, levels = NULL,
       center_row <- floor(max(rows) / 2)
       grid$distance <- abs(grid$col - center_col) + abs(grid$row - center_row)
       grid <- grid[order(grid$distance, grid$row, grid$col), , drop = FALSE]
-      grid <- head(grid, 8L)
+      grid <- utils::head(grid, 8L)
       for (idx in seq_len(nrow(grid))) {
         ok <- tryCatch(
           {

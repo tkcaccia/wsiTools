@@ -24,15 +24,14 @@ in the default system-tool plan.}
 }
 \value{
 Invisibly returns a list containing \code{version}, \code{session},
-\code{backends}, \code{helpers}, \code{r_packages}, \code{system_tools}, and
-\code{environment}.
+\code{backends}, \code{helpers}, \code{r_packages}, \code{system_tools}, and \code{environment}.
 }
 \description{
 \code{wsi_setup_report()} is the quickest command to paste into an issue or use
 during installation troubleshooting. It reports the package version, R/OS
-details, optional backends, key \code{wsi_has_*()} checks, optional R packages,
-copyable setup commands, and relevant environment variables. It never installs
-software or changes the user's system.
+details, optional backends, key \verb{wsi_has_*()} checks, optional R packages,
+copyable setup commands, and relevant environment variables. It never
+installs software or changes the user's system.
 }
 \examples{
 wsi_setup_report(method = "manual")

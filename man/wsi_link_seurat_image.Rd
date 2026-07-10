@@ -23,7 +23,7 @@ wsi_link_seurat_image(
   spot_genes = NULL,
   default_gene = NULL,
   spot_radius = NULL,
-  max_points = 100000L,
+  max_points = .Machine$integer.max,
   colour_by = c("component_1", "gene", "none")
 )
 }
@@ -49,7 +49,9 @@ only downsampled image coordinates.}
 CSV file. These files contain full-resolution pixel coordinates and are the
 preferred source for alignment to an external high-resolution image.}
 
-\item{reduction}{Dimensional reduction to extract, for example \code{"pca"}.}
+\item{reduction}{Dimensional reduction to extract, for example \code{"pca"}.
+If the reduction is absent but spatial coordinates are available, the
+viewer uses the slide x/y coordinates as a fallback \code{"spatial"} plot.}
 
 \item{dims}{Two reduction dimensions to plot.}
 
@@ -93,8 +95,10 @@ variable. The gene is automatically added to \code{spot_genes} when needed.}
 \item{spot_radius}{Spot marker radius, in slide pixels. When \code{NULL}, an
 estimate is taken from Seurat scale factors when available.}
 
-\item{max_points}{Maximum number of spots to keep in the browser payload.
-This protects interactive HTML viewers from very large objects.}
+\item{max_points}{Maximum number of spots/cells to keep in the linked
+browser payload. The default keeps all coordinates and the viewer culls
+by viewport while drawing. Set a smaller value only when an intentionally
+sampled static payload is needed.}
 
 \item{colour_by}{Spot colour mode. \code{"component_1"} colours by the first
 plotted reduction component; \code{"gene"} colours by \code{default_gene}; \code{"none"}
@@ -105,9 +109,11 @@ A \code{wsi_seurat_spatial} object containing the slide, spot table, PCA
 points, and coordinate mapping metadata.
 }
 \description{
-\code{wsi_link_seurat_image()} extracts spatial spot coordinates and a dimensional
-reduction from a Seurat object and maps the spots onto a high-resolution
-image. Seurat remains an optional dependency: when
+\code{wsi_link_seurat_image()} extracts spatial spot coordinates and, when
+available, a dimensional reduction from a Seurat object and maps the spots
+or cells onto a high-resolution image. If no reduction is present, wsiTools
+falls back to a coordinate-based spatial plot so the image overlay and live
+gene lookup still work. Seurat remains an optional dependency: when
 \code{SeuratObject} or \code{Seurat} is installed their accessors are used; otherwise
 the function falls back to Seurat-like object slots/lists.
 }

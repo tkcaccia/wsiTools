@@ -9,7 +9,7 @@ wsi_viewer_spatialexperiment(
   image,
   linked = NULL,
   live = TRUE,
-  dynamic_tiles = live,
+  dynamic_tiles = FALSE,
   mode = c("tiles", "thumbnail"),
   output = NULL,
   open = interactive(),
@@ -29,7 +29,11 @@ wsi_viewer_spatialexperiment(
 default is \code{TRUE} so R and the browser stay synchronized while the session
 is active; set \code{live = FALSE} to write a static HTML viewer.}
 
-\item{dynamic_tiles}{When \code{live = TRUE}, serve the image as dynamic tiles.}
+\item{dynamic_tiles}{When \code{live = TRUE}, serve the image as dynamic tiles.
+The default is \code{FALSE}: live synchronization stays active, while the base
+image and dense spatial masks use prebuilt Deep Zoom tiles for smoother
+zooming and panning. Use \code{TRUE} only as a fallback when prebuilt tiles
+cannot be created.}
 
 \item{mode}{Viewer mode for static output. \code{"tiles"} gives full-resolution
 Deep Zoom viewing when the backend can create tiles.}

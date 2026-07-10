@@ -2,27 +2,12 @@
 % Please edit documentation in R/spatial-objects.R
 \name{wsi_link_spatial_image}
 \alias{wsi_link_spatial_image}
-\alias{wsi_viewer_spatial}
-\title{Link and view a spatial omics object with a high-resolution image}
+\title{Link a spatial omics object to a high-resolution image}
 \usage{
 wsi_link_spatial_image(
   object,
   image,
   object_type = c("auto", "seurat", "giotto", "spatialexperiment"),
-  ...
-)
-
-wsi_viewer_spatial(
-  object,
-  image,
-  linked = NULL,
-  object_type = c("auto", "seurat", "giotto", "spatialexperiment"),
-  live = TRUE,
-  dynamic_tiles = live,
-  mode = c("tiles", "thumbnail"),
-  output = NULL,
-  open = interactive(),
-  overwrite = FALSE,
   ...
 )
 }
@@ -31,37 +16,26 @@ wsi_viewer_spatial(
 
 \item{image}{Path to the high-resolution image, or a \code{wsi_slide} object.}
 
-\item{object_type}{Object family. \code{"auto"} tries to infer the backend.
-Set this explicitly for lightweight lists or unusual objects.}
+\item{object_type}{Object family. \code{"auto"} tries to infer the backend.}
 
-\item{...}{Arguments passed to the selected linker or viewer, for example
-\code{coordinates}, \code{embeddings}, \code{reduction}, \code{spot_genes},
-\code{default_gene}, \code{coordinate_flip}, and \code{coordinate_rotation}.}
-
-\item{linked}{Optional linked object returned by
-\code{wsi_link_spatial_image()} or one of the specialised linkers.}
-
-\item{live}{Whether to start the live R/httpuv bridge. The default is
-\code{TRUE}; set \code{live = FALSE} for a static HTML viewer.}
-
-\item{dynamic_tiles}{Whether live tiled mode should use the dynamic tile
-server.}
-
-\item{mode}{Viewer mode. \code{"tiles"} uses tiled viewing; \code{"thumbnail"}
-is useful for quick tests and mock slides.}
-
-\item{output, open, overwrite}{Viewer output options.}
+\item{...}{Arguments passed to the selected linker, for example
+\code{coordinates}, \code{embeddings}, \code{reduction}, \code{spot_genes}, \code{default_gene},
+\code{coordinate_flip}, and \code{coordinate_rotation}.}
 }
 \value{
-\code{wsi_link_spatial_image()} returns a linked spatial object.
-\code{wsi_viewer_spatial()} returns a \code{wsi_viewer_session} by default, or
-the HTML path when \code{live = FALSE}.
+A linked spatial object accepted by \code{\link[=wsi_viewer_spatial]{wsi_viewer_spatial()}} and the
+lower-level viewer functions.
 }
 \description{
-\code{wsi_link_spatial_image()} and \code{wsi_viewer_spatial()} provide a
-common user-facing entry point for Seurat, Giotto, and SpatialExperiment-style
-objects. Live mode is the default, keeping expression matrices in R and letting
-the browser request one gene at a time.
+\code{wsi_link_spatial_image()} is the shared entry point for linking spatial
+omics coordinates, dimensional reductions, and optional expression data to a
+tissue image. It dispatches to the existing Seurat, Giotto, or
+SpatialExperiment linkers while preserving their specialised arguments.
+}
+\details{
+Use \code{object_type = "auto"} for ordinary Seurat, Giotto, and
+SpatialExperiment objects. For lightweight lists or unusual objects, set
+\code{object_type} explicitly.
 }
 \examples{
 \dontrun{

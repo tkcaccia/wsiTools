@@ -452,6 +452,7 @@ wsi_stardist_result <- function(input, output, segmentation = NULL,
 }
 
 #' @keywords internal
+#' @export
 print.wsi_stardist_result <- function(x, ...) {
   cat("<wsi_stardist_result>\n")
   cat(sprintf("  engine: %s\n", x$engine %||% "stardist"))
@@ -886,6 +887,8 @@ wsi_cell_segment_image <- function(input, output,
 #' @param mask_as_rois For mask outputs, convert connected components to cell
 #'   ROI polygons.
 #' @inheritParams stardist_segment_roi
+#' @param ... Additional arguments passed to [import_segmentation()] or
+#'   [wsi_mask_to_rois()] depending on the selected output type.
 #'
 #' @return A `wsi_cell_segmentation_result` object.
 #' @export
@@ -1475,6 +1478,7 @@ wsi_stardist_server <- function(image,
 }
 
 #' @keywords internal
+#' @export
 print.wsi_stardist_server <- function(x, ...) {
   cat("<wsi_stardist_server>\n")
   cat(sprintf("  url: %s\n", x$url))

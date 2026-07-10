@@ -88,10 +88,10 @@ selects one; otherwise the first ROI is used.}
 \code{WSITOOLS_STARDIST_COMMAND} when this is \code{NULL}; Mesmer uses
 \code{WSITOOLS_MESMER_COMMAND}.}
 
-\item{args}{Command arguments with placeholders such as \code{\{input\}},
-\code{\{output\}}, \code{\{model\}}, \code{\{tiles_x\}}, \code{\{tiles_y\}},
-\code{\{min_area\}}, \code{\{nuclear_channel\}}, \code{\{membrane_channel\}},
-\code{\{keras_home\}}, and \code{\{pretrained_zip\}}.}
+\item{args}{Command arguments with placeholders such as \code{{input}},
+\code{{output}}, \code{{model}}, \code{{tiles_x}}, \code{{tiles_y}}, \code{{min_area}},
+\code{{nuclear_channel}}, \code{{membrane_channel}}, \code{{keras_home}}, and
+\code{{pretrained_zip}}.}
 
 \item{output}{Optional expected model output path.}
 
@@ -104,7 +104,7 @@ to \code{"mask"} when \code{"auto"} is supplied.}
 placeholders. Use these with a wrapper that supports tiled StarDist/Mesmer
 prediction to avoid high RAM use on large ROI crops.}
 
-\item{min_area}{Optional minimum cell area passed through \code{\{min_area\}}.}
+\item{min_area}{Optional minimum cell area passed through \code{{min_area}}.}
 
 \item{nuclear_channel, membrane_channel}{Channel names/indices passed through
 command placeholders for mIHC/DAPI workflows.}
@@ -118,14 +118,14 @@ ROI polygons.}
 \item{translate_geojson}{Whether to translate crop-local GeoJSON polygons to
 slide coordinates using the selected ROI bounding box origin.}
 
-\item{overwrite}{Whether output paths may overwrite existing files.}
+\item{overwrite}{Whether to overwrite \code{output}.}
 
-\item{run}{If \code{FALSE}, return the command plan after exporting the crop.}
+\item{run}{If \code{FALSE}, return the command plan without running StarDist.}
 
 \item{backend}{Region export backend.}
 
-\item{...}{Additional arguments passed to mask import when \code{output_type =
-"mask"} and \code{mask_as_rois = TRUE}.}
+\item{...}{Additional arguments passed to \code{\link[=import_segmentation]{import_segmentation()}} or
+\code{\link[=wsi_mask_to_rois]{wsi_mask_to_rois()}} depending on the selected output type.}
 }
 \value{
 A \code{wsi_cell_segmentation_result} object.
@@ -136,17 +136,4 @@ segmentation command, imports the result, and maps crop-local cells back to
 slide coordinates. This is designed for memory-safe viewer workflows:
 StarDist/Mesmer should process a crop or a tiled crop, never the full WSI
 loaded into R memory.
-}
-\examples{
-\dontrun{
-result <- wsi_cell_segment_roi(
-  slide,
-  roi,
-  "roi_cells",
-  engine = "stardist_he",
-  args = c("--input", "{input}", "--output", "{output}", "--tiles", "{tiles_y}", "{tiles_x}"),
-  tiles_x = 32,
-  tiles_y = 32
-)
-}
 }

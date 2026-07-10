@@ -3,6 +3,7 @@
 \name{wsi_viewer_session}
 \alias{wsi_viewer_session}
 \alias{wsi_viewer_live}
+\alias{wsi_viewer_stardist}
 \title{Start a live viewer session that syncs back to R}
 \usage{
 wsi_viewer_session(
@@ -21,9 +22,14 @@ wsi_viewer_session(
   dynamic_tile_path = "/tiles",
   seurat_gene_path = "/seurat-gene",
   spatial_tile_path = "/spatial-tiles",
+  spatial_object_save_path = "/spatial-object-save",
   image_export_path = "/image-export",
   image_export_dir = getwd(),
   image_export_max_pixels = 5e+07,
+  geojson_mask_path = "/geojson-mask-overlay",
+  geojson_mask_dir = file.path(tempdir(), "wsiTools_geojson_masks"),
+  dense_geojson_path = "/dense-geojson",
+  dense_geojson_context = NULL,
   prediction_path = "/prediction",
   prediction_context = NULL,
   proximity_path = "/proximity",
@@ -82,9 +88,14 @@ wsi_viewer_live(
   dynamic_tile_path = "/tiles",
   seurat_gene_path = "/seurat-gene",
   spatial_tile_path = "/spatial-tiles",
+  spatial_object_save_path = "/spatial-object-save",
   image_export_path = "/image-export",
   image_export_dir = getwd(),
   image_export_max_pixels = 5e+07,
+  geojson_mask_path = "/geojson-mask-overlay",
+  geojson_mask_dir = file.path(tempdir(), "wsiTools_geojson_masks"),
+  dense_geojson_path = "/dense-geojson",
+  dense_geojson_context = NULL,
   prediction_path = "/prediction",
   prediction_context = NULL,
   proximity_path = "/proximity",
@@ -126,6 +137,8 @@ wsi_viewer_live(
   segmentation_keras_home = NULL,
   segmentation_pretrained_zip = NULL
 )
+
+wsi_viewer_stardist(slide, ..., stardist = TRUE)
 }
 \arguments{
 \item{slide}{A \code{wsi_slide} object.}
@@ -137,7 +150,9 @@ objects named \verb{<name>_rois}, \verb{<name>_measurements},
 \verb{<name>_roi_summary}, \verb{<name>_cell_summary}, \verb{<name>_class_summary},
 \verb{<name>_ihc_summary}, \verb{<name>_ihc_class_summary},
 \verb{<name>_segmentation}, \verb{<name>_layers}, \verb{<name>_selected_roi},
-\verb{<name>_selected_rois}, \verb{<name>_selected_object}, \verb{<name>_history}, \verb{<name>_logs}, \verb{<name>_tile_preview},
+\verb{<name>_selected_rois}, \verb{<name>_selected_object},
+\verb{<name>_annotation_spots},
+\verb{<name>_history}, \verb{<name>_logs}, \verb{<name>_tile_preview},
 \verb{<name>_last_segmentation}, and \verb{<name>_last_event} are refreshed after
 every browser sync or R-side measurement update.}
 
@@ -183,8 +198,8 @@ CellPhenotyper viewers to calculate nearest-neighbour proximity from
 spots/cells inside one annotation to spots/cells inside another annotation.}
 
 \item{proximity_context}{Internal live proximity sources. Advanced users can
-pass \code{wsi_proximity_context()}; ordinary Seurat/Giotto/
-SpatialExperiment and CellPhenotyper viewer helpers set this automatically.}
+pass \code{wsi_proximity_context()}; ordinary Seurat/Giotto/SpatialExperiment
+and CellPhenotyper viewer helpers set this automatically.}
 
 \item{project_tile_sources}{Optional dynamic tile sources used only by
 Project-panel image/section entries. These sources are served by the live
@@ -208,8 +223,8 @@ to the console; synced objects remain in \code{envir}.}
 \item{autosave_overwrite}{Whether autosave may update an existing
 \code{.wsiproject} index and sidecar files.}
 
-\item{stardist}{Logical retained for old scripts. If \code{TRUE}, wsiTools
-starts an optional selected-ROI cell-segmentation endpoint for StarDist H&E,
+\item{stardist}{Logical retained for old scripts. If \code{TRUE}, wsiTools starts
+an optional selected-ROI cell-segmentation endpoint for StarDist H&E,
 StarDist IHC, and Mesmer DAPI presets.}
 
 \item{stardist_output_dir, stardist_host, stardist_port, stardist_path, stardist_max_tries}{Segmentation endpoint settings.}
@@ -237,13 +252,15 @@ A \code{wsi_viewer_session} object, invisibly. The object keeps the
 bridge fields (\code{url}, \code{html}, \code{state}) and provides live-session helper
 methods:
 \code{on()}, \code{off()}, \code{list_callbacks()}, \code{get_state()}, \code{get_rois()}, \code{get_selected_roi()}, \code{get_selected_rois()},
-\code{get_selected_object()}, \code{get_selected_spots()}, \code{get_spot_annotation_table()}, \code{get_measurements()}, \code{get_roi_summary()}, \code{get_cell_summary()},
+\code{get_selected_object()},
+\code{get_measurements()}, \code{get_roi_summary()}, \code{get_cell_summary()},
 \code{get_class_summary()}, \code{get_ihc_summary()}, \code{get_ihc_class_summary()},
-\code{get_segmentation()}, \code{get_layers()}, \code{get_annotation_spots()}, \code{get_history()}, \code{get_logs()}, \code{get_tile_preview()}, \code{get_prediction()}, \code{get_proximity()},
+\code{get_segmentation()}, \code{get_layers()}, \code{get_annotation_spots()},
+\code{get_history()}, \code{get_logs()}, \code{get_tile_preview()}, \code{get_prediction()}, \code{get_proximity()},
 \code{list_layers()}, \code{get_events()}, \code{add_rois()}, \code{add_segmentation()},
 \code{add_layer()}, \code{set_layer_visible()}, \code{remove_layer()},
-\code{colour_spots_by_gene()}, \code{measure_ihc_intensity()},
-\code{preview_tiles()}, \code{clear_tile_preview()}, \code{extract_tile_preview()}, \code{run_segmentation_async()},
+\code{measure_ihc_intensity()},
+\code{preview_tiles()}, \code{clear_tile_preview()}, \code{extract_tile_preview()},
 \code{save_project()},
 \code{service()}, and \code{stop()}.
 }
@@ -256,20 +273,23 @@ session. ROI area, cell-density, cell, stain-measurement, and class-summary
 tables are refreshed as ordinary R data frames whenever ROI or segmentation
 state changes. The returned object is a live session with convenience methods
 such as \code{capabilities()}, \code{get_rois()}, \code{get_selected_roi()}, \code{get_selected_rois()},
-\code{get_selected_object()}, \code{get_selected_spots()}, \code{get_spot_annotation_table()},
+\code{get_selected_object()}, \code{get_selected_spots()},
+\code{get_spot_annotation_table()},
 \code{get_measurements()}, \code{get_roi_summary()}, \code{get_cell_summary()}, \code{get_class_summary()},
 \code{get_ihc_summary()}, \code{get_ihc_class_summary()}, \code{get_segmentation()},
-\code{get_layers()}, \code{get_annotation_spots()}, \code{get_history()}, \code{get_logs()}, \code{get_tile_preview()}, \code{get_prediction()}, \code{get_proximity()},
-\code{colour_spots_by_gene()}, \code{add_rois()}, \code{add_segmentation()}, \code{measure_ihc_intensity()},
+\code{get_layers()}, \code{get_annotation_spots()}, \code{get_history()}, \code{get_logs()}, \code{get_tile_preview()},
+\code{colour_spots_by_gene()},
+\code{add_rois()}, \code{add_segmentation()}, \code{measure_ihc_intensity()},
 \code{add_layer()}, \code{set_layer_visible()}, \code{preview_tiles()},
 \code{extract_tile_preview()}, \code{list_jobs()},
-\code{run_segmentation_async()}, \code{run_tiles_async()},
+\code{run_tiles_async()},
 \code{run_conversion_async()}, \code{run_pyramid_async()}, and \code{save_project()}.
 Async methods require the suggested \code{callr} package and return \code{wsi_job}
 objects with \code{status()} and \code{result()} methods. The state object
-is an environment, so it is updated in place as new events arrive. Selected-ROI
-cell segmentation remains optional: wsiTools crops only the selected ROI and
-calls configured external StarDist or Mesmer commands when requested.
+is an environment, so it is updated in place as new events arrive. Selected
+ROI StarDist/Cellpose launching is no longer provided by wsiTools; run cell
+segmentation separately with CellPhenotyper and open the resulting project or
+cell overlays in the viewer.
 }
 \details{
 This live bridge is optional and requires the suggested \code{httpuv} package.
@@ -321,3 +341,4 @@ session$on("segmentation_finished", function(cells) {
 })
 }
 }
+\keyword{internal}

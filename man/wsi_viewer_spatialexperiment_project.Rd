@@ -54,13 +54,14 @@ wsi_viewer_spatialexperiment_project(
 \code{wsi_slide} objects. Names are used as \code{sample_id} values when
 \code{sample_ids} is not supplied.}
 
-\item{linked}{Optional pre-linked spatial sections. Supplying \code{linked}
-skips the linking step.}
+\item{linked}{Optional \code{wsi_seurat_spatial} object, or named list of objects
+returned by \code{\link[=wsi_link_seurat_image]{wsi_link_seurat_image()}}. Supplying \code{linked} skips the
+linking step.}
 
 \item{sample_ids}{Sample identifiers matching a \code{sample_id}, \code{sample},
-\code{section}, or \code{image_id} column in \code{colData(spe)}. When \code{NULL},
-names on \code{images} are used; if those are missing, unique sample IDs are
-inferred from \code{colData(spe)} when their number matches \code{images}.}
+\code{section}, or \code{image_id} column in \code{colData(spe)}. When \code{NULL}, names on
+\code{images} are used; if those are missing, unique sample IDs are inferred
+from \code{colData(spe)} when their number matches \code{images}.}
 
 \item{image_names}{Optional image/section names stored in the linked objects.
 Defaults to \code{sample_ids}.}
@@ -69,48 +70,64 @@ Defaults to \code{sample_ids}.}
 
 \item{assay_name}{Optional assay name used for live gene expression lookup.}
 
-\item{reduction}{Dimensional reduction to extract, for example \code{"PCA"}.}
+\item{reduction}{Dimensional reduction to extract, for example \code{"pca"}.
+If the reduction is absent but spatial coordinates are available, the
+viewer uses the slide x/y coordinates as a fallback \code{"spatial"} plot.}
 
 \item{dims}{Two reduction dimensions to plot.}
 
-\item{coordinate_scale}{How to map spatial coordinates onto \code{image}.
-\code{"auto"} rescales from stored preview dimensions when available.
-\code{"none"} uses coordinates as supplied. \code{"custom"} uses
-\code{scale_x} and \code{scale_y}.}
+\item{coordinate_scale}{How to map Seurat image coordinates onto \code{image}.
+\code{"auto"} rescales from the stored Seurat image dimensions when coordinates
+appear to be in that preview space. \code{"none"} uses coordinates as supplied.
+\code{"fullres"} treats coordinates as 10x full-resolution pixels and only
+applies a final scale if the external image dimensions differ from the 10x
+inferred full-resolution dimensions. \code{"hires"} and \code{"lowres"} convert from
+10x hires/lowres preview pixels back to full-resolution pixels.
+\code{"seurat_image"} always rescales from the stored Seurat image dimensions.
+\code{"custom"} uses \code{scale_x} and \code{scale_y}.}
 
 \item{scale_x, scale_y}{Custom coordinate scale factors used when
 \code{coordinate_scale = "custom"}.}
 
 \item{coordinate_flip}{Orientation flip applied after coordinate scaling and
-before rotation. Choices are \code{"none"}, \code{"vertical"}, and
-\code{"horizontal"}.}
+before rotation. Choices are \code{"none"}, \code{"vertical"} (\code{y1 = -y}, displayed
+as \code{image_height - y}) and \code{"horizontal"} (\code{x1 = -x}, displayed as
+\code{image_width - x}). The misspelling \code{"verticcal"} is accepted as an alias.}
 
 \item{coordinate_rotation}{Clockwise rotation applied after
-\code{coordinate_flip}. Choices are \code{0}, \code{90}, \code{180}, and
-\code{270} degrees.}
+\code{coordinate_flip}. Choices are \code{0}, \code{90}, \code{180}, and \code{270} degrees.}
 
 \item{coordinate_transform}{Legacy one-step orientation transform kept for
 backwards compatibility. Prefer \code{coordinate_flip} and
-\code{coordinate_rotation} for new code.}
+\code{coordinate_rotation} for new code. For example, the old
+\code{"x_neg_y_y_neg_x"} transform is equivalent to
+\code{coordinate_flip = "horizontal"} and \code{coordinate_rotation = 90}.}
 
-\item{spot_genes}{Optional character vector of gene names to extract and send
-to the viewer for spot colouring. Only these genes are embedded in static HTML
-viewers.}
+\item{spot_genes}{Optional character vector of gene names to extract and
+send to the viewer for spot colouring. Only these genes are embedded in the
+viewer payload; the full expression matrix is never copied into the
+browser. In live mode, \code{\link[=wsi_viewer_seurat]{wsi_viewer_seurat()}} can instead retrieve one
+selected gene at a time from the active R session, so \code{spot_genes} may be
+left \code{NULL}.}
 
 \item{default_gene}{Optional gene name used as the initial spot colour
-variable.}
+variable. The gene is automatically added to \code{spot_genes} when needed.}
 
-\item{spot_radius}{Spot marker radius, in slide pixels.}
+\item{spot_radius}{Spot marker radius, in slide pixels. When \code{NULL}, an
+estimate is taken from Seurat scale factors when available.}
 
-\item{max_points}{Maximum number of spots to keep in the browser payload.}
+\item{max_points}{Maximum number of spots/cells to keep in the linked
+browser payload. The default keeps all coordinates and the viewer culls
+by viewport while drawing. Set a smaller value only when an intentionally
+sampled static payload is needed.}
 
 \item{colour_by}{Spot colour mode. \code{"component_1"} colours by the first
-plotted reduction component; \code{"gene"} colours by \code{default_gene};
-\code{"none"} uses one colour.}
+plotted reduction component; \code{"gene"} colours by \code{default_gene}; \code{"none"}
+uses one colour.}
 
-\item{mode}{Viewer mode. \code{"tiles"} uses prebuilt Deep Zoom tiles and is
-recommended for high-resolution tissue images. \code{"thumbnail"} is useful for
-quick tests and mock slides.}
+\item{mode}{Viewer mode. \code{"tiles"} uses prebuilt Deep Zoom tiles and is the
+recommended mode for real WSI or high-resolution tissue images.
+\code{"thumbnail"} is useful for quick tests and mock slides.}
 
 \item{live}{Use \code{\link[=wsi_viewer_live]{wsi_viewer_live()}} by default so the project can synchronize
 annotations, selections, measurements, and spot tables back to R. Set

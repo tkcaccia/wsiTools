@@ -17,7 +17,6 @@ Description: A lightweight R toolkit for memory-efficient whole-slide image
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.2
 Depends:
     R (>= 4.1)
 Imports:
@@ -29,12 +28,16 @@ Imports:
     utils
 Suggests:
     callr,
+    clinical,
     e1071,
-    knitr,
     httpuv,
+    knitr,
     magick,
+    Matrix,
     pkgdown,
     rmarkdown,
+    S4Vectors,
+    SeuratObject,
     SingleCellExperiment,
     sf,
     SpatialExperiment,
@@ -46,3 +49,4 @@ SystemRequirements: None required for installation. Optional runtime tools:
     local web services for interactive workflows.
 Config/testthat/edition: 3
 VignetteBuilder: knitr
+Config/roxygen2/version: 8.0.0

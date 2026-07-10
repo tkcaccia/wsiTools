@@ -905,6 +905,7 @@ wsi_install_stardist <- function(method = c("auto", "conda", "pip", "manual"),
 }
 
 #' @keywords internal
+#' @export
 print.wsi_stardist_installation <- function(x, ...) {
   cat("<wsi_stardist_installation>\n")
   cat(sprintf("  method:    %s\n", x$method))

@@ -2,20 +2,19 @@
 % Please edit documentation in R/segmentation.R
 \name{wsi_has_stardist}
 \alias{wsi_has_stardist}
-\alias{wsi_has_mesmer}
-\title{Check optional cell segmentation engines}
+\title{Check StarDist command availability}
 \usage{
 wsi_has_stardist(command = NULL)
-
-wsi_has_mesmer(command = NULL)
 }
 \arguments{
-\item{command}{Optional command path/name to check.}
+\item{command}{Optional command to check. If omitted, the
+\code{WSITOOLS_STARDIST_COMMAND} environment variable is used, followed by
+\code{stardist-predict2d} when present on \code{PATH}.}
 }
 \value{
 \code{TRUE} or \code{FALSE}.
 }
 \description{
-Checks whether optional external segmentation commands are available. These
-functions do not install or load StarDist, DeepCell, or Mesmer.
+Checks whether a StarDist command-line entry point is available. StarDist is
+optional and is never required to install or load wsiTools.
 }

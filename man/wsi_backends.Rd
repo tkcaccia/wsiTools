@@ -25,7 +25,6 @@ wsi_has_imagemagick()
 \item{python}{Optional Python executable used to check the legacy CZI
 preview bridge. When \code{NULL}, \code{WSITOOLS_CZI_PYTHON} and then \code{python3} are
 checked.}
-
 }
 \value{
 A data frame with backend name, installation status, version,

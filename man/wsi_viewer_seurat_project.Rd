@@ -25,7 +25,7 @@ wsi_viewer_seurat_project(
   spot_genes = NULL,
   default_gene = NULL,
   spot_radius = NULL,
-  max_points = 100000L,
+  max_points = .Machine$integer.max,
   colour_by = c("component_1", "gene", "none"),
   mode = c("tiles", "thumbnail"),
   live = TRUE,
@@ -77,7 +77,9 @@ only downsampled image coordinates.}
 CSV file. These files contain full-resolution pixel coordinates and are the
 preferred source for alignment to an external high-resolution image.}
 
-\item{reduction}{Dimensional reduction to extract, for example \code{"pca"}.}
+\item{reduction}{Dimensional reduction to extract, for example \code{"pca"}.
+If the reduction is absent but spatial coordinates are available, the
+viewer uses the slide x/y coordinates as a fallback \code{"spatial"} plot.}
 
 \item{dims}{Two reduction dimensions to plot.}
 
@@ -121,8 +123,10 @@ variable. The gene is automatically added to \code{spot_genes} when needed.}
 \item{spot_radius}{Spot marker radius, in slide pixels. When \code{NULL}, an
 estimate is taken from Seurat scale factors when available.}
 
-\item{max_points}{Maximum number of spots to keep in the browser payload.
-This protects interactive HTML viewers from very large objects.}
+\item{max_points}{Maximum number of spots/cells to keep in the linked
+browser payload. The default keeps all coordinates and the viewer culls
+by viewport while drawing. Set a smaller value only when an intentionally
+sampled static payload is needed.}
 
 \item{colour_by}{Spot colour mode. \code{"component_1"} colours by the first
 plotted reduction component; \code{"gene"} colours by \code{default_gene}; \code{"none"}
@@ -164,9 +168,10 @@ static HTML path.
 \code{wsi_viewer_seurat_project()} links several Seurat spatial images to their
 corresponding high-resolution tissue images and opens them as one wsiTools
 project. Each tissue section keeps its own spatial spot overlay, available
-reduction plots, annotations, and trajectories. In tiled mode, Deep Zoom tiles
-are generated for each source image with libvips so zooming can reach the full
-available image resolution without loading the complete image into R memory.
+reduction plots, annotations, and trajectories. In tiled mode, Deep Zoom
+tiles are generated for each source image with libvips so zooming can reach
+the full available image resolution without loading the complete image into R
+memory.
 }
 \examples{
 \dontrun{

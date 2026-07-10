@@ -17,8 +17,8 @@ Integer process status, invisibly.
 }
 \description{
 Provides a small dependency-free command-line interface around backend
-checks and GeoJSON coordinate
-translation. It is used by the installed \code{exec/wsitools} script and can also
+checks and GeoJSON coordinate translation. It is used by the installed
+\code{exec/wsitools} script and can also
 be called directly with \verb{Rscript -e 'wsiTools::wsi_cli()' ...}.
 }
 \examples{

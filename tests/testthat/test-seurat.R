@@ -48,7 +48,7 @@ test_that("Seurat spatial objects can be linked to high-resolution slide coordin
   expect_equal(layer$source_type, "seurat_spots")
   expect_equal(layer$type, "vector")
   expect_equal(layer$count, 3)
-  expect_equal(layer$metadata$display_mode, "adaptive_circles")
+  expect_equal(layer$metadata$display_mode, "all_coordinates_circles")
   expect_true(layer$metadata$vector_rendering)
   expect_equal(length(layer$items), 3)
   expect_true(all(vapply(layer$items, `[[`, character(1), "type") == "point"))
@@ -92,8 +92,9 @@ test_that("Seurat coordinate circle layers expose sampled browser points and pre
   expect_equal(layer$metadata$represented_count, 3)
   expect_equal(length(layer$items), 3)
   expect_equal(vapply(layer$items, `[[`, character(1), "barcode"), linked$spots$barcode)
-  expect_equal(layer$metadata$display_mode, "adaptive_circles")
-  expect_true(layer$metadata$lod$enabled)
+  expect_equal(layer$metadata$display_mode, "all_coordinates_circles")
+  expect_false(layer$metadata$lod$enabled)
+  expect_true(layer$metadata$lod$full_coordinates)
 })
 
 test_that("cell coordinate layers keep all browser points unless explicitly capped", {
@@ -368,7 +369,7 @@ test_that("Seurat spots can be coloured by selected gene expression values", {
 
   layer <- wsiTools:::wsi_seurat_spots_layer(linked)
   expect_equal(layer$type, "vector")
-  expect_equal(layer$metadata$display_mode, "adaptive_circles")
+  expect_equal(layer$metadata$display_mode, "all_coordinates_circles")
   expect_true(all(grepl("^#", vapply(layer$items, `[[`, character(1), "colour"))))
   expect_equal(linked$pca$points$gene_values[[2]]$Mbp, 2)
   expect_match(linked$spots$base_colour[[2]], "^#")
@@ -423,7 +424,7 @@ test_that("Seurat clustering metadata is detected and exposed to the viewer", {
 
   layer <- wsiTools:::wsi_seurat_spots_layer(linked)
   expect_equal(layer$type, "vector")
-  expect_equal(layer$metadata$display_mode, "adaptive_circles")
+  expect_equal(layer$metadata$display_mode, "all_coordinates_circles")
   expect_true(layer$metadata$vector_rendering)
   expect_equal(linked$pca$points$cluster_values[[1]]$seurat_clusters, "stroma")
 
@@ -1434,7 +1435,7 @@ test_that("live Seurat viewers prefer static tiles even when dynamic tiles are r
   expect_true(grepl("_tiles/slide_files", html, fixed = TRUE))
   expect_false(grepl("_spatial_masks/seurat_spots_deepzoom/slide_files", html, fixed = TRUE))
   expect_true(grepl('"source_type":"seurat_spots"', html, fixed = TRUE))
-  expect_true(grepl('"display_mode":"adaptive_circles"', html, fixed = TRUE))
+  expect_true(grepl('"display_mode":"all_coordinates_circles"', html, fixed = TRUE))
   expect_true(grepl('"vector_rendering":true', html, fixed = TRUE))
   expect_true(grepl('"opacity":1', html, fixed = TRUE))
   expect_true(grepl("densePointLayerStride", html, fixed = TRUE))

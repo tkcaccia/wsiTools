@@ -5,7 +5,11 @@
 \alias{wsi_demo_viewer}
 \title{Create a lightweight built-in demo project}
 \usage{
-wsi_demo_project(path = tempfile("wsiTools-demo-"), open = FALSE, overwrite = FALSE)
+wsi_demo_project(
+  path = tempfile("wsiTools-demo-"),
+  open = FALSE,
+  overwrite = FALSE
+)
 
 wsi_demo_viewer(
   path = tempfile("wsiTools-demo-"),
@@ -29,12 +33,13 @@ tile grid, spatial spots, and viewer path.
 \code{wsi_demo_project()} creates a tiny, self-contained demo directory that can
 be used immediately after installing wsiTools. It contains a mock slide,
 synthetic ROI GeoJSON, a tiny PNG/TIFF image pair, fake cell centroids, fake
-tile coordinates, fake spatial spots/expression, and an HTML viewer. The demo
-is generated on demand and does not ship large image data with the package.
+tile coordinates, fake spatial spots/expression, and an HTML viewer. The
+demo is generated on demand and does not ship large image data with the
+package.
 }
 \details{
-\code{wsi_demo_viewer()} is the shortest onboarding command: it creates the
-demo project, opens the viewer when requested, and returns the demo object.
+\code{wsi_demo_viewer()} is the shortest onboarding command: it creates the demo
+project, opens the viewer when requested, and returns the demo object.
 }
 \examples{
 \dontrun{

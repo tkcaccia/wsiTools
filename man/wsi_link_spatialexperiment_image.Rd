@@ -44,7 +44,9 @@ SpatialExperiment objects before extracting coordinates and reductions.}
 
 \item{assay_name}{Optional assay name used for gene expression lookup.}
 
-\item{reduction}{Dimensional reduction to extract, for example \code{"pca"}.}
+\item{reduction}{Dimensional reduction to extract, for example \code{"pca"}.
+If the reduction is absent but spatial coordinates are available, the
+viewer uses the slide x/y coordinates as a fallback \code{"spatial"} plot.}
 
 \item{dims}{Two reduction dimensions to plot.}
 
@@ -88,8 +90,10 @@ variable. The gene is automatically added to \code{spot_genes} when needed.}
 \item{spot_radius}{Spot marker radius, in slide pixels. When \code{NULL}, an
 estimate is taken from Seurat scale factors when available.}
 
-\item{max_points}{Maximum number of spots to keep in the browser payload.
-This protects interactive HTML viewers from very large objects.}
+\item{max_points}{Maximum number of spots/cells to keep in the linked
+browser payload. The default keeps all coordinates and the viewer culls
+by viewport while drawing. Set a smaller value only when an intentionally
+sampled static payload is needed.}
 
 \item{colour_by}{Spot colour mode. \code{"component_1"} colours by the first
 plotted reduction component; \code{"gene"} colours by \code{default_gene}; \code{"none"}

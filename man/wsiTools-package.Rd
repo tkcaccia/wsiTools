@@ -6,10 +6,15 @@
 \alias{wsiTools-package}
 \title{wsiTools package}
 \description{
-A lightweight R toolkit for memory-efficient whole-slide image access and preprocessing through region-based reading, tiling, pyramidal image handling, conversion and export. The core uses light R dependencies plus a small native bridge for optional accelerated routines. OpenSlide, libvips, ZEISS libCZI, OME-Zarr metadata access, and live-viewer services are optional runtime capabilities discovered through explicit backend checks. The package avoids loading complete whole-slide images into R memory by default.
+A lightweight R toolkit for memory-efficient whole-slide image access and preprocessing through region-based reading, tiling, pyramidal image handling, conversion and export. The core uses light R dependencies plus a small native bridge for optional accelerated routines. OpenSlide, libvips, ZEISS libCZI, OME-Zarr pixel access, and web-service integrations are optional runtime capabilities discovered through explicit backend checks. The package avoids loading complete whole-slide images into R memory by default.
 }
 \author{
 \strong{Maintainer}: Stefano Caccia \email{tkcaccia@gmail.com}
+
+Authors:
+\itemize{
+  \item Stefano Caccia \email{tkcaccia@gmail.com}
+}
 
 }
 \keyword{internal}

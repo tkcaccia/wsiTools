@@ -25,6 +25,8 @@ wsi_viewer(
   tile_prefetch_margin = 1L,
   tile_cache_count = 768L,
   tile_prefetch_cache_count = 512L,
+  tile_image_loader_limit = 0L,
+  tile_timeout_ms = 30000L,
   progressive_preview = TRUE,
   tile_url_style = c("deepzoom", "slash"),
   max_level = NULL,
@@ -51,7 +53,10 @@ wsi_viewer(
   viewer_state_ws_url = NULL,
   seurat_gene_url = NULL,
   spatial_tile_export_url = NULL,
+  spatial_object_save_url = NULL,
   image_export_url = NULL,
+  geojson_mask_url = NULL,
+  dense_geojson_url = NULL,
   prediction_url = NULL,
   proximity_url = NULL,
   autosave_enabled = FALSE,
@@ -116,6 +121,11 @@ in the browser cache.}
 \item{tile_prefetch_cache_count}{Maximum number of browser-side speculative
 prefetch tile images kept by wsiTools.}
 
+\item{tile_image_loader_limit}{Maximum number of concurrent OpenSeadragon
+tile image loads. Use \code{0} to let OpenSeadragon choose its default.}
+
+\item{tile_timeout_ms}{Timeout in milliseconds for browser tile image loads.}
+
 \item{progressive_preview}{Whether tiled viewers should keep the
 low-resolution navigator preview behind the tile canvas while sharper
 tiles stream in. This improves perceived opening speed for very large WSI
@@ -155,7 +165,8 @@ a time.}
 menu.}
 
 \item{base_layer_visible, base_layer_opacity}{Initial visibility and opacity
-for the base image layer.}
+for the base tissue/image layer. These are useful when checking tiled
+masks or other overlays independently from the base image.}
 
 \item{hematoxylin, hrp}{RGB optical-density vectors used when
 \code{stain = "ihc"} and \code{channels} is not supplied.}
@@ -189,16 +200,26 @@ unless a compatible endpoint is supplied manually.}
 Giotto, and SpatialExperiment menus to export spot-centered tiles from R.
 Static viewers can preview tile boxes but cannot write local image files.}
 
+\item{spatial_object_save_url}{Optional live HTTP endpoint used by Seurat,
+Giotto, and SpatialExperiment menus to save a full registered spatial
+object or coordinate CSV from R.}
+
 \item{image_export_url}{Optional live HTTP endpoint used by the viewer to
 export the current viewport or selected annotation bounding box as
 PNG/JPEG/TIFF through R.}
+
+\item{geojson_mask_url}{Optional live HTTP endpoint used by the viewer to
+rasterize dense GeoJSON annotation files into tiled mask overlays.}
+
+\item{dense_geojson_url}{Optional live HTTP endpoint used by the viewer to
+load dense GeoJSON annotations progressively for visible regions.}
 
 \item{prediction_url}{Optional live HTTP endpoint used by the Prediction menu
 to run optional \code{fastPLS} PLS-LDA from annotation-defined training/test
 sets in the active R session.}
 
-\item{proximity_url}{Optional live HTTP endpoint used by the Trajectories menu
-to calculate nearest-neighbour proximity from spots/cells inside one
+\item{proximity_url}{Optional live HTTP endpoint used by the Trajectories
+menu to calculate nearest-neighbour proximity from spots/cells inside one
 annotation to spots/cells inside another annotation in the active R session.}
 
 \item{autosave_enabled}{Whether the viewer should periodically sync state to
@@ -251,12 +272,12 @@ annotations, GeoJSON overlays, view aids, and optional stains. These cover
 pan and annotation modes, fit and 1:1 zoom, ROI visibility and label toggles, ROI
 opacity, ROI previous/next navigation, a left-side annotation manager with
 GeoJSON geometry listing, visibility toggles, lock/unlock, colour editing,
-name/class editing, duplicate/delete, zoom-to-ROI, selected-ROI export,
+category editing, duplicate/delete, zoom-to-ROI, selected-ROI export,
 browser-side GeoJSON import, crosshair display, polygon drawing,
 brush-style annotation painting with a brush-size slider,
 selected-ROI extension, platform-aware brush removal (\code{Alt} on Windows/Linux
 and \code{Command} on macOS), hole filling, selected-ROI vertex editing,
-name/class reassignment including custom annotation categories, 10-step
+category reassignment including custom annotation categories, 10-step
 \code{Ctrl+Z} undo and \code{Ctrl+Shift+Z}/\code{Ctrl+Y} redo for annotations,
 trajectories, and closed project images, CellPhenotyper cell overlays,
 distance measurement in pixels and micrometres when MPP metadata is

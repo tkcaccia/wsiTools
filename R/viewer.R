@@ -4658,6 +4658,10 @@ wsi_tiled_viewer_html <- function(config) {
 #' @param image_export_url Optional live HTTP endpoint used by the viewer to
 #'   export the current viewport or selected annotation bounding box as
 #'   PNG/JPEG/TIFF through R.
+#' @param geojson_mask_url Optional live HTTP endpoint used by the viewer to
+#'   rasterize dense GeoJSON annotation files into tiled mask overlays.
+#' @param dense_geojson_url Optional live HTTP endpoint used by the viewer to
+#'   load dense GeoJSON annotations progressively for visible regions.
 #' @param prediction_url Optional live HTTP endpoint used by the Prediction menu
 #'   to run optional `fastPLS` PLS-LDA from annotation-defined training/test
 #'   sets in the active R session.

@@ -37,15 +37,15 @@ Invisibly returns a \code{wsi_diagnose} list.
 \description{
 \code{wsi_diagnose()} prints a read-only support report intended for GitHub
 issues, remote desktops, and difficult installation sessions. It reports the
-operating system, R version, package version, backend table, executable paths,
-relevant environment variables, live viewer startup status, a local browser/R
-synchronization self-test when possible, and suggested fixes.
+operating system, R version, package version, backend table, executable
+paths, relevant environment variables, live viewer startup status, a local
+browser/R synchronization self-test when possible, and suggested fixes.
 }
 \details{
-The live synchronization self-test starts a temporary local \code{httpuv}
-endpoint and, when the optional \code{callr} package is available, asks a child
-R process to request that endpoint while the parent services the event loop. It
-does not open a browser, install tools, or modify the system.
+The live synchronization self-test starts a temporary local \code{httpuv} endpoint
+and, when the optional \code{callr} package is available, asks a child R process
+to request that endpoint while the parent services the event loop. It does
+not open a browser, install tools, or modify the system.
 }
 \examples{
 wsi_diagnose(live_test = FALSE)

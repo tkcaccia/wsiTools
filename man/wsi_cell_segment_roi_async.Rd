@@ -9,7 +9,8 @@ wsi_cell_segment_roi_async(image, roi, output_dir, ...)
 \arguments{
 \item{image}{A \code{wsi_slide} object or image path accepted by \code{\link[=wsi_open]{wsi_open()}}.}
 
-\item{roi}{A \code{wsi_roi} object.}
+\item{roi}{A \code{wsi_roi} object. When multiple ROIs are supplied, \code{roi_id}
+selects one; otherwise the first ROI is used.}
 
 \item{output_dir}{Directory for crops and segmentation outputs.}
 

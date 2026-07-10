@@ -26,7 +26,8 @@ otherwise a Python virtual environment via pip.}
 
 \item{tensorflow}{Whether to install TensorFlow with StarDist.}
 
-\item{install}{Whether to run the installation commands.}
+\item{install}{Whether to run the installation commands. Defaults to \code{TRUE}
+because this function is only called explicitly.}
 
 \item{ask}{Whether to ask before running commands.}
 
@@ -38,8 +39,8 @@ otherwise a Python virtual environment via pip.}
 attempted. StarDist commonly pulls in a large TensorFlow stack.}
 }
 \value{
-A \code{wsi_stardist_installation} object with the command plan and wrapper
-path.
+A \code{wsi_stardist_installation} object with the command plan and
+wrapper path.
 }
 \description{
 Installs or configures an optional StarDist command wrapper for selected-ROI

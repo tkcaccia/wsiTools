@@ -9,7 +9,7 @@ wsi_viewer_seurat(
   image,
   linked = NULL,
   live = TRUE,
-  dynamic_tiles = live,
+  dynamic_tiles = FALSE,
   show_spots = TRUE,
   mode = c("tiles", "thumbnail"),
   output = NULL,
@@ -29,10 +29,16 @@ wsi_viewer_seurat(
 default is \code{TRUE} so R and the browser stay synchronized while the session
 is active; set \code{live = FALSE} to write a static HTML viewer.}
 
-\item{dynamic_tiles}{When \code{live = TRUE}, serve the image as dynamic tiles.}
+\item{dynamic_tiles}{When \code{live = TRUE}, serve the image as dynamic tiles.
+The default is \code{FALSE}: live synchronization stays active, while the base
+image and dense spatial masks use prebuilt Deep Zoom tiles for smoother
+zooming and panning. Use \code{TRUE} only as a fallback when prebuilt tiles
+cannot be created.}
 
 \item{show_spots}{Whether to draw the spatial spot layer on top of the
-image.}
+tissue image. Set this to \code{FALSE} for very dense assays such as Visium HD
+when a tiled mask or other aggregate layer is more appropriate than sending
+sampled spots to the browser.}
 
 \item{mode}{Viewer mode for static output. \code{"tiles"} gives full-resolution
 Deep Zoom viewing when the backend can create tiles.}
