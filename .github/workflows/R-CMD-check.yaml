@@ -50,6 +50,19 @@ jobs:
           r-version: ${{ matrix.config.r }}
           use-public-rspm: true
 
+      - name: Install macOS build libraries
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew install gettext
+          GETTEXT_PREFIX="$(brew --prefix gettext)"
+          mkdir -p ~/.R
+          {
+            echo "CPPFLAGS += -I${GETTEXT_PREFIX}/include"
+            echo "LDFLAGS += -L${GETTEXT_PREFIX}/lib"
+          } >> ~/.R/Makevars
+          echo "PKG_CONFIG_PATH=${GETTEXT_PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
+
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           extra-packages: any::rcmdcheck
