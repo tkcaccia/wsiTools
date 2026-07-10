@@ -217,6 +217,8 @@ test_that("Giotto viewer controls expose only present dimensional reductions", {
   expect_equal(vapply(linked$plots, function(x) x$reduction, character(1)), c("pca", "KODAMA"))
   expect_match(controls, ">PCA<", fixed = TRUE)
   expect_match(controls, ">KODAMA<", fixed = TRUE)
+  expect_match(controls, "seuratRegistrationOpen", fixed = TRUE)
+  expect_match(controls, "seuratRegistrationSave", fixed = TRUE)
   expect_false(grepl(">UMAP<", controls, fixed = TRUE))
 
   html <- tempfile(fileext = ".html")
@@ -231,8 +233,69 @@ test_that("Giotto viewer controls expose only present dimensional reductions", {
   )
   text <- paste(readLines(html, warn = FALSE), collapse = "\n")
   expect_match(text, "\"managed_analysis_project\":true", fixed = TRUE)
+  expect_match(text, "seuratRegistrationWindow", fixed = TRUE)
+  expect_match(text, "seuratRegistrationDragDrop", fixed = TRUE)
+  expect_match(text, "seuratRegistrationMoveStepUp", fixed = TRUE)
+  expect_match(text, "seuratRegistrationScaleStepUp", fixed = TRUE)
+  expect_match(text, "seuratRegistrationRotateSmallCw", fixed = TRUE)
+  expect_match(text, "restoreSeuratRegistrationUndo", fixed = TRUE)
+  expect_match(text, "Save spatial object", fixed = TRUE)
+  expect_match(text, "spatialObjectSaveDialog", fixed = TRUE)
+  expect_match(text, "spatial_object_save_url", fixed = TRUE)
+  expect_match(text, "spatial_registration_updated", fixed = TRUE)
+  expect_match(text, "spatial_object_save_requested", fixed = TRUE)
   expect_false(grepl("id=\"projectOpenImage\"", text, fixed = TRUE))
   expect_false(grepl("id=\"projectImageFile\"", text, fixed = TRUE))
+})
+
+test_that("spatial object save response writes CSV and full R object", {
+  registration_payload <- list(
+    format = "csv",
+    output = tempfile(fileext = ".csv"),
+    spatial_registration = list(
+      source = "Seurat",
+      count = 2L,
+      changed_count = 1L,
+      coordinates = list(
+        list(
+          source = "Seurat", layer_id = "seurat_spots", layer_name = "Seurat spots",
+          item_index = 1L, id = "spot_1", label = "spot_1",
+          x = 12, y = 34, original_x = 10, original_y = 30, changed = TRUE
+        ),
+        list(
+          source = "Seurat", layer_id = "seurat_spots", layer_name = "Seurat spots",
+          item_index = 2L, id = "spot_2", label = "spot_2",
+          x = 20, y = 40, original_x = 20, original_y = 40, changed = FALSE
+        )
+      )
+    )
+  )
+  spatial <- structure(
+    list(expression_source = list(object = list(
+      meta.data = data.frame(value = c(1, 2), row.names = c("spot_1", "spot_2"))
+    ))),
+    class = "wsi_seurat_spatial"
+  )
+  state <- wsiTools:::wsi_new_viewer_state(name = "save_response_state", envir = new.env(parent = emptyenv()))
+
+  csv_result <- wsiTools:::wsi_spatial_object_save_response(spatial, registration_payload, state = state)
+  expect_true(file.exists(csv_result$file))
+  csv <- utils::read.csv(csv_result$file, stringsAsFactors = FALSE)
+  expect_equal(nrow(csv), 2L)
+  expect_equal(csv$id, c("spot_1", "spot_2"))
+  expect_equal(nrow(state$spatial_registration), 2L)
+
+  rds_path <- tempfile(fileext = ".rds")
+  rds_payload <- registration_payload
+  rds_payload$format <- "rds"
+  rds_payload$output <- rds_path
+  rds_result <- wsiTools:::wsi_spatial_object_save_response(spatial, rds_payload, state = state)
+  expect_true(file.exists(rds_result$file))
+  saved <- readRDS(rds_result$file)
+  expect_equal(saved$meta.data$registered_x, c(12, 20))
+  expect_equal(saved$meta.data$registered_y, c(34, 40))
+  expect_equal(saved$meta.data$wsi_registration_changed, c(TRUE, FALSE))
+  expect_s3_class(attr(saved, "wsi_spatial_registration"), "wsi_spatial_registration")
 })
 
 test_that("SpatialExperiment-like objects can be linked with explicit coordinates", {

@@ -68,6 +68,7 @@ wsi_new_viewer_state <- function(name = "wsi_viewer_live_state", envir = parent.
   state$kodama_selection <- list(labels = character(), count = 0L, matched_count = 0L)
   state$seurat_selection <- list(labels = character(), count = 0L, matched_count = 0L)
   state$annotation_spots <- wsi_empty_annotation_spots()
+  state$spatial_registration <- wsi_empty_spatial_registration()
   state$annotations <- list(dirty = FALSE, dirty_reason = "")
   state$history <- wsi_empty_annotation_history()
   state$logs <- wsi_empty_viewer_logs()
@@ -422,6 +423,8 @@ wsi_viewer_allowed_events <- function() {
     "grandqc_loaded", "grandqc_cleared",
     "kodama_cells_selected", "seurat_spots_selected", "seurat_gene_coloured",
     "seurat_cluster_coloured", "seurat_plot_scope_changed",
+    "spatial_registration_updated", "spatial_registration_saved",
+    "spatial_object_save_requested",
     "prediction_started", "prediction_finished", "prediction_failed",
     "prediction_cleared",
     "proximity_started", "proximity_finished", "proximity_failed",
@@ -1449,6 +1452,25 @@ wsi_empty_annotation_spots <- function() {
   out
 }
 
+wsi_empty_spatial_registration <- function() {
+  out <- data.frame(
+    source = character(),
+    layer_id = character(),
+    layer_name = character(),
+    item_index = integer(),
+    id = character(),
+    label = character(),
+    x = numeric(),
+    y = numeric(),
+    original_x = numeric(),
+    original_y = numeric(),
+    changed = logical(),
+    stringsAsFactors = FALSE
+  )
+  class(out) <- c("wsi_spatial_registration", class(out))
+  out
+}
+
 wsi_payload_value <- function(row, name, default = NA_character_) {
   if (!is.list(row) || is.null(row[[name]])) {
     return(default)
@@ -1485,6 +1507,18 @@ wsi_payload_integer <- function(row, name) {
     return(NA_integer_)
   }
   value[[1L]]
+}
+
+wsi_payload_logical <- function(row, name) {
+  value <- wsi_payload_value(row, name, default = NA)
+  if (is.logical(value)) {
+    return(isTRUE(value[[1L]]))
+  }
+  if (is.numeric(value)) {
+    return(!is.na(value[[1L]]) && value[[1L]] != 0)
+  }
+  value <- tolower(as.character(value[[1L]] %||% ""))
+  value %in% c("true", "t", "1", "yes", "y")
 }
 
 wsi_annotation_spots_from_payload <- function(x) {
@@ -1531,6 +1565,242 @@ wsi_annotation_spots_from_payload <- function(x) {
   out <- out[, columns, drop = FALSE]
   class(out) <- c("wsi_annotation_spots", setdiff(class(out), "wsi_annotation_spots"))
   out
+}
+
+wsi_spatial_registration_from_payload <- function(x) {
+  if (is.null(x) || !length(x)) {
+    return(wsi_empty_spatial_registration())
+  }
+  if (is.list(x) && !is.null(x$coordinates)) {
+    x <- x$coordinates
+  }
+  columns <- names(wsi_empty_spatial_registration())
+  if (is.data.frame(x)) {
+    out <- as.data.frame(x, stringsAsFactors = FALSE)
+    for (column in setdiff(columns, names(out))) {
+      out[[column]] <- NA
+    }
+    out <- out[, columns, drop = FALSE]
+  } else {
+    rows <- if (is.list(x) && !is.null(names(x)) && any(names(x) %in% columns)) {
+      list(x)
+    } else {
+      as.list(x)
+    }
+    if (!length(rows)) {
+      return(wsi_empty_spatial_registration())
+    }
+    out <- do.call(rbind, lapply(rows, function(row) {
+      data.frame(
+        source = wsi_payload_character(row, "source"),
+        layer_id = wsi_payload_character(row, "layer_id"),
+        layer_name = wsi_payload_character(row, "layer_name"),
+        item_index = wsi_payload_integer(row, "item_index"),
+        id = wsi_payload_character(row, "id"),
+        label = wsi_payload_character(row, "label"),
+        x = wsi_payload_numeric(row, "x"),
+        y = wsi_payload_numeric(row, "y"),
+        original_x = wsi_payload_numeric(row, "original_x"),
+        original_y = wsi_payload_numeric(row, "original_y"),
+        changed = wsi_payload_logical(row, "changed"),
+        stringsAsFactors = FALSE
+      )
+    }))
+  }
+  out$item_index <- suppressWarnings(as.integer(out$item_index))
+  for (column in c("source", "layer_id", "layer_name", "id", "label")) {
+    out[[column]] <- as.character(out[[column]])
+  }
+  for (column in c("x", "y", "original_x", "original_y")) {
+    out[[column]] <- suppressWarnings(as.numeric(out[[column]]))
+  }
+  out$changed <- as.logical(out$changed)
+  out <- out[, columns, drop = FALSE]
+  class(out) <- c("wsi_spatial_registration", setdiff(class(out), "wsi_spatial_registration"))
+  out
+}
+
+wsi_spatial_object_save_format <- function(format) {
+  format <- tolower(as.character(format %||% "rds")[[1L]])
+  if (!format %in% c("rds", "csv")) {
+    wsi_abort("Spatial object save `format` must be `rds` or `csv`.")
+  }
+  format
+}
+
+wsi_spatial_object_save_path <- function(path, format) {
+  if (!is.character(path) || length(path) != 1L || is.na(path) || !nzchar(trimws(path))) {
+    wsi_abort("Choose or type an output path before saving the spatial object.")
+  }
+  path <- path.expand(trimws(path))
+  parent <- dirname(path)
+  if (!dir.exists(parent)) {
+    dir.create(parent, recursive = TRUE, showWarnings = FALSE)
+  }
+  if (!dir.exists(parent)) {
+    wsi_abort(sprintf("Could not create output directory: %s", parent))
+  }
+  ext <- tolower(tools::file_ext(path))
+  expected <- if (identical(format, "csv")) "csv" else "rds"
+  if (!nzchar(ext)) {
+    path <- paste0(path, ".", expected)
+  } else if (!identical(ext, expected)) {
+    wsi_abort(sprintf("Output path must end in .%s for %s export.", expected, toupper(format)))
+  }
+  normalizePath(path, winslash = "/", mustWork = FALSE)
+}
+
+wsi_spatial_object_registration_table <- function(payload) {
+  reg <- wsi_spatial_registration_from_payload(payload$spatial_registration %||% payload)
+  reg <- reg[is.finite(reg$x) & is.finite(reg$y) & nzchar(reg$id), , drop = FALSE]
+  row.names(reg) <- NULL
+  reg
+}
+
+wsi_spatial_object_payload_source <- function(spatial) {
+  if (inherits(spatial, "wsi_seurat_spatial") || inherits(spatial, "wsi_spatial_object")) {
+    return(spatial)
+  }
+  if (is.list(spatial) && inherits(spatial$spatial, "wsi_seurat_spatial")) {
+    return(spatial$spatial)
+  }
+  spatial
+}
+
+wsi_spatial_object_from_source <- function(spatial) {
+  source <- wsi_spatial_object_payload_source(spatial)
+  if (is.list(source) && !is.null(source$expression_source$object)) {
+    return(source$expression_source$object)
+  }
+  if (is.list(source) && !is.null(source$object)) {
+    return(source$object)
+  }
+  source
+}
+
+wsi_spatial_object_set_slot <- function(object, slot_name, value) {
+  if (isS4(object) && slot_name %in% methods::slotNames(object)) {
+    methods::slot(object, slot_name) <- value
+    return(object)
+  }
+  if (is.list(object)) {
+    object[[slot_name]] <- value
+    return(object)
+  }
+  attr(object, slot_name) <- value
+  object
+}
+
+wsi_spatial_object_metadata <- function(object) {
+  meta <- tryCatch(wsi_seurat_slot(object, "meta.data"), error = function(err) NULL)
+  if (is.null(meta) && is.list(object)) {
+    meta <- object$meta.data %||% object$meta_data %||% object$metadata %||% NULL
+  }
+  if (is.null(meta) || !is.data.frame(meta)) {
+    return(NULL)
+  }
+  as.data.frame(meta, stringsAsFactors = FALSE)
+}
+
+wsi_spatial_object_with_registration <- function(spatial, registration) {
+  object <- wsi_spatial_object_from_source(spatial)
+  if (is.null(object)) {
+    wsi_abort("No live spatial object is attached to this viewer session.")
+  }
+  registration <- as.data.frame(registration, stringsAsFactors = FALSE)
+  row.names(registration) <- NULL
+  class(registration) <- c("wsi_spatial_registration", setdiff(class(registration), "wsi_spatial_registration"))
+  updated <- object
+  meta <- wsi_spatial_object_metadata(updated)
+  matched <- 0L
+  if (!is.null(meta) && nrow(meta) && nrow(registration)) {
+    ids <- rownames(meta) %||% as.character(seq_len(nrow(meta)))
+    candidates <- unique(c(
+      "barcode", "barcodes", "cell", "cells", "cell_id", "cellid",
+      "spot", "spot_id", "feature_id", "id"
+    ))
+    for (candidate in candidates) {
+      if (candidate %in% names(meta)) {
+        ids <- as.character(meta[[candidate]])
+        break
+      }
+    }
+    key <- as.character(registration$id)
+    idx <- match(ids, key)
+    matched <- sum(!is.na(idx))
+    meta$registered_x <- NA_real_
+    meta$registered_y <- NA_real_
+    meta$wsi_registered_x <- NA_real_
+    meta$wsi_registered_y <- NA_real_
+    meta$wsi_registration_changed <- FALSE
+    meta$wsi_registration_source <- NA_character_
+    if (matched > 0L) {
+      hit <- !is.na(idx)
+      meta$registered_x[hit] <- registration$x[idx[hit]]
+      meta$registered_y[hit] <- registration$y[idx[hit]]
+      meta$wsi_registered_x[hit] <- registration$x[idx[hit]]
+      meta$wsi_registered_y[hit] <- registration$y[idx[hit]]
+      meta$wsi_registration_changed[hit] <- as.logical(registration$changed[idx[hit]])
+      meta$wsi_registration_source[hit] <- as.character(registration$source[idx[hit]])
+    }
+    updated <- wsi_spatial_object_set_slot(updated, "meta.data", meta)
+  }
+  misc <- tryCatch(wsi_seurat_slot(updated, "misc"), error = function(err) NULL)
+  if (is.null(misc) || !is.list(misc)) {
+    misc <- list()
+  }
+  misc$wsiTools <- misc$wsiTools %||% list()
+  misc$wsiTools$spatial_registration <- registration
+  misc$wsiTools$spatial_registration_saved_at <- Sys.time()
+  updated <- wsi_spatial_object_set_slot(updated, "misc", misc)
+  attr(updated, "wsi_spatial_registration") <- registration
+  list(object = updated, matched = matched)
+}
+
+wsi_spatial_object_save_response <- function(spatial, payload, state = NULL) {
+  if (!is.list(payload)) {
+    wsi_abort("Spatial object save request must be a JSON object.")
+  }
+  unknown <- setdiff(names(payload), c("format", "output", "path", "file", "spatial_registration"))
+  if (length(unknown)) {
+    wsi_abort(sprintf(
+      "Unsupported spatial object save field%s: %s.",
+      if (length(unknown) == 1L) "" else "s",
+      paste(unknown, collapse = ", ")
+    ))
+  }
+  format <- wsi_spatial_object_save_format(payload$format %||% "rds")
+  output <- wsi_spatial_object_save_path(payload$output %||% payload$path %||% payload$file, format)
+  registration <- wsi_spatial_object_registration_table(payload)
+  if (!nrow(registration)) {
+    wsi_abort("No registered spatial coordinates were supplied by the viewer.")
+  }
+  if (!is.null(state) && inherits(state, "wsi_viewer_state")) {
+    state$spatial_registration <- registration
+  }
+  if (identical(format, "csv")) {
+    utils::write.csv(registration, output, row.names = FALSE)
+    matched <- NA_integer_
+  } else {
+    updated <- wsi_spatial_object_with_registration(spatial, registration)
+    saveRDS(updated$object, output)
+    matched <- updated$matched
+  }
+  if (!is.null(state) && inherits(state, "wsi_viewer_state")) {
+    wsi_viewer_state_record_event(
+      state,
+      "spatial_object_save_requested",
+      list(file = output, format = format, count = nrow(registration), matched = matched)
+    )
+    wsi_assign_viewer_state(state)
+  }
+  list(
+    ok = TRUE,
+    file = output,
+    format = format,
+    count = nrow(registration),
+    matched = matched
+  )
 }
 
 wsi_rois_from_payload <- function(geojson) {
@@ -1694,6 +1964,7 @@ wsi_assign_viewer_state <- function(state) {
   assign(paste0(name, "_kodama_selection"), state$kodama_selection %||% list(labels = character(), count = 0L, matched_count = 0L), envir = envir)
   assign(paste0(name, "_seurat_selection"), state$seurat_selection %||% list(labels = character(), count = 0L, matched_count = 0L), envir = envir)
   assign(paste0(name, "_annotation_spots"), state$annotation_spots %||% wsi_empty_annotation_spots(), envir = envir)
+  assign(paste0(name, "_spatial_registration"), state$spatial_registration %||% wsi_empty_spatial_registration(), envir = envir)
   assign(paste0(name, "_last_event"), state$last_payload, envir = envir)
   invisible(state)
 }
@@ -1734,6 +2005,9 @@ wsi_viewer_state_apply <- function(state, payload) {
   }
   if (is.list(detail) && !is.null(detail$trajectory_profile)) {
     state$trajectory_profile <- wsi_trajectory_profile_from_payload(detail$trajectory_profile)
+  }
+  if (is.list(detail) && !is.null(detail$spatial_registration)) {
+    state$spatial_registration <- wsi_spatial_registration_from_payload(detail$spatial_registration)
   }
   state$selected_roi <- wsi_selected_roi_from_payload(payload[["selected_roi", exact = TRUE]])
   state$selected_rois <- wsi_selected_rois_from_payload(
@@ -2944,6 +3218,9 @@ wsi_attach_viewer_session_methods <- function(session) {
   session$get_annotation_spots <- function(service = TRUE) {
     session$get_state(service = service)$annotation_spots
   }
+  session$get_spatial_registration <- function(service = TRUE) {
+    session$get_state(service = service)$spatial_registration %||% wsi_empty_spatial_registration()
+  }
   session$get_spot_annotation_table <- function(service = TRUE) {
     session$get_annotation_spots(service = service)
   }
@@ -3936,6 +4213,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	                                          seurat = NULL,
 	                                          seurat_gene_path = "/seurat-gene",
 	                                          spatial_tile_path = "/spatial-tiles",
+	                                          spatial_object_save_path = "/spatial-object-save",
 	                                          image_export_path = "/image-export",
 	                                          image_export_dir = getwd(),
 	                                          image_export_max_pixels = 50000000,
@@ -3964,6 +4242,9 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	  }
 	  if (!startsWith(spatial_tile_path, "/")) {
 	    spatial_tile_path <- paste0("/", spatial_tile_path)
+	  }
+	  if (!startsWith(spatial_object_save_path, "/")) {
+	    spatial_object_save_path <- paste0("/", spatial_object_save_path)
 	  }
   if (!startsWith(image_export_path, "/")) {
     image_export_path <- paste0("/", image_export_path)
@@ -4308,6 +4589,26 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	    })
 	  }
 
+	  spatial_object_save_response <- function(req) {
+	    method <- req$REQUEST_METHOD %||% "GET"
+	    if (!identical(method, "POST")) {
+	      return(wsi_http_json_response(status = 405L, body = list(error = "Use POST for spatial object save.")))
+	    }
+	    if (is.null(seurat)) {
+	      return(wsi_http_json_response(status = 404L, body = list(error = "No live spatial object is attached to this viewer session.")))
+	    }
+	    tryCatch({
+	      body <- wsi_http_request_body(req)
+	      payload <- if (nzchar(body)) jsonlite::fromJSON(body, simplifyVector = FALSE) else list()
+	      result <- wsi_spatial_object_save_response(seurat, payload, state = state)
+	      response <- wsi_viewer_state_response(state)
+	      response$spatial_object_save <- result
+	      wsi_http_json_response(body = response)
+	    }, error = function(err) {
+	      wsi_http_json_response(status = 500L, body = list(ok = FALSE, error = conditionMessage(err)))
+	    })
+	  }
+
 	  image_export_response <- function(req) {
 	    method <- req$REQUEST_METHOD %||% "GET"
 	    if (!identical(method, "POST")) {
@@ -4450,6 +4751,9 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	      if (identical(request_path, spatial_tile_path)) {
 	        return(spatial_tile_response(req))
 	      }
+	      if (identical(request_path, spatial_object_save_path)) {
+	        return(spatial_object_save_response(req))
+	      }
 	      if (identical(request_path, image_export_path)) {
 	        return(image_export_response(req))
 	      }
@@ -4555,6 +4859,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	        tile_path = tile_path,
 	        seurat_gene_path = seurat_gene_path,
 	        spatial_tile_path = spatial_tile_path,
+	        spatial_object_save_path = spatial_object_save_path,
 	        image_export_path = image_export_path,
 	        geojson_mask_path = geojson_mask_path,
 	        dense_geojson_path = dense_geojson_path,
@@ -4567,6 +4872,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
             NULL
           },
 	        spatial_tile_export_url = sprintf("http://%s:%d%s", host, candidate, spatial_tile_path),
+	        spatial_object_save_url = if (!is.null(seurat)) sprintf("http://%s:%d%s", host, candidate, spatial_object_save_path) else NULL,
 	        image_export_url = if (!is.null(slide)) sprintf("http://%s:%d%s", host, candidate, image_export_path) else NULL,
 	        geojson_mask_url = if (!is.null(slide)) sprintf("http://%s:%d%s", host, candidate, geojson_mask_path) else NULL,
 	        dense_geojson_url = sprintf("http://%s:%d%s", host, candidate, dense_geojson_path),
@@ -4861,6 +5167,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
 	                               dynamic_tile_path = "/tiles",
 	                               seurat_gene_path = "/seurat-gene",
 	                               spatial_tile_path = "/spatial-tiles",
+	                               spatial_object_save_path = "/spatial-object-save",
 	                               image_export_path = "/image-export",
 	                               image_export_dir = getwd(),
 	                               image_export_max_pixels = 50000000,
@@ -5026,6 +5333,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
 	    seurat = live_seurat,
 	    seurat_gene_path = seurat_gene_path,
 	    spatial_tile_path = spatial_tile_path,
+	    spatial_object_save_path = spatial_object_save_path,
 	    image_export_path = image_export_path,
 	    image_export_dir = image_export_dir,
 	    image_export_max_pixels = image_export_max_pixels,
@@ -5135,6 +5443,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
 	  dots$viewer_transport <- transport
 	  dots$seurat_gene_url <- bridge$seurat_gene_url %||% NULL
 	  dots$spatial_tile_export_url <- bridge$spatial_tile_export_url %||% NULL
+	  dots$spatial_object_save_url <- bridge$spatial_object_save_url %||% NULL
 	  dots$image_export_url <- bridge$image_export_url %||% NULL
 	  dots$geojson_mask_url <- bridge$geojson_mask_url %||% NULL
 	  dots$dense_geojson_url <- bridge$dense_geojson_url %||% NULL
@@ -5279,6 +5588,7 @@ wsi_viewer_state <- function(x) {
     kodama_selection = state$kodama_selection %||% list(labels = character(), count = 0L, matched_count = 0L),
     seurat_selection = state$seurat_selection %||% list(labels = character(), count = 0L, matched_count = 0L),
     annotation_spots = state$annotation_spots %||% wsi_empty_annotation_spots(),
+    spatial_registration = state$spatial_registration %||% wsi_empty_spatial_registration(),
     tile_preview = state$tile_preview %||% wsi_empty_tile_preview(),
     prediction = state$prediction %||% wsi_empty_prediction_result(),
     proximity = state$proximity %||% wsi_empty_proximity_result(),
@@ -5388,7 +5698,7 @@ print.wsi_viewer_session <- function(x, ...) {
   if (!is.null(x$stardist_server)) {
     cat(sprintf("  stardist: %s\n", x$stardist_server$url))
   }
-  cat("  methods: capabilities(), on(), get_rois(), get_selected_roi(), get_selected_rois(), get_selected_object(), get_selected_spots(), get_spot_annotation_table(), get_annotation_spot_matrix(), get_measurements(), get_trajectories(), get_roi_summary(), get_cell_summary(), get_ihc_summary(), get_segmentation(), get_layers(), get_annotation_masks(), get_channel_settings(), get_kodama_selection(), get_annotation_spots(), get_history(), get_logs(), get_tile_preview(), get_prediction(), get_proximity(), get_proximity_stats(), get_trajectory_profile(), colour_spots_by_gene(), add_rois(), add_layer(), add_channel_source(), measure_ihc_intensity(), preview_tiles(), extract_tile_preview(), list_jobs(), run_tiles_async(), save_project(), autosave_start()\n")
+  cat("  methods: capabilities(), on(), get_rois(), get_selected_roi(), get_selected_rois(), get_selected_object(), get_selected_spots(), get_spot_annotation_table(), get_annotation_spot_matrix(), get_spatial_registration(), get_measurements(), get_trajectories(), get_roi_summary(), get_cell_summary(), get_ihc_summary(), get_segmentation(), get_layers(), get_annotation_masks(), get_channel_settings(), get_kodama_selection(), get_annotation_spots(), get_history(), get_logs(), get_tile_preview(), get_prediction(), get_proximity(), get_proximity_stats(), get_trajectory_profile(), colour_spots_by_gene(), add_rois(), add_layer(), add_channel_source(), measure_ihc_intensity(), preview_tiles(), extract_tile_preview(), list_jobs(), run_tiles_async(), save_project(), autosave_start()\n")
   cat("  stop with: wsi_viewer_stop(x)\n")
   invisible(x)
 }

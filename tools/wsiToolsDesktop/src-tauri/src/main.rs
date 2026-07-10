@@ -538,6 +538,37 @@ async fn save_viewer_file(
     .map_err(|err| format!("Viewer save task failed: {err}"))?
 }
 
+#[tauri::command]
+async fn choose_viewer_save_path(
+    app: AppHandle,
+    file_name: String,
+    filters: Vec<SaveFilter>,
+) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut dialog = app.dialog().file().set_file_name(file_name);
+        for filter in filters {
+            let extensions: Vec<&str> = filter
+                .extensions
+                .iter()
+                .map(|x| x.trim().trim_start_matches('.'))
+                .filter(|x| !x.is_empty())
+                .collect();
+            if !extensions.is_empty() {
+                dialog = dialog.add_filter(filter.name, &extensions);
+            }
+        }
+        let Some(path) = dialog.blocking_save_file() else {
+            return Ok(None);
+        };
+        let path = path
+            .into_path()
+            .map_err(|err| format!("Could not resolve selected save path: {err}"))?;
+        Ok(Some(path.to_string_lossy().to_string()))
+    })
+    .await
+    .map_err(|err| format!("Viewer save path task failed: {err}"))?
+}
+
 fn recent_log_tail(logs: &Arc<Mutex<Vec<String>>>) -> String {
     let guard = logs.lock().unwrap();
     let mut tail = guard.iter().rev().take(24).cloned().collect::<Vec<_>>();
@@ -1300,7 +1331,8 @@ fn main() {
             stop_r_viewer,
             viewer_logs,
             save_launcher_log,
-            save_viewer_file
+            save_viewer_file,
+            choose_viewer_save_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running wsiTools Desktop");

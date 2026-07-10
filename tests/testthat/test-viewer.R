@@ -571,7 +571,7 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "Brush annotation editing", fixed = TRUE)
   expect_match(html, "Edit ROI vertices or redraw smooth boundary curves", fixed = TRUE)
   expect_match(html, "Measure distance between two points", fixed = TRUE)
-  expect_match(html, "Undo annotation, trajectory, or closed-image edit", fixed = TRUE)
+  expect_match(html, "Undo annotation, trajectory, registration, or closed-image edit", fixed = TRUE)
   expect_match(html, "Redo annotation, trajectory, or closed-image edit", fixed = TRUE)
   expect_match(html, "Ctrl+S", fixed = TRUE)
   expect_match(html, "Ctrl+I", fixed = TRUE)
@@ -641,7 +641,8 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "pushAnnotationUndo('trajectory_added')", fixed = TRUE)
   expect_match(html, "pushAnnotationUndo('trajectories_cleared')", fixed = TRUE)
   expect_match(html, "mode==='trajectory'&&trajectoryDraft.length", fixed = TRUE)
-  expect_match(html, "undoTrajectoryPoint();return;}restoreAnnotationUndo", fixed = TRUE)
+  expect_match(html, "seuratRegistrationActive()&&restoreSeuratRegistrationUndo()", fixed = TRUE)
+  expect_match(html, "seuratRegistrationActive()&&restoreSeuratRegistrationRedo()", fixed = TRUE)
   expect_match(html, "annotation_undo", fixed = TRUE)
   expect_match(html, "annotation_redo", fixed = TRUE)
   expect_match(html, "Nothing to undo", fixed = TRUE)
@@ -1468,6 +1469,7 @@ test_that("live viewer sessions expose R-native helper methods and command queue
   expect_true(is.function(session$get_layers))
   expect_true(is.function(session$get_annotation_masks))
   expect_true(is.function(session$get_annotation_spots))
+  expect_true(is.function(session$get_spatial_registration))
   expect_true(is.function(session$get_history))
   expect_true(is.function(session$get_logs))
   expect_true(is.function(session$get_tile_preview))
@@ -2568,7 +2570,8 @@ test_that("viewer event validation allowlists live WebSocket events", {
     "segmentation_finished", "job_status", "project_image_reordered",
     "project_image_closed", "grandqc_loaded", "grandqc_cleared",
     "kodama_cells_selected", "seurat_cluster_coloured",
-    "seurat_plot_scope_changed",
+    "seurat_plot_scope_changed", "spatial_registration_saved",
+    "spatial_object_save_requested",
     "viewer_log_updated", "viewer_log_cleared", "viewer_log_exported",
     "multi_view_layout_updated", "multi_view_pane_replaced", "multi_view_sync_updated",
     "geojson_mask_overlay_created"
@@ -2604,6 +2607,71 @@ test_that("viewer event validation allowlists live WebSocket events", {
     event = "seurat_plot_scope_changed",
     detail = list(scope = "all", requested_scope = "all")
   )))
+  expect_silent(wsiTools:::wsi_viewer_validate_state_payload(list(
+    event = "spatial_registration_saved",
+    detail = list(spatial_registration = list(
+      source = "Seurat",
+      count = 2L,
+      changed_count = 1L,
+      coordinates = list(list(
+        source = "Seurat",
+        layer_id = "seurat_spots",
+        layer_name = "Seurat spots",
+        item_index = 1L,
+        id = "spot_1",
+        label = "spot_1",
+        x = 12,
+        y = 34,
+        original_x = 10,
+        original_y = 30,
+        changed = TRUE
+      ))
+    ))
+  )))
+  expect_silent(wsiTools:::wsi_viewer_validate_state_payload(list(
+    event = "spatial_object_save_requested",
+    detail = list(spatial_registration = list(
+      source = "Seurat",
+      count = 2L,
+      changed_count = 1L,
+      coordinates = list(list(
+        source = "Seurat",
+        layer_id = "seurat_spots",
+        layer_name = "Seurat spots",
+        item_index = 1L,
+        id = "spot_1",
+        label = "spot_1",
+        x = 12,
+        y = 34,
+        original_x = 10,
+        original_y = 30,
+        changed = TRUE
+      ))
+    ))
+  )))
+
+  state <- wsiTools:::wsi_new_viewer_state(name = "registration_test_state", envir = new.env(parent = emptyenv()))
+  wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "spatial_object_save_requested",
+    rois = list(type = "FeatureCollection", features = list()),
+    selected_rois = list(type = "FeatureCollection", features = list()),
+    detail = list(spatial_registration = list(coordinates = list(list(
+      source = "Seurat",
+      layer_id = "seurat_spots",
+      layer_name = "Seurat spots",
+      item_index = 1L,
+      id = "spot_1",
+      label = "spot_1",
+      x = 12,
+      y = 34,
+      original_x = 10,
+      original_y = 30,
+      changed = TRUE
+    ))))
+  ))
+  expect_equal(nrow(state$spatial_registration), 1L)
+  expect_equal(state$spatial_registration$id, "spot_1")
+  expect_true(state$spatial_registration$changed)
 })
 
 test_that("channel source API updates live viewer settings", {
