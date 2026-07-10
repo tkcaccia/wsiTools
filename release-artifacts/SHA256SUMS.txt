@@ -1,0 +1,1 @@
+1030f5796c10a8482c050006e47915bed82c5545540ae608e0ed163ff0620de3  release-artifacts/wsiTools-Desktop_0.1.1_macos_aarch64.dmg

@@ -1022,12 +1022,13 @@ wsi_seurat_spots_layer <- function(linked, visible = TRUE, opacity = 1) {
     scale_metadata = linked$scale_metadata %||% NULL,
     feature_count = feature_count,
     represented_count = length(items),
-    display_mode = "adaptive_circles",
+    display_mode = "all_coordinates_circles",
     vector_rendering = TRUE,
     lod = list(
-      enabled = TRUE,
-      far_sample_threshold = 10000L,
-      close_viewport_only = TRUE
+      enabled = FALSE,
+      full_coordinates = TRUE,
+      far_sample_threshold = .Machine$integer.max,
+      close_viewport_only = FALSE
     )
   )
   layer
