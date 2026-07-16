@@ -9,7 +9,7 @@ on:
       tag:
         description: "GitHub release tag to update"
         required: true
-        default: "desktop-v0.1.3"
+        default: "desktop-v0.1.4"
       upload_release:
         description: "Upload built installers to the GitHub release"
         required: true
@@ -81,6 +81,7 @@ jobs:
         working-directory: tools/wsiToolsDesktop
         run: |
           set -euo pipefail
+          rm -rf ../../release-artifacts
           mkdir -p ../../release-artifacts
           version="$(node -p "require('./package.json').version")"
           case "${{ runner.os }}" in
@@ -128,6 +129,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Prepare clean release directory
+        run: rm -rf release-artifacts
 
       - name: Download desktop installers
         uses: actions/download-artifact@v4
