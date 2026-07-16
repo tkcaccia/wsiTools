@@ -9,6 +9,17 @@ desktop_emit <- function(key, value) {
   flush(stdout())
 }
 
+desktop_stage <- function(stage, message) {
+  desktop_emit(
+    "STAGE",
+    paste(
+      gsub("[^a-z0-9_-]+", "_", tolower(as.character(stage %||% "working"))),
+      gsub("[\r\n\t]+", " ", as.character(message %||% "Working...")),
+      sep = "\t"
+    )
+  )
+}
+
 desktop_file_url <- function(path) {
   path <- normalizePath(path, winslash = "/", mustWork = FALSE)
   encoded <- utils::URLencode(path, reserved = FALSE)
@@ -122,7 +133,8 @@ desktop_open_czi_project <- function(image_paths, output, log_file, title = "wsi
     title = title,
     czi_preview = "lazy",
     sections = TRUE,
-    transport = "auto"
+    transport = "auto",
+    persistent_cache = TRUE
   )
   if (!inherits(viewer, "wsi_viewer_session")) {
     stop(
@@ -134,18 +146,43 @@ desktop_open_czi_project <- function(image_paths, output, log_file, title = "wsi
   viewer
 }
 
-desktop_http_response <- function(status, body = raw(), content_type = "text/plain; charset=utf-8") {
+desktop_http_response <- function(status, body = raw(), content_type = "text/plain; charset=utf-8",
+                                  cache_control = "no-store", etag = NULL) {
+  headers <- c(
+    "Content-Type" = content_type,
+    "Cache-Control" = cache_control
+  )
+  if (!is.null(etag) && nzchar(etag)) {
+    headers <- c(headers, "ETag" = etag)
+  }
   list(
     status = as.integer(status),
-    headers = c(
-      "Content-Type" = content_type,
-      "Cache-Control" = "no-store"
-    ),
+    headers = headers,
     body = body
   )
 }
 
-desktop_start_html_server <- function(html, host = "127.0.0.1", port = 8900L, max_tries = 100L) {
+desktop_static_cache_control <- function(path) {
+  ext <- tolower(tools::file_ext(path))
+  if (ext %in% c("jpg", "jpeg", "png", "webp", "dzi")) {
+    return("public, max-age=31536000, immutable")
+  }
+  if (ext %in% c("js", "css", "svg", "json", "geojson")) {
+    return("public, max-age=3600")
+  }
+  "no-store"
+}
+
+desktop_static_etag <- function(path) {
+  info <- suppressWarnings(file.info(path))
+  if (!nrow(info) || !is.finite(info$size[[1L]]) || is.na(info$mtime[[1L]])) {
+    return(NULL)
+  }
+  sprintf('"%s-%s"', format(info$size[[1L]], scientific = FALSE), as.integer(info$mtime[[1L]]))
+}
+
+desktop_start_html_server_in_process <- function(html, host = "127.0.0.1", port = 8900L,
+                                                 max_tries = 100L) {
   if (!requireNamespace("httpuv", quietly = TRUE)) {
     stop("The desktop HTML bridge requires the optional R package `httpuv`.", call. = FALSE)
   }
@@ -170,10 +207,24 @@ desktop_start_html_server <- function(html, host = "127.0.0.1", port = 8900L, ma
       if (!file.exists(candidate) || dir.exists(candidate)) {
         return(desktop_http_response(404L, charToRaw("Not found")))
       }
+      etag <- desktop_static_etag(candidate)
+      if (!is.null(etag) && identical(as.character(req$HTTP_IF_NONE_MATCH %||% ""), etag)) {
+        return(desktop_http_response(
+          304L,
+          raw(),
+          desktop_content_type(candidate),
+          desktop_static_cache_control(candidate),
+          etag
+        ))
+      }
       desktop_http_response(
         200L,
-        readBin(candidate, what = "raw", n = file.info(candidate)$size),
-        desktop_content_type(candidate)
+        if (identical(req$REQUEST_METHOD %||% "GET", "HEAD")) raw() else {
+          readBin(candidate, what = "raw", n = file.info(candidate)$size)
+        },
+        desktop_content_type(candidate),
+        desktop_static_cache_control(candidate),
+        etag
       )
     }
   )
@@ -181,12 +232,143 @@ desktop_start_html_server <- function(html, host = "127.0.0.1", port = 8900L, ma
     server <- try(httpuv::startServer(host, candidate, app), silent = TRUE)
     if (!inherits(server, "try-error")) {
       return(list(
+        mode = "in_process",
         server = server,
         url = sprintf("http://%s:%d/", host, candidate)
       ))
     }
   }
   stop("Could not start the desktop HTML server on localhost.", call. = FALSE)
+}
+
+desktop_start_html_server <- function(html, host = "127.0.0.1", port = 8900L, max_tries = 100L) {
+  html <- normalizePath(html, winslash = "/", mustWork = TRUE)
+  if (!requireNamespace("callr", quietly = TRUE) ||
+      tolower(Sys.getenv("WSITOOLS_DESKTOP_SEPARATE_STATIC_SERVER", "true")) %in%
+        c("0", "false", "no", "off")) {
+    return(desktop_start_html_server_in_process(html, host, port, max_tries))
+  }
+
+  root <- normalizePath(dirname(html), winslash = "/", mustWork = TRUE)
+  ready_file <- tempfile("wsitools-static-server-", tmpdir = root, fileext = ".port")
+  server_log <- tempfile("wsitools-static-server-", tmpdir = root, fileext = ".log")
+  process <- callr::r_bg(
+    func = function(root, index, host, port, max_tries, ready_file) {
+      if (!requireNamespace("httpuv", quietly = TRUE)) {
+        writeLines("ERROR\thttpuv is unavailable", ready_file, useBytes = TRUE)
+        return(invisible(NULL))
+      }
+      `%or%` <- function(x, y) if (is.null(x) || !length(x)) y else x
+      content_type <- function(path) {
+        switch(tolower(tools::file_ext(path)),
+          html = "text/html; charset=utf-8", htm = "text/html; charset=utf-8",
+          js = "application/javascript; charset=utf-8", css = "text/css; charset=utf-8",
+          json = "application/json; charset=utf-8", geojson = "application/geo+json; charset=utf-8",
+          png = "image/png", jpg = "image/jpeg", jpeg = "image/jpeg",
+          webp = "image/webp", svg = "image/svg+xml", dzi = "application/xml; charset=utf-8",
+          "application/octet-stream"
+        )
+      }
+      cache_control <- function(path) {
+        ext <- tolower(tools::file_ext(path))
+        if (ext %in% c("jpg", "jpeg", "png", "webp", "dzi")) {
+          return("public, max-age=31536000, immutable")
+        }
+        if (ext %in% c("js", "css", "svg", "json", "geojson")) {
+          return("public, max-age=3600")
+        }
+        "no-store"
+      }
+      response <- function(status, body = raw(), type = "text/plain; charset=utf-8",
+                           cache = "no-store", etag = NULL) {
+        headers <- list("Content-Type" = type, "Cache-Control" = cache)
+        if (!is.null(etag)) headers[["ETag"]] <- etag
+        list(status = as.integer(status), headers = headers, body = body)
+      }
+      app <- list(call = function(req) {
+        request_path <- utils::URLdecode(req$PATH_INFO %or% "/")
+        if (identical(request_path, "/") || !nzchar(request_path)) request_path <- paste0("/", index)
+        if (identical(request_path, "/favicon.ico")) return(response(204L))
+        relative <- sub("^/+", "", request_path)
+        candidate <- normalizePath(file.path(root, relative), winslash = "/", mustWork = FALSE)
+        if ((!startsWith(candidate, paste0(root, "/")) && !identical(candidate, root))) {
+          return(response(403L, charToRaw("Forbidden")))
+        }
+        if (!file.exists(candidate) || dir.exists(candidate)) {
+          return(response(404L, charToRaw("Not found")))
+        }
+        info <- file.info(candidate)
+        etag <- sprintf('"%s-%s"', format(info$size[[1L]], scientific = FALSE), as.integer(info$mtime[[1L]]))
+        type <- content_type(candidate)
+        cache <- cache_control(candidate)
+        if (identical(as.character(req$HTTP_IF_NONE_MATCH %or% ""), etag)) {
+          return(response(304L, raw(), type, cache, etag))
+        }
+        body <- if (identical(req$REQUEST_METHOD %or% "GET", "HEAD")) raw() else {
+          readBin(candidate, what = "raw", n = info$size[[1L]])
+        }
+        response(200L, body, type, cache, etag)
+      })
+      server <- NULL
+      chosen <- NA_integer_
+      for (candidate in seq.int(as.integer(port), as.integer(port) + as.integer(max_tries))) {
+        server <- try(httpuv::startServer(host, candidate, app), silent = TRUE)
+        if (!inherits(server, "try-error")) {
+          chosen <- candidate
+          break
+        }
+      }
+      if (!is.finite(chosen)) {
+        writeLines("ERROR\tno localhost port was available", ready_file, useBytes = TRUE)
+        return(invisible(NULL))
+      }
+      writeLines(paste("OK", chosen, sep = "\t"), ready_file, useBytes = TRUE)
+      on.exit(try(httpuv::stopServer(server), silent = TRUE), add = TRUE)
+      repeat {
+        httpuv::service(100L)
+        Sys.sleep(0.005)
+      }
+    },
+    args = list(
+      root = root,
+      index = basename(html),
+      host = host,
+      port = as.integer(port),
+      max_tries = as.integer(max_tries),
+      ready_file = ready_file
+    ),
+    stdout = server_log,
+    stderr = server_log,
+    supervise = TRUE
+  )
+  deadline <- Sys.time() + 8
+  while (!file.exists(ready_file) && isTRUE(process$is_alive()) && Sys.time() < deadline) {
+    Sys.sleep(0.04)
+  }
+  status <- if (file.exists(ready_file)) readLines(ready_file, warn = FALSE, n = 1L) else ""
+  fields <- strsplit(status, "\t", fixed = TRUE)[[1L]]
+  if (length(fields) >= 2L && identical(fields[[1L]], "OK")) {
+    return(list(
+      mode = "process",
+      process = process,
+      ready_file = ready_file,
+      log_file = server_log,
+      url = sprintf("http://%s:%d/", host, as.integer(fields[[2L]]))
+    ))
+  }
+  try(process$kill(), silent = TRUE)
+  unlink(c(ready_file, server_log), force = TRUE)
+  desktop_start_html_server_in_process(html, host, port, max_tries)
+}
+
+desktop_stop_html_server <- function(server) {
+  if (identical(server$mode %||% "", "process")) {
+    try(server$process$kill(), silent = TRUE)
+    unlink(c(server$ready_file %||% "", server$log_file %||% ""), force = TRUE)
+    return(invisible(TRUE))
+  }
+  try(httpuv::stopServer(server$server), silent = TRUE)
+  invisible(TRUE)
 }
 
 find_source_tree <- function() {
@@ -564,6 +746,31 @@ desktop_geojson_persistent_cache_file <- function(path, kind) {
   file.path(root, paste0(kind %||% "geojson", "_", desktop_simple_hash(key), ".rds"))
 }
 
+desktop_geojson_browser_copy <- function(path, output, kind) {
+  info <- suppressWarnings(file.info(path))
+  key <- paste(
+    normalizePath(path, winslash = "/", mustWork = FALSE),
+    suppressWarnings(as.numeric(info$size[[1L]])),
+    suppressWarnings(as.numeric(info$mtime[[1L]])),
+    sep = "|"
+  )
+  directory <- file.path(dirname(output), "dense_geojson_sources")
+  dir.create(directory, recursive = TRUE, showWarnings = FALSE)
+  stem <- gsub("[^A-Za-z0-9_.-]+", "_", tools::file_path_sans_ext(basename(path)))
+  target <- file.path(directory, paste0(kind %||% "geojson", "_", desktop_simple_hash(key), "_", stem, ".geojson"))
+  if (!file.exists(target) || !isTRUE(all.equal(file.info(target)$size, info$size, tolerance = 0))) {
+    unlink(target, force = TRUE)
+    linked <- isTRUE(tryCatch(file.link(path, target), error = function(err) FALSE))
+    if (!linked && !isTRUE(file.copy(path, target, overwrite = TRUE, copy.mode = TRUE))) {
+      return(list(file = NULL, url = NULL))
+    }
+  }
+  list(
+    file = normalizePath(target, winslash = "/", mustWork = TRUE),
+    url = paste0("dense_geojson_sources/", utils::URLencode(basename(target), reserved = TRUE))
+  )
+}
+
 desktop_start_geojson_import_job <- function(path, output, name, kind, log_file = NULL) {
   if (!requireNamespace("callr", quietly = TRUE)) {
     desktop_log(
@@ -581,6 +788,11 @@ desktop_start_geojson_import_job <- function(path, output, name, kind, log_file 
     paste0(format(Sys.time(), "%Y%m%d%H%M%S"), "_", tools::file_path_sans_ext(basename(path)), ".rds")
   )
   persistent_cache_file <- desktop_geojson_persistent_cache_file(path, kind)
+  browser_copy <- if (identical(kind, "tissue")) {
+    desktop_geojson_browser_copy(path, output, kind)
+  } else {
+    list(file = NULL, url = NULL)
+  }
   desktop_log(
     "Deferring large ",
     kind,
@@ -664,6 +876,8 @@ desktop_start_geojson_import_job <- function(path, output, name, kind, log_file 
     name = name,
     kind = kind,
     path = path,
+    static_file = browser_copy$file,
+    static_url = browser_copy$url,
     cache_file = cache_file,
     job = job,
     loaded = FALSE,
@@ -954,38 +1168,61 @@ desktop_decimate_tissue_rois <- function(rois, max_points_per_roi = desktop_tiss
 
 desktop_register_dense_geojson_source <- function(viewer, item, log_file = NULL) {
   if (!inherits(viewer, "wsi_viewer_session") ||
-      !is.environment(viewer$dense_geojson_context) ||
-      !inherits(item$rois, "wsi_roi") ||
-      !nrow(item$rois)) {
+      !is.environment(viewer$dense_geojson_context)) {
+    return(FALSE)
+  }
+  has_rois <- inherits(item$rois, "wsi_roi") && nrow(item$rois) > 0L
+  has_static_source <- is.character(item$static_url) && length(item$static_url) == 1L &&
+    !is.na(item$static_url) && nzchar(item$static_url)
+  if (!has_rois && !has_static_source) {
     return(FALSE)
   }
   sources <- viewer$dense_geojson_context$sources %||% list()
   id <- item$id %||% desktop_dense_geojson_id(item$path, item$kind)
   kind <- item$kind %||% "geojson"
   is_tissue <- identical(kind, "tissue")
+  previous <- sources[[id]] %||% list()
+  bbox_index <- if (has_rois) {
+    tryCatch(
+      getFromNamespace("wsi_bbox_index_create", "wsiTools")(item$rois),
+      error = function(err) NULL
+    )
+  } else {
+    previous$bbox_index %||% NULL
+  }
   sources[[id]] <- list(
     id = id,
     name = item$name %||% if (is_tissue) "Tissue annotation" else "Cell annotation",
     kind = kind,
     source_type = if (is_tissue) "annotation" else "cell_segmentation",
     path = item$path,
-    rois = item$rois,
-    total_count = nrow(item$rois),
+    static_url = item$static_url %||% previous$static_url %||% NULL,
+    rois = if (has_rois) item$rois else previous$rois %||% NULL,
+    total_count = if (has_rois) nrow(item$rois) else previous$total_count %||% NA_integer_,
     visible = TRUE,
     opacity = if (is_tissue) 0.86 else 0.92,
     colour = if (is_tissue) "#22C55E" else "#F97316",
     fill_alpha = if (is_tissue) 0.16 else 0.22,
     line_width = if (is_tissue) 2.2 else 1.8,
     max_points_per_roi = if (is_tissue) Inf else 700L,
-    full_resolution_zoom = if (is_tissue) 3 else Inf
+    full_resolution_zoom = if (is_tissue) 3 else Inf,
+    min_zoom = if (is_tissue) 0 else 5,
+    bbox_index = bbox_index
   )
   viewer$dense_geojson_context$sources <- sources
   desktop_log(
     "Registered ",
     item$kind,
-    " GeoJSON for viewport-limited rendering: ",
-    nrow(item$rois),
-    " region(s).",
+    if (has_static_source && !has_rois) {
+      " GeoJSON for immediate browser-side level-of-detail rendering."
+    } else {
+      paste0(
+        " GeoJSON for indexed rendering and R analysis: ",
+        nrow(item$rois),
+        " region(s)",
+        if (!is.null(bbox_index)) " with native spatial indexing." else "."
+      )
+    },
     log_file = log_file
   )
   TRUE
@@ -1082,7 +1319,7 @@ desktop_poll_pending_imports <- function(viewer, pending, log_file = NULL) {
           item$compact_list_only <- !desktop_tissue_preview_geometry()
           desktop_log(
             "Large tissue GeoJSON will be listed in the Annotations panel as class-coloured compact entries; ",
-            "full outlines are rendered by viewport at 3x zoom and above.",
+            "the browser renders adaptive class-coloured outlines at every zoom without reloading the file.",
             log_file = log_file
           )
         } else {
@@ -1208,6 +1445,7 @@ desktop_add_annotation_files <- function(viewer, cell_annotation = NULL,
           log_file = log_file
         )
       } else {
+        desktop_register_dense_geojson_source(viewer, deferred, log_file = log_file)
         pending[[length(pending) + 1L]] <- deferred
       }
     } else {
@@ -1514,7 +1752,8 @@ desktop_create_dynamic_project_source <- function(slide, index, log_file,
     slide_id = source_id,
     tile_size = 512,
     tile_overlap = 1,
-    format = tile_format
+    format = tile_format,
+    persistent_cache = TRUE
   )
   label <- basename(slide$path %||% source_id)
   source$name <- label
@@ -1564,6 +1803,7 @@ desktop_open_live_slide_prebuilt <- function(slide, output, log_file,
       mode = "tiles",
       dynamic_tiles = TRUE,
       dynamic_tile_format = "jpg",
+      dynamic_tile_persistent_cache = TRUE,
       progressive_preview = FALSE,
       project_images = project_images,
       project_tile_sources = project_tile_sources,
@@ -1745,6 +1985,7 @@ desktop_apply_associated_data <- function(viewer, items, output, log_file) {
 }
 
 desktop_open_new_project <- function(items, output, log_file) {
+  desktop_stage("metadata", "Reading image and project metadata")
   image_paths <- vapply(items, function(item) item$image, character(1))
   image_paths <- normalizePath(image_paths, winslash = "/", mustWork = TRUE)
   sample_ids <- vapply(items, function(item) item$spatial_sample_id %||% "", character(1))
@@ -1754,6 +1995,7 @@ desktop_open_new_project <- function(items, output, log_file) {
   initial_rois <- desktop_initial_tissue_rois(items, log_file = log_file)
   desktop_log("Opening new project with ", length(image_paths), " image(s).", log_file = log_file)
   if (length(spatial_paths) == 1L) {
+    desktop_stage("spatial", "Reading the spatial object and mapping tissues")
     desktop_log("Loading spatial transcriptomics object: ", spatial_paths[[1L]], log_file = log_file)
     spatial_object <- desktop_load_spatial_object(spatial_paths[[1L]])
     viewer <- tryCatch(
@@ -1872,6 +2114,7 @@ main <- function() {
   Sys.setenv(WSITOOLS_DESKTOP_LOG_FILE = log_file)
   desktop_emit("LOG_FILE", normalizePath(log_file, winslash = "/", mustWork = FALSE))
 
+  desktop_stage("runtime", "Starting R and checking wsiTools")
   load_wsitools()
   desktop_log_runtime_diagnostics(log_file = log_file)
 
@@ -1886,6 +2129,7 @@ main <- function() {
     desktop_open_target(parsed$path, mode, output, log_file)
   }
 
+  desktop_stage("tiles", "Starting full-resolution tiles and live synchronization")
   is_live <- inherits(viewer, "wsi_viewer_session")
   html <- if (is_live) {
     normalizePath(viewer$html, winslash = "/", mustWork = FALSE)
@@ -1919,12 +2163,13 @@ main <- function() {
   desktop_emit("SYNC_URL", if (is_live) viewer$url %||% "" else "")
   desktop_emit("VIEWER_HTTP_URL", html_server$url)
   desktop_emit("VIEWER_URL", viewer_url)
+  desktop_stage("interactive", "Tissue viewer ready; loading associated data")
   desktop_log("Live viewer ready: ", desktop_file_url(html), log_file = log_file)
   desktop_log("Desktop viewer served at: ", viewer_url, log_file = log_file)
   desktop_log("Sync endpoint: ", if (is_live) viewer$url %||% "not available" else "not available for static viewer", log_file = log_file)
 
   on.exit({
-    try(httpuv::stopServer(html_server$server), silent = TRUE)
+    desktop_stop_html_server(html_server)
     if (is_live) {
       try(wsiTools::wsi_viewer_stop(viewer), silent = TRUE)
     }
@@ -1941,6 +2186,7 @@ main <- function() {
 
   pending_imports <- list()
   if (identical(mode, "new-project")) {
+    desktop_stage("associated", "Loading annotations and associated data in the background")
     pending_imports <- tryCatch(
       desktop_apply_associated_data(viewer, parsed$items, output = output, log_file = log_file),
       error = function(err) {
@@ -1949,6 +2195,7 @@ main <- function() {
       }
     )
   }
+  desktop_stage("ready", "Viewer ready")
 
   repeat {
     if (is_live) {

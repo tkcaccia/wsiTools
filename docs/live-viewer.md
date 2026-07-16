@@ -23,6 +23,7 @@ viewer$get_rois()
 viewer$get_selected_roi()
 viewer$get_measurements()
 viewer$get_segmentation()
+viewer$get_performance()
 ```
 
 Keep the R session alive while the browser is open. If R stops, the browser may
@@ -48,6 +49,24 @@ viewer$open()
 The browser cannot read raw SVS, NDPI, CZI, BTF, or OME-TIFF pixels directly.
 It needs image tiles. wsiTools can use prebuilt Deep Zoom tiles or a dynamic
 tile server, depending on the slide and available backends.
+
+For frequently reopened slides, enable persistent dynamic tiles:
+
+```r
+viewer <- wsi_viewer_live(
+  slide,
+  tiled = TRUE,
+  dynamic_tile_persistent_cache = TRUE
+)
+```
+
+The cache is fingerprinted by source file identity and tile settings. A changed
+file receives a different namespace. Inspect or prune it with:
+
+```r
+wsi_tile_cache_info()
+wsi_tile_cache_prune()
+```
 
 ## What Live Synchronization Means
 
@@ -78,7 +97,38 @@ viewer$add_rois(read_geojson("annotations.geojson"))
 viewer$add_segmentation(import_segmentation("cells.geojson"))
 viewer$save_project("case_01.wsiproject")
 viewer$capabilities()
+viewer$get_performance()
 ```
+
+## Performance Diagnostics
+
+Open **View / Performance** to see time to image, time to first tile, tile
+failures, overlay frame time, dense-annotation request timing, renderer, and
+cache mode. **Copy report** creates a compact diagnostic suitable for a bug
+report.
+
+The report is also synchronized to R:
+
+```r
+viewer$get_performance()
+```
+
+Interpret the main fields as follows:
+
+| Field | Meaning |
+| --- | --- |
+| `open_ms` | time from page startup until OpenSeadragon opens the image |
+| `first_tile_ms` | time until the first tile is available |
+| `tile_failed` | failed or timed-out tile requests |
+| `render_average_ms` | average browser overlay frame cost |
+| `dense_average_ms` | average live dense-annotation query time |
+| `renderer` | 2D canvas or GPU WebGL for spatial points |
+| `cache_mode` | temporary or persistent dynamic tile cache |
+
+A high first-tile time with a low overlay frame time points to image decoding or
+tile delivery. A low first-tile time with a high overlay frame time points to
+browser overlays. Dense request failures point to annotation indexing or live
+bridge problems.
 
 For what is stored in a `.wsiproject` directory, see
 [project format](projects.md).

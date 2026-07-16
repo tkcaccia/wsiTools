@@ -9,7 +9,7 @@ on:
       tag:
         description: "GitHub release tag to update"
         required: true
-        default: "desktop-v0.1.1"
+        default: "desktop-v0.1.2"
       upload_release:
         description: "Upload built installers to the GitHub release"
         required: true
@@ -66,7 +66,13 @@ jobs:
         working-directory: tools/wsiToolsDesktop
         run: npm ci
 
-      - name: Build Tauri desktop app
+      - name: Build Tauri desktop app (macOS)
+        if: runner.os == 'macOS'
+        working-directory: tools/wsiToolsDesktop
+        run: npm run tauri -- build --bundles app
+
+      - name: Build Tauri desktop app (Windows and Linux)
+        if: runner.os != 'macOS'
         working-directory: tools/wsiToolsDesktop
         run: npm run build
 
@@ -76,10 +82,14 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ../../release-artifacts
-          version="0.1.1"
+          version="$(node -p \"require('./package.json').version\")"
           case "${{ runner.os }}" in
             macOS)
-              cp src-tauri/target/release/bundle/dmg/*.dmg \
+              hdiutil create \
+                -volname "wsiTools Desktop" \
+                -srcfolder "src-tauri/target/release/bundle/macos/wsiTools Desktop.app" \
+                -ov \
+                -format UDZO \
                 "../../release-artifacts/wsiTools-Desktop_${version}_macos_${{ runner.arch }}.dmg"
               ;;
             Windows)
@@ -128,7 +138,7 @@ jobs:
       - name: Write checksums
         run: |
           cd release-artifacts
-          sha256sum wsiTools-Desktop_0.1.1_* > SHA256SUMS.txt
+          sha256sum wsiTools-Desktop_* > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Create release if needed

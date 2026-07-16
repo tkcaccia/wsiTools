@@ -2,6 +2,7 @@
 .Rhistory
 .RData
 .Ruserdata
+.DS_Store
 Data/
 *.tar.gz
 *.Rcheck/
@@ -17,3 +18,7 @@ tools/wsiToolsDesktop/dist/
 tools/wsiToolsDesktop/src-tauri/target/
 tools/wsiToolsDesktop/src-tauri/gen/
 tools/wsiToolsDesktop/src-tauri/Cargo.lock
+release-artifacts/wsiTools-Desktop_*
+tmp/
+tmp_dress_check/
+wsiTools_Implementation_and_Architecture_Reference.docx

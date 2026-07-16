@@ -67,6 +67,7 @@ wsi_new_viewer_state <- function(name = "wsi_viewer_live_state", envir = parent.
   state$tile_sources <- list()
   state$kodama_selection <- list(labels = character(), count = 0L, matched_count = 0L)
   state$seurat_selection <- list(labels = character(), count = 0L, matched_count = 0L)
+  state$performance <- list()
   state$annotation_spots <- wsi_empty_annotation_spots()
   state$spatial_registration <- wsi_empty_spatial_registration()
   state$annotations <- list(dirty = FALSE, dirty_reason = "")
@@ -398,7 +399,7 @@ wsi_viewer_allowed_events <- function() {
     "project_image_added", "project_image_reordered", "project_image_closed",
     "project_image_selected", "project_section_selected",
     "roi_added", "roi_created", "roi_selected", "roi_deselected",
-    "roi_updated", "roi_edited", "roi_curve_edited", "roi_brush_edited", "roi_deleted",
+    "roi_updated", "roi_label_updated", "roi_edited", "roi_curve_edited", "roi_brush_edited", "roi_deleted",
     "roi_duplicated", "roi_exported", "roi_export_selection_updated",
     "roi_color_updated", "roi_visibility_updated", "roi_lock_updated",
     "roi_smoothed", "roi_simplified", "roi_holes_filled", "roi_split",
@@ -407,6 +408,7 @@ wsi_viewer_allowed_events <- function() {
     "geojson_imported", "geojson_mask_overlay_created", "class_export_rules_updated",
     "annotations_dirty", "annotations_saved",
     "annotation_history_updated", "annotation_history_cleared",
+    "annotation_undo", "annotation_redo",
     "viewer_log_updated", "viewer_log_cleared", "viewer_log_exported",
     "annotation_spots_exported", "annotation_spots_updated",
     "measurement_added", "measurements_cleared",
@@ -416,6 +418,7 @@ wsi_viewer_allowed_events <- function() {
     "layer_added", "layer_removed", "layer_updated", "layer_visibility_updated",
     "layer_opacity_updated", "tile_grid_toggled",
     "multi_view_layout_updated", "multi_view_pane_replaced", "multi_view_sync_updated",
+    "performance_updated",
     "tile_preview_created", "tile_preview_cleared", "tile_preview_exported", "tiles_extracted",
     "channel_source_added", "channel_source_removed", "channel_updated",
     "artifact_detected", "artifact_flagged", "artifact_overlay_toggled",
@@ -455,7 +458,7 @@ wsi_viewer_allowed_payload_fields <- function() {
     "artifacts", "view", "annotations", "history", "logs", "stain",
     "channel_sources", "annotation_masks", "channel_settings",
     "tile_sources", "kodama_selection", "seurat_selection",
-    "annotation_spots", "detail"
+    "annotation_spots", "performance", "detail"
   )
 }
 
@@ -1622,8 +1625,11 @@ wsi_spatial_registration_from_payload <- function(x) {
 
 wsi_spatial_object_save_format <- function(format) {
   format <- tolower(as.character(format %||% "rds")[[1L]])
-  if (!format %in% c("rds", "csv")) {
-    wsi_abort("Spatial object save `format` must be `rds` or `csv`.")
+  if (format %in% c("associations_csv", "annotation_associations_csv")) {
+    format <- "annotation_csv"
+  }
+  if (!format %in% c("rds", "csv", "annotation_csv")) {
+    wsi_abort("Spatial object save `format` must be `rds`, `csv`, or `annotation_csv`.")
   }
   format
 }
@@ -1641,13 +1647,23 @@ wsi_spatial_object_save_path <- function(path, format) {
     wsi_abort(sprintf("Could not create output directory: %s", parent))
   }
   ext <- tolower(tools::file_ext(path))
-  expected <- if (identical(format, "csv")) "csv" else "rds"
+  expected <- if (format %in% c("csv", "annotation_csv")) "csv" else "rds"
   if (!nzchar(ext)) {
     path <- paste0(path, ".", expected)
   } else if (!identical(ext, expected)) {
     wsi_abort(sprintf("Output path must end in .%s for %s export.", expected, toupper(format)))
   }
   normalizePath(path, winslash = "/", mustWork = FALSE)
+}
+
+wsi_spatial_object_overwrite <- function(value) {
+  if (is.null(value)) {
+    return(FALSE)
+  }
+  if (!is.logical(value) || length(value) != 1L || is.na(value)) {
+    wsi_abort("Spatial object save `overwrite` must be one TRUE or FALSE value.")
+  }
+  isTRUE(value)
 }
 
 wsi_spatial_object_registration_table <- function(payload) {
@@ -1843,11 +1859,163 @@ wsi_spatial_object_with_registration <- function(spatial, registration) {
   list(object = updated, matched = matched, image_coordinate_matched = image_update$matched)
 }
 
+wsi_spatial_object_annotation_rois <- function(payload, state = NULL) {
+  geojson <- payload$annotations %||% payload$rois %||% NULL
+  rois <- if (!is.null(geojson)) {
+    wsi_roi_from_geojson(geojson)
+  } else if (!is.null(state) && inherits(state, "wsi_viewer_state") &&
+             inherits(state$rois, "wsi_roi")) {
+    state$rois
+  } else {
+    wsi_empty_roi()
+  }
+  if (!nrow(rois)) {
+    return(rois)
+  }
+  area <- tolower(as.character(rois$geometry_type %||% "")) %in%
+    c("polygon", "multipolygon")
+  out <- rois[area, , drop = FALSE]
+  class(out) <- unique(c("wsi_roi", class(out)))
+  out
+}
+
+wsi_spatial_object_annotation_association <- function(registration, rois) {
+  if (!inherits(rois, "wsi_roi") || !nrow(rois)) {
+    return(NULL)
+  }
+  points <- data.frame(
+    point_id = as.character(registration$id),
+    point_label = as.character(registration$label),
+    x = as.numeric(registration$x),
+    y = as.numeric(registration$y),
+    stringsAsFactors = FALSE
+  )
+  wsi_associate_annotations(points, rois, engine = "auto")
+}
+
+wsi_spatial_object_annotation_export <- function(association,
+                                                 unassigned = "Unassigned") {
+  if (is.null(association)) {
+    return(NULL)
+  }
+  out <- as.data.frame(association, stringsAsFactors = FALSE)
+  category <- as.character(out$annotation_class)
+  missing <- is.na(category) | !nzchar(category)
+  category[missing] <- as.character(out$annotation_name[missing])
+  missing <- is.na(category) | !nzchar(category)
+  category[missing] <- as.character(out$annotation_id[missing])
+  missing <- is.na(category) | !nzchar(category)
+  category[missing] <- unassigned
+  out$annotation_class <- category
+  class(out) <- c(
+    "wsi_annotation_association",
+    setdiff(class(out), "wsi_annotation_association")
+  )
+  out
+}
+
+wsi_spatial_object_with_annotations <- function(object, association, rois,
+                                                unassigned = "Unassigned") {
+  association <- wsi_spatial_object_annotation_export(association, unassigned = unassigned)
+  if (is.null(association)) {
+    return(list(object = object, matched = 0L, assigned = 0L, unassigned = 0L))
+  }
+  meta <- wsi_spatial_object_metadata(object)
+  if (is.null(meta) || !nrow(meta)) {
+    wsi_abort("Could not add annotation assignments because the spatial object has no cell metadata table.")
+  }
+  idx <- match(wsi_spatial_object_table_ids(meta), as.character(association$point_id))
+  hit <- !is.na(idx)
+  if (!any(hit) && nrow(meta) == nrow(association)) {
+    idx <- seq_len(nrow(meta))
+    hit <- rep(TRUE, nrow(meta))
+  }
+  annotation <- rep(NA_character_, nrow(meta))
+  annotation_id <- rep(NA_character_, nrow(meta))
+  annotation_name <- rep(NA_character_, nrow(meta))
+  annotation_index <- rep(NA_integer_, nrow(meta))
+  if (any(hit)) {
+    source_index <- idx[hit]
+    annotation[hit] <- as.character(association$annotation_class[source_index])
+    annotation_id[hit] <- as.character(association$annotation_id[source_index])
+    annotation_name[hit] <- as.character(association$annotation_name[source_index])
+    annotation_index[hit] <- suppressWarnings(as.integer(association$annotation_index[source_index]))
+  }
+  meta$wsi_annotation <- annotation
+  meta$wsi_annotation_id <- annotation_id
+  meta$wsi_annotation_name <- annotation_name
+  meta$wsi_annotation_index <- annotation_index
+  object <- wsi_spatial_object_set_slot(object, "meta.data", meta)
+
+  assigned <- hit & !is.na(annotation_id) & nzchar(annotation_id)
+  misc <- tryCatch(wsi_seurat_slot(object, "misc"), error = function(err) NULL)
+  if (is.null(misc) || !is.list(misc)) {
+    misc <- list()
+  }
+  misc$wsiTools <- misc$wsiTools %||% list()
+  misc$wsiTools$annotation_association <- list(
+    assigned_at = Sys.time(),
+    cells = sum(hit),
+    assigned = sum(assigned),
+    unassigned = sum(hit) - sum(assigned),
+    area_annotations = nrow(rois),
+    coordinate_space = "level0_slide_pixels",
+    metadata_columns = c(
+      "wsi_annotation", "wsi_annotation_id",
+      "wsi_annotation_name", "wsi_annotation_index"
+    )
+  )
+  misc$wsiTools$annotation_rois <- wsi_viewer_rois_to_geojson(rois)
+  object <- wsi_spatial_object_set_slot(object, "misc", misc)
+  list(
+    object = object,
+    matched = sum(hit),
+    assigned = sum(assigned),
+    unassigned = sum(hit) - sum(assigned)
+  )
+}
+
+wsi_spatial_object_annotation_spots <- function(association, registration) {
+  association <- wsi_spatial_object_annotation_export(association)
+  if (is.null(association) || !nrow(association)) {
+    return(wsi_empty_annotation_spots())
+  }
+  assigned <- !is.na(association$annotation_id) & nzchar(association$annotation_id)
+  association <- association[assigned, , drop = FALSE]
+  if (!nrow(association)) {
+    return(wsi_empty_annotation_spots())
+  }
+  idx <- match(as.character(association$point_id), as.character(registration$id))
+  out <- data.frame(
+    annotation_index = suppressWarnings(as.integer(association$annotation_index)),
+    annotation_id = as.character(association$annotation_id),
+    annotation_name = as.character(association$annotation_name),
+    annotation_class = as.character(association$annotation_class),
+    spot_id = as.character(association$point_id),
+    spot_label = as.character(association$point_label),
+    spot_x = as.numeric(association$x),
+    spot_y = as.numeric(association$y),
+    spot_layer_id = ifelse(is.na(idx), NA_character_, as.character(registration$layer_id[idx])),
+    spot_layer_name = ifelse(is.na(idx), NA_character_, as.character(registration$layer_name[idx])),
+    project_image = NA_character_,
+    project_section = NA_character_,
+    stringsAsFactors = FALSE
+  )
+  class(out) <- c("wsi_annotation_spots", class(out))
+  out
+}
+
 wsi_spatial_object_save_response <- function(spatial, payload, state = NULL) {
   if (!is.list(payload)) {
     wsi_abort("Spatial object save request must be a JSON object.")
   }
-  unknown <- setdiff(names(payload), c("format", "output", "path", "file", "spatial_registration"))
+  unknown <- setdiff(
+    names(payload),
+    c(
+      "format", "output", "path", "file", "overwrite",
+      "spatial_registration", "annotations", "rois"
+    )
+  )
   if (length(unknown)) {
     wsi_abort(sprintf(
       "Unsupported spatial object save field%s: %s.",
@@ -1857,6 +2025,16 @@ wsi_spatial_object_save_response <- function(spatial, payload, state = NULL) {
   }
   format <- wsi_spatial_object_save_format(payload$format %||% "rds")
   output <- wsi_spatial_object_save_path(payload$output %||% payload$path %||% payload$file, format)
+  overwrite <- wsi_spatial_object_overwrite(payload$overwrite)
+  if (file.exists(output) && !overwrite) {
+    wsi_abort(
+      sprintf(
+        "The output file already exists: %s. Confirm replacement before saving, or choose a different name.",
+        output
+      ),
+      class = "wsi_overwrite_required"
+    )
+  }
   registration <- wsi_spatial_object_registration_table(payload)
   if (!nrow(registration)) {
     wsi_abort("No registered spatial coordinates were supplied by the viewer.")
@@ -1864,12 +2042,40 @@ wsi_spatial_object_save_response <- function(spatial, payload, state = NULL) {
   if (!is.null(state) && inherits(state, "wsi_viewer_state")) {
     state$spatial_registration <- registration
   }
+  rois <- wsi_spatial_object_annotation_rois(payload, state = state)
+  association <- if (nrow(rois)) {
+    wsi_spatial_object_annotation_association(registration, rois)
+  } else {
+    NULL
+  }
+  association_export <- wsi_spatial_object_annotation_export(association)
+  association_count <- if (is.null(association_export)) 0L else nrow(association_export)
+  assigned_count <- if (is.null(association_export)) {
+    0L
+  } else {
+    sum(!is.na(association_export$annotation_id) & nzchar(association_export$annotation_id))
+  }
+  if (!is.null(state) && inherits(state, "wsi_viewer_state")) {
+    state$annotation_spots <- wsi_spatial_object_annotation_spots(association, registration)
+  }
   image_coordinate_matched <- NA_integer_
   if (identical(format, "csv")) {
     utils::write.csv(registration, output, row.names = FALSE)
     matched <- NA_integer_
+  } else if (identical(format, "annotation_csv")) {
+    if (is.null(association_export) || !nrow(rois)) {
+      wsi_abort("Draw or import at least one area annotation before exporting coordinate-to-annotation assignments.")
+    }
+    utils::write.csv(association_export, output, row.names = FALSE)
+    matched <- association_count
   } else {
     updated <- wsi_spatial_object_with_registration(spatial, registration)
+    if (!is.null(association_export)) {
+      annotated <- wsi_spatial_object_with_annotations(updated$object, association, rois)
+      updated$object <- annotated$object
+      association_count <- annotated$matched
+      assigned_count <- annotated$assigned
+    }
     saveRDS(updated$object, output)
     matched <- updated$matched
     image_coordinate_matched <- updated$image_coordinate_matched
@@ -1878,7 +2084,14 @@ wsi_spatial_object_save_response <- function(spatial, payload, state = NULL) {
     wsi_viewer_state_record_event(
       state,
       "spatial_object_save_requested",
-      list(file = output, format = format, count = nrow(registration), matched = matched, image_coordinate_matched = image_coordinate_matched %||% NA_integer_)
+      list(
+        file = output, format = format, count = nrow(registration),
+        matched = matched,
+        image_coordinate_matched = image_coordinate_matched %||% NA_integer_,
+        annotation_count = nrow(rois),
+        association_count = association_count,
+        assigned_count = assigned_count
+      )
     )
     wsi_assign_viewer_state(state)
   }
@@ -1886,9 +2099,14 @@ wsi_spatial_object_save_response <- function(spatial, payload, state = NULL) {
     ok = TRUE,
     file = output,
     format = format,
+    overwrite = overwrite,
     count = nrow(registration),
     matched = matched,
-    image_coordinate_matched = image_coordinate_matched %||% NA_integer_
+    image_coordinate_matched = image_coordinate_matched %||% NA_integer_,
+    annotation_count = nrow(rois),
+    association_count = association_count,
+    assigned_count = assigned_count,
+    unassigned_count = association_count - assigned_count
   )
 }
 
@@ -2123,6 +2341,8 @@ wsi_viewer_state_apply <- function(state, payload) {
     state$kodama_selection %||% list(labels = character(), count = 0L, matched_count = 0L)
   state$seurat_selection <- payload[["seurat_selection", exact = TRUE]] %||%
     state$seurat_selection %||% list(labels = character(), count = 0L, matched_count = 0L)
+  state$performance <- payload[["performance", exact = TRUE]] %||%
+    state$performance %||% list()
   state$annotation_spots <- wsi_annotation_spots_from_payload(payload[["annotation_spots", exact = TRUE]])
   state$annotations <- payload[["annotations", exact = TRUE]] %||% list(dirty = FALSE, dirty_reason = "")
   state$history <- wsi_annotation_history_from_payload(payload[["history", exact = TRUE]])
@@ -3310,6 +3530,9 @@ wsi_attach_viewer_session_methods <- function(session) {
   session$get_spatial_registration <- function(service = TRUE) {
     session$get_state(service = service)$spatial_registration %||% wsi_empty_spatial_registration()
   }
+  session$get_performance <- function(service = TRUE) {
+    session$get_state(service = service)$performance %||% list()
+  }
   session$get_spot_annotation_table <- function(service = TRUE) {
     session$get_annotation_spots(service = service)
   }
@@ -4388,7 +4611,11 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
       sources <- list()
     }
     sources[vapply(sources, function(source) {
-      is.list(source) && inherits(source$rois, "wsi_roi") && nrow(source$rois) > 0L
+      is.list(source) && (
+        (inherits(source$rois, "wsi_roi") && nrow(source$rois) > 0L) ||
+          (is.character(source$static_url) && length(source$static_url) == 1L &&
+             !is.na(source$static_url) && nzchar(source$static_url))
+      )
     }, logical(1))]
   }
 
@@ -4425,6 +4652,28 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
         sources = source_names
       ))
     }
+    static_url <- as.character(source$static_url %||% "")
+    if (length(static_url) == 1L && !is.na(static_url) && nzchar(static_url)) {
+      return(list(
+        ok = TRUE,
+        loaded = TRUE,
+        source_id = as.character(source$id %||% source_id),
+        sources = source_names,
+        static_url = static_url,
+        static_source = list(
+          name = as.character(source$name %||% "Tissue annotation"),
+          kind = as.character(source$kind %||% "tissue"),
+          source_type = as.character(source$source_type %||% "annotation"),
+          visible = isTRUE(source$visible %||% TRUE),
+          opacity = suppressWarnings(as.numeric(source$opacity %||% 0.86)),
+          colour = as.character(source$colour %||% "#22C55E"),
+          fill_alpha = suppressWarnings(as.numeric(source$fill_alpha %||% 0.16)),
+          line_width = suppressWarnings(as.numeric(source$line_width %||% 2.2)),
+          full_resolution_zoom = suppressWarnings(as.numeric(source$full_resolution_zoom %||% 3)),
+          total_count = suppressWarnings(as.integer(source$total_count %||% NA_integer_))
+        )
+      ))
+    }
     rois <- source$rois
     bounds <- vapply(c("xmin", "ymin", "xmax", "ymax"), function(field) {
       suppressWarnings(as.numeric(payload[[field]] %||% NA_real_))
@@ -4434,6 +4683,39 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
       wsi_abort("Dense GeoJSON viewport request needs finite xmin, ymin, xmax, and ymax.")
     }
     zoom <- suppressWarnings(as.numeric(payload$zoom %||% NA_real_))
+    source_min_zoom <- suppressWarnings(as.numeric(source$min_zoom %||% 0))
+    if (!is.finite(source_min_zoom) || source_min_zoom < 0) {
+      source_min_zoom <- 0
+    }
+    if (is.finite(zoom) && zoom < source_min_zoom) {
+      source_type <- as.character(source$source_type %||% "cell_segmentation")
+      source_id <- as.character(source$id %||% source_id)
+      return(list(
+        ok = TRUE,
+        loaded = TRUE,
+        source_id = source_id,
+        sources = source_names,
+        total_count = nrow(rois),
+        viewport_count = 0L,
+        returned_count = 0L,
+        layer = list(
+          id = source_id,
+          name = as.character(source$name %||% "Cell annotation"),
+          type = "vector",
+          source_type = source_type,
+          visible = isTRUE(source$visible %||% TRUE),
+          opacity = suppressWarnings(as.numeric(source$opacity %||% 0.92)),
+          colour = as.character(source$colour %||% "#F97316"),
+          line_width = suppressWarnings(as.numeric(source$line_width %||% 1.8)),
+          replace = TRUE,
+          count = 0L,
+          total_count = nrow(rois),
+          viewport_count = 0L,
+          items = list(),
+          metadata = list(viewport_only = TRUE, below_min_zoom = TRUE, min_zoom = source_min_zoom, zoom = zoom)
+        )
+      ))
+    }
     default_limit <- if (is.finite(zoom) && zoom >= 12) {
       12000L
     } else if (is.finite(zoom) && zoom >= 8) {
@@ -4456,11 +4738,31 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
     rymin <- suppressWarnings(as.numeric(rois$ymin))
     rxmax <- suppressWarnings(as.numeric(rois$xmax))
     rymax <- suppressWarnings(as.numeric(rois$ymax))
-    idx <- which(
-      is.finite(rxmin) & is.finite(rymin) & is.finite(rxmax) & is.finite(rymax) &
-        rxmin <= bounds[["xmax"]] & rxmax >= bounds[["xmin"]] &
-        rymin <= bounds[["ymax"]] & rymax >= bounds[["ymin"]]
+    bbox_index <- source$bbox_index %||% NULL
+    if (is.null(bbox_index)) {
+      bbox_index <- wsi_bbox_index_create(rois)
+      if (!is.null(bbox_index)) {
+        source$bbox_index <- bbox_index
+        if (is.environment(dense_geojson_context)) {
+          dense_geojson_context$sources[[source_id]] <- source
+        }
+      }
+    }
+    idx <- wsi_bbox_index_query(
+      bbox_index,
+      bounds[["xmin"]],
+      bounds[["ymin"]],
+      bounds[["xmax"]],
+      bounds[["ymax"]]
     )
+    spatial_indexed <- !is.null(idx)
+    if (is.null(idx)) {
+      idx <- which(
+        is.finite(rxmin) & is.finite(rymin) & is.finite(rxmax) & is.finite(rymax) &
+          rxmin <= bounds[["xmax"]] & rxmax >= bounds[["xmin"]] &
+          rymin <= bounds[["ymax"]] & rymax >= bounds[["ymin"]]
+      )
+    }
     viewport_count <- length(idx)
     sampled <- FALSE
     if (viewport_count > limit) {
@@ -4482,8 +4784,14 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
     if (is.na(full_resolution_zoom) || full_resolution_zoom < 0) {
       full_resolution_zoom <- Inf
     }
-    zoom_cap <- if (is.finite(zoom) && zoom >= full_resolution_zoom) {
-      Inf
+    zoom_cap <- if (is.finite(zoom) && zoom >= full_resolution_zoom && zoom < 5) {
+      2400L
+    } else if (is.finite(zoom) && zoom >= full_resolution_zoom && zoom < 10) {
+      6000L
+    } else if (is.finite(zoom) && zoom >= full_resolution_zoom && zoom < 16) {
+      12000L
+    } else if (is.finite(zoom) && zoom >= full_resolution_zoom) {
+      24000L
     } else if (!is.finite(zoom) || zoom < 1.5) {
       96L
     } else if (isTRUE(broad_view) || zoom < 5) {
@@ -4533,7 +4841,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
       source_name = source_name,
       bounds_only = bounds_only,
       max_points_per_roi = max_points_per_roi,
-      clip_bounds = if (isTRUE(bounds_only) || is.finite(max_points_per_roi)) NULL else clip_bounds
+      clip_bounds = if (isTRUE(bounds_only)) NULL else clip_bounds
     )
     items <- decorate_items(items)
     source_id <- as.character(source$id %||% source_id)
@@ -4556,6 +4864,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
         sampled = sampled,
         displayed_count = length(items),
         viewport_count = viewport_count,
+        spatial_indexed = spatial_indexed,
         source_path = as.character(source$path %||% ""),
         geometry_lod = if (isTRUE(bounds_only)) "bounds" else "detail",
         max_points_per_roi = if (is.finite(max_points_per_roi)) max_points_per_roi else "full",
@@ -4694,7 +5003,15 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	      response$spatial_object_save <- result
 	      wsi_http_json_response(body = response)
 	    }, error = function(err) {
-	      wsi_http_json_response(status = 500L, body = list(ok = FALSE, error = conditionMessage(err)))
+	      overwrite_required <- inherits(err, "wsi_overwrite_required")
+	      wsi_http_json_response(
+	        status = if (overwrite_required) 409L else 500L,
+	        body = list(
+	          ok = FALSE,
+	          error = conditionMessage(err),
+	          overwrite_required = overwrite_required
+	        )
+	      )
 	    })
 	  }
 
@@ -4874,7 +5191,8 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
             col = tile_request$x,
             row = tile_request$y,
             format = tile_request$format,
-            settings = wsi_dynamic_tile_query_settings(req$QUERY_STRING %||% "")
+            settings = wsi_dynamic_tile_query_settings(req$QUERY_STRING %||% ""),
+            request_etag = req$HTTP_IF_NONE_MATCH %||% NULL
           ),
           error = function(err) {
             status <- if (inherits(err, "wsi_region_out_of_bounds")) 404L else 500L
@@ -5129,6 +5447,9 @@ wsi_project_images_with_dynamic_tiles <- function(project_images = NULL,
 #'   Zoom generation in [wsi_viewer()] is unchanged.
 #' @param dynamic_tile_format,dynamic_tile_cache_dir,dynamic_tile_path Format,
 #'   cache directory, and HTTP route for on-demand live tiles.
+#' @param dynamic_tile_persistent_cache Keep generated dynamic tiles across
+#'   viewer sessions in a fingerprinted, size-bounded cache. The desktop app
+#'   enables this by default; the R API leaves it opt-in for compatibility.
 #' @param seurat_gene_path Local HTTP route used by live Seurat viewers to
 #'   retrieve one gene at a time from the active R session.
 #' @param spatial_tile_path Local HTTP route used by live Seurat, Giotto, and
@@ -5303,13 +5624,19 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
                                segmentation_nuclear_channel = "DAPI",
                                segmentation_membrane_channel = NULL,
                                segmentation_keras_home = NULL,
-                               segmentation_pretrained_zip = NULL) {
+                               segmentation_pretrained_zip = NULL,
+                               dynamic_tile_persistent_cache = FALSE) {
   if (!is.logical(stardist) || length(stardist) != 1L || is.na(stardist)) {
     wsi_abort("`stardist` must be `TRUE` or `FALSE`.")
   }
   transport <- match.arg(transport)
   if (!is.logical(dynamic_tiles) || length(dynamic_tiles) != 1L || is.na(dynamic_tiles)) {
     wsi_abort("`dynamic_tiles` must be `TRUE` or `FALSE`.")
+  }
+  if (!is.logical(dynamic_tile_persistent_cache) ||
+      length(dynamic_tile_persistent_cache) != 1L ||
+      is.na(dynamic_tile_persistent_cache)) {
+    wsi_abort("`dynamic_tile_persistent_cache` must be `TRUE` or `FALSE`.")
   }
   dynamic_tile_format <- wsi_dynamic_tile_format(dynamic_tile_format)
   stardist_output_type <- match.arg(stardist_output_type)
@@ -5362,7 +5689,8 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
       slide_id = wsi_safe_id(name, "slide"),
       format = dynamic_tile_format,
       cache_dir = dynamic_tile_cache_dir,
-      route = dynamic_tile_path
+      route = dynamic_tile_path,
+      persistent_cache = dynamic_tile_persistent_cache
     )
   }
   requested_stain <- dots$stain %||% "none"
@@ -5378,7 +5706,8 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
         tile_overlap = if (!is.null(dynamic_source)) dynamic_source$tile_overlap else 1,
         format = "png",
         cache_dir = if (!is.null(dynamic_source)) dynamic_source$cache_dir else dynamic_tile_cache_dir,
-        route = dynamic_tile_path
+        route = dynamic_tile_path,
+        persistent_cache = dynamic_tile_persistent_cache
       ),
       error = function(err) {
         wsi_warn(paste0(
@@ -5678,6 +6007,7 @@ wsi_viewer_state <- function(x) {
     seurat_selection = state$seurat_selection %||% list(labels = character(), count = 0L, matched_count = 0L),
     annotation_spots = state$annotation_spots %||% wsi_empty_annotation_spots(),
     spatial_registration = state$spatial_registration %||% wsi_empty_spatial_registration(),
+    performance = state$performance %||% list(),
     tile_preview = state$tile_preview %||% wsi_empty_tile_preview(),
     prediction = state$prediction %||% wsi_empty_prediction_result(),
     proximity = state$proximity %||% wsi_empty_proximity_result(),
@@ -5787,7 +6117,7 @@ print.wsi_viewer_session <- function(x, ...) {
   if (!is.null(x$stardist_server)) {
     cat(sprintf("  stardist: %s\n", x$stardist_server$url))
   }
-  cat("  methods: capabilities(), on(), get_rois(), get_selected_roi(), get_selected_rois(), get_selected_object(), get_selected_spots(), get_spot_annotation_table(), get_annotation_spot_matrix(), get_spatial_registration(), get_measurements(), get_trajectories(), get_roi_summary(), get_cell_summary(), get_ihc_summary(), get_segmentation(), get_layers(), get_annotation_masks(), get_channel_settings(), get_kodama_selection(), get_annotation_spots(), get_history(), get_logs(), get_tile_preview(), get_prediction(), get_proximity(), get_proximity_stats(), get_trajectory_profile(), colour_spots_by_gene(), add_rois(), add_layer(), add_channel_source(), measure_ihc_intensity(), preview_tiles(), extract_tile_preview(), list_jobs(), run_tiles_async(), save_project(), autosave_start()\n")
+  cat("  methods: capabilities(), on(), get_rois(), get_selected_roi(), get_selected_rois(), get_selected_object(), get_selected_spots(), get_spot_annotation_table(), get_annotation_spot_matrix(), get_spatial_registration(), get_performance(), get_measurements(), get_trajectories(), get_roi_summary(), get_cell_summary(), get_ihc_summary(), get_segmentation(), get_layers(), get_annotation_masks(), get_channel_settings(), get_kodama_selection(), get_annotation_spots(), get_history(), get_logs(), get_tile_preview(), get_prediction(), get_proximity(), get_proximity_stats(), get_trajectory_profile(), colour_spots_by_gene(), add_rois(), add_layer(), add_channel_source(), measure_ihc_intensity(), preview_tiles(), extract_tile_preview(), list_jobs(), run_tiles_async(), save_project(), autosave_start()\n")
   cat("  stop with: wsi_viewer_stop(x)\n")
   invisible(x)
 }

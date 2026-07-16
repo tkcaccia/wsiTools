@@ -126,9 +126,11 @@ bridge.
 In live CZI viewers, wsiTools keeps a small native reader/accessor handle open
 for the viewer session and requests only the tile or region needed by
 OpenSeadragon. The full CZI scene is not loaded into R memory. Generated tiles
-are cached temporarily and the native handle/cache are cleaned up when the live
-viewer session stops. Set `WSITOOLS_CZI_PERSISTENT_TILE_READER=false` only when
-debugging a native CZI installation problem.
+use a temporary session cache in ordinary live mode, or a fingerprinted
+persistent cache when `dynamic_tile_persistent_cache = TRUE` (enabled by the
+desktop launcher). Native reader handles are always closed when the session
+stops. Set `WSITOOLS_CZI_PERSISTENT_TILE_READER=false` only when debugging a
+native CZI installation problem.
 
 Check:
 

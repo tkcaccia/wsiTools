@@ -82,6 +82,29 @@ function setStatus(message, kind = "info") {
   appendLog(`Status: ${message}`);
 }
 
+function errorMessage(error, fallback = "Unknown error") {
+  if (typeof error === "string" && error.trim()) return error.trim();
+  if (error && typeof error.message === "string" && error.message.trim()) {
+    return error.message.trim();
+  }
+  try {
+    const serialized = JSON.stringify(error);
+    if (serialized && serialized !== "{}") return serialized;
+  } catch (_) {
+    // Fall through to the stable user-facing message.
+  }
+  return fallback;
+}
+
+function shortErrorStatus(prefix, error) {
+  const detail = errorMessage(error);
+  const maximum = 150;
+  const summary = detail.length > maximum
+    ? `${detail.slice(0, maximum - 3)}...`
+    : detail;
+  return `${prefix}: ${summary}`;
+}
+
 function activeLauncherLayout() {
   if (!homeScreen.hidden) return "home";
   if (!runtimePanel.hidden) return "runtime";
@@ -560,6 +583,14 @@ async function handleLaunch(launcher, codeLog, successPrefix) {
   appendLog(codeLog);
   startLogPolling();
   try {
+    await invoke("open_viewer_loading_window");
+    viewerWindowOpen = true;
+    stopViewer.disabled = false;
+    appendLog("Viewer window opened while R prepares the project.");
+  } catch (error) {
+    appendLog(`Could not open the viewer progress window: ${error}`);
+  }
+  try {
     const launch = await launcher();
     appendLog(`${successPrefix}: ${launch.viewer_url}`);
     if (launch.sync_url) appendLog(`Live sync endpoint: ${launch.sync_url}`);
@@ -570,6 +601,13 @@ async function handleLaunch(launcher, codeLog, successPrefix) {
     setStatus("viewer failed", "error");
     appendLog(`Viewer launch failed: ${error}`);
     showLaunchError(error);
+    try {
+      await invoke("close_viewer_window");
+      viewerWindowOpen = false;
+      stopViewer.disabled = true;
+    } catch (closeError) {
+      appendLog(`Could not close failed viewer window: ${closeError}`);
+    }
     stopLogPolling();
   } finally {
     setBusy(false);
@@ -757,8 +795,9 @@ associationList.addEventListener("click", async (event) => {
       renderAssociations();
     }
   } catch (error) {
-    setStatus("selection failed", "error");
-    appendLog(`Selection failed: ${error}`);
+    const detail = errorMessage(error);
+    setStatus(shortErrorStatus("selection failed", error), "error");
+    appendLog(`Selection failed: ${detail}`);
   }
 });
 

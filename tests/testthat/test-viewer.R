@@ -138,6 +138,7 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "zoomIn", fixed = TRUE)
   expect_match(html, "zoomOut", fixed = TRUE)
   expect_match(html, "oneToOne", fixed = TRUE)
+  expect_false(grepl("if(e.key==='1')oneToOne();", html, fixed = TRUE))
   expect_false(grepl("<button id=\"toolSelect\"", html, fixed = TRUE))
   expect_match(html, "toolDraw", fixed = TRUE)
   expect_match(html, "toolBrush", fixed = TRUE)
@@ -174,14 +175,19 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "Stains", fixed = TRUE)
   expect_match(html, "Overlay layer", fixed = TRUE)
   expect_match(html, "data-overlay-focus=\"coordinates\"", fixed = TRUE)
+  expect_match(html, "this can be active together with annotations", fixed = TRUE)
   expect_match(html, "data-overlay-focus=\"cell_segmentation\"", fixed = TRUE)
   expect_match(html, "data-overlay-focus=\"annotation\"", fixed = TRUE)
+  expect_match(html, "this can be active together with coordinates", fixed = TRUE)
   expect_match(html, "data-overlay-focus=\"trajectory\"", fixed = TRUE)
   expect_match(html, "overlayFocusMode", fixed = TRUE)
   expect_match(html, "overlayFocusLayerAllowed", fixed = TRUE)
   expect_match(html, "overlayFocusRoiAllowed", fixed = TRUE)
   expect_match(html, "overlayFocusChannelAllowed", fixed = TRUE)
   expect_match(html, "overlayFocusTrajectoryVisible", fixed = TRUE)
+  expect_match(html, "mode==='coordinates_annotation'&&(wanted==='coordinates'||wanted==='annotation')", fixed = TRUE)
+  expect_match(html, "current===other)overlayFocusMode='coordinates_annotation'", fixed = TRUE)
+  expect_match(html, "Showing coordinates and annotations together.", fixed = TRUE)
   pos_annotations_menu <- regexpr("<summary title=\"Draw, select, import, export, and manage annotations\">Annotations</summary>", html, fixed = TRUE)[[1]]
   pos_segmentation_section <- regexpr("StarDist segmentation", html, fixed = TRUE)[[1]]
   expect_gt(pos_annotations_menu, 0)
@@ -290,6 +296,15 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_false(grepl("selectedRoiRelabelClassValue", html, fixed = TRUE))
   expect_false(grepl("applySelectedRoiLabelSwap", html, fixed = TRUE))
   expect_match(html, "roi_label_updated", fixed = TRUE)
+  expect_match(html, "viewerTypingTarget", fixed = TRUE)
+  expect_match(
+    html,
+    "document.addEventListener('keydown',e=>{if(viewerTypingTarget(e.target))e.stopPropagation();});",
+    fixed = TRUE
+  )
+  expect_match(html, "classPresetColour(cls,stableClassColour(cls))", fixed = TRUE)
+  expect_match(html, "if(cls)syncPanelColour(cls)", fixed = TRUE)
+  expect_false(grepl("if(cls){ensureRoiClassOption(cls);syncPanelColour(cls);}", html, fixed = TRUE))
   expect_match(html, "Annotation category changed:", fixed = TRUE)
   expect_match(html, "automaticAnnotationName(selectedClass,'ROI',selectedRoi)", fixed = TRUE)
   expect_match(html, "consistent_category_label:true", fixed = TRUE)
@@ -926,7 +941,13 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "multiViewCanvasUnitScale(pane)", fixed = TRUE)
   expect_match(html, "deltaPointsFromPixels(new OpenSeadragon.Point(1,0),true)", fixed = TRUE)
   expect_match(html, "refreshMultiViewOverlaysSoon", fixed = TRUE)
-  expect_match(html, "window.requestAnimationFrame(drawMultiViewOverlays)", fixed = TRUE)
+  expect_match(html, "window.requestAnimationFrame(requestMultiViewOverlayDraw)", fixed = TRUE)
+  expect_match(html, "multiViewPaneSpatialOverlay", fixed = TRUE)
+  expect_match(html, "multiViewLayersForPane", fixed = TRUE)
+  expect_match(html, "const paneLayers=multiViewLayersForPane(pane)", fixed = TRUE)
+  expect_match(html, "multiViewDrawSpatialWebglLayers", fixed = TRUE)
+  expect_match(html, "multiViewSpatialLayerData", fixed = TRUE)
+  expect_match(html, "webglLayers.has(layer)", fixed = TRUE)
   expect_match(html, "multiViewDrawScaleBar(pack.ctx,pane,pack.rect)", fixed = TRUE)
   expect_match(html, "if(typeof multiViewLayout!=='undefined'&&multiViewLayout>1){bar.style.display='none'", fixed = TRUE)
   expect_match(html, "if(typeof updateScaleBar==='function')updateScaleBar();if(typeof requestDraw==='function')requestDraw();", fixed = TRUE)
@@ -1457,6 +1478,7 @@ test_that("live viewer sessions expose R-native helper methods and command queue
   expect_true(is.function(session$get_selected_rois))
   expect_true(is.function(session$get_selected_object))
   expect_true(is.function(session$get_selected_spots))
+  expect_true(is.function(session$get_performance))
   expect_true(is.function(session$get_spot_annotation_table))
   expect_true(is.function(session$get_measurements))
   expect_true(is.function(session$get_trajectories))
@@ -1822,10 +1844,25 @@ test_that("live viewer state validates events and payload fields strictly", {
     annotations = list(dirty = FALSE),
     history = list(),
     logs = list(),
+    performance = list(tile_loaded = 12L, render_average_ms = 4.25, renderer = "webgl"),
     detail = list()
   )
 
   expect_silent(wsiTools:::wsi_viewer_state_apply(state, payload))
+  expect_equal(state$performance$tile_loaded, 12L)
+  expect_equal(state$performance$renderer, "webgl")
+
+  renamed <- payload
+  renamed$event <- "roi_label_updated"
+  renamed$detail <- list(
+    id = "brush_roi_7",
+    old_name = "Sample",
+    name = "Sample7",
+    old_class = "Sample",
+    class = "Sample7"
+  )
+  expect_silent(wsiTools:::wsi_viewer_state_apply(state, renamed))
+  expect_equal(state$last_event, "roi_label_updated")
 
   bad_event <- payload
   bad_event$event <- "not_a_real_event"
@@ -2261,6 +2298,7 @@ test_that("dynamic tile sources create OpenSeadragon-compatible URLs and cache f
   expect_equal(request$format, "png")
   expect_true(file.exists(file))
   expect_gt(file.info(file)$size, 0)
+  expect_false(any(grepl("\\.lock$", list.files(source$cache_dir, recursive = TRUE))))
 })
 
 test_that("vips-backed dynamic tiles cache low-resolution fit levels", {
@@ -2281,12 +2319,80 @@ test_that("vips-backed dynamic tiles cache low-resolution fit levels", {
   level <- max(0L, source$max_level - 6L)
   region <- wsiTools:::wsi_dynamic_tile_region(source, level = level, col = 0, row = 0)
   file <- wsiTools:::wsi_dynamic_tile_file(source, level = level, col = 0, row = 0, format = "jpg")
-  level_cache <- file.path(source$cache_dir, source$id, "_levels", sprintf("level_%d.tif", level))
+  level_cache <- file.path(
+    source$cache_dir,
+    source$cache_namespace,
+    "_levels",
+    sprintf("level_%d.tif", level)
+  )
 
   expect_true(file.exists(level_cache))
   expect_true(file.exists(file))
   expect_equal(as.integer(wsiTools:::wsi_vips_field(file, "width")), region$desired_width)
   expect_equal(as.integer(wsiTools:::wsi_vips_field(file, "height")), region$desired_height)
+})
+
+test_that("persistent dynamic tiles use stable fingerprints and HTTP validation", {
+  slide <- wsiTools:::wsi_mock_slide(width = 640, height = 480, levels = c(1, 4))
+  cache_dir <- tempfile("persistent_tile_cache_")
+  dir.create(cache_dir)
+  on.exit(unlink(cache_dir, recursive = TRUE, force = TRUE), add = TRUE)
+
+  first <- wsi_dynamic_tile_source(
+    slide,
+    slide_id = "persistent case",
+    tile_size = 128,
+    cache_dir = cache_dir,
+    persistent_cache = TRUE
+  )
+  second <- wsi_dynamic_tile_source(
+    slide,
+    slide_id = "persistent case",
+    tile_size = 128,
+    cache_dir = cache_dir,
+    persistent_cache = TRUE
+  )
+  changed <- wsi_dynamic_tile_source(
+    slide,
+    slide_id = "persistent case",
+    tile_size = 256,
+    cache_dir = cache_dir,
+    persistent_cache = TRUE
+  )
+
+  expect_true(first$cache_persistent)
+  expect_equal(first$cache_key, second$cache_key)
+  expect_equal(first$cache_namespace, second$cache_namespace)
+  expect_false(identical(first$cache_key, changed$cache_key))
+
+  response <- wsiTools:::wsi_dynamic_tile_response(
+    first,
+    level = first$max_level,
+    col = 0,
+    row = 0
+  )
+  expect_equal(response$status, 200L)
+  expect_equal(response$headers[["Cache-Control"]], "public, max-age=31536000, immutable")
+  expect_equal(response$headers[["X-wsiTools-Tile-Cache"]], "miss")
+  expect_match(response$headers[["ETag"]], '^"v2_')
+
+  validated <- wsiTools:::wsi_dynamic_tile_response(
+    second,
+    level = second$max_level,
+    col = 0,
+    row = 0,
+    request_etag = response$headers[["ETag"]]
+  )
+  expect_equal(validated$status, 304L)
+  expect_length(validated$body, 0L)
+  expect_equal(validated$headers[["X-wsiTools-Tile-Cache"]], "hit")
+
+  namespace <- file.path(cache_dir, first$cache_namespace)
+  expect_true(dir.exists(namespace))
+  wsiTools:::wsi_dynamic_tile_cleanup(first)
+  expect_true(dir.exists(namespace))
+  wsiTools:::wsi_dynamic_tile_cleanup(first, force = TRUE)
+  expect_false(dir.exists(namespace))
 })
 
 test_that("mIHC channel sources use registration extent and dynamic tiles", {
@@ -2561,7 +2667,8 @@ test_that("live H&E viewer wires deconvolution as tiled channel layers", {
 
 test_that("viewer event validation allowlists live WebSocket events", {
   expected <- c(
-    "roi_created", "roi_updated", "roi_curve_edited", "roi_deleted", "roi_selected",
+    "roi_created", "roi_updated", "roi_label_updated", "roi_curve_edited",
+    "roi_deleted", "roi_selected",
     "brush_committed", "annotation_mask_updated", "viewport_changed", "layer_updated",
     "trajectory_deleted", "trajectory_area_created", "trajectory_area_updated",
     "trajectory_profile_started", "trajectory_profile_finished",
@@ -2571,6 +2678,7 @@ test_that("viewer event validation allowlists live WebSocket events", {
     "project_image_closed", "grandqc_loaded", "grandqc_cleared",
     "kodama_cells_selected", "seurat_cluster_coloured",
     "seurat_plot_scope_changed", "spatial_registration_saved",
+    "annotation_undo", "annotation_redo",
     "spatial_object_save_requested",
     "viewer_log_updated", "viewer_log_cleared", "viewer_log_exported",
     "multi_view_layout_updated", "multi_view_pane_replaced", "multi_view_sync_updated",
@@ -2579,6 +2687,7 @@ test_that("viewer event validation allowlists live WebSocket events", {
 
   expect_true(all(expected %in% wsiTools:::wsi_viewer_allowed_events()))
   expect_equal(wsiTools:::wsi_viewer_validate_event("brush_committed"), "brush_committed")
+  expect_equal(wsiTools:::wsi_viewer_validate_event("roi_label_updated"), "roi_label_updated")
   expect_error(
     wsiTools:::wsi_viewer_validate_state_payload(list(event = "eval_r_code")),
     "Unsupported viewer event"
@@ -3003,6 +3112,39 @@ test_that("desktop launcher routes CZI files to the CZI live project viewer", {
   expect_match(launcher, "all(czi_paths)", fixed = TRUE)
 })
 
+test_that("desktop launcher isolates static viewer assets from live R work", {
+  launcher_path <- test_path("../../tools/wsiToolsDesktop/src-tauri/resources/launch-viewer.R")
+  skip_if_not(
+    file.exists(launcher_path),
+    "Desktop launcher resources are not included in source-package checks."
+  )
+  launcher <- paste(readLines(launcher_path, warn = FALSE), collapse = "\n")
+
+  expect_match(launcher, "WSITOOLS_DESKTOP_SEPARATE_STATIC_SERVER", fixed = TRUE)
+  expect_match(launcher, "callr::r_bg", fixed = TRUE)
+  expect_match(launcher, "Cache-Control", fixed = TRUE)
+  expect_match(launcher, "ETag", fixed = TRUE)
+  expect_match(launcher, "dense_geojson_sources", fixed = TRUE)
+  expect_match(launcher, "immediate browser-side level-of-detail rendering", fixed = TRUE)
+})
+
+test_that("dense tissue annotations load once and coalesce viewport work", {
+  html_code <- paste(deparse(wsiTools:::wsi_viewer_geometry_js), collapse = "\n")
+  session_code <- paste(deparse(wsiTools:::wsi_start_viewer_state_server), collapse = "\n")
+
+  expect_match(html_code, "denseGeojsonStaticLayer", fixed = TRUE)
+  expect_match(html_code, "denseGeojsonStaticLoaded", fixed = TRUE)
+  expect_match(html_code, "denseGeojsonInflight", fixed = TRUE)
+  expect_match(html_code, "denseGeojsonQueued", fixed = TRUE)
+  expect_match(html_code, "scheduleDenseGeojsonViewportLoad", fixed = TRUE)
+  expect_match(html_code, "denseStaticUsesFullResolution", fixed = TRUE)
+  expect_match(html_code, "_dense_full_groups", fixed = TRUE)
+  expect_match(html_code, "Tissue annotation loaded with browser-side level-of-detail rendering", fixed = TRUE)
+  expect_match(session_code, "static_url", fixed = TRUE)
+  expect_match(session_code, "static_source", fixed = TRUE)
+  expect_match(session_code, "full_resolution_zoom", fixed = TRUE)
+})
+
 test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
   html <- wsiTools:::wsi_tiled_viewer_html(list(
     title = "synthetic tiled viewer",
@@ -3116,7 +3258,16 @@ test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
   expect_match(html, "multiViewSyncedPanByPixels", fixed = TRUE)
   expect_match(html, "if(multiViewSyncedPanByPixels(pane,dx,dy))return", fixed = TRUE)
   expect_match(html, "multiViewPanByPixels", fixed = TRUE)
-  expect_match(html, "activeMultiViewPane();if(pane){multiViewPanByPixels(pane,dx,dy);draw();return;}", fixed = TRUE)
+  expect_match(html, "activeMultiViewPane();if(pane){multiViewPanByPixels(pane,dx,dy);requestDraw();return;}", fixed = TRUE)
+  expect_match(html, "id=\"spatialOverlay\"", fixed = TRUE)
+  expect_match(html, "spatialWebglProgram", fixed = TRUE)
+  expect_match(html, "invalidateSpatialWebglCache", fixed = TRUE)
+  expect_match(html, "requestMultiViewOverlayDraw", fixed = TRUE)
+  expect_match(html, "viewerPerformancePayload", fixed = TRUE)
+  expect_match(html, "id=\"performanceSummary\"", fixed = TRUE)
+  expect_match(html, "id=\"performanceAdvice\"", fixed = TRUE)
+  expect_match(html, "viewerPerformanceAdvice", fixed = TRUE)
+  expect_match(html, "denseGeojsonInflight", fixed = TRUE)
   expect_match(html, "panByKeyboard(e.key,e.shiftKey)", fixed = TRUE)
   expect_match(html, "highlighted=typeof roiClassHighlighted==='function'&&roiClassHighlighted(roi)", fixed = TRUE)
   expect_match(html, "multiViewOsdOptions", fixed = TRUE)

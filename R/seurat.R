@@ -157,6 +157,14 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
     image_obj = image_obj,
     tissue_positions = spatial$tissue_positions
   )
+  image_coordinate_count <- nrow(coordinates)
+  image_coordinate_ids <- as.character(coordinates$barcode)
+  if (anyDuplicated(image_coordinate_ids)) {
+    wsi_abort(sprintf(
+      "Seurat image `%s` contains duplicated spatial cell/spot identifiers.",
+      image_name
+    ))
+  }
   embeddings <- tryCatch(
     wsi_seurat_embeddings(seurat, reduction = reduction),
     error = function(err) NULL
@@ -334,6 +342,12 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
     ))
     plots <- plots[!vapply(plots, is.null, logical(1))]
   }
+  if (length(gene_value_items) == nrow(spots)) {
+    spots$gene_values <- I(gene_value_items)
+  }
+  if (length(cluster_value_items) == nrow(spots)) {
+    spots$cluster_values <- I(cluster_value_items)
+  }
   primary_plot <- if (length(plots)) {
     plots[[1L]]
   } else {
@@ -381,7 +395,15 @@ wsi_link_seurat_image <- function(seurat, image, image_name = NULL,
     expression_source = list(
       object = seurat,
       spot_ids = as.character(mask_spots$barcode %||% mask_spots$id),
-      feature_type = feature_type
+      feature_type = feature_type,
+      image_name = image_name
+    ),
+    cell_scope = list(
+      image_name = image_name,
+      image_coordinate_count = as.integer(image_coordinate_count),
+      linked_cell_count = as.integer(length(ids)),
+      dropped_coordinate_count = as.integer(image_coordinate_count - length(ids)),
+      exact_id_order = TRUE
     ),
     reduction_embeddings = embeddings,
     reduction_embedding_name = reduction,
@@ -1019,6 +1041,7 @@ wsi_seurat_spots_layer <- function(linked, visible = TRUE, opacity = 1) {
     image_name = linked$image_name,
     coordinate_mapping = linked$coordinate_mapping,
     mpp = linked$mpp %||% linked$pixel_size %||% NULL,
+    coordinate_diameter_um = 50,
     scale_metadata = linked$scale_metadata %||% NULL,
     feature_count = feature_count,
     represented_count = length(items),
@@ -1736,6 +1759,7 @@ wsi_viewer_seurat_config <- function(seurat = NULL) {
     spot_count = as.integer(seurat$spot_count),
     displayed_spot_count = as.integer(seurat$displayed_spot_count),
     spot_radius = as.numeric(seurat$spot_radius),
+    coordinate_diameter_um = 50,
     mpp = seurat$mpp %||% seurat$pixel_size %||% NULL,
     pixel_size = seurat$pixel_size %||% seurat$mpp %||% NULL,
     scale_metadata = seurat$scale_metadata %||% NULL,
@@ -2264,7 +2288,16 @@ wsi_seurat_images <- function(seurat) {
 
 wsi_seurat_image_name <- function(seurat, image_name = NULL) {
   if (!is.null(image_name)) {
-    return(wsi_seurat_check_scalar_character(image_name, "image_name"))
+    image_name <- wsi_seurat_check_scalar_character(image_name, "image_name")
+    available <- wsi_seurat_images(seurat)
+    if (length(available) && !image_name %in% available) {
+      wsi_abort(sprintf(
+        "Seurat image `%s` was not found. Available spatial images: %s.",
+        image_name,
+        paste(available, collapse = ", ")
+      ))
+    }
+    return(image_name)
   }
   images <- wsi_seurat_images(seurat)
   if (!length(images)) {
@@ -2299,6 +2332,7 @@ wsi_seurat_embeddings <- function(seurat, reduction = "pca") {
   }
   if (is.null(rownames(emb))) {
     rownames(emb) <- as.character(seq_len(nrow(emb)))
+    attr(emb, "wsi_synthetic_ids") <- TRUE
   }
   emb
 }
@@ -2309,8 +2343,43 @@ wsi_seurat_coordinates_from_accessor <- function(seurat, image_name) {
   if (!is.null(out)) {
     return(out)
   }
+  image_names <- wsi_seurat_images(seurat)
+  if (length(image_names) > 1L && !is.null(image_name) && image_name %in% image_names) {
+    return(NULL)
+  }
   wsi_seurat_try_accessor("SeuratObject", "GetTissueCoordinates", object = seurat) %||%
     wsi_seurat_try_accessor("Seurat", "GetTissueCoordinates", object = seurat)
+}
+
+wsi_seurat_coordinate_ids <- function(coords) {
+  if (is.null(coords) || !is.data.frame(coords) || !nrow(coords)) {
+    return(character())
+  }
+  for (candidate in c("barcode", "barcodes")) {
+    if (candidate %in% names(coords)) {
+      ids <- as.character(coords[[candidate]])
+      if (length(ids) == nrow(coords) && all(!is.na(ids) & nzchar(ids))) {
+        return(ids)
+      }
+    }
+  }
+  ids <- rownames(coords)
+  default_ids <- as.character(seq_len(nrow(coords)))
+  if (!is.null(ids) && length(ids) == nrow(coords) &&
+      all(!is.na(ids) & nzchar(ids)) &&
+      !identical(as.character(ids), default_ids) &&
+      !all(grepl("^[0-9]+$", ids))) {
+    return(as.character(ids))
+  }
+  for (candidate in c("cell", "cells", "spot", "spot_id")) {
+    if (candidate %in% names(coords)) {
+      ids <- as.character(coords[[candidate]])
+      if (length(ids) == nrow(coords) && all(!is.na(ids) & nzchar(ids))) {
+        return(ids)
+      }
+    }
+  }
+  character()
 }
 
 wsi_seurat_coordinates_from_boundaries <- function(image_obj) {
@@ -2488,14 +2557,26 @@ wsi_seurat_coordinates_from_metadata <- function(seurat) {
 wsi_seurat_coordinate_table <- function(seurat, image_name, image_obj = NULL, tissue_positions = NULL) {
   coords <- wsi_seurat_read_tissue_positions(tissue_positions)
   meta_coords <- NULL
+  accessor_coords <- NULL
   if (is.null(coords)) {
+    accessor_coords <- wsi_seurat_coordinates_from_accessor(seurat, image_name)
+    accessor_coords <- accessor_coords %||% wsi_seurat_slot(image_obj, "coordinates")
+    accessor_coords <- accessor_coords %||% wsi_seurat_coordinates_from_boundaries(image_obj)
     meta_coords <- wsi_seurat_coordinates_from_metadata(seurat)
     if (isTRUE(attr(meta_coords, "registered_coordinates", exact = TRUE))) {
-      coords <- meta_coords
+      if (is.null(accessor_coords)) {
+        coords <- meta_coords
+      } else {
+        image_ids <- wsi_seurat_coordinate_ids(accessor_coords)
+        registered_index <- match(image_ids, as.character(meta_coords$barcode))
+        if (length(image_ids) && all(!is.na(registered_index))) {
+          coords <- meta_coords[registered_index, , drop = FALSE]
+        }
+      }
     }
   }
   if (is.null(coords)) {
-    coords <- wsi_seurat_coordinates_from_accessor(seurat, image_name)
+    coords <- accessor_coords %||% wsi_seurat_coordinates_from_accessor(seurat, image_name)
   }
   if (is.null(coords)) {
     coords <- wsi_seurat_slot(image_obj, "coordinates")
@@ -2510,15 +2591,9 @@ wsi_seurat_coordinate_table <- function(seurat, image_name, image_obj = NULL, ti
     wsi_abort("Could not extract spatial coordinates from the Seurat object.")
   }
   coords <- as.data.frame(coords, stringsAsFactors = FALSE)
-  barcode <- NULL
-  for (candidate in c("barcode", "barcodes", "cell", "cells", "spot", "spot_id")) {
-    if (candidate %in% names(coords)) {
-      barcode <- as.character(coords[[candidate]])
-      break
-    }
-  }
-  if (is.null(barcode)) {
-    barcode <- rownames(coords) %||% as.character(seq_len(nrow(coords)))
+  barcode <- wsi_seurat_coordinate_ids(coords)
+  if (!length(barcode)) {
+    barcode <- as.character(seq_len(nrow(coords)))
   }
   x_col <- wsi_seurat_first_column(coords, c("pxl_col_in_fullres", "imagecol", "col", "x", "X"))
   y_col <- wsi_seurat_first_column(coords, c("pxl_row_in_fullres", "imagerow", "row", "y", "Y"))
@@ -2569,9 +2644,16 @@ wsi_seurat_first_column <- function(data, candidates) {
 wsi_seurat_match_spots <- function(coordinates, embeddings) {
   coord_ids <- as.character(coordinates$barcode)
   emb_ids <- rownames(embeddings) %||% as.character(seq_len(nrow(embeddings)))
+  if (anyDuplicated(coord_ids)) {
+    wsi_abort("The selected Seurat image contains duplicated spatial cell/spot identifiers.")
+  }
+  if (anyDuplicated(emb_ids)) {
+    wsi_abort("The selected Seurat reduction contains duplicated cell/spot identifiers.")
+  }
   idx <- match(coord_ids, emb_ids)
   keep <- !is.na(idx)
-  if (!any(keep) && nrow(coordinates) == nrow(embeddings)) {
+  if (!any(keep) && nrow(coordinates) == nrow(embeddings) &&
+      isTRUE(attr(embeddings, "wsi_synthetic_ids", exact = TRUE))) {
     coordinates$barcode <- emb_ids
     return(list(coordinates = coordinates, embeddings = embeddings))
   }
@@ -3155,6 +3237,24 @@ wsi_seurat_dynamic_gene_payload <- function(linked, gene) {
   if (!length(spot_ids)) {
     wsi_abort(sprintf("No %s spot/cell identifiers are available for dynamic gene lookup.", source_name))
   }
+  if (anyDuplicated(spot_ids)) {
+    wsi_abort(sprintf(
+      "The selected %s image contains duplicated spot/cell identifiers; gene values cannot be aligned safely.",
+      source_name
+    ))
+  }
+  spot_barcodes <- as.character(spots$barcode %||% spots$id)
+  spot_index <- match(spot_ids, spot_barcodes)
+  if (anyNA(spot_index)) {
+    missing_count <- sum(is.na(spot_index))
+    wsi_abort(sprintf(
+      "%d %s expression identifier%s could not be matched to the selected image coordinates.",
+      missing_count,
+      source_name,
+      if (missing_count == 1L) "" else "s"
+    ))
+  }
+  spots <- spots[spot_index, , drop = FALSE]
   feature_type <- source$feature_type %||% linked$feature_type %||% {
     if ("feature_type" %in% names(spots)) spots$feature_type[[1L]] else NULL
   }

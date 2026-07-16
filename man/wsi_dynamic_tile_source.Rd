@@ -11,7 +11,8 @@ wsi_dynamic_tile_source(
   tile_overlap = 1,
   format = c("png", "jpg", "jpeg"),
   cache_dir = NULL,
-  route = "/tiles"
+  route = "/tiles",
+  persistent_cache = FALSE
 )
 }
 \arguments{
@@ -29,6 +30,10 @@ seams between browser tiles.}
 \item{cache_dir}{Directory for generated tile cache files.}
 
 \item{route}{HTTP route prefix.}
+
+\item{persistent_cache}{Keep generated tiles across viewer sessions. When
+\code{TRUE} and \code{cache_dir} is \code{NULL}, the platform user cache directory is
+used and bounded maintenance is performed periodically.}
 }
 \value{
 A \code{wsi_dynamic_tile_source} object.

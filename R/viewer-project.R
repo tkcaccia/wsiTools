@@ -170,6 +170,8 @@ wsi_viewer_project <- function(images, output = NULL, open = interactive(),
 #' @param transport Live browser-to-R transport.
 #' @param tile_path HTTP route used for dynamic tiles.
 #' @param cache_dir Optional dynamic tile cache directory.
+#' @param persistent_cache Keep generated CZI tiles across viewer sessions in
+#'   the fingerprinted user cache.
 #' @param name,envir Live state name and environment.
 #' @param wait If `TRUE`, service the live bridge until interrupted.
 #' @param roi_class_presets ROI class presets used by the annotation UI.
@@ -201,7 +203,8 @@ wsi_viewer_czi_project_live <- function(images, output = NULL, open = interactiv
                                         name = "wsi_czi_project_live_state",
                                         envir = parent.frame(),
                                         wait = interactive(),
-                                        roi_class_presets = wsi_roi_class_presets()) {
+                                        roi_class_presets = wsi_roi_class_presets(),
+                                        persistent_cache = FALSE) {
   if (!requireNamespace("httpuv", quietly = TRUE)) {
     wsi_abort(
       "Full-resolution live CZI project viewing requires the optional package `httpuv`.",
@@ -254,7 +257,7 @@ wsi_viewer_czi_project_live <- function(images, output = NULL, open = interactiv
   roi_class_presets <- wsi_normalize_roi_class_presets(roi_class_presets)
 
   state <- wsi_new_viewer_state(name = name, envir = envir)
-  shared_cache <- wsi_dynamic_tile_cache_dir(cache_dir)
+  shared_cache <- wsi_dynamic_tile_cache_dir(cache_dir, persistent = persistent_cache)
   dynamic_sources <- list()
 
   items <- lapply(seq_along(paths), function(i) {
@@ -269,7 +272,8 @@ wsi_viewer_czi_project_live <- function(images, output = NULL, open = interactiv
       sections = sections,
       preview = czi_preview,
       cache_dir = shared_cache,
-      route = tile_path
+      route = tile_path,
+      persistent_cache = persistent_cache
     )
     dynamic_sources <<- c(dynamic_sources, built$sources)
     built$item
@@ -422,7 +426,8 @@ wsi_czi_live_project_item <- function(path, index = 1L, width = 1024,
                                       tile_format = "jpg", channel = 0,
                                       sections = TRUE, preview = c("lazy", "all"),
                                       cache_dir = NULL,
-                                      route = "/tiles") {
+                                      route = "/tiles",
+                                      persistent_cache = FALSE) {
   preview <- match.arg(preview)
   info <- wsi_native_czi_info(path)
   mpp <- wsi_viewer_mpp_payload(wsi_native_czi_mpp(info$metadata_xml %||% NA_character_))
@@ -457,6 +462,7 @@ wsi_czi_live_project_item <- function(path, index = 1L, width = 1024,
       route = route,
       channel = channel,
       pyramid_factors = pyramid_factors,
+      persistent_cache = persistent_cache,
       metadata = list(
         source_path = path,
         scene = scene_index,

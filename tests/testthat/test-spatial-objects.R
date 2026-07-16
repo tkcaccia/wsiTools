@@ -241,6 +241,17 @@ test_that("Giotto viewer controls expose only present dimensional reductions", {
   expect_match(text, "restoreSeuratRegistrationUndo", fixed = TRUE)
   expect_match(text, "Save spatial object", fixed = TRUE)
   expect_match(text, "spatialObjectSaveDialog", fixed = TRUE)
+  expect_match(text, "Coordinate-to-annotation CSV", fixed = TRUE)
+  expect_match(text, "Spatial object file name", fixed = TRUE)
+  expect_match(text, "spatialObjectSaveFileName", fixed = TRUE)
+  expect_match(text, "spatialObjectPathWithFileName", fixed = TRUE)
+  expect_match(text, "annotations:annotationGeojson", fixed = TRUE)
+  expect_match(text, "overwriteConfirmed", fixed = TRUE)
+  expect_match(text, "overwrite_required", fixed = TRUE)
+  expect_match(text, "A file already exists at:\\n\\n", fixed = TRUE)
+  expect_match(text, "Do you want to replace it?", fixed = TRUE)
+  expect_match(text, "viewerErrorText", fixed = TRUE)
+  expect_equal(lengths(regmatches(text, gregexpr("function roiFeature(", text, fixed = TRUE))), 1L)
   expect_match(text, "spatial_object_save_url", fixed = TRUE)
   expect_match(text, "spatial_registration_updated", fixed = TRUE)
   expect_match(text, "spatial_object_save_requested", fixed = TRUE)
@@ -282,6 +293,30 @@ test_that("spatial object save response writes CSV and full R object", {
     class = "wsi_seurat_spatial"
   )
   state <- wsiTools:::wsi_new_viewer_state(name = "save_response_state", envir = new.env(parent = emptyenv()))
+  state$rois <- data.frame(
+    roi_id = "roi_tumour",
+    name = "Tumour",
+    class = "tumour",
+    object_type = "annotation",
+    color = "#ff0000",
+    classification_color = "#ff0000",
+    is_locked = FALSE,
+    geometry_type = "Polygon",
+    xmin = 0,
+    ymin = 0,
+    xmax = 15,
+    ymax = 35,
+    crs = NA_character_,
+    stringsAsFactors = FALSE
+  )
+  state$rois$coordinates <- I(list(list(rbind(
+    c(0, 0), c(15, 0), c(15, 35), c(0, 35), c(0, 0)
+  ))))
+  state$rois$measurements <- I(list(list()))
+  state$rois$properties <- I(list(list()))
+  state$rois$geometry <- I(list(list()))
+  state$rois$feature <- I(list(list()))
+  class(state$rois) <- c("wsi_roi", class(state$rois))
 
   csv_result <- wsiTools:::wsi_spatial_object_save_response(spatial, registration_payload, state = state)
   expect_true(file.exists(csv_result$file))
@@ -296,6 +331,18 @@ test_that("spatial object save response writes CSV and full R object", {
   rds_payload$output <- rds_path
   rds_result <- wsiTools:::wsi_spatial_object_save_response(spatial, rds_payload, state = state)
   expect_true(file.exists(rds_result$file))
+  expect_error(
+    wsiTools:::wsi_spatial_object_save_response(spatial, rds_payload, state = state),
+    "already exists",
+    class = "wsi_overwrite_required"
+  )
+  rds_payload$overwrite <- TRUE
+  overwrite_result <- wsiTools:::wsi_spatial_object_save_response(
+    spatial,
+    rds_payload,
+    state = state
+  )
+  expect_true(overwrite_result$overwrite)
   saved <- readRDS(rds_result$file)
   expect_equal(saved$meta.data$registered_x, c(12, 20))
   expect_equal(saved$meta.data$registered_y, c(34, 40))
@@ -304,7 +351,40 @@ test_that("spatial object save response writes CSV and full R object", {
   expect_equal(saved$images$slice1$coordinates$y, c(34, 40))
   expect_equal(saved$images$slice1$coordinates$imagecol, c(12, 20))
   expect_equal(saved$images$slice1$coordinates$imagerow, c(34, 40))
+  expect_equal(saved$meta.data$wsi_annotation, c("tumour", "Unassigned"))
+  expect_equal(saved$meta.data$wsi_annotation_id, c("roi_tumour", NA))
+  expect_equal(saved$meta.data$wsi_annotation_name, c("Tumour", NA))
+  expect_equal(saved$meta.data$wsi_annotation_index, c(1L, NA_integer_))
+  expect_equal(saved$misc$wsiTools$annotation_association$assigned, 1L)
+  expect_equal(saved$misc$wsiTools$annotation_association$unassigned, 1L)
+  expect_equal(length(saved$misc$wsiTools$annotation_rois$features), 1L)
+  expect_equal(rds_result$association_count, 2L)
+  expect_equal(rds_result$assigned_count, 1L)
+  expect_equal(nrow(state$annotation_spots), 1L)
+  expect_equal(state$annotation_spots$spot_id, "spot_1")
   expect_s3_class(attr(saved, "wsi_spatial_registration"), "wsi_spatial_registration")
+
+  invalid_overwrite <- rds_payload
+  invalid_overwrite$output <- tempfile(fileext = ".rds")
+  invalid_overwrite$overwrite <- "yes"
+  expect_error(
+    wsiTools:::wsi_spatial_object_save_response(spatial, invalid_overwrite, state = state),
+    "must be one TRUE or FALSE"
+  )
+
+  association_path <- tempfile(fileext = ".csv")
+  association_payload <- registration_payload
+  association_payload$format <- "annotation_csv"
+  association_payload$output <- association_path
+  association_result <- wsiTools:::wsi_spatial_object_save_response(
+    spatial,
+    association_payload,
+    state = state
+  )
+  expect_true(file.exists(association_result$file))
+  association <- utils::read.csv(association_result$file, stringsAsFactors = FALSE)
+  expect_equal(association$point_id, c("spot_1", "spot_2"))
+  expect_equal(association$annotation_class, c("tumour", "Unassigned"))
 })
 
 test_that("SpatialExperiment-like objects can be linked with explicit coordinates", {

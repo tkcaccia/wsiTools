@@ -15,7 +15,8 @@ wsi_stain_channel_sources(
   cache_dir = NULL,
   route = "/tiles",
   opacity = 0.9,
-  metadata = list()
+  metadata = list(),
+  persistent_cache = FALSE
 )
 }
 \arguments{
@@ -41,6 +42,8 @@ use alpha.}
 \item{opacity}{Initial overlay opacity.}
 
 \item{metadata}{Optional metadata added to each channel source.}
+
+\item{persistent_cache}{Keep generated tiles across viewer sessions.}
 }
 \value{
 A \code{wsi_stain_channel_sources} object for \code{channel_sources}.

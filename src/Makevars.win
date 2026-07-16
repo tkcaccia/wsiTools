@@ -2,7 +2,7 @@
 # retained as an explicit emergency fallback for systems where native-czi.cpp
 # cannot be compiled.
 ifeq ($(WSITOOLS_DISABLE_NATIVE_CZI),1)
-OBJECTS = native-stubs.o
+OBJECTS = native-stubs.o native-geometry.o
 else
-OBJECTS = native-czi.o
+OBJECTS = native-czi.o native-geometry.o
 endif

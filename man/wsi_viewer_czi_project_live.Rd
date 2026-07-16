@@ -27,7 +27,8 @@ wsi_viewer_czi_project_live(
   name = "wsi_czi_project_live_state",
   envir = parent.frame(),
   wait = interactive(),
-  roi_class_presets = wsi_roi_class_presets()
+  roi_class_presets = wsi_roi_class_presets(),
+  persistent_cache = FALSE
 )
 }
 \arguments{
@@ -72,6 +73,9 @@ and generates low-resolution previews for all scenes before opening.}
 \item{wait}{If \code{TRUE}, service the live bridge until interrupted.}
 
 \item{roi_class_presets}{ROI class presets used by the annotation UI.}
+
+\item{persistent_cache}{Keep generated CZI tiles across viewer sessions in
+the fingerprinted user cache.}
 }
 \value{
 A \code{wsi_viewer_session} object, invisibly.

@@ -62,6 +62,56 @@ wsi_filter_polygonal_rois <- function(roi) {
   out
 }
 
+wsi_bbox_matrix <- function(x) {
+  if (is.matrix(x)) {
+    if (ncol(x) < 4L) {
+      wsi_abort("A bounding-box matrix must have at least four columns.")
+    }
+    out <- x[, seq_len(4L), drop = FALSE]
+  } else if (is.data.frame(x)) {
+    columns <- c("xmin", "ymin", "xmax", "ymax")
+    if (!all(columns %in% names(x))) {
+      wsi_abort("Bounding-box data must contain xmin, ymin, xmax, and ymax columns.")
+    }
+    out <- as.matrix(x[, columns, drop = FALSE])
+  } else {
+    wsi_abort("Bounding boxes must be supplied as a matrix or data frame.")
+  }
+  storage.mode(out) <- "double"
+  colnames(out) <- c("xmin", "ymin", "xmax", "ymax")
+  out
+}
+
+wsi_bbox_index_create <- function(x) {
+  bbox <- wsi_bbox_matrix(x)
+  if (!nrow(bbox) || !is.loaded("wsi_bbox_index_build_cpp", PACKAGE = "wsiTools")) {
+    return(NULL)
+  }
+  tryCatch(
+    .Call("wsi_bbox_index_build_cpp", bbox, PACKAGE = "wsiTools"),
+    error = function(err) NULL
+  )
+}
+
+wsi_bbox_index_query <- function(index, xmin, ymin, xmax, ymax) {
+  if (is.null(index) || !inherits(index, "wsi_bbox_index") ||
+      !is.loaded("wsi_bbox_index_query_cpp", PACKAGE = "wsiTools")) {
+    return(NULL)
+  }
+  tryCatch(
+    .Call(
+      "wsi_bbox_index_query_cpp",
+      index,
+      as.numeric(xmin),
+      as.numeric(ymin),
+      as.numeric(xmax),
+      as.numeric(ymax),
+      PACKAGE = "wsiTools"
+    ),
+    error = function(err) NULL
+  )
+}
+
 wsi_roi_rings <- function(roi, index = 1L) {
   unlist(wsi_roi_polygons(roi, index), recursive = FALSE)
 }

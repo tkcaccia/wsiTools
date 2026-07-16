@@ -82,13 +82,214 @@ wsi_dynamic_tile_settings_key <- function(settings = list()) {
   gsub("[^A-Za-z0-9_]+", "_", key)
 }
 
-wsi_dynamic_tile_cache_dir <- function(cache_dir = NULL) {
-  cache_dir <- cache_dir %||% tempfile("wsi_dynamic_tiles_")
+wsi_dynamic_hash_text <- function(text) {
+  bytes <- utf8ToInt(enc2utf8(paste(text, collapse = "\n")))
+  hash <- 5381
+  if (length(bytes)) {
+    for (byte in bytes) {
+      hash <- (hash * 33 + byte) %% 2147483647
+    }
+  }
+  sprintf("%08x", as.integer(hash))
+}
+
+wsi_dynamic_path_signature <- function(path = NULL) {
+  if (is.null(path) || length(path) != 1L || is.na(path) || !nzchar(path)) {
+    return(c(path = "", size = "", mtime = ""))
+  }
+  normalized <- normalizePath(path, winslash = "/", mustWork = FALSE)
+  info <- suppressWarnings(file.info(path))
+  if (!nrow(info) || is.na(info$size[[1L]])) {
+    return(c(path = normalized, size = "", mtime = ""))
+  }
+  c(
+    path = normalized,
+    size = format(info$size[[1L]], scientific = FALSE, trim = TRUE),
+    mtime = format(as.numeric(info$mtime[[1L]]), scientific = FALSE, trim = TRUE)
+  )
+}
+
+#' Inspect and manage the persistent viewer tile cache
+#'
+#' Persistent dynamic tiles are stored outside the R session so reopening a
+#' slide can reuse tiles generated previously. Cache entries are keyed by the
+#' source file identity and tile settings; stale entries therefore cannot be
+#' used for a changed image.
+#'
+#' @param create Whether to create the cache directory when it is missing.
+#' @param cache_dir Cache directory. The default is the platform-specific R
+#'   user cache directory, or `WSITOOLS_DYNAMIC_TILE_CACHE_DIR` when set.
+#' @param max_bytes Maximum cache size in bytes. The default is controlled by
+#'   `WSITOOLS_DYNAMIC_TILE_CACHE_GB` and otherwise uses 20 GB.
+#' @param max_age_days Remove entries older than this many days. Use `Inf` to
+#'   prune only by size.
+#'
+#' @return `wsi_tile_cache_dir()` returns a path. `wsi_tile_cache_info()` and
+#'   `wsi_tile_cache_prune()` return a one-row data frame. `wsi_tile_cache_clear()`
+#'   returns the cache path invisibly.
+#' @export
+wsi_tile_cache_dir <- function(create = TRUE) {
+  configured <- Sys.getenv("WSITOOLS_DYNAMIC_TILE_CACHE_DIR", unset = "")
+  path <- if (nzchar(configured)) {
+    path.expand(configured)
+  } else {
+    file.path(tools::R_user_dir("wsiTools", which = "cache"), "dynamic-tiles")
+  }
+  if (isTRUE(create) && !dir.exists(path) &&
+      !dir.create(path, recursive = TRUE, showWarnings = FALSE)) {
+    wsi_abort(sprintf("Could not create persistent tile cache directory: %s", path))
+  }
+  normalizePath(path, winslash = "/", mustWork = isTRUE(create))
+}
+
+wsi_tile_cache_default_max_bytes <- function() {
+  gb <- suppressWarnings(as.numeric(Sys.getenv(
+    "WSITOOLS_DYNAMIC_TILE_CACHE_GB",
+    unset = "20"
+  )))
+  if (!is.finite(gb) || gb <= 0) {
+    gb <- 20
+  }
+  gb * 1024^3
+}
+
+#' @rdname wsi_tile_cache_dir
+#' @export
+wsi_tile_cache_info <- function(cache_dir = wsi_tile_cache_dir()) {
+  cache_dir <- normalizePath(cache_dir, winslash = "/", mustWork = FALSE)
+  files <- if (dir.exists(cache_dir)) {
+    list.files(cache_dir, recursive = TRUE, full.names = TRUE, all.files = TRUE)
+  } else {
+    character()
+  }
+  files <- files[file.exists(files) & !dir.exists(files)]
+  info <- if (length(files)) suppressWarnings(file.info(files)) else data.frame()
+  bytes <- if (nrow(info)) sum(info$size, na.rm = TRUE) else 0
+  data.frame(
+    path = cache_dir,
+    files = as.integer(length(files)),
+    bytes = as.numeric(bytes),
+    gigabytes = as.numeric(bytes / 1024^3),
+    stringsAsFactors = FALSE
+  )
+}
+
+#' @rdname wsi_tile_cache_dir
+#' @export
+wsi_tile_cache_prune <- function(cache_dir = wsi_tile_cache_dir(),
+                                 max_bytes = wsi_tile_cache_default_max_bytes(),
+                                 max_age_days = 30) {
+  cache_dir <- normalizePath(cache_dir, winslash = "/", mustWork = FALSE)
+  max_bytes <- wsi_check_scalar_number(max_bytes, "max_bytes", allow_zero = TRUE)
+  max_age_days <- suppressWarnings(as.numeric(max_age_days))
+  if (length(max_age_days) != 1L || is.na(max_age_days) || max_age_days < 0) {
+    wsi_abort("`max_age_days` must be one non-negative number or `Inf`.")
+  }
+  if (!dir.exists(cache_dir)) {
+    return(wsi_tile_cache_info(cache_dir))
+  }
+  files <- list.files(cache_dir, recursive = TRUE, full.names = TRUE, all.files = TRUE)
+  files <- files[file.exists(files) & !dir.exists(files)]
+  files <- files[basename(files) != ".last-prune"]
+  if (!length(files)) {
+    return(wsi_tile_cache_info(cache_dir))
+  }
+  info <- suppressWarnings(file.info(files))
+  valid <- !is.na(info$size)
+  files <- files[valid]
+  info <- info[valid, , drop = FALSE]
+  if (!length(files)) {
+    return(wsi_tile_cache_info(cache_dir))
+  }
+  remove <- rep(FALSE, length(files))
+  if (is.finite(max_age_days)) {
+    remove <- difftime(Sys.time(), info$mtime, units = "days") > max_age_days
+    remove[is.na(remove)] <- FALSE
+  }
+  remaining_bytes <- sum(info$size[!remove], na.rm = TRUE)
+  if (remaining_bytes > max_bytes) {
+    candidates <- which(!remove)
+    candidates <- candidates[order(info$mtime[candidates], na.last = TRUE)]
+    target <- max_bytes * 0.9
+    for (idx in candidates) {
+      if (remaining_bytes <= target) {
+        break
+      }
+      remove[[idx]] <- TRUE
+      remaining_bytes <- remaining_bytes - info$size[[idx]]
+    }
+  }
+  if (any(remove)) {
+    unlink(files[remove], force = TRUE)
+  }
+  wsi_tile_cache_info(cache_dir)
+}
+
+#' @rdname wsi_tile_cache_dir
+#' @export
+wsi_tile_cache_clear <- function(cache_dir = wsi_tile_cache_dir(create = FALSE)) {
+  cache_dir <- normalizePath(cache_dir, winslash = "/", mustWork = FALSE)
+  if (dir.exists(cache_dir)) {
+    unlink(cache_dir, recursive = TRUE, force = TRUE)
+  }
+  invisible(cache_dir)
+}
+
+wsi_dynamic_tile_cache_maintain <- function(cache_dir, interval = 3600) {
+  marker <- file.path(cache_dir, ".last-prune")
+  info <- suppressWarnings(file.info(marker))
+  recent <- nrow(info) && !is.na(info$mtime[[1L]]) &&
+    as.numeric(difftime(Sys.time(), info$mtime[[1L]], units = "secs")) < interval
+  if (isTRUE(recent)) {
+    return(invisible(FALSE))
+  }
+  try(wsi_tile_cache_prune(cache_dir), silent = TRUE)
+  try(writeLines(format(Sys.time(), tz = "UTC", usetz = TRUE), marker), silent = TRUE)
+  invisible(TRUE)
+}
+
+wsi_dynamic_tile_cache_dir <- function(cache_dir = NULL, persistent = FALSE) {
+  cache_dir <- cache_dir %||% if (isTRUE(persistent)) {
+    wsi_tile_cache_dir()
+  } else {
+    tempfile("wsi_dynamic_tiles_")
+  }
   if (!dir.exists(cache_dir) &&
       !dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)) {
     wsi_abort(sprintf("Could not create dynamic tile cache directory: %s", cache_dir))
   }
-  normalizePath(cache_dir, winslash = "/", mustWork = TRUE)
+  cache_dir <- normalizePath(cache_dir, winslash = "/", mustWork = TRUE)
+  if (isTRUE(persistent)) {
+    wsi_dynamic_tile_cache_maintain(cache_dir)
+  }
+  cache_dir
+}
+
+wsi_dynamic_source_cache_key <- function(source) {
+  path <- source$path %||% (source$slide %||% list())$path %||% ""
+  signature <- wsi_dynamic_path_signature(path)
+  fields <- c(
+    signature,
+    kind = source$kind %||% "slide",
+    backend = (source$slide %||% list())$backend %||% source$backend %||% "",
+    width = source$width %||% "",
+    height = source$height %||% "",
+    page = source$page %||% "",
+    scene = source$scene %||% "",
+    channel = source$channel %||% source$channel_id %||% "",
+    stain = source$stain_type %||% "",
+    tile_size = source$tile_size %||% "",
+    tile_overlap = source$tile_overlap %||% "",
+    tile_format = source$tile_format %||% ""
+  )
+  paste0("v2_", wsi_dynamic_hash_text(paste(names(fields), fields, sep = "=", collapse = "|")))
+}
+
+wsi_dynamic_finalize_source <- function(source, persistent_cache = FALSE) {
+  source$cache_persistent <- isTRUE(persistent_cache)
+  source$cache_key <- wsi_dynamic_source_cache_key(source)
+  source$cache_namespace <- paste0(wsi_safe_id(source$id %||% "source", "source"), "_", source$cache_key)
+  source
 }
 
 wsi_dynamic_tile_route <- function(route = "/tiles") {
@@ -114,6 +315,9 @@ wsi_dynamic_tile_route <- function(route = "/tiles") {
 #'   seams between browser tiles.
 #' @param format Tile image format.
 #' @param cache_dir Directory for generated tile cache files.
+#' @param persistent_cache Keep generated tiles across viewer sessions. When
+#'   `TRUE` and `cache_dir` is `NULL`, the platform user cache directory is
+#'   used and bounded maintenance is performed periodically.
 #' @param route HTTP route prefix.
 #'
 #' @return A `wsi_dynamic_tile_source` object.
@@ -121,7 +325,8 @@ wsi_dynamic_tile_route <- function(route = "/tiles") {
 wsi_dynamic_tile_source <- function(slide, slide_id = NULL, tile_size = 512,
                                     tile_overlap = 1,
                                     format = c("png", "jpg", "jpeg"),
-                                    cache_dir = NULL, route = "/tiles") {
+                                    cache_dir = NULL, route = "/tiles",
+                                    persistent_cache = FALSE) {
   wsi_check_slide(slide)
   format <- wsi_dynamic_tile_format(format)
   tile_size <- as.integer(wsi_check_scalar_number(tile_size, "tile_size", allow_zero = FALSE))
@@ -131,7 +336,7 @@ wsi_dynamic_tile_source <- function(slide, slide_id = NULL, tile_size = 512,
   }
   route <- wsi_dynamic_tile_route(route)
   id <- wsi_safe_id(slide_id %||% wsi_slide_id(slide), "slide")
-  cache_dir <- wsi_dynamic_tile_cache_dir(cache_dir)
+  cache_dir <- wsi_dynamic_tile_cache_dir(cache_dir, persistent = persistent_cache)
   max_level <- wsi_dz_max_level(slide$dimensions[["width"]], slide$dimensions[["height"]])
 
   source <- list(
@@ -148,6 +353,7 @@ wsi_dynamic_tile_source <- function(slide, slide_id = NULL, tile_size = 512,
     cache_dir = cache_dir,
     created = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS%z")
   )
+  source <- wsi_dynamic_finalize_source(source, persistent_cache = persistent_cache)
   class(source) <- c("wsi_dynamic_tile_source", "list")
   source
 }
@@ -254,6 +460,7 @@ wsi_dynamic_image_levels <- function(path, page = 0L) {
 #'   seams between browser tiles.
 #' @param format Tile image format.
 #' @param cache_dir Directory for generated tile cache files.
+#' @param persistent_cache Keep generated tiles across viewer sessions.
 #' @param route HTTP route prefix.
 #' @param colour,gain,contrast_min,contrast_max Initial server-side colour map.
 #' @param visible,opacity Initial browser display settings.
@@ -272,7 +479,8 @@ wsi_dynamic_image_tile_source <- function(path, source_id = NULL, name = NULL,
                                           colour = "#ff00ff", gain = 1,
                                           contrast_min = 0, contrast_max = 1,
                                           visible = TRUE, opacity = 0.65,
-                                          extent = NULL, metadata = list()) {
+                                          extent = NULL, metadata = list(),
+                                          persistent_cache = FALSE) {
   if (!wsi_has_vips()) {
     wsi_abort("Dynamic image channel tiles require libvips (`vips` and `vipsheader`) on PATH.", class = "wsi_backend_unavailable")
   }
@@ -287,7 +495,7 @@ wsi_dynamic_image_tile_source <- function(path, source_id = NULL, name = NULL,
   route <- wsi_dynamic_tile_route(route)
   id <- wsi_safe_id(source_id %||% name %||% sprintf("%s_page_%d", tools::file_path_sans_ext(basename(path)), page + 1L), "channel")
   name <- as.character(name %||% id)
-  cache_dir <- wsi_dynamic_tile_cache_dir(cache_dir)
+  cache_dir <- wsi_dynamic_tile_cache_dir(cache_dir, persistent = persistent_cache)
   levels <- wsi_dynamic_image_levels(path, page = page)
   page_option <- isTRUE(attr(levels, "page_option", exact = TRUE) %||% TRUE)
   max_level <- wsi_dz_max_level(levels$width[[1L]], levels$height[[1L]])
@@ -334,6 +542,7 @@ wsi_dynamic_image_tile_source <- function(path, source_id = NULL, name = NULL,
     metadata = metadata %||% list(),
     created = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS%z")
   )
+  source <- wsi_dynamic_finalize_source(source, persistent_cache = persistent_cache)
   class(source) <- c("wsi_dynamic_image_tile_source", "wsi_dynamic_tile_source", "list")
   source
 }
@@ -353,6 +562,7 @@ wsi_dynamic_image_tile_source <- function(path, source_id = NULL, name = NULL,
 #' @param tile_size,tile_overlap Tile size and overlap in pixels.
 #' @param format Tile image format.
 #' @param cache_dir Tile cache directory.
+#' @param persistent_cache Keep generated tiles across viewer sessions.
 #' @param route HTTP route prefix.
 #' @param channel Zero-based CZI channel index.
 #' @param pyramid_factors Optional native pyramid downsample factors.
@@ -371,7 +581,8 @@ wsi_dynamic_czi_section_tile_source <- function(path, section, source_id = NULL,
                                                 channel = 0,
                                                 pyramid_factors = NULL,
                                                 metadata = list(),
-                                                persistent_reader = TRUE) {
+                                                persistent_reader = TRUE,
+                                                persistent_cache = FALSE) {
   if (!wsi_has_native_czi()) {
     wsi_abort("Full-resolution CZI section tiles require the optional native CZI backend. Run `wsi_install_native_czi()` first.", class = "wsi_backend_unavailable")
   }
@@ -400,7 +611,7 @@ wsi_dynamic_czi_section_tile_source <- function(path, section, source_id = NULL,
   scene <- as.integer(wsi_check_scalar_number(section$scene, "section$scene", allow_zero = TRUE))
   id <- wsi_safe_id(source_id %||% sprintf("%s_scene_%d", tools::file_path_sans_ext(basename(path)), scene), "czi")
   name <- as.character(name %||% sprintf("Scene %d", scene))
-  cache_dir <- wsi_dynamic_tile_cache_dir(cache_dir)
+  cache_dir <- wsi_dynamic_tile_cache_dir(cache_dir, persistent = persistent_cache)
   pyramid_factors <- suppressWarnings(as.numeric(pyramid_factors %||% numeric()))
   pyramid_factors <- sort(unique(pyramid_factors[is.finite(pyramid_factors) & pyramid_factors > 1]))
   levels <- data.frame(
@@ -448,6 +659,7 @@ wsi_dynamic_czi_section_tile_source <- function(path, section, source_id = NULL,
       }
     )
   }
+  source <- wsi_dynamic_finalize_source(source, persistent_cache = persistent_cache)
   class(source) <- c("wsi_dynamic_czi_section_tile_source", "wsi_dynamic_tile_source", "list")
   source
 }
@@ -469,6 +681,7 @@ wsi_dynamic_czi_section_tile_source <- function(path, section, source_id = NULL,
 #' @param format Tile image format. PNG is recommended because stain overlays
 #'   use alpha.
 #' @param cache_dir Tile cache directory.
+#' @param persistent_cache Keep generated tiles across viewer sessions.
 #' @param route HTTP route prefix.
 #' @param opacity Initial overlay opacity.
 #' @param metadata Optional metadata added to each channel source.
@@ -484,7 +697,8 @@ wsi_stain_channel_sources <- function(slide, stain = c("he", "ihc"),
                                       cache_dir = NULL,
                                       route = "/tiles",
                                       opacity = 0.9,
-                                      metadata = list()) {
+                                      metadata = list(),
+                                      persistent_cache = FALSE) {
   wsi_check_slide(slide)
   stain <- match.arg(stain)
   format <- wsi_dynamic_tile_format(format)
@@ -507,7 +721,7 @@ wsi_stain_channel_sources <- function(slide, stain = c("he", "ihc"),
   if (!length(channel_definitions)) {
     wsi_abort("At least one stain channel is required.")
   }
-  cache_dir <- wsi_dynamic_tile_cache_dir(cache_dir)
+  cache_dir <- wsi_dynamic_tile_cache_dir(cache_dir, persistent = persistent_cache)
   slide_id <- wsi_safe_id(source_prefix %||% wsi_slide_id(slide), "slide")
   max_level <- wsi_dz_max_level(slide$dimensions[["width"]], slide$dimensions[["height"]])
   width <- unname(as.numeric(slide$dimensions[["width"]]))
@@ -558,6 +772,7 @@ wsi_stain_channel_sources <- function(slide, stain = c("he", "ihc"),
       ),
       created = format(Sys.time(), "%Y-%m-%dT%H:%M:%OS%z")
     )
+    source <- wsi_dynamic_finalize_source(source, persistent_cache = persistent_cache)
     class(source) <- c("wsi_dynamic_stain_channel_tile_source", "wsi_dynamic_tile_source", "list")
     source
   })
@@ -607,8 +822,17 @@ wsi_dynamic_tile_metadata <- function(source, base_url = NULL) {
     visible = source$visible %||% TRUE,
     opacity = source$opacity %||% 1,
     extent = source$extent %||% NULL,
-    cache_key = wsi_safe_id(source$created %||% as.character(Sys.time()), "tile_cache"),
-    metadata = source$metadata %||% list()
+    cache_persistent = isTRUE(source$cache_persistent),
+    cache_namespace = source$cache_namespace %||% NULL,
+    cache_key = source$cache_key %||%
+      wsi_safe_id(source$created %||% as.character(Sys.time()), "tile_cache"),
+    metadata = utils::modifyList(
+      source$metadata %||% list(),
+      list(
+        cache_persistent = isTRUE(source$cache_persistent),
+        cache_namespace = source$cache_namespace %||% NULL
+      )
+    )
   )
 }
 
@@ -732,7 +956,8 @@ wsi_dynamic_tile_region <- function(source, level, col, row) {
 wsi_dynamic_tile_cache_file <- function(source, level, col, row, format = NULL,
                                         settings = list()) {
   format <- wsi_dynamic_tile_format(format %||% source$tile_format)
-  dir <- file.path(source$cache_dir, source$id, as.character(level), as.character(col))
+  namespace <- source$cache_namespace %||% source$id
+  dir <- file.path(source$cache_dir, namespace, as.character(level), as.character(col))
   if (!dir.exists(dir) && !dir.create(dir, recursive = TRUE, showWarnings = FALSE)) {
     wsi_abort(sprintf("Could not create dynamic tile cache subdirectory: %s", dir))
   }
@@ -849,7 +1074,8 @@ wsi_dynamic_can_cache_vips_level <- function(source, level, region) {
 }
 
 wsi_dynamic_vips_level_cache_file <- function(source, level, region) {
-  level_dir <- file.path(source$cache_dir, source$id, "_levels")
+  namespace <- source$cache_namespace %||% source$id
+  level_dir <- file.path(source$cache_dir, namespace, "_levels")
   if (!dir.exists(level_dir) &&
       !dir.create(level_dir, recursive = TRUE, showWarnings = FALSE)) {
     wsi_abort(sprintf("Could not create dynamic tile level-cache directory: %s", level_dir))
@@ -1285,14 +1511,46 @@ wsi_dynamic_stain_channel_region_to_file <- function(source, region, output,
   invisible(output)
 }
 
-wsi_dynamic_tile_file <- function(source, level, col, row, format = NULL,
-                                  settings = list()) {
-  format <- wsi_dynamic_tile_format(format %||% source$tile_format)
-  output <- wsi_dynamic_tile_cache_file(source, level, col, row, format, settings = settings)
-  if (file.exists(output) && file.info(output)$size > 0) {
-    return(output)
+wsi_dynamic_tile_cache_hit <- function(path) {
+  is.character(path) && length(path) == 1L && nzchar(path) &&
+    file.exists(path) && !is.na(file.info(path)$size) && file.info(path)$size > 0
+}
+
+wsi_dynamic_tile_cache_touch <- function(path, min_age = 3600) {
+  info <- suppressWarnings(file.info(path))
+  if (nrow(info) && !is.na(info$mtime[[1L]]) &&
+      as.numeric(difftime(Sys.time(), info$mtime[[1L]], units = "secs")) >= min_age) {
+    try(Sys.setFileTime(path, Sys.time()), silent = TRUE)
   }
-  region <- wsi_dynamic_tile_region(source, level, col, row)
+  invisible(path)
+}
+
+wsi_dynamic_tile_lock <- function(output, wait_seconds = 5, stale_seconds = 180) {
+  lock <- paste0(output, ".lock")
+  deadline <- Sys.time() + wait_seconds
+  repeat {
+    if (dir.create(lock, showWarnings = FALSE)) {
+      return(list(path = lock, acquired = TRUE))
+    }
+    if (wsi_dynamic_tile_cache_hit(output)) {
+      return(list(path = lock, acquired = FALSE))
+    }
+    info <- suppressWarnings(file.info(lock))
+    stale <- nrow(info) && !is.na(info$mtime[[1L]]) &&
+      as.numeric(difftime(Sys.time(), info$mtime[[1L]], units = "secs")) > stale_seconds
+    if (isTRUE(stale)) {
+      unlink(lock, recursive = TRUE, force = TRUE)
+      next
+    }
+    if (Sys.time() >= deadline) {
+      return(list(path = lock, acquired = FALSE))
+    }
+    Sys.sleep(0.05)
+  }
+}
+
+wsi_dynamic_tile_generate <- function(source, level, region, output, format,
+                                      settings = list()) {
   tmp <- tempfile(fileext = ".png", tmpdir = dirname(output))
   on.exit(unlink(tmp), add = TRUE)
 
@@ -1352,31 +1610,111 @@ wsi_dynamic_tile_file <- function(source, level, col, row, format = NULL,
   output
 }
 
-wsi_http_file_response <- function(file, content_type, status = 200L) {
+wsi_dynamic_tile_file <- function(source, level, col, row, format = NULL,
+                                  settings = list()) {
+  format <- wsi_dynamic_tile_format(format %||% source$tile_format)
+  output <- wsi_dynamic_tile_cache_file(source, level, col, row, format, settings = settings)
+  if (wsi_dynamic_tile_cache_hit(output)) {
+    wsi_dynamic_tile_cache_touch(output)
+    return(output)
+  }
+
+  lock <- wsi_dynamic_tile_lock(output)
+  if (isTRUE(lock$acquired)) {
+    on.exit(unlink(lock$path, recursive = TRUE, force = TRUE), add = TRUE)
+  } else if (wsi_dynamic_tile_cache_hit(output)) {
+    wsi_dynamic_tile_cache_touch(output)
+    return(output)
+  }
+
+  region <- wsi_dynamic_tile_region(source, level, col, row)
+  staged <- tempfile(fileext = paste0(".", format), tmpdir = dirname(output))
+  on.exit(unlink(staged, force = TRUE), add = TRUE)
+  wsi_dynamic_tile_generate(
+    source,
+    level = level,
+    region = region,
+    output = staged,
+    format = format,
+    settings = settings
+  )
+  if (!wsi_dynamic_tile_cache_hit(staged)) {
+    wsi_abort(sprintf("Dynamic tile generation did not create a valid tile: %s", staged))
+  }
+  if (!file.rename(staged, output)) {
+    if (!wsi_dynamic_tile_cache_hit(output) &&
+        !file.copy(staged, output, overwrite = FALSE)) {
+      wsi_abort(sprintf("Could not publish dynamic tile cache file: %s", output))
+    }
+  }
+  if (!wsi_dynamic_tile_cache_hit(output)) {
+    wsi_abort(sprintf("Published dynamic tile cache file is invalid: %s", output))
+  }
+  output
+}
+
+wsi_http_file_etag <- function(file, cache_key = NULL) {
+  info <- suppressWarnings(file.info(file))
+  size <- if (nrow(info) && !is.na(info$size[[1L]])) info$size[[1L]] else 0
+  key <- as.character(cache_key %||% wsi_dynamic_hash_text(normalizePath(
+    file,
+    winslash = "/",
+    mustWork = FALSE
+  )))
+  sprintf('"%s-%s"', key, format(size, scientific = FALSE, trim = TRUE))
+}
+
+wsi_http_file_response <- function(file, content_type, status = 200L,
+                                   cache_key = NULL, request_etag = NULL,
+                                   cache_status = NULL) {
   size <- file.info(file)$size
   if (is.na(size) || size <= 0) {
     wsi_abort(sprintf("Could not read generated tile file: %s", file))
   }
+  etag <- wsi_http_file_etag(file, cache_key = cache_key)
+  headers <- list(
+    "Content-Type" = content_type,
+    "Cache-Control" = "public, max-age=31536000, immutable",
+    "ETag" = etag,
+    "Access-Control-Allow-Origin" = "*",
+    "Access-Control-Allow-Methods" = "GET, OPTIONS",
+    "Access-Control-Allow-Headers" = "Content-Type, If-None-Match",
+    "Access-Control-Expose-Headers" = "ETag, X-wsiTools-Tile-Cache"
+  )
+  if (!is.null(cache_status) && nzchar(as.character(cache_status))) {
+    headers[["X-wsiTools-Tile-Cache"]] <- as.character(cache_status)
+  }
+  if (!is.null(request_etag) && identical(trimws(as.character(request_etag)), etag)) {
+    return(list(status = 304L, headers = headers, body = raw()))
+  }
   body <- readBin(file, what = "raw", n = size)
   list(
     status = as.integer(status),
-    headers = list(
-      "Content-Type" = content_type,
-      "Cache-Control" = "no-store, max-age=0",
-      "Pragma" = "no-cache",
-      "Access-Control-Allow-Origin" = "*",
-      "Access-Control-Allow-Methods" = "GET, OPTIONS",
-      "Access-Control-Allow-Headers" = "Content-Type"
-    ),
+    headers = headers,
     body = body
   )
 }
 
 wsi_dynamic_tile_response <- function(source, level, col, row, format = NULL,
-                                      settings = list()) {
+                                      settings = list(), request_etag = NULL) {
   format <- wsi_dynamic_tile_format(format %||% source$tile_format)
+  expected <- wsi_dynamic_tile_cache_file(
+    source,
+    level,
+    col,
+    row,
+    format = format,
+    settings = settings
+  )
+  cache_hit <- file.exists(expected) && file.info(expected)$size > 0
   file <- wsi_dynamic_tile_file(source, level, col, row, format = format, settings = settings)
-  wsi_http_file_response(file, wsi_dynamic_tile_content_type(format))
+  wsi_http_file_response(
+    file,
+    wsi_dynamic_tile_content_type(format),
+    cache_key = source$cache_key %||% NULL,
+    request_etag = request_etag,
+    cache_status = if (isTRUE(cache_hit)) "hit" else "miss"
+  )
 }
 
 wsi_dynamic_prewarm_tiles <- function(sources, levels = NULL,
@@ -1457,14 +1795,20 @@ wsi_dynamic_prewarm_tiles <- function(sources, levels = NULL,
   invisible(warmed)
 }
 
-wsi_dynamic_tile_cleanup <- function(source) {
+wsi_dynamic_tile_cleanup <- function(source, force = FALSE) {
   if (inherits(source, "wsi_dynamic_czi_section_tile_source") && !is.null(source$czi_handle)) {
     try(wsi_native_czi_close_handle(source$czi_handle), silent = TRUE)
   }
   if (inherits(source, "wsi_dynamic_tile_source") &&
+      (!isTRUE(source$cache_persistent) || isTRUE(force)) &&
       is.character(source$cache_dir) && length(source$cache_dir) == 1L &&
       nzchar(source$cache_dir) && dir.exists(source$cache_dir)) {
-    unlink(source$cache_dir, recursive = TRUE, force = TRUE)
+    target <- if (isTRUE(source$cache_persistent) && nzchar(source$cache_namespace %||% "")) {
+      file.path(source$cache_dir, source$cache_namespace)
+    } else {
+      source$cache_dir
+    }
+    unlink(target, recursive = TRUE, force = TRUE)
   }
   invisible(TRUE)
 }

@@ -1,2 +1,2 @@
-OBJECTS = native-czi.o
+OBJECTS = native-czi.o native-geometry.o
 PKG_LIBS = $(DL_LIBS)

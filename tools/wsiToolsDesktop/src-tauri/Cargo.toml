@@ -1,6 +1,6 @@
 [package]
 name = "wsitools-desktop"
-version = "0.1.1"
+version = "0.1.2"
 description = "Desktop launcher for the wsiTools live viewer"
 authors = ["wsiTools contributors"]
 edition = "2021"

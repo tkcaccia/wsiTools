@@ -4,14 +4,16 @@ use std::{
     env, fs,
     io::{BufRead, BufReader, Read, Write},
     net::TcpStream,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{mpsc, Arc, Mutex},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tauri::{path::BaseDirectory, AppHandle, Manager, State};
-use tauri_plugin_dialog::DialogExt;
+use tauri::{path::BaseDirectory, AppHandle, Emitter, Manager, State};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+
+const VIEWER_WINDOW_LABEL: &str = "viewer-main";
 
 #[derive(Default)]
 struct RViewerState {
@@ -91,6 +93,35 @@ struct SaveFilter {
     extensions: Vec<String>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SavePathSelection {
+    path: String,
+    overwrite_confirmed: bool,
+}
+
+fn confirm_file_replacement(app: &AppHandle, window: &tauri::WebviewWindow, path: &Path) -> bool {
+    if !path.exists() {
+        return true;
+    }
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("the selected file");
+    app.dialog()
+        .message(format!(
+            "A file named \"{name}\" already exists. Do you want to replace it?"
+        ))
+        .parent(window)
+        .title("Replace existing file?")
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Replace".to_string(),
+            "Cancel".to_string(),
+        ))
+        .blocking_show()
+}
+
 fn push_log(logs: &Arc<Mutex<Vec<String>>>, line: impl Into<String>) {
     let mut guard = logs.lock().unwrap();
     guard.push(line.into());
@@ -98,6 +129,10 @@ fn push_log(logs: &Arc<Mutex<Vec<String>>>, line: impl Into<String>) {
         let extra = guard.len() - 1000;
         guard.drain(0..extra);
     }
+}
+
+fn emit_viewer_progress(app: &AppHandle, value: &str) {
+    let _ = app.emit_to(VIEWER_WINDOW_LABEL, "viewer-progress", value.to_string());
 }
 
 fn r_string(value: &str) -> String {
@@ -466,6 +501,9 @@ fn stop_r_viewer(app: AppHandle, state: State<'_, Arc<RViewerState>>) -> Result<
         remove_pid_file(&dir);
     }
     stop_existing_child(&state);
+    if let Some(window) = app.get_webview_window(VIEWER_WINDOW_LABEL) {
+        let _ = window.close();
+    }
     push_log(&state.logs, "Stopped R viewer process.");
     Ok(())
 }
@@ -496,29 +534,40 @@ fn save_launcher_log(app: AppHandle, log_text: String) -> Result<String, String>
 #[tauri::command]
 async fn save_viewer_file(
     app: AppHandle,
+    window: tauri::WebviewWindow,
     file_name: String,
     data_base64: String,
     filters: Vec<SaveFilter>,
 ) -> Result<Option<String>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut dialog = app.dialog().file().set_file_name(file_name);
-        for filter in filters {
-            let extensions: Vec<&str> = filter
-                .extensions
-                .iter()
-                .map(|x| x.trim().trim_start_matches('.'))
-                .filter(|x| !x.is_empty())
-                .collect();
-            if !extensions.is_empty() {
-                dialog = dialog.add_filter(filter.name, &extensions);
-            }
+    let confirmation_app = app.clone();
+    let confirmation_window = window.clone();
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .set_title("Save wsiTools file")
+        .set_file_name(file_name);
+    for filter in filters {
+        let extensions: Vec<&str> = filter
+            .extensions
+            .iter()
+            .map(|x| x.trim().trim_start_matches('.'))
+            .filter(|x| !x.is_empty())
+            .collect();
+        if !extensions.is_empty() {
+            dialog = dialog.add_filter(filter.name, &extensions);
         }
+    }
+    tauri::async_runtime::spawn_blocking(move || {
         let Some(path) = dialog.blocking_save_file() else {
             return Ok(None);
         };
         let path = path
             .into_path()
             .map_err(|err| format!("Could not resolve selected save path: {err}"))?;
+        if !confirm_file_replacement(&confirmation_app, &confirmation_window, &path) {
+            return Ok(None);
+        }
         let bytes = general_purpose::STANDARD
             .decode(data_base64.as_bytes())
             .map_err(|err| format!("Could not decode viewer file data: {err}"))?;
@@ -541,29 +590,44 @@ async fn save_viewer_file(
 #[tauri::command]
 async fn choose_viewer_save_path(
     app: AppHandle,
+    window: tauri::WebviewWindow,
     file_name: String,
     filters: Vec<SaveFilter>,
-) -> Result<Option<String>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut dialog = app.dialog().file().set_file_name(file_name);
-        for filter in filters {
-            let extensions: Vec<&str> = filter
-                .extensions
-                .iter()
-                .map(|x| x.trim().trim_start_matches('.'))
-                .filter(|x| !x.is_empty())
-                .collect();
-            if !extensions.is_empty() {
-                dialog = dialog.add_filter(filter.name, &extensions);
-            }
+) -> Result<Option<SavePathSelection>, String> {
+    let confirmation_app = app.clone();
+    let confirmation_window = window.clone();
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .set_title("Save spatial object")
+        .set_file_name(file_name);
+    for filter in filters {
+        let extensions: Vec<&str> = filter
+            .extensions
+            .iter()
+            .map(|x| x.trim().trim_start_matches('.'))
+            .filter(|x| !x.is_empty())
+            .collect();
+        if !extensions.is_empty() {
+            dialog = dialog.add_filter(filter.name, &extensions);
         }
+    }
+    tauri::async_runtime::spawn_blocking(move || {
         let Some(path) = dialog.blocking_save_file() else {
             return Ok(None);
         };
         let path = path
             .into_path()
             .map_err(|err| format!("Could not resolve selected save path: {err}"))?;
-        Ok(Some(path.to_string_lossy().to_string()))
+        let existed = path.exists();
+        if !confirm_file_replacement(&confirmation_app, &confirmation_window, &path) {
+            return Ok(None);
+        }
+        Ok(Some(SavePathSelection {
+            path: path.to_string_lossy().to_string(),
+            overwrite_confirmed: existed,
+        }))
     })
     .await
     .map_err(|err| format!("Viewer save path task failed: {err}"))?
@@ -776,14 +840,28 @@ object_type <- if (inherits(obj, "Seurat")) {
   classes[[1L]]
 }
 tissues <- character()
+tissues_emitted <- FALSE
 if (inherits(obj, "Seurat")) {
-  meta <- tryCatch(methods::slot(obj, "meta.data"), error = function(e) NULL)
-  if (is.data.frame(meta)) {
-    col <- first_col(meta, c("sample_id", "sample", "section", "image_id", "orig.ident", "slide_id", "tissue", "library_id"))
-    if (!is.null(col)) tissues <- meta[[col]]
-  }
   images <- tryCatch(names(methods::slot(obj, "images")), error = function(e) character())
-  if (length(images)) tissues <- c(images, tissues)
+  if (length(images)) {
+    for (image_id in images) {
+      image_obj <- tryCatch(methods::slot(obj, "images")[[image_id]], error = function(e) NULL)
+      coordinates <- tryCatch(methods::slot(image_obj, "coordinates"), error = function(e) NULL)
+      n_coordinates <- if (is.data.frame(coordinates) || is.matrix(coordinates)) nrow(coordinates) else NA_integer_
+      cat(sprintf(
+        "WSITOOLS_TISSUE=%s\t%s\n",
+        clean_value(image_id),
+        if (is.finite(n_coordinates)) as.integer(n_coordinates) else ""
+      ))
+    }
+    tissues_emitted <- TRUE
+  } else {
+    meta <- tryCatch(methods::slot(obj, "meta.data"), error = function(e) NULL)
+    if (is.data.frame(meta)) {
+      col <- first_col(meta, c("sample_id", "sample", "section", "image_id", "orig.ident", "slide_id", "tissue", "library_id"))
+      if (!is.null(col)) tissues <- meta[[col]]
+    }
+  }
 } else if (inherits(obj, "SpatialExperiment") ||
            inherits(obj, "SingleCellExperiment") ||
            inherits(obj, "SummarizedExperiment")) {
@@ -796,7 +874,7 @@ if (inherits(obj, "Seurat")) {
 if (!length(tissues)) tissues <- "default"
 emit("OBJECT_TYPE", object_type)
 emit("MESSAGE", sprintf("Detected %s in %s", object_type, basename(path)))
-emit_tissues(tissues)
+if (!tissues_emitted) emit_tissues(tissues)
 "#;
     let output = Command::new(&rscript)
         .arg("--vanilla")
@@ -1039,6 +1117,7 @@ fn launch_r_new_project_target(
         let logs = state.logs.clone();
         let launch_state = launch.clone();
         let tx = tx.clone();
+        let progress_app = app.clone();
         thread::spawn(move || {
             let reader = BufReader::new(stdout);
             for line in reader.lines().map_while(Result::ok) {
@@ -1053,6 +1132,8 @@ fn launch_r_new_project_target(
                     launch_state.lock().unwrap().sync_url = value.trim().to_string();
                 } else if let Some(value) = line.strip_prefix("WSITOOLS_LOG_FILE=") {
                     launch_state.lock().unwrap().log_file = value.trim().to_string();
+                } else if let Some(value) = line.strip_prefix("WSITOOLS_STAGE=") {
+                    emit_viewer_progress(&progress_app, value.trim());
                 }
                 push_log(&logs, line);
             }
@@ -1191,6 +1272,7 @@ fn launch_r_target(
         let logs = state.logs.clone();
         let launch_state = launch.clone();
         let tx = tx.clone();
+        let progress_app = app.clone();
         thread::spawn(move || {
             let reader = BufReader::new(stdout);
             for line in reader.lines().map_while(Result::ok) {
@@ -1205,6 +1287,8 @@ fn launch_r_target(
                     launch_state.lock().unwrap().sync_url = value.trim().to_string();
                 } else if let Some(value) = line.strip_prefix("WSITOOLS_LOG_FILE=") {
                     launch_state.lock().unwrap().log_file = value.trim().to_string();
+                } else if let Some(value) = line.strip_prefix("WSITOOLS_STAGE=") {
+                    emit_viewer_progress(&progress_app, value.trim());
                 }
                 push_log(&logs, line);
             }
@@ -1280,6 +1364,35 @@ async fn inspect_spatial_object(file_path: String) -> Result<SpatialInspection, 
 }
 
 #[tauri::command]
+fn open_viewer_loading_window(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(VIEWER_WINDOW_LABEL) {
+        let _ = window.close();
+    }
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        VIEWER_WINDOW_LABEL,
+        tauri::WebviewUrl::App("viewer-loading.html".into()),
+    )
+    .title("wsiTools Viewer")
+    .inner_size(1500.0, 950.0)
+    .min_inner_size(960.0, 700.0)
+    .resizable(true)
+    .build()
+    .map_err(|err| format!("Could not open viewer loading window: {err}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn close_viewer_window(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(VIEWER_WINDOW_LABEL) {
+        window
+            .close()
+            .map_err(|err| format!("Could not close viewer window: {err}"))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn open_viewer_window(app: AppHandle, url: String) -> Result<(), String> {
     if url.trim().is_empty() {
         return Err("Viewer URL was empty.".to_string());
@@ -1287,24 +1400,18 @@ fn open_viewer_window(app: AppHandle, url: String) -> Result<(), String> {
     let parsed = url
         .parse()
         .map_err(|err| format!("Viewer URL is not valid: {err}"))?;
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis())
-        .unwrap_or(0);
-    #[cfg(target_family = "windows")]
-    {
-        let status = Command::new("cmd")
-            .args(["/C", "start", "", &url])
-            .status()
-            .map_err(|err| format!("Could not open viewer in the system browser: {err}"))?;
-        if status.success() {
-            return Ok(());
-        }
+    if let Some(window) = app.get_webview_window(VIEWER_WINDOW_LABEL) {
+        window
+            .navigate(parsed)
+            .map_err(|err| format!("Could not navigate viewer window: {err}"))?;
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
     }
 
     tauri::WebviewWindowBuilder::new(
         &app,
-        format!("viewer-{stamp}"),
+        VIEWER_WINDOW_LABEL,
         tauri::WebviewUrl::External(parsed),
     )
     .title("wsiTools Viewer")
@@ -1327,7 +1434,9 @@ fn main() {
             start_r_project,
             start_r_new_project,
             inspect_spatial_object,
+            open_viewer_loading_window,
             open_viewer_window,
+            close_viewer_window,
             stop_r_viewer,
             viewer_logs,
             save_launcher_log,

@@ -1,0 +1,26 @@
+[[permission]]
+identifier = "allow-choose-viewer-save-path"
+description = "Allows localhost viewer windows to open the native Save As dialog for R-managed spatial outputs."
+commands.allow = ["choose_viewer_save_path"]
+
+[[permission]]
+identifier = "allow-save-viewer-file"
+description = "Allows localhost viewer windows to save explicitly selected viewer exports."
+commands.allow = ["save_viewer_file"]
+
+[[permission]]
+identifier = "allow-launcher-commands"
+description = "Allows the local desktop launcher to inspect spatial objects and manage its R viewer session."
+commands.allow = [
+  "check_r",
+  "close_viewer_window",
+  "inspect_spatial_object",
+  "open_r_download_page",
+  "open_viewer_loading_window",
+  "open_viewer_window",
+  "save_launcher_log",
+  "start_r_new_project",
+  "start_r_project",
+  "stop_r_viewer",
+  "viewer_logs"
+]

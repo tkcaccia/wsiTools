@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "viewer-save",
+  "description": "File-save permissions for localhost wsiTools viewer windows.",
+  "windows": ["viewer-*"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*", "http://localhost:*"]
+  },
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "allow-choose-viewer-save-path",
+    "allow-save-viewer-file"
+  ]
+}

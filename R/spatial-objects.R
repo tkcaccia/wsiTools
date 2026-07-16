@@ -216,6 +216,7 @@ wsi_spatial_reduction_plot <- function(embeddings, spots, reduction, dims,
   if (is.null(embeddings) || is.null(spots) || !nrow(spots)) {
     return(NULL)
   }
+  synthetic_ids <- isTRUE(attr(embeddings, "wsi_synthetic_ids", exact = TRUE))
   emb <- tryCatch(as.matrix(embeddings), error = function(e) NULL)
   if (is.null(emb) || length(dim(emb)) != 2L || !nrow(emb) || ncol(emb) < max(dims)) {
     return(NULL)
@@ -225,7 +226,7 @@ wsi_spatial_reduction_plot <- function(embeddings, spots, reduction, dims,
   emb_ids <- rownames(emb) %||% as.character(seq_len(nrow(emb)))
   idx <- match(spot_ids, emb_ids)
   keep <- !is.na(idx)
-  if (!any(keep) && nrow(emb) == nrow(spots)) {
+  if (!any(keep) && nrow(emb) == nrow(spots) && synthetic_ids) {
     idx <- seq_len(nrow(spots))
     keep <- rep(TRUE, nrow(spots))
   }

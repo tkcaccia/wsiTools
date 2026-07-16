@@ -69,7 +69,8 @@ wsi_viewer_session(
   segmentation_nuclear_channel = "DAPI",
   segmentation_membrane_channel = NULL,
   segmentation_keras_home = NULL,
-  segmentation_pretrained_zip = NULL
+  segmentation_pretrained_zip = NULL,
+  dynamic_tile_persistent_cache = FALSE
 )
 
 wsi_viewer_live(
@@ -135,7 +136,8 @@ wsi_viewer_live(
   segmentation_nuclear_channel = "DAPI",
   segmentation_membrane_channel = NULL,
   segmentation_keras_home = NULL,
-  segmentation_pretrained_zip = NULL
+  segmentation_pretrained_zip = NULL,
+  dynamic_tile_persistent_cache = FALSE
 )
 
 wsi_viewer_stardist(slide, ..., stardist = TRUE)
@@ -246,6 +248,10 @@ placeholders for mIHC/DAPI wrappers.}
 
 \item{segmentation_keras_home, segmentation_pretrained_zip}{Optional model
 cache/model placeholders for external wrappers.}
+
+\item{dynamic_tile_persistent_cache}{Keep generated dynamic tiles across
+viewer sessions in a fingerprinted, size-bounded cache. The desktop app
+enables this by default; the R API leaves it opt-in for compatibility.}
 }
 \value{
 A \code{wsi_viewer_session} object, invisibly. The object keeps the

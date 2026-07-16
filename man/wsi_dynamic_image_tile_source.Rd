@@ -21,7 +21,8 @@ wsi_dynamic_image_tile_source(
   visible = TRUE,
   opacity = 0.65,
   extent = NULL,
-  metadata = list()
+  metadata = list(),
+  persistent_cache = FALSE
 )
 }
 \arguments{
@@ -53,6 +54,8 @@ with \code{x}, \code{y}, \code{width}, and \code{height}. When \code{NULL}, the 
 channel to the base image width.}
 
 \item{metadata}{Optional source metadata.}
+
+\item{persistent_cache}{Keep generated tiles across viewer sessions.}
 }
 \value{
 A \code{wsi_dynamic_image_tile_source} object.

@@ -16,6 +16,7 @@
 | Install optional backends such as OpenSlide, libvips, CZI, Bio-Formats, StarDist, or Mesmer | [Backend setup](docs/backends.md) |
 | Open one image quickly | [One-image quickstart](docs/open-one-image.md) |
 | Use the live R-synchronized viewer | [Live viewer guide](docs/live-viewer.md) |
+| Understand tiles, caching, rendering, and synchronization | [Architecture and performance](docs/architecture.md) |
 | Open Seurat, Giotto, SpatialExperiment, or CellPhenotyper projects | [Spatial omics](docs/spatial-omics.md) and [Examples](docs/examples.md) |
 | Compile the Tauri desktop app yourself | [Tauri build guide](docs/tauri-build.md) |
 | Diagnose installation or viewer problems | [Troubleshooting](docs/troubleshooting.md) |
@@ -57,6 +58,15 @@ viewer more stable for real pathology workflows:
   CZI files should be viewed with OpenSeadragon tiles. wsiTools prefers
   precomputed Deep Zoom tiles when available, and can fall back to dynamic live
   tiles served from R. The full level-0 image is not loaded into R memory.
+- **Persistent tile reuse and faster overlays.** Desktop live viewers reuse
+  fingerprinted dynamic tiles across sessions, while WebGL renders large
+  spatial-coordinate layers in the main view and in independent multi-view
+  panes. Dense cell GeoJSON sources are queried by visible viewport through a
+  native bounding-box index instead of sending every polygon to the browser.
+- **Measurable performance.** View / Performance reports startup and first-tile
+  timing, tile failures, overlay frame time, dense-annotation requests,
+  renderer, and cache mode. The same data is available from R with
+  `viewer$get_performance()`.
 - **Project and panel workflow.** The left Project panel opens by default in
   project viewers, can be closed/reopened from the top menus, and can be resized
   horizontally and vertically. The Annotations, Layers, History, and Logs panels
@@ -145,6 +155,7 @@ viewer$open()
 
 viewer$get_rois()
 viewer$get_measurements()
+viewer$get_performance()
 ```
 
 No sample slide yet? Run the lightweight built-in demo:

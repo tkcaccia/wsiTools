@@ -17,7 +17,8 @@ wsi_dynamic_czi_section_tile_source(
   channel = 0,
   pyramid_factors = NULL,
   metadata = list(),
-  persistent_reader = TRUE
+  persistent_reader = TRUE,
+  persistent_cache = FALSE
 )
 }
 \arguments{
@@ -46,6 +47,8 @@ wsi_dynamic_czi_section_tile_source(
 
 \item{persistent_reader}{Keep a native CZI reader handle open for faster
 repeated tile reads when the native backend supports persistent handles.}
+
+\item{persistent_cache}{Keep generated tiles across viewer sessions.}
 }
 \value{
 A \code{wsi_dynamic_czi_section_tile_source} object.

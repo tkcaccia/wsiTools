@@ -47,6 +47,199 @@ wsi_associate_annotations <- function(points, rois, ids = NULL, include_all = TR
   table
 }
 
+#' Add GeoJSON annotation categories to Seurat cell metadata
+#'
+#' `wsi_annotate_seurat()` is a non-interactive workflow: it extracts the
+#' full-resolution cell or spot coordinates stored in a Seurat object, assigns
+#' each coordinate to an annotation polygon, and adds the result to the
+#' object's `meta.data`. It does not launch the wsiTools viewer.
+#'
+#' Polygon and MultiPolygon annotations are used for assignment. Point and line
+#' annotations are ignored because they do not define an enclosed tissue area.
+#' Cells outside every polygon are retained and receive `unassigned`.
+#'
+#' @param seurat A Seurat object or the path to a `.rds` file containing one.
+#' @param annotations A `wsi_roi` object or a GeoJSON file path.
+#' @param output Optional path for the annotated Seurat `.rds` file.
+#' @param image_name Optional Seurat spatial image name. By default the first
+#'   available image is used.
+#' @param unassigned Category stored for cells outside all annotation polygons.
+#' @param association_csv Optional path for a CSV containing cell coordinates
+#'   and their assigned annotation details.
+#' @param engine Assignment engine passed to [wsi_associate_annotations()].
+#' @param overwrite Whether existing `output` or `association_csv` files may be
+#'   replaced.
+#' @param verbose Print a concise assignment summary.
+#'
+#' @return The annotated Seurat object. The following columns are added to
+#'   `meta.data`: `wsi_annotation`, `wsi_annotation_id`, and
+#'   `wsi_annotation_name`.
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' annotated <- wsi_annotate_seurat(
+#'   "cells.rds",
+#'   "tissue_annotations.geojson",
+#'   output = "cells_with_annotations.rds"
+#' )
+#' table(annotated$wsi_annotation)
+#' }
+wsi_annotate_seurat <- function(seurat, annotations, output = NULL,
+                                image_name = NULL,
+                                unassigned = "Unassigned",
+                                association_csv = NULL,
+                                engine = c("auto", "native", "r"),
+                                overwrite = FALSE,
+                                verbose = TRUE) {
+  engine <- match.arg(engine)
+  if (!is.character(unassigned) || length(unassigned) != 1L ||
+      is.na(unassigned) || !nzchar(unassigned)) {
+    wsi_abort("`unassigned` must be a single non-empty category name.")
+  }
+  if (!is.logical(overwrite) || length(overwrite) != 1L || is.na(overwrite)) {
+    wsi_abort("`overwrite` must be `TRUE` or `FALSE`.")
+  }
+  if (!is.logical(verbose) || length(verbose) != 1L || is.na(verbose)) {
+    wsi_abort("`verbose` must be `TRUE` or `FALSE`.")
+  }
+
+  seurat_path <- NULL
+  if (is.character(seurat)) {
+    seurat_path <- wsi_validate_input_path(seurat)
+    if (!grepl("\\.rds$", seurat_path, ignore.case = TRUE)) {
+      wsi_abort("`seurat` must be a Seurat object or a path ending in `.rds`.")
+    }
+    seurat <- tryCatch(
+      readRDS(seurat_path),
+      error = function(err) {
+        wsi_abort(sprintf("Could not read Seurat object `%s`: %s", seurat_path, conditionMessage(err)))
+      }
+    )
+  }
+  if (!inherits(seurat, "Seurat")) {
+    wsi_abort("`seurat` must contain a Seurat object.")
+  }
+
+  annotation_path <- NULL
+  if (is.character(annotations)) {
+    annotation_path <- wsi_validate_input_path(annotations)
+    annotations <- read_geojson(annotation_path)
+  }
+  if (!inherits(annotations, "wsi_roi")) {
+    wsi_abort("`annotations` must be a GeoJSON path or a `wsi_roi` object.")
+  }
+  geometry_type <- tolower(as.character(annotations$geometry_type %||% ""))
+  area <- geometry_type %in% c("polygon", "multipolygon")
+  skipped <- sum(!area)
+  annotations <- annotations[area, , drop = FALSE]
+  if (!nrow(annotations)) {
+    wsi_abort("No Polygon or MultiPolygon annotations were found.")
+  }
+
+  coordinates <- wsi_seurat_coordinates(seurat, image_name = image_name)
+  meta <- wsi_spatial_object_metadata(seurat)
+  if (is.null(meta) || !nrow(meta) || is.null(rownames(meta))) {
+    wsi_abort("Could not extract cell metadata and identifiers from the Seurat object.")
+  }
+  cell_ids <- as.character(rownames(meta))
+  coordinate_ids <- as.character(coordinates$barcode %||% coordinates$id)
+  coordinate_index <- match(cell_ids, coordinate_ids)
+  matched_coordinates <- !is.na(coordinate_index)
+  points <- data.frame(
+    point_id = cell_ids[matched_coordinates],
+    x = as.numeric(coordinates$x[coordinate_index[matched_coordinates]]),
+    y = as.numeric(coordinates$y[coordinate_index[matched_coordinates]]),
+    stringsAsFactors = FALSE
+  )
+  association <- wsi_associate_annotations(
+    points,
+    annotations,
+    engine = engine
+  )
+
+  full <- data.frame(
+    point_id = cell_ids,
+    x = NA_real_,
+    y = NA_real_,
+    annotation_id = NA_character_,
+    annotation_name = NA_character_,
+    annotation_class = unassigned,
+    stringsAsFactors = FALSE
+  )
+  destination <- match(association$point_id, cell_ids)
+  keep <- !is.na(destination)
+  destination <- destination[keep]
+  full$x[destination] <- association$x[keep]
+  full$y[destination] <- association$y[keep]
+  full$annotation_id[destination] <- association$annotation_id[keep]
+  full$annotation_name[destination] <- association$annotation_name[keep]
+  category <- as.character(association$annotation_class[keep])
+  missing_category <- is.na(category) | !nzchar(category)
+  category[missing_category] <- as.character(association$annotation_name[keep][missing_category])
+  missing_category <- is.na(category) | !nzchar(category)
+  category[missing_category] <- as.character(association$annotation_id[keep][missing_category])
+  missing_category <- is.na(category) | !nzchar(category)
+  category[missing_category] <- unassigned
+  full$annotation_class[destination] <- category
+
+  meta$wsi_annotation <- full$annotation_class
+  meta$wsi_annotation_id <- full$annotation_id
+  meta$wsi_annotation_name <- full$annotation_name
+  seurat <- wsi_spatial_object_set_slot(seurat, "meta.data", meta)
+
+  assigned <- !is.na(full$annotation_id)
+  misc <- tryCatch(wsi_seurat_slot(seurat, "misc"), error = function(err) NULL)
+  if (is.null(misc) || !is.list(misc)) {
+    misc <- list()
+  }
+  misc$wsiTools <- misc$wsiTools %||% list()
+  misc$wsiTools$annotation_association <- list(
+    annotation_source = annotation_path,
+    seurat_source = seurat_path,
+    image_name = attr(coordinates, "image_name", exact = TRUE) %||% image_name,
+    coordinate_source = attr(coordinates, "coordinate_source", exact = TRUE),
+    assigned_at = Sys.time(),
+    cells = nrow(full),
+    assigned = sum(assigned),
+    unassigned = sum(!assigned),
+    area_annotations = nrow(annotations),
+    ignored_non_area_annotations = skipped
+  )
+  seurat <- wsi_spatial_object_set_slot(seurat, "misc", misc)
+
+  if (!is.null(association_csv)) {
+    association_csv <- wsi_validate_output_path(association_csv, overwrite = overwrite)
+    if (!grepl("\\.csv$", association_csv, ignore.case = TRUE)) {
+      wsi_abort("`association_csv` must end in `.csv`.")
+    }
+    wsi_write_annotation_associations(full, association_csv)
+  }
+  if (!is.null(output)) {
+    output <- wsi_validate_output_path(output, overwrite = overwrite)
+    if (!grepl("\\.rds$", output, ignore.case = TRUE)) {
+      wsi_abort("`output` must end in `.rds`.")
+    }
+    saveRDS(seurat, output)
+  }
+  if (isTRUE(verbose)) {
+    cli::cli_inform(c(
+      "v" = sprintf(
+        "Associated %s of %s cells with %s area annotations; %s cells are `%s`.",
+        format(sum(assigned), big.mark = ","),
+        format(nrow(full), big.mark = ","),
+        format(nrow(annotations), big.mark = ","),
+        format(sum(!assigned), big.mark = ","),
+        unassigned
+      ),
+      "i" = if (skipped) sprintf("Ignored %s non-area annotation features.", format(skipped, big.mark = ",")) else NULL,
+      "i" = if (!is.null(output)) sprintf("Saved annotated Seurat object: %s", normalizePath(output, winslash = "/", mustWork = FALSE)) else NULL,
+      "i" = if (!is.null(association_csv)) sprintf("Saved association table: %s", normalizePath(association_csv, winslash = "/", mustWork = FALSE)) else NULL
+    ))
+  }
+  seurat
+}
+
 #' Convert an annotation association table to a matrix
 #'
 #' @param x A table returned by [wsi_associate_annotations()] or
@@ -58,6 +251,7 @@ wsi_associate_annotations <- function(points, rois, ids = NULL, include_all = TR
 #'
 #' @return An integer matrix with one row per point and one column per
 #'   annotation or class.
+#' @rdname wsi_associate_annotations
 #' @export
 wsi_annotation_association_matrix <- function(x, rois = NULL,
                                               by = c("annotation", "class"),
@@ -101,6 +295,7 @@ wsi_annotation_association_matrix <- function(x, rois = NULL,
 #' @param file Output CSV path.
 #'
 #' @return The normalized output path, invisibly.
+#' @rdname wsi_associate_annotations
 #' @export
 wsi_write_annotation_associations <- function(x, file) {
   if (!is.data.frame(x)) {

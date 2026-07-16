@@ -1,3 +1,18 @@
+# wsiTools 0.1.24
+
+- Fixed merged Seurat projects so each spatial image uses its own
+  `GetTissueCoordinates()` table while RNA/SCT assays, reductions, clusters,
+  metadata, and live gene values are matched and reordered by exact cell ID.
+- Updated the desktop project wizard to list only real Seurat image keys and
+  their coordinate counts, preventing global `orig.ident` values from being
+  mistaken for spatial images.
+- Added native coordinate-to-annotation association and spatial-object export
+  that preserves registered image coordinates and annotation assignments.
+- Improved large-image tile caching, dense annotation viewport loading,
+  performance reporting, and CZI tile handling.
+- Added a real desktop viewer startup window, native save dialogs with
+  overwrite confirmation, and clearer launcher error reporting.
+
 # wsiTools 0.1.23
 
 - Restored optional StarDist and Mesmer selected-ROI segmentation workflows.

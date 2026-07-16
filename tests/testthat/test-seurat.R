@@ -50,6 +50,7 @@ test_that("Seurat spatial objects can be linked to high-resolution slide coordin
   expect_equal(layer$count, 3)
   expect_equal(layer$metadata$display_mode, "all_coordinates_circles")
   expect_true(layer$metadata$vector_rendering)
+  expect_equal(layer$metadata$coordinate_diameter_um, 50)
   expect_equal(length(layer$items), 3)
   expect_true(all(vapply(layer$items, `[[`, character(1), "type") == "point"))
 })
@@ -208,6 +209,127 @@ test_that("registered Seurat metadata coordinates override stale image-slot coor
   expect_equal(linked$coordinate_mapping$coordinate_space, "fullres")
   expect_equal(linked$spots$x, c(1100, 2200, 3300))
   expect_equal(linked$spots$y, c(600, 1600, 2600))
+})
+
+test_that("registered Seurat metadata is scoped to the selected image", {
+  ids <- c("first_a", "first_b", "second_c", "second_d")
+  embeddings <- matrix(
+    c(-2, 0.5, 1, -0.5, 2, 1.5, 3, 2.5),
+    ncol = 2,
+    byrow = TRUE,
+    dimnames = list(ids, c("PC_1", "PC_2"))
+  )
+  seurat_like <- list(
+    meta.data = data.frame(
+      registered_x = c(1100, 2200, NA, NA),
+      registered_y = c(600, 1600, NA, NA),
+      row.names = ids
+    ),
+    reductions = list(pca = list(cell.embeddings = embeddings)),
+    images = list(
+      first = list(coordinates = data.frame(
+        barcode = ids[1:2], imagecol = c(10, 20), imagerow = c(5, 15)
+      )),
+      second = list(coordinates = data.frame(
+        barcode = ids[3:4], imagecol = c(30, 40), imagerow = c(25, 35)
+      ))
+    )
+  )
+  slide <- wsi_mock_slide(width = 4000, height = 3000, levels = c(1, 2))
+
+  first <- wsi_link_seurat_image(
+    seurat_like, slide, image_name = "first", coordinate_scale = "none"
+  )
+  second <- wsi_link_seurat_image(
+    seurat_like, slide, image_name = "second", coordinate_scale = "none"
+  )
+
+  expect_equal(first$spots$barcode, ids[1:2])
+  expect_equal(first$spots$x, c(1100, 2200))
+  expect_equal(first$spots$y, c(600, 1600))
+  expect_equal(second$spots$barcode, ids[3:4])
+  expect_equal(second$spots$x, c(30, 40))
+  expect_equal(second$spots$y, c(25, 35))
+})
+
+test_that("merged Seurat images keep coordinates, reductions, expression, and clusters on the same cells", {
+  ids <- c("dress1_a", "dress1_b", "dress2_c", "dress2_d")
+  embeddings <- matrix(
+    c(10, 100, 20, 200, 30, 300, 40, 400),
+    ncol = 2,
+    byrow = TRUE,
+    dimnames = list(ids, c("PC_1", "PC_2"))
+  )
+  expression <- matrix(
+    c(1, 2, 31, 42),
+    nrow = 1,
+    dimnames = list("GeneX", ids)
+  )
+  first_coordinates <- data.frame(
+    cells = c("legacy_first_a", "legacy_first_b"),
+    x = c(10, 20),
+    y = c(15, 25),
+    row.names = ids[1:2]
+  )
+  second_coordinates <- data.frame(
+    cells = c("legacy_second_d", "legacy_second_c"),
+    x = c(400, 300),
+    y = c(450, 350),
+    row.names = ids[c(4, 3)]
+  )
+  merged_like <- list(
+    meta.data = data.frame(
+      registered_x = c(110, 220, NA, NA),
+      registered_y = c(115, 225, NA, NA),
+      seurat_clusters = c("first-a", "first-b", "second-c", "second-d"),
+      row.names = ids
+    ),
+    reductions = list(pca = list(cell.embeddings = embeddings)),
+    assays = list(RNA = list(data = expression)),
+    images = list(
+      dress1_slice1 = list(coordinates = first_coordinates),
+      dress2_slice1 = list(coordinates = second_coordinates)
+    )
+  )
+  slide <- wsi_mock_slide(width = 1000, height = 800, levels = c(1, 2))
+
+  linked <- wsi_link_seurat_image(
+    merged_like,
+    slide,
+    image_name = "dress2_slice1",
+    coordinate_scale = "none",
+    spot_genes = "GeneX",
+    default_gene = "GeneX"
+  )
+
+  expect_equal(linked$spots$barcode, ids[c(4, 3)])
+  expect_equal(linked$spots$x, c(400, 300))
+  expect_equal(linked$spots$y, c(450, 350))
+  expect_equal(linked$spots$PC_1, c(40, 30))
+  expect_equal(as.numeric(linked$gene_expression$values[, "GeneX"]), c(42, 31))
+  expect_equal(linked$cluster_values$id, ids[c(4, 3)])
+  expect_equal(linked$cluster_values$seurat_clusters, c("second-d", "second-c"))
+  expect_equal(linked$expression_source$spot_ids, ids[c(4, 3)])
+  expect_equal(linked$expression_source$image_name, "dress2_slice1")
+  expect_equal(linked$cell_scope$image_coordinate_count, 2L)
+  expect_equal(linked$cell_scope$linked_cell_count, 2L)
+  expect_equal(linked$cell_scope$dropped_coordinate_count, 0L)
+
+  payload <- wsiTools:::wsi_seurat_dynamic_gene_payload(linked, "GeneX")
+  expect_equal(vapply(payload$points, `[[`, character(1), "barcode"), ids[c(4, 3)])
+  expect_equal(vapply(payload$points, `[[`, numeric(1), "value"), c(42, 31))
+  expect_equal(vapply(payload$points, `[[`, numeric(1), "x"), c(400, 300))
+
+  expect_error(
+    wsi_link_seurat_image(
+      merged_like,
+      slide,
+      image_name = "SeuratProject",
+      coordinate_scale = "none"
+    ),
+    "Available spatial images: dress1_slice1, dress2_slice1",
+    fixed = TRUE
+  )
 })
 
 test_that("cell-level centroid coordinates in Seurat metadata can be used for image registration", {
@@ -426,6 +548,8 @@ test_that("Seurat clustering metadata is detected and exposed to the viewer", {
   expect_equal(layer$type, "vector")
   expect_equal(layer$metadata$display_mode, "all_coordinates_circles")
   expect_true(layer$metadata$vector_rendering)
+  expect_equal(layer$items[[1]]$cluster_values$seurat_clusters, "stroma")
+  expect_equal(layer$items[[2]]$cluster_values$seurat_clusters, "tumour")
   expect_equal(linked$pca$points$cluster_values[[1]]$seurat_clusters, "stroma")
 
   config <- wsiTools:::wsi_viewer_seurat_config(linked)
@@ -992,6 +1116,15 @@ test_that("Seurat viewer exposes spot layer and reduction controls", {
   expect_match(text, "seurat_spots", fixed = TRUE)
 	  expect_match(text, "seuratSpotOpacityHelp", fixed = TRUE)
 	  expect_match(text, "showSeuratSpotOpacityHelp", fixed = TRUE)
+	  expect_match(text, "seuratSpotSizeDecrease", fixed = TRUE)
+	  expect_match(text, "seuratSpotSizeValue", fixed = TRUE)
+	  expect_match(text, "seuratSpotSizeIncrease", fixed = TRUE)
+	  expect_match(text, "changeSeuratSpotSize", fixed = TRUE)
+	  expect_match(text, "seurat_spot_diameter_um", fixed = TRUE)
+	  expect_match(text, "spatialPointRadiusSlide", fixed = TRUE)
+	  expect_match(text, "diameter/(2*scalar)", fixed = TRUE)
+	  expect_match(text, "50 &micro;m", fixed = TRUE)
+	  expect_match(text, "requestMultiViewOverlayDraw", fixed = TRUE)
 	  expect_false(grepl("<div class=\"menuHint\">Spot size is fixed by the spatial transcriptomics platform metadata.", text, fixed = TRUE))
 	  expect_match(text, "seurat_gene_url", fixed = TRUE)
 	  expect_match(text, "spatial_tile_export_url", fixed = TRUE)
