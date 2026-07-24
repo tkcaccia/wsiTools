@@ -1,0 +1,88 @@
+---
+title: "Tutorials"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Tutorials}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE, purl = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE, purl = FALSE)
+```
+
+This page is the practical entry point for wsiTools. It is organized by the
+question a user is likely to have, rather than by function name.
+
+## First 5 Minutes
+
+Install the package, check the available image backends, and open one image.
+
+```{r, purl = FALSE}
+install.packages("remotes", repos = "https://cloud.r-project.org")
+remotes::install_github("tkcaccia/wsiTools", upgrade = "never")
+
+library(wsiTools)
+wsi_backends()
+
+viewer <- wsi_open_viewer("/path/to/image.svs")
+```
+
+Use the desktop app if you prefer a file picker instead of R commands. The app
+still starts R in the background and opens the same live viewer.
+
+## Viewer Tutorials
+
+| Task | Start here |
+| --- | --- |
+| Open one SVS, TIFF, BTF, OME-TIFF, or CZI image | [Open one image](https://github.com/tkcaccia/wsiTools/blob/main/docs/open-one-image.md) |
+| Understand static versus live viewing | [Viewer](viewer.html) and [live viewer guide](https://github.com/tkcaccia/wsiTools/blob/main/docs/live-viewer.md) |
+| Diagnose missing tiles, black viewer, or slow CZI files | [Troubleshooting](troubleshooting.html) |
+| Use the optional desktop app | [Desktop app](desktop-app.html) |
+| Compare multiple images side by side | [Viewer](viewer.html#full-resolution-viewing) |
+
+## Annotation Tutorials
+
+| Task | Start here |
+| --- | --- |
+| Draw tissue ROIs | [Annotations](annotations.html) |
+| Import or export QuPath GeoJSON | [Annotations](annotations.html#qupath-compatible-geojson) |
+| Convert masks to ROIs or ROIs to masks | [Annotations](annotations.html#masks-and-geometry) |
+| Associate spots or cells to annotations | [Spatial omics](spatial-omics.html) |
+| Keep annotation coordinates aligned after zooming | [Concepts](concepts.html#coordinate-systems) |
+
+## Spatial Omics Tutorials
+
+| Task | Start here |
+| --- | --- |
+| Open a Seurat object with a high-resolution image | [Spatial omics](spatial-omics.html#seurat) |
+| Open a Giotto project | [Spatial omics](spatial-omics.html#giotto-and-spatialexperiment) |
+| Open a SpatialExperiment project | [Spatial omics](spatial-omics.html#giotto-and-spatialexperiment) |
+| Work with multiple tissue sections | [Spatial omics](spatial-omics.html) |
+| Manually register spatial coordinates | [Spatial omics](spatial-omics.html) |
+| Colour cells or spots by gene | [Spatial omics](spatial-omics.html) |
+
+## CellPhenotyper Tutorials
+
+| Task | Start here |
+| --- | --- |
+| Open a CellPhenotyper output folder | [CellPhenotyper](cellphenotyper.html) |
+| Overlay H&E and GigaTIME or mIHC channels | [CellPhenotyper](cellphenotyper.html#typical-layers) |
+| Load cell masks, cell centroids, or KODAMA regions | [CellPhenotyper](cellphenotyper.html) |
+| Run proximity or trajectory analysis | [Spatial omics](spatial-omics.html) |
+
+## Copy-Paste Examples
+
+Installed example scripts are available with `system.file()`:
+
+```{r, purl = FALSE}
+system.file("examples/open_single_svs_live.R", package = "wsiTools")
+system.file("examples/open_czi_project_live.R", package = "wsiTools")
+system.file("examples/open_spatialexperiment_four_slide_live.R", package = "wsiTools")
+system.file("examples/open_cellphenotyper_project_live.R", package = "wsiTools")
+system.file("examples/open_he_mihc_overlay_live.R", package = "wsiTools")
+```
+
+For a complete list, see the
+[examples gallery](https://github.com/tkcaccia/wsiTools/blob/main/docs/examples.md).
+

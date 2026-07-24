@@ -1,0 +1,69 @@
+---
+title: "Troubleshooting"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Troubleshooting}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE, purl = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE, purl = FALSE)
+```
+
+Start here when wsiTools does not install, an image does not open, the viewer is
+white, live synchronization fails, or annotations do not align.
+
+## First Diagnostics
+
+Run these commands and keep the output:
+
+```{r, purl = FALSE}
+library(wsiTools)
+
+packageVersion("wsiTools")
+wsi_backends()
+wsi_setup_report()
+wsi_diagnose()
+```
+
+For a live viewer session:
+
+```{r, purl = FALSE}
+viewer$capabilities()
+viewer$get_state()
+viewer$get_performance()
+```
+
+## Common Problems
+
+| Problem | First check |
+| --- | --- |
+| `there is no package called 'wsiTools'` | reinstall from GitHub and check `.libPaths()` |
+| Windows `00LOCK-wsiTools` | remove the stale `00LOCK-wsiTools` directory |
+| Windows `Makeconf:296` | check Rtools and C++ compilation output |
+| CZI opens but no image appears | check native CZI or Bio-Formats availability |
+| Image is slow or tiles fail | check libvips/OpenSlide/native CZI and tile cache |
+| Viewer opens as `file://` | use `wsi_viewer_live()` and the `http://127.0.0.1` URL |
+| R sync says unsupported field/event | update wsiTools and regenerate the viewer |
+| Scale bar unavailable | check slide metadata with `wsi_mpp()` |
+| Seurat/Giotto/SpatialExperiment coordinates are misaligned | check sample mapping, image IDs, flips, rotations, and saved registration |
+
+## Save A Report
+
+For remote debugging, include:
+
+```{r, purl = FALSE}
+sink("wsiTools-diagnose.txt")
+sessionInfo()
+wsi_backends()
+wsi_diagnose()
+sink()
+```
+
+In the viewer, use the Logs or History panel to copy the browser-side report.
+
+The long troubleshooting guide is maintained at:
+
+- [Troubleshooting guide](https://github.com/tkcaccia/wsiTools/blob/main/docs/troubleshooting.md)
+

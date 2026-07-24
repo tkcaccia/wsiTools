@@ -4,12 +4,23 @@
 [![Lifecycle: experimental/maturing](https://img.shields.io/badge/lifecycle-experimental%20%2F%20maturing-orange.svg)](https://lifecycle.r-lib.org/articles/stages.html)
 [![License](https://img.shields.io/github/license/tkcaccia/wsiTools.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/tkcaccia/wsiTools?include_prereleases)](https://github.com/tkcaccia/wsiTools/releases)
-[![Documentation](https://img.shields.io/badge/docs-guides-blue.svg)](https://github.com/tkcaccia/wsiTools/tree/main/docs)
+[![Documentation](https://img.shields.io/badge/docs-tutorials%20%26%20reference-blue.svg)](https://tkcaccia.github.io/wsiTools/)
+
+## Documentation Website
+
+The full tutorial and help site is published at:
+
+<https://tkcaccia.github.io/wsiTools/>
+
+It is organized like a user manual, with separate sections for installation,
+opening images, the live viewer, annotations, spatial omics, CellPhenotyper,
+desktop app use, troubleshooting, and the full R function reference.
 
 ## Navigation
 
 | I want to... | Go here |
 | --- | --- |
+| Read the full tutorial site | [wsiTools documentation](https://tkcaccia.github.io/wsiTools/) |
 | Install the R package | [Installation](docs/installation.md) |
 | Download the desktop executable | [Desktop downloads](docs/downloads.md) |
 | Install R and required build tools | [R and platform setup](docs/installation.md#r-package-installation) |
@@ -291,23 +302,23 @@ or identifiable slide data.
 
 | Full-resolution viewer | Annotation panel |
 | --- | --- |
-| ![Full-resolution tiled viewer](docs/media/full-resolution-viewer.png) | ![Annotation panel](docs/media/annotation-panel.png) |
+| ![Full-resolution tiled viewer](man/figures/full-resolution-viewer.png) | ![Annotation panel](man/figures/annotation-panel.png) |
 
 | GeoJSON overlay | mIHC channel overlay |
 | --- | --- |
-| ![GeoJSON overlay](docs/media/geojson-overlay.png) | ![mIHC channel overlay](docs/media/mihc-channel-overlay.png) |
+| ![GeoJSON overlay](man/figures/geojson-overlay.png) | ![mIHC channel overlay](man/figures/mihc-channel-overlay.png) |
 
 | Spatial spots | CellPhenotyper cells |
 | --- | --- |
-| ![Seurat and SpatialExperiment spots](docs/media/spatial-spots.png) | ![CellPhenotyper cells](docs/media/cellphenotyper-cells.png) |
+| ![Seurat and SpatialExperiment spots](man/figures/spatial-spots.png) | ![CellPhenotyper cells](man/figures/cellphenotyper-cells.png) |
 
 | Tile grid | Live R synchronization |
 | --- | --- |
-| ![Tile grid preview](docs/media/tile-grid.png) | ![Live R synchronization](docs/media/live-r-synchronization.png) |
+| ![Tile grid preview](man/figures/tile-grid.png) | ![Live R synchronization](man/figures/live-r-synchronization.png) |
 
 ROI drawing and R round trip:
 
-![Drawing an ROI and retrieving it in R](docs/media/roi-roundtrip.gif)
+![Drawing an ROI and retrieving it in R](man/figures/roi-roundtrip.gif)
 
 ## Installation
 

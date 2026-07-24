@@ -29,6 +29,8 @@ navbar:
       - installation
       - downloads
       - viewer
+      - tutorials
+      - concepts
       - backends
       - annotations
       - spatial_omics
@@ -71,7 +73,31 @@ navbar:
         - text: Visual gallery
           href: https://github.com/tkcaccia/wsiTools/blob/main/docs/screenshots.md
         - text: Desktop launcher
-          href: https://github.com/tkcaccia/wsiTools/blob/main/docs/desktop-app.md
+          href: articles/desktop-app.html
+    tutorials:
+      text: Tutorials
+      menu:
+        - text: Tutorial index
+          href: articles/tutorials.html
+        - text: Open one image
+          href: https://github.com/tkcaccia/wsiTools/blob/main/docs/open-one-image.md
+        - text: Examples gallery
+          href: https://github.com/tkcaccia/wsiTools/blob/main/docs/examples.md
+        - text: Screenshots and GIFs
+          href: https://github.com/tkcaccia/wsiTools/blob/main/docs/screenshots.md
+        - text: Troubleshooting
+          href: articles/troubleshooting.html
+    concepts:
+      text: Concepts
+      menu:
+        - text: Core concepts
+          href: articles/concepts.html
+        - text: Architecture
+          href: https://github.com/tkcaccia/wsiTools/blob/main/docs/architecture.md
+        - text: Project format
+          href: https://github.com/tkcaccia/wsiTools/blob/main/docs/projects.md
+        - text: Supported formats
+          href: articles/concepts.html#image-formats-and-backends
     backends:
       text: Backends
       href: articles/backends.html
@@ -103,6 +129,8 @@ articles:
     navbar: Get started
     contents:
       - getting-started
+      - tutorials
+      - concepts
   - title: Installation and runtime capabilities
     navbar: Installation
     contents:
@@ -114,17 +142,23 @@ articles:
       - viewer
       - annotations
       - tile-extraction
+      - desktop-app
   - title: Analysis integrations
     navbar: Analysis
     contents:
       - spatial-omics
       - cellphenotyper
       - segmentation
+  - title: Help and troubleshooting
+    navbar: Help
+    contents:
+      - troubleshooting
 
 reference:
   - title: Package setup, diagnostics, and demos
     desc: Install the lightweight R package, inspect optional backends, and start from demo projects.
     contents:
+      - wsi_start
       - wsi_backends
       - starts_with("wsi_has_")
       - wsi_setup
@@ -143,6 +177,8 @@ reference:
   - title: Slides, metadata, and image access
     desc: Open images without loading full slides into R memory and inspect metadata, pyramid levels, and properties.
     contents:
+      - wsi_open_viewer
+      - wsi_open_fast_viewer
       - wsi_open
       - wsi_close
       - wsi_info
@@ -157,6 +193,7 @@ reference:
       - wsi_thumbnail
       - wsi_crop
       - wsi_crop_roi
+      - export_roi_crop
       - wsi_export_region
       - wsi_export_tiles
 
@@ -190,12 +227,15 @@ reference:
       - wsi_dynamic_tile_source
       - wsi_dynamic_image_tile_source
       - wsi_dynamic_czi_section_tile_source
+      - wsi_tile_cache_dir
 
   - title: Annotations, ROIs, masks, and geometry
     desc: Read, write, edit, translate, transform, summarize, and rasterize annotations.
     contents:
       - wsi_read_geojson
       - wsi_write_geojson
+      - wsi_geojson_to_mask_tiff
+      - wsi_geojson_mask_channel_source
       - read_geojson
       - write_geojson
       - viewer_add_rois
@@ -214,6 +254,9 @@ reference:
       - wsi_transform_rois
       - estimate_transform
       - wsi_estimate_transform
+      - wsi_orientation_transform
+      - wsi_translation_transform
+      - wsi_estimate_tissue_translation
       - wsi_set_roi_class
       - wsi_default_roi_class_presets
       - wsi_roi_class_presets
@@ -309,6 +352,9 @@ reference:
       - wsi_viewer_giotto
       - wsi_viewer_spatialexperiment
       - wsi_viewer_spatialexperiment_project
+      - wsi_seurat_coordinates
+      - wsi_annotate_seurat
+      - wsi_associate_annotations
       - wsi_spatial_clusters
       - wsi_spatial_cluster_fields
       - wsi_prediction_context

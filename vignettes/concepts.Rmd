@@ -1,0 +1,116 @@
+---
+title: "Concepts"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Concepts}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE, purl = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE, purl = FALSE)
+```
+
+wsiTools is built around a few concepts that explain most viewer behavior.
+Understanding them makes it easier to diagnose slow images, missing overlays,
+and coordinate alignment problems.
+
+## Whole-Slide Images Are Not Ordinary Images
+
+A whole-slide image can contain billions of pixels. wsiTools therefore avoids
+reading the complete level-0 image into R memory. The normal workflow is:
+
+1. read metadata;
+2. choose a pyramid level or region;
+3. request only the image tiles needed for the current viewport;
+4. keep annotations, spots, cells, and measurements in slide coordinates.
+
+## Static Viewer And Live Viewer
+
+Use `wsi_viewer()` when you want an HTML file that can be opened later without
+R. This is useful for sharing a read-only view.
+
+Use `wsi_viewer_live()` when browser edits should return to R. The live viewer
+starts a local `httpuv` service and opens a URL such as
+`http://127.0.0.1:<port>/...`.
+
+```{r, purl = FALSE}
+slide <- wsi_open("/path/to/image.svs")
+
+static_html <- wsi_viewer(slide)
+
+viewer <- wsi_viewer_live(slide, tiled = TRUE)
+viewer$open()
+viewer$get_rois()
+```
+
+If the browser opens a `file://` page, R synchronization is not active.
+
+## Tiles And OpenSeadragon
+
+OpenSeadragon is the browser tile viewer. It does not decode raw SVS, CZI,
+BTF, or OME-TIFF files by itself. Instead, it requests JPEG or PNG tiles.
+wsiTools can provide those tiles in two ways:
+
+- prebuilt Deep Zoom tiles for the smoothest static viewing;
+- dynamic live tile URLs backed by libvips, OpenSlide, native CZI, or another
+  available region reader.
+
+This is why full-resolution viewing depends on a tile-capable backend.
+
+## Coordinate Systems
+
+All exported annotations and spatial overlays should use the original slide
+coordinate system, not the current browser zoom level. Zooming, panning,
+rotating, flipping, or opening a multi-view pane must not change the saved
+GeoJSON coordinates.
+
+Spatial omics data add a second layer of coordinates. For Seurat, Giotto, and
+SpatialExperiment objects, wsiTools tries to keep the relation between
+expression values and image coordinates explicit, especially when an object
+contains multiple tissue sections.
+
+## Image Formats And Backends
+
+Format support is backend-dependent. The package can install without heavy
+image tools, but advanced workflows need runtime capabilities.
+
+| Format | Recommended backend | Status |
+| --- | --- | --- |
+| SVS | OpenSlide or libvips | supported when backend available |
+| NDPI, SCN, MRXS | OpenSlide | backend-dependent |
+| OME-TIFF, BTF, TIFF | libvips or Bio-Formats | backend-dependent |
+| CZI | native CZI or Bio-Formats | improving |
+| ordinary PNG/JPEG | ImageMagick or base image readers | fallback/previews |
+
+Check the current machine with:
+
+```{r, purl = FALSE}
+wsi_backends()
+wsi_diagnose(live_test = FALSE)
+```
+
+## Project State
+
+A `.wsiproject` records the analysis state: slide paths, annotations,
+trajectories, segmentation, measurements, channel settings, tile manifests,
+viewport position, and provenance. It does not copy whole-slide image pixels by
+default.
+
+## Architecture
+
+```{r, echo = FALSE, results = "asis"}
+cat("```mermaid\n")
+cat("flowchart TD\n")
+cat("  R[\"R session\"] --> Bridge[\"httpuv / WebSocket / polling\"]\n")
+cat("  Bridge --> Browser[\"Browser viewer\"]\n")
+cat("  Browser --> OSD[\"OpenSeadragon tiles\"]\n")
+cat("  OSD --> Backends[\"OpenSlide / libvips / native CZI / Bio-Formats\"]\n")
+cat("  Browser --> Overlays[\"Annotations / spots / cells / trajectories\"]\n")
+cat("  Overlays --> R\n")
+cat("```\n")
+```
+
+For the detailed architecture guide, see
+[wsiTools architecture](https://github.com/tkcaccia/wsiTools/blob/main/docs/architecture.md).
+

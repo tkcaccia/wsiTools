@@ -15,6 +15,8 @@ Description: A lightweight R toolkit for memory-efficient whole-slide image
     through explicit backend checks. The package avoids loading complete
     whole-slide images into R memory by default.
 License: MIT + file LICENSE
+URL: https://tkcaccia.github.io/wsiTools/, https://github.com/tkcaccia/wsiTools
+BugReports: https://github.com/tkcaccia/wsiTools/issues
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 Depends:

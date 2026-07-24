@@ -15,6 +15,9 @@
 ^release-artifacts$
 ^Data$
 ^Data/
+^Data.*
+^_site$
+^_site/
 ^\.DS_Store$
 ^.*\.Rcheck$
 ^\.\.Rcheck$

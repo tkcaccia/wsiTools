@@ -1,0 +1,68 @@
+---
+title: "Desktop app"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Desktop app}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE, purl = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE, purl = FALSE)
+```
+
+The optional wsiTools Desktop app is a Tauri launcher for users who do not want
+to type R commands. It does not replace the R package. It finds `Rscript`,
+starts R in the background, and opens the live wsiTools viewer.
+
+## Install
+
+1. Install R from CRAN.
+2. Install wsiTools in R.
+3. Download the desktop installer from GitHub Releases.
+4. Start the app and choose **Open project** or **Create new project**.
+
+```{r, purl = FALSE}
+install.packages("remotes", repos = "https://cloud.r-project.org")
+remotes::install_github("tkcaccia/wsiTools", upgrade = "never")
+
+library(wsiTools)
+wsi_diagnose(live_test = FALSE)
+```
+
+Downloads and platform notes:
+
+- [Desktop downloads](https://github.com/tkcaccia/wsiTools/blob/main/docs/downloads.md)
+- [Compile the Tauri app](https://github.com/tkcaccia/wsiTools/blob/main/docs/tauri-build.md)
+
+## Create A New Project
+
+The guided project workflow is:
+
+1. add one or more microscopy images;
+2. associate optional cell annotations, tissue annotations, and spatial omics
+   objects to each image;
+3. map tissue or sample names when a spatial object contains multiple sections;
+4. click **Run R** to start the live viewer.
+
+The viewer opens in a separate window. R remains responsible for image access,
+dynamic tiles, synchronization, saving spatial objects, and backend checks.
+
+## Common Problems
+
+If the viewer opens white, open the app log and check whether R returned a
+viewer URL. Typical causes are:
+
+- `Rscript` is not on `PATH`;
+- wsiTools is not installed in the R used by the app;
+- libvips/OpenSlide/native CZI is missing for a full-resolution workflow;
+- a selected spatial object does not contain coordinates for the selected
+  tissue/sample.
+
+Use:
+
+```{r, purl = FALSE}
+wsi_backends()
+wsi_diagnose()
+```
+
