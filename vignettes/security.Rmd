@@ -1,0 +1,119 @@
+---
+title: "Live viewer security and data handling"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Live viewer security and data handling}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE, purl = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE, purl = FALSE)
+```
+
+This page describes the trust boundary of a live wsiTools viewer. It is part
+of the reproducibility record for analyses that use `wsi_viewer_live()` or the
+Tauri desktop launcher.
+
+## What runs where
+
+The browser renders the interface and requests image tiles. R owns the slide
+handle, the optional tile service, project state, annotations, and analysis
+objects. The browser communicates with R through a local `httpuv` service using
+WebSocket transport when available and HTTP polling as a fallback.
+
+The browser receives data explicitly returned by the viewer session. It does
+not receive an R console, an `eval()` endpoint, or a general-purpose command
+interpreter. Incoming messages are parsed as structured JSON and are checked
+against an event and payload allowlist before they are applied to the R-side
+state.
+
+```{r, eval=FALSE, purl=FALSE}
+library(wsiTools)
+
+slide <- wsi_open("/path/to/image.svs")
+viewer <- wsi_viewer_live(
+  slide,
+  host = "127.0.0.1",
+  transport = "auto",
+  tiled = TRUE
+)
+viewer$open()
+```
+
+The default host is loopback (`127.0.0.1`). This keeps the bridge local to the
+computer running R. The printed URL contains the local port and a session
+identifier; use that URL rather than opening the generated HTML with a
+`file://` URL.
+
+## What the browser is allowed to request
+
+The live bridge supports a finite set of viewer events, including viewport
+changes, ROI edits, layer and channel changes, project actions, segmentation
+status, and spatial selections. State payloads also have a finite set of
+accepted fields. Unknown event names, unknown top-level state fields, invalid
+object types, and malformed numeric fields are rejected with an actionable R
+error.
+
+This validation is an interoperability contract, not an authorization system.
+It prevents accidental or unsupported state mutation, but it should not be
+treated as a way to expose the viewer to an untrusted network.
+
+## Local-only usage is the supported security model
+
+Do not bind a live viewer to `0.0.0.0`, a public interface, or a forwarded port
+unless you have placed it behind an independently managed authentication and
+TLS boundary. The live bridge is designed for a trusted local desktop or
+remote session in which the browser and R process are on the same protected
+machine.
+
+In particular:
+
+- do not paste a live viewer URL into a public issue, chat, notebook, or web
+  page;
+- do not expose a live viewer while the source slide contains identifiable or
+  confidential data;
+- stop the viewer when the analysis is finished;
+- keep project, log, tile-cache, and exported-file directories access
+  controlled by the operating system;
+- treat browser logs and saved project files as potentially sensitive because
+  they can contain image paths, object identifiers, and annotation metadata.
+
+```{r, eval=FALSE, purl=FALSE}
+# Stop the local bridge when finished.
+viewer$stop()
+
+# Inspect the bridge and backend status without opening a slide.
+wsi_diagnose(live_test = FALSE)
+```
+
+## File and memory handling
+
+The core viewer is tile-based. It requests bounded regions through the selected
+backend instead of loading a whole WSI into the browser or R memory as one
+large raster. Dynamic tiles and temporary caches are local runtime artifacts;
+they should be placed on a protected disk and removed when no longer needed.
+
+Project files generally store paths and analysis state rather than a copy of
+the original whole-slide pixels. A project is therefore reproducible only when
+the source files, checksums or stable accessions, package version, backend
+versions, and transforms are retained together.
+
+## Reporting checklist
+
+For a paper, release, or incident report, record:
+
+1. the exact wsiTools release or commit;
+2. R, operating-system, browser, and optional backend versions;
+3. the host and transport mode (`127.0.0.1`, WebSocket or polling);
+4. whether dynamic tiles, static tiles, or a desktop launcher was used;
+5. project and tile-cache locations without publishing confidential paths;
+6. whether any non-default host, port forwarding, or reverse proxy was used;
+7. the `wsi_backends()` and `wsi_diagnose(live_test = FALSE)` output;
+8. the saved project, event history, and relevant logs after redacting private
+   identifiers.
+
+The live bridge is an R-to-browser integration layer. It is not a network
+service, access-control layer, or replacement for an authenticated pathology
+data platform.
+

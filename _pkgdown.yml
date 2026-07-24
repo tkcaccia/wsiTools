@@ -31,6 +31,7 @@ navbar:
       - viewer
       - tutorials
       - concepts
+      - security
       - validation
       - references
       - backends
@@ -162,6 +163,7 @@ articles:
     contents:
       - validation
       - references
+      - security
       - troubleshooting
 
 reference:

@@ -16,6 +16,10 @@ It is organized like a user manual, with separate sections for installation,
 opening images, the live viewer, annotations, spatial omics, CellPhenotyper,
 desktop app use, troubleshooting, and the full R function reference.
 
+For live sessions, also read the [security and data-handling guide](https://tkcaccia.github.io/wsiTools/articles/security.html).
+The live bridge is designed for local loopback use; it is not an authenticated
+public web service.
+
 ## Navigation
 
 | I want to... | Go here |
@@ -33,6 +37,7 @@ desktop app use, troubleshooting, and the full R function reference.
 | Diagnose installation or viewer problems | [Troubleshooting](docs/troubleshooting.md) |
 | Understand validation, benchmarks, and reproducibility | [Validation guide](https://tkcaccia.github.io/wsiTools/articles/validation.html) |
 | Find software citations and attribution guidance | [References](https://tkcaccia.github.io/wsiTools/articles/references.html) |
+| Understand live-viewer security and sensitive-data handling | [Security guide](https://tkcaccia.github.io/wsiTools/articles/security.html) |
 
 wsiTools is an R toolkit for memory-efficient WSI access and preprocessing
 through region-based reading, tiling, pyramidal image handling, conversion and

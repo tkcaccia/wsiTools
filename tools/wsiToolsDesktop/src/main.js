@@ -117,6 +117,12 @@ function activeLauncherContent() {
   return document.querySelector(".launcherPanel");
 }
 
+function setWorkflowStep(index) {
+  document.querySelectorAll(".workflowStep").forEach((step, stepIndex) => {
+    step.classList.toggle("is-active", stepIndex === index);
+  });
+}
+
 function launcherTargetSize(layout = activeLauncherLayout()) {
   const preset = launcherWindowSizes[layout] || launcherWindowSizes.home;
   const content = activeLauncherContent();
@@ -204,6 +210,7 @@ function showCreateProject() {
   associationStep.hidden = true;
   runtimePanel.hidden = true;
   workspaceSubtitle.textContent = "Create a new project";
+  setWorkflowStep(0);
   renderProjectImages();
   setBusy(false);
   scheduleLauncherWindowFit("images");
@@ -216,6 +223,7 @@ function showAssociations() {
   associationStep.hidden = false;
   runtimePanel.hidden = true;
   workspaceSubtitle.textContent = "Associate data to each image";
+  setWorkflowStep(1);
   renderAssociations();
   setBusy(false);
   scheduleLauncherWindowFit("associations");
@@ -230,6 +238,7 @@ function showOpenProjectLog() {
   associationStep.hidden = true;
   runtimePanel.hidden = false;
   workspaceSubtitle.textContent = "Open saved project";
+  setWorkflowStep(2);
   renderProjectImages("Opening saved project...");
   setBusy(false);
   scheduleLauncherWindowFit("runtime");
