@@ -142,7 +142,9 @@ project reporting are described in the [validation and reproducibility
 guide](https://tkcaccia.github.io/wsiTools/articles/validation.html). The
 package tests validate software contracts; they do not imply that every image
 format, backend, registration, or biological analysis has been independently
-validated.
+validated. The validation page also separates current automated evidence from
+the real-slide benchmarks and biological case studies still needed for a
+publication-level evaluation.
 
 ## Start here
 

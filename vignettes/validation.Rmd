@@ -28,6 +28,21 @@ The repository contains automated tests for several core contracts:
 | Viewer protocol | state payloads, event allowlists, project state, live-session helpers | Browser/R messages follow the tested schema |
 | Spatial objects | Seurat, Giotto, SpatialExperiment, cell/spot association | The tested object representation can be read and mapped to image coordinates |
 
+The current evidence status is intentionally separated from implementation
+status:
+
+| Claim | Current evidence | What a publication should add |
+| --- | --- | --- |
+| Lightweight package installation | Clean source build and automated tests | Repeated checks on supported R/platform versions |
+| Core annotation and GeoJSON behavior | Deterministic unit-test fixtures | Large, representative annotations and round-trip error measurements |
+| Live viewer protocol | Event/state tests and manual smoke workflows | Reconnection, failure, and multi-platform latency measurements |
+| Large-image performance | Instrumentation and performance report API | Cold/warm-cache benchmarks on real slides against comparator tools |
+| Spatial-coordinate integration | Object-specific tests and explicit transforms | Landmark error and section-level registration validation |
+| Biological analysis | Workflow interfaces and import/export paths | A biological case study with independent validation |
+
+This matrix is part of the documentation rather than a claim that all rows have
+already been validated experimentally.
+
 Run the package tests locally with:
 
 ```{r, purl = FALSE}
@@ -155,4 +170,3 @@ backend- or dataset-dependent until a corresponding benchmark is published:
 
 When reporting a result, state the tested file format, backend, operating system,
 package version, and any manual transformation or correction applied.
-
