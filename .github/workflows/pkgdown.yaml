@@ -39,7 +39,7 @@ jobs:
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           extra-packages: any::pkgdown, any::rmarkdown
-          needs: website
+          dependencies: '"hard"'
 
       - name: Build website
         shell: Rscript {0}
@@ -68,4 +68,3 @@ jobs:
       - name: Deploy site
         id: deployment
         uses: actions/deploy-pages@v4
-
