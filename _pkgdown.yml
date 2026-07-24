@@ -32,6 +32,7 @@ navbar:
       - tutorials
       - concepts
       - validation
+      - references
       - backends
       - annotations
       - spatial_omics
@@ -102,6 +103,9 @@ navbar:
     validation:
       text: Validation
       href: articles/validation.html
+    references:
+      text: References
+      href: articles/references.html
     backends:
       text: Backends
       href: articles/backends.html
@@ -157,6 +161,7 @@ articles:
     navbar: Help
     contents:
       - validation
+      - references
       - troubleshooting
 
 reference:

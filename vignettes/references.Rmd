@@ -1,0 +1,86 @@
+---
+title: "References and attribution"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{References and attribution}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+This page lists the external software and data standards that wsiTools can
+interoperate with. Users should cite both wsiTools and the backends or methods
+used in their analysis.
+
+## Citing wsiTools
+
+Until a release DOI is available, cite the exact GitHub release or commit used
+for the analysis:
+
+> Caccia, S. *wsiTools: Tools for reading, tiling, converting and exporting
+> whole-slide images*. GitHub repository, version `r packageVersion("wsiTools")`.
+> <https://github.com/tkcaccia/wsiTools>
+
+Record the package version, commit, operating system, R version, backend
+versions, and project files with the analysis. A version number alone is not
+enough when the package is installed from the development branch.
+
+## Image access and viewer technologies
+
+- [OpenSeadragon](https://openseadragon.github.io/) is the browser-side tiled
+  image viewer.
+- [OpenSlide](https://openslide.org/) provides region access to several digital
+  pathology WSI formats.
+- [libvips](https://www.libvips.org/) provides streaming image operations,
+  conversion, and pyramid preparation.
+- [Bio-Formats](https://www.openmicroscopy.org/bio-formats/) provides broad
+  microscopy-format compatibility and metadata access.
+- ZEISS [libCZI](https://github.com/ZEISS/libCZI) is an optional native CZI
+  reader when enabled by the local installation.
+
+The exact backend used for each operation should be retained with the project
+provenance. Different backends can produce different performance and, for some
+formats, different metadata behavior.
+
+## Interoperability and analysis frameworks
+
+- [QuPath](https://qupath.github.io/) is the main interoperability target for
+  pathology annotations and GeoJSON round trips.
+- [Seurat](https://satijalab.org/seurat/) provides spatial transcriptomics and
+  single-cell analysis workflows.
+- [Giotto](https://giottosuite.com/) provides spatial-omics analysis tools.
+- [SpatialExperiment](https://bioconductor.org/packages/SpatialExperiment/)
+  provides a Bioconductor data model for spatial experiments.
+- [OME-TIFF](https://ngff.openmicroscopy.org/0.5/) and [OME-NGFF / OME-Zarr](https://ngff.openmicroscopy.org/)
+  define interoperable image and multiscale metadata conventions.
+
+## Segmentation and image-analysis methods
+
+When a result uses an external segmentation or preprocessing method, cite that
+method separately and report its version and parameters. wsiTools does not
+claim ownership of the biological validity of externally generated masks or
+predictions.
+
+- [StarDist](https://github.com/stardist/stardist) for optional star-convex
+  object segmentation.
+- [DeepCell Mesmer](https://deepcell.readthedocs.io/en/master/app-gallery/mesmer.html)
+  for optional multiplex/DAPI segmentation workflows.
+- [Nature Methods computational-methods guidance](https://www.nature.com/articles/nmeth.3686)
+  for reporting software, test data, parameters, and reproducibility.
+
+## Data and provenance
+
+For every published example, provide the source or accession for the slide,
+spatial object, annotation, and segmentation files. If data cannot be shared,
+state the restriction and provide a small synthetic or de-identified fixture
+that exercises the same workflow.
+
+At minimum, record:
+
+- input file checksums or immutable accessions;
+- scanner and file format where known;
+- spatial-object version and image/section identifier;
+- annotation and registration transforms;
+- backend and package versions;
+- random seeds and model parameters;
+- output project and measurement files.
+
