@@ -100,6 +100,19 @@ for a publication benchmark. For publication results, run the same protocol
 across real slides, cold and warm caches, operating systems, and comparator
 viewers, then archive the resulting output directories.
 
+The package includes a blank comparison template for this purpose:
+
+```{r, purl = FALSE}
+system.file("extdata/benchmark-comparison-template.csv", package = "wsiTools")
+```
+
+Keep the comparison boundary explicit. QuPath is a suitable end-to-end viewer
+comparison for opening, navigation, annotation, and export. OpenSlide and
+libvips are suitable backend comparisons for metadata, region reads, and tile
+generation. A browser visualization framework such as Vitessce or napari should
+only be compared for a workflow it actually supports, using the same source
+pixels, coordinate transform, cache state, and output definition.
+
 Do not compare timings from a cold cache with timings from a warm cache. Report
 both when cache behavior is relevant. Do not describe a workflow as
 “full-resolution” without stating the physical pixel size or pyramid level that
@@ -121,6 +134,17 @@ For a practical landmark check, select corresponding tissue landmarks in the
 image and spatial object, then report the median and 95th-percentile Euclidean
 error. If a transform is estimated from landmarks, keep the landmarks and the
 transform in project provenance rather than only saving the transformed object.
+
+The package also includes a landmark template:
+
+```{r, purl = FALSE}
+system.file("extdata/registration-landmarks-template.csv", package = "wsiTools")
+```
+
+Each landmark should be recorded before and after transformation. Do not report
+only a representative overlay screenshot; report the number of landmarks,
+median error, 95th-percentile error, and the fraction of coordinates outside
+the image or tissue mask.
 
 ```{r, purl = FALSE}
 # Inspect the coordinates and image metadata before registration.

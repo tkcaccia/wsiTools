@@ -1,0 +1,1 @@
+dataset_id,image_id,section_id,landmark_id,image_x,image_y,object_x,object_y,transformed_x,transformed_y,error_pixels,error_micrometres,transform_description,reviewer,notes
