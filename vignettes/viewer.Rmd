@@ -62,3 +62,13 @@ More detail:
 - [Live viewer guide](https://github.com/tkcaccia/wsiTools/blob/main/docs/live-viewer.md)
 - [Architecture diagram](https://github.com/tkcaccia/wsiTools/blob/main/docs/architecture.md)
 - [Visual gallery](https://github.com/tkcaccia/wsiTools/blob/main/docs/screenshots.md)
+
+## Viewer visual language
+
+The viewer uses a compact dark pathology-workbench layout: solid charcoal
+panels keep controls legible over bright tissue, blue states identify the
+active tool or selected object, and amber states indicate analysis or a drop
+target. The layout is intentionally dense so the image remains the primary
+workspace, with the project, annotation, layer, history, and navigation panels
+kept visually separate. This is a visual convention only; it does not change
+the coordinate system, tile source, or annotation data.
