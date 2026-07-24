@@ -12,14 +12,15 @@ synchronization, dynamic tiles, annotations, and analysis.
 
 Prebuilt desktop installers are attached to the GitHub release:
 
-[Download wsiTools Desktop 0.1.1](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.1)
+[Download wsiTools Desktop 0.1.4](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.4)
 
 | Platform | Asset | Notes |
 | --- | --- | --- |
-| macOS Apple Silicon | `wsiTools-Desktop_0.1.1_macos_aarch64.dmg` | For Apple Silicon Macs. Unsigned builds may need right-click -> Open. |
-| Windows x64 | `wsiTools-Desktop_0.1.1_windows_x64-setup.exe` | NSIS installer for Windows 10/11 x64. |
-| Ubuntu/Debian x64 | `wsiTools-Desktop_0.1.1_linux_amd64.deb` | Install with `sudo apt install ./file.deb`. |
-| Fedora/RHEL-style x86_64 | `wsiTools-Desktop_0.1.1_linux_x86_64.rpm` | Install with your RPM package manager. |
+| macOS Apple Silicon | `wsiTools-Desktop_0.1.4_macos_ARM64.dmg` | For Apple Silicon Macs. Unsigned builds may need right-click -> Open. |
+| Windows x64 | `wsiTools-Desktop_0.1.4_windows_x64-setup.exe` | NSIS installer for Windows 10/11 x64. |
+| Ubuntu/Debian x64 | `wsiTools-Desktop_0.1.4_linux_amd64.deb` | Install with `sudo apt install ./file.deb`. |
+| Fedora/RHEL-style x86_64 | `wsiTools-Desktop_0.1.4_linux_x86_64.rpm` | Install with your RPM package manager. |
+| Linux x86_64 portable | `wsiTools-Desktop_0.1.4_linux_x86_64.AppImage` | Make executable and run without installing a package. |
 | All platforms | `SHA256SUMS.txt` | Optional checksum verification. |
 
 ## Required Runtime Dependencies

@@ -31,6 +31,7 @@ navbar:
       - viewer
       - tutorials
       - concepts
+      - validation
       - backends
       - annotations
       - spatial_omics
@@ -98,6 +99,9 @@ navbar:
           href: https://github.com/tkcaccia/wsiTools/blob/main/docs/projects.md
         - text: Supported formats
           href: articles/concepts.html#image-formats-and-backends
+    validation:
+      text: Validation
+      href: articles/validation.html
     backends:
       text: Backends
       href: articles/backends.html
@@ -152,6 +156,7 @@ articles:
   - title: Help and troubleshooting
     navbar: Help
     contents:
+      - validation
       - troubleshooting
 
 reference:

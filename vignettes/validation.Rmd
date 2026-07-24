@@ -1,0 +1,158 @@
+---
+title: "Validation and reproducibility"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Validation and reproducibility}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE, purl = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE, purl = FALSE)
+```
+
+This page defines what is tested automatically and what should be measured when
+reporting a wsiTools result. It is deliberately explicit: a passing R package
+check validates software behavior, but it does not by itself establish image
+registration accuracy, viewer speed, or biological validity.
+
+## Current validation layers
+
+The repository contains automated tests for several core contracts:
+
+| Layer | Examples | Interpretation |
+| --- | --- | --- |
+| Package installation | CRAN-safe imports, native registration, optional dependencies | The lightweight package can be built without optional image/model tools |
+| Image access | metadata, region reads, thumbnails, tiles, format fallbacks | A backend can satisfy a defined image-access contract for the tested fixture |
+| Annotation data | GeoJSON, masks, polygons, multipolygons, class behavior | Data transformations preserve the tested coordinates and metadata |
+| Viewer protocol | state payloads, event allowlists, project state, live-session helpers | Browser/R messages follow the tested schema |
+| Spatial objects | Seurat, Giotto, SpatialExperiment, cell/spot association | The tested object representation can be read and mapped to image coordinates |
+
+Run the package tests locally with:
+
+```{r, purl = FALSE}
+testthat::test_local()
+```
+
+For a release-level check, use a clean source tree without private benchmark
+data and run:
+
+```{bash, eval=FALSE}
+R CMD build .
+R CMD check --as-cran wsiTools_<version>.tar.gz
+```
+
+Optional backends are capability-tested and skipped when unavailable. A green
+check therefore means that the tested core is healthy; it does not mean that
+every CZI, SVS, BTF, Bio-Formats, StarDist, or Mesmer installation is supported.
+
+## Performance benchmark protocol
+
+For a reproducible performance report, record the following for every image and
+backend combination:
+
+1. file format, scanner/vendor, dimensions, pyramid levels, and file size;
+2. operating system, CPU, RAM, R version, wsiTools version, and backend versions;
+3. time to metadata, time to first preview, time to first requested tile, and
+   time to a full-viewport redraw;
+4. peak resident memory and CPU usage during startup, zooming, and panning;
+5. tile cache mode, cache size, tile dimensions, and cache hit rate;
+6. number of tile failures and retry behavior;
+7. whether the viewer was static, polling-live, or WebSocket-live.
+
+Use the viewer performance report as part of the record:
+
+```{r, purl = FALSE}
+viewer$get_performance()
+wsi_diagnose(live_test = FALSE)
+```
+
+Do not compare timings from a cold cache with timings from a warm cache. Report
+both when cache behavior is relevant. Do not describe a workflow as
+“full-resolution” without stating the physical pixel size or pyramid level that
+was displayed.
+
+## Registration validation
+
+Spatial overlays should be validated independently of visual impression. For
+each image/object pair, retain:
+
+- the original object coordinates;
+- the image identifier and section identifier;
+- the flip, rotation, scale, translation, or registration transform;
+- the number of coordinates retained and excluded;
+- landmark coordinates before and after transformation;
+- residual error in pixels and, when available, micrometres.
+
+For a practical landmark check, select corresponding tissue landmarks in the
+image and spatial object, then report the median and 95th-percentile Euclidean
+error. If a transform is estimated from landmarks, keep the landmarks and the
+transform in project provenance rather than only saving the transformed object.
+
+```{r, purl = FALSE}
+# Inspect the coordinates and image metadata before registration.
+coords <- wsi_seurat_coordinates(object, image = "slice1")
+info <- wsi_info(slide)
+info
+head(coords)
+```
+
+Visual agreement alone is not sufficient evidence of registration accuracy,
+especially for objects containing multiple tissue sections or cell-level and
+spot-level coordinates at the same time.
+
+## Annotation validation
+
+For annotation workflows, validate both the representation and the geometry:
+
+- GeoJSON import followed by export should preserve class, label, object ID, and
+  slide-coordinate geometry;
+- mask conversion should record pixel size, origin, label mapping, and whether
+  holes or small components were removed;
+- class-exclusive editing should report how intersections are resolved;
+- spot/cell association should record the point-in-polygon rule and boundary
+  convention;
+- reopening the saved project should reproduce the same annotation coordinates.
+
+The package tests cover small deterministic fixtures. For a scientific report,
+also include a representative large annotation set and report vertex count,
+rendering time, memory use, and the geometry difference introduced by any
+simplification or rasterization.
+
+## Reproducible project records
+
+Save the project together with a diagnostic report and a session record:
+
+```{r, purl = FALSE}
+project <- wsi_project(slide)
+wsi_save_project(project, "case_01.wsiproject")
+
+writeLines(capture.output(sessionInfo()), "case_01-sessionInfo.txt")
+writeLines(capture.output(wsi_backends()), "case_01-backends.txt")
+writeLines(capture.output(wsi_diagnose(live_test = FALSE)), "case_01-diagnose.txt")
+```
+
+Project files store references and analysis state; they do not generally copy
+the original whole-slide pixels. A reproducible record must therefore retain
+the source-image paths or stable data-access instructions, file checksums when
+possible, the object files, backend versions, and the exact wsiTools release.
+
+## Scope and current limitations
+
+wsiTools is an evolving research tool. The following should be treated as
+backend- or dataset-dependent until a corresponding benchmark is published:
+
+- universal support for every CZI, BTF, OME-TIFF, SVS, or DICOM WSI variant;
+- performance equivalence between native CZI, libvips, OpenSlide, and
+  Bio-Formats;
+- automatic registration of arbitrary spatial objects to arbitrary microscopy
+  images;
+- biological correctness of externally generated segmentation or stain
+  deconvolution;
+- synchronization after browser refresh, network interruption, or stale R
+  sessions;
+- exact equivalence between vector geometry and raster mask rendering.
+
+When reporting a result, state the tested file format, backend, operating system,
+package version, and any manual transformation or correction applied.
+

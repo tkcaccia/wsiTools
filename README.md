@@ -31,6 +31,7 @@ desktop app use, troubleshooting, and the full R function reference.
 | Open Seurat, Giotto, SpatialExperiment, or CellPhenotyper projects | [Spatial omics](docs/spatial-omics.md) and [Examples](docs/examples.md) |
 | Compile the Tauri desktop app yourself | [Tauri build guide](docs/tauri-build.md) |
 | Diagnose installation or viewer problems | [Troubleshooting](docs/troubleshooting.md) |
+| Understand validation, benchmarks, and reproducibility | [Validation guide](https://tkcaccia.github.io/wsiTools/articles/validation.html) |
 
 wsiTools is an R toolkit for memory-efficient WSI access and preprocessing
 through region-based reading, tiling, pyramidal image handling, conversion and
@@ -134,6 +135,13 @@ Check your machine with:
 wsi_backends()
 wsi_diagnose(live_test = FALSE)
 ```
+
+Performance, coordinate registration, annotation accuracy, and reproducible
+project reporting are described in the [validation and reproducibility
+guide](https://tkcaccia.github.io/wsiTools/articles/validation.html). The
+package tests validate software contracts; they do not imply that every image
+format, backend, registration, or biological analysis has been independently
+validated.
 
 ## Start here
 
@@ -343,7 +351,7 @@ wsi_backends()
 wsi_diagnose(live_test = FALSE)
 ```
 
-The current GitHub package version is `0.1.23`. Avoid installing old commit
+The current GitHub package version is `0.1.24`. Avoid installing old commit
 references unless you are deliberately debugging a previous build; the command
 above always reinstalls the current GitHub version.
 
@@ -382,7 +390,7 @@ want to update your local package library. This avoids accidental long updates
 on managed Windows workstations.
 
 After installation, check `packageVersion("wsiTools")`. It should report
-`0.1.23` or newer. On Windows, the native CZI bridge is compiled by default.
+`0.1.24` or newer. On Windows, the native CZI bridge is compiled by default.
 If you need to install only the core package on a machine where that native
 bridge cannot compile, set `WSITOOLS_DISABLE_NATIVE_CZI=1` before installation
 to use the fallback stub.
