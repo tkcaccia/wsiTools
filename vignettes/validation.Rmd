@@ -82,6 +82,24 @@ viewer$get_performance()
 wsi_diagnose(live_test = FALSE)
 ```
 
+For a portable, non-interactive smoke benchmark, run the bundled script. It
+reads metadata, one thumbnail, and one bounded center region; it never reads
+the entire level-0 image. The output directory contains timings, backend
+diagnostics, image metadata, and the R session record.
+
+```{r, eval=FALSE, purl=FALSE}
+script <- system.file("examples/benchmark_wsi.R", package = "wsiTools")
+system2(
+  file.path(R.home("bin"), "Rscript"),
+  c(script, "/path/to/image.svs", "benchmark-output")
+)
+```
+
+The script is a reproducibility aid and a backend smoke test, not a substitute
+for a publication benchmark. For publication results, run the same protocol
+across real slides, cold and warm caches, operating systems, and comparator
+viewers, then archive the resulting output directories.
+
 Do not compare timings from a cold cache with timings from a warm cache. Report
 both when cache behavior is relevant. Do not describe a workflow as
 “full-resolution” without stating the physical pixel size or pyramid level that
