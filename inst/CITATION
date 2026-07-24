@@ -1,0 +1,17 @@
+citHeader("To cite wsiTools in publications use:")
+
+meta <- packageDescription("wsiTools")
+version <- if (is.null(meta$Version) || is.na(meta$Version)) {
+  "development version"
+} else {
+  meta$Version
+}
+
+bibentry(
+  bibtype = "Manual",
+  title = "wsiTools: Tools for Reading, Tiling, Converting and Exporting Whole-Slide Images",
+  author = person("Stefano", "Caccia", email = "tkcaccia@gmail.com"),
+  year = format(Sys.Date(), "%Y"),
+  note = paste("R package version", version),
+  url = "https://github.com/tkcaccia/wsiTools"
+)

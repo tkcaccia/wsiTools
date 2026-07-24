@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+title: "wsiTools: Tools for Reading, Tiling, Converting and Exporting Whole-Slide Images"
+message: "If you use wsiTools, please cite the exact release or commit used in your analysis."
+type: software
+authors:
+  - given-names: Stefano
+    family-names: Caccia
+    email: tkcaccia@gmail.com
+repository-code: "https://github.com/tkcaccia/wsiTools"
+url: "https://tkcaccia.github.io/wsiTools/"
+license: MIT
+version: "0.1.24"
+date-released: "2026-07-24"
+keywords:
+  - whole-slide imaging
+  - digital pathology
+  - spatial transcriptomics
+  - R
+  - OpenSeadragon

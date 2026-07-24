@@ -24,6 +24,16 @@ Record the package version, commit, operating system, R version, backend
 versions, and project files with the analysis. A version number alone is not
 enough when the package is installed from the development branch.
 
+The repository also provides machine-readable citation metadata in
+[`CITATION.cff`](https://github.com/tkcaccia/wsiTools/blob/main/CITATION.cff),
+and the installed R package supports:
+
+```{r, eval=FALSE, purl=FALSE}
+citation("wsiTools")
+```
+
+No DOI is claimed until a release has been archived by a DOI-issuing service.
+
 ## Image access and viewer technologies
 
 - [OpenSeadragon](https://openseadragon.github.io/) is the browser-side tiled
@@ -83,4 +93,3 @@ At minimum, record:
 - backend and package versions;
 - random seeds and model parameters;
 - output project and measurement files.
-
