@@ -38,6 +38,7 @@ wsi_new_viewer_state <- function(name = "wsi_viewer_live_state", envir = parent.
                                  max_events = 1000L) {
   state <- new.env(parent = emptyenv())
   state$rois <- wsi_empty_roi()
+  state$analysis_rois <- wsi_empty_roi()
   state$measurements <- wsi_empty_measurements()
   state$trajectories <- wsi_empty_trajectories()
   state$segmentation <- wsi_empty_roi()
@@ -1864,10 +1865,17 @@ wsi_spatial_object_annotation_rois <- function(payload, state = NULL) {
   rois <- if (!is.null(geojson)) {
     wsi_roi_from_geojson(geojson)
   } else if (!is.null(state) && inherits(state, "wsi_viewer_state") &&
+             inherits(state$analysis_rois, "wsi_roi") && nrow(state$analysis_rois)) {
+    state$analysis_rois
+  } else if (!is.null(state) && inherits(state, "wsi_viewer_state") &&
              inherits(state$rois, "wsi_roi")) {
     state$rois
   } else {
     wsi_empty_roi()
+  }
+  if (!nrow(rois) && !is.null(state) && inherits(state, "wsi_viewer_state") &&
+      inherits(state$analysis_rois, "wsi_roi") && nrow(state$analysis_rois)) {
+    rois <- state$analysis_rois
   }
   if (!nrow(rois)) {
     return(rois)
@@ -5893,6 +5901,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
         dynamic_tile_source = dynamic_source,
         dynamic_tile_sources = all_dynamic_sources,
         dense_geojson_context = dense_geojson_context,
+        proximity_context = live_proximity_context,
         dynamic_tile_cache_dir = if (!is.null(dynamic_source)) dynamic_source$cache_dir else NULL,
         dynamic_channel_cache_dirs = unique(vapply(dynamic_channel_sources, function(x) as.character(x$cache_dir %||% ""), character(1))),
         dynamic_project_cache_dirs = unique(vapply(dynamic_project_sources, function(x) as.character(x$cache_dir %||% ""), character(1)))

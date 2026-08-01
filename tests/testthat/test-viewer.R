@@ -3150,6 +3150,34 @@ test_that("dense tissue annotations load once and coalesce viewport work", {
   expect_match(session_code, "static_url", fixed = TRUE)
   expect_match(session_code, "static_source", fixed = TRUE)
   expect_match(session_code, "full_resolution_zoom", fixed = TRUE)
+  expect_match(html_code, "Math.max(256", fixed = TRUE)
+  expect_match(html_code, "ceiling=!Number.isFinite(z)||z<1.5?5000:12000", fixed = TRUE)
+})
+
+test_that("desktop viewer keeps full tissue polygons for R analysis", {
+  launcher_path <- test_path("../../tools/wsiToolsDesktop/src-tauri/resources/launch-viewer.R")
+  skip_if_not(file.exists(launcher_path), "Desktop launcher resources are not included in source-package checks.")
+  launcher <- paste(readLines(launcher_path, warn = FALSE), collapse = "\n")
+
+  expect_match(launcher, "desktop_register_tissue_analysis", fixed = TRUE)
+  expect_match(launcher, "viewer$state$analysis_rois <- analysis_rois", fixed = TRUE)
+  expect_match(launcher, "Use Annotations > Associate spots/cells", fixed = TRUE)
+  geometry_code <- paste(deparse(wsiTools:::wsi_viewer_trajectory_js), collapse = "\n")
+  expect_match(geometry_code, "roiHasFullAnalysisGeometry", fixed = TRUE)
+  expect_match(geometry_code, "meta.full_geometry_source===true", fixed = TRUE)
+  viewer_code <- paste(deparse(wsiTools:::wsi_viewer_chrome), collapse = "\n")
+  expect_match(viewer_code, "Associate spots/cells", fixed = TRUE)
+  viewer_js <- paste(deparse(wsiTools:::wsi_viewer_geometry_js), collapse = "\n")
+  expect_match(viewer_js, "associateAnnotationSpots", fixed = TRUE)
+  expect_match(viewer_code, "closeMenuAfterToolAction(this)", fixed = TRUE)
+})
+
+test_that("navigator thumbnail is independent from progressive background preview", {
+  viewer_code <- paste(deparse(wsiTools::wsi_viewer), collapse = "\n")
+  expect_match(
+    viewer_code,
+    "navigator_image_data_uri = wsi_viewer_navigator_data_uri\\(slide,\\s+width = 512\\)"
+  )
 })
 
 test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {

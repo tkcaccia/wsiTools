@@ -145,16 +145,35 @@ wsi_proximity_same_selection <- function(result, point_source, query_ids, target
     same_set(existing_target, target_ids)
 }
 
+wsi_proximity_analysis_rois <- function(state, rois = NULL) {
+  rois <- rois %||% state$rois %||% wsi_empty_roi()
+  full <- state$analysis_rois %||% wsi_empty_roi()
+  if (!inherits(full, "wsi_roi") || !nrow(full)) {
+    return(rois)
+  }
+  if (!inherits(rois, "wsi_roi") || !nrow(rois)) {
+    return(full)
+  }
+  full_ids <- as.character(full$roi_id %||% character())
+  current_ids <- as.character(rois$roi_id %||% character())
+  extra <- rois[!current_ids %in% full_ids, , drop = FALSE]
+  if (!nrow(extra)) {
+    return(full)
+  }
+  wsi_viewer_bind_rois(full, extra)
+}
+
 wsi_proximity_result_from_payload <- function(context, state, payload, rois = NULL,
                                               force = FALSE) {
-  rois <- rois %||% if (!is.null(payload$rois)) {
+  display_rois <- rois %||% if (!is.null(payload$rois)) {
     wsi_rois_from_payload(payload$rois)
   } else {
     state$rois %||% wsi_empty_roi()
   }
-  if (inherits(rois, "wsi_roi")) {
-    state$rois <- rois
+  if (inherits(display_rois, "wsi_roi")) {
+    state$rois <- display_rois
   }
+  rois <- wsi_proximity_analysis_rois(state, display_rois)
   source <- payload$point_source %||% "spatial:points"
   query_ids <- payload$query_annotations %||% character()
   target_ids <- payload$target_annotations %||% character()
@@ -168,6 +187,7 @@ wsi_proximity_result_from_payload <- function(context, state, payload, rois = NU
     point_source = source,
     query_ids = query_ids,
     target_ids = target_ids,
+    association = state$annotation_spots %||% NULL,
     pixel_size = state$pixel_size %||% NULL,
     max_pairs = payload$max_pairs %||% 5e6
   )
@@ -201,6 +221,17 @@ wsi_proximity_roi_metadata <- function(rois, roi_id, roi_index = NA_integer_) {
 wsi_proximity_nearest <- function(query, target, max_pairs = 5e6) {
   if (!nrow(query) || !nrow(target)) {
     return(list(index = integer(), distance = numeric()))
+  }
+  if (requireNamespace("Rnanoflann", quietly = TRUE)) {
+    fit <- Rnanoflann::nn(
+      as.matrix(target[, c("x", "y"), drop = FALSE]),
+      as.matrix(query[, c("x", "y"), drop = FALSE]),
+      1L
+    )
+    return(list(
+      index = as.integer(fit$indices[, 1L]),
+      distance = as.numeric(fit$distances[, 1L])
+    ))
   }
   max_pairs <- suppressWarnings(as.numeric(max_pairs %||% 5e6))
   if (!is.finite(max_pairs) || max_pairs < 1) {
@@ -344,8 +375,67 @@ wsi_proximity_layer <- function(result, radius = 8) {
   )
 }
 
+wsi_proximity_assignment_from_table <- function(points, rois, ids, association) {
+  if (!is.data.frame(association) || !nrow(association)) {
+    return(NULL)
+  }
+  indices <- wsi_prediction_selected_roi_indices(rois, ids, include_all = FALSE)
+  if (!length(indices)) {
+    return(NULL)
+  }
+  point_ids <- as.character(association$spot_id %||% association$point_id %||% character())
+  annotation_ids <- as.character(association$annotation_id %||% character())
+  annotation_indices <- suppressWarnings(as.integer(association$annotation_index %||% NA_integer_))
+  if (length(point_ids) != nrow(association) || length(annotation_ids) != nrow(association)) {
+    return(NULL)
+  }
+  valid_index <- is.finite(annotation_indices) & annotation_indices >= 1L &
+    annotation_indices <= nrow(rois)
+  if (!all(indices %in% unique(annotation_indices[valid_index]))) {
+    annotation_indices <- match(annotation_ids, as.character(rois$roi_id %||% character()))
+  }
+  if (!all(indices %in% unique(annotation_indices[is.finite(annotation_indices)]))) {
+    assigned <- wsi_annotation_assign_indices(
+      wsi_annotation_points(points), rois, indices, engine = "auto"
+    )
+    roi_index <- as.integer(assigned)
+    hit <- !is.na(roi_index)
+    roi_id <- rep(NA_character_, nrow(points))
+    label <- rep(NA_character_, nrow(points))
+    if (any(hit)) {
+      roi_labels <- vapply(
+        seq_len(nrow(rois)),
+        function(i) wsi_prediction_roi_label(rois, i),
+        character(1)
+      )
+      roi_id[hit] <- as.character(rois$roi_id[roi_index[hit]])
+      label[hit] <- roi_labels[roi_index[hit]]
+    }
+    return(list(label = label, roi_id = roi_id, roi_index = roi_index, indices = indices))
+  }
+  association_row <- match(as.character(points$id), point_ids)
+  roi_index <- rep(NA_integer_, nrow(points))
+  hit <- !is.na(association_row)
+  roi_index[hit] <- annotation_indices[association_row[hit]]
+  hit <- hit & roi_index %in% indices
+  roi_index[!hit] <- NA_integer_
+  roi_id <- rep(NA_character_, nrow(points))
+  label <- rep(NA_character_, nrow(points))
+  if (any(hit)) {
+    roi_id[hit] <- as.character(rois$roi_id[roi_index[hit]])
+    roi_labels <- vapply(
+      seq_len(nrow(rois)),
+      function(i) wsi_prediction_roi_label(rois, i),
+      character(1)
+    )
+    label[hit] <- roi_labels[roi_index[hit]]
+  }
+  list(label = label, roi_id = roi_id, roi_index = roi_index, indices = indices)
+}
+
 wsi_proximity_run <- function(context, rois, point_source = "spatial:points",
-                              query_ids, target_ids, pixel_size = NULL,
+                              query_ids, target_ids, association = NULL,
+                              pixel_size = NULL,
                               max_pairs = 5e6) {
   if (!inherits(rois, "wsi_roi") || !nrow(rois)) {
     wsi_abort("Draw or import at least two annotations before running proximity analysis.")
@@ -377,8 +467,10 @@ wsi_proximity_run <- function(context, rois, point_source = "spatial:points",
     wsi_abort(sprintf("No %s with finite coordinates are available for proximity analysis.", unit_label))
   }
 
-  query <- wsi_prediction_assign_points(points, rois, query_ids)
-  target <- wsi_prediction_assign_points(points, rois, target_ids)
+  query <- wsi_proximity_assignment_from_table(points, rois, query_ids, association) %||%
+    wsi_prediction_assign_points(points, rois, query_ids)
+  target <- wsi_proximity_assignment_from_table(points, rois, target_ids, association) %||%
+    wsi_prediction_assign_points(points, rois, target_ids)
   query_rows <- which(!is.na(query$label) & nzchar(query$label))
   target_rows <- which(!is.na(target$label) & nzchar(target$label))
   if (!length(query_rows)) {
@@ -673,11 +765,12 @@ wsi_proximity_stats_detail <- function(stats) {
 
 wsi_proximity_stats_response <- function(context, state, payload) {
   payload <- wsi_proximity_validate_payload(payload)
-  rois <- if (!is.null(payload$rois)) {
+  display_rois <- if (!is.null(payload$rois)) {
     wsi_rois_from_payload(payload$rois)
   } else {
     state$rois %||% wsi_empty_roi()
   }
+  rois <- wsi_proximity_analysis_rois(state, display_rois)
   result_info <- wsi_proximity_result_from_payload(
     context = context,
     state = state,
@@ -714,9 +807,57 @@ wsi_proximity_stats_response <- function(context, state, payload) {
   response
 }
 
+wsi_annotation_association_response <- function(context, state, payload) {
+  display_rois <- if (!is.null(payload$rois)) {
+    wsi_rois_from_payload(payload$rois)
+  } else {
+    state$rois %||% wsi_empty_roi()
+  }
+  if (inherits(display_rois, "wsi_roi")) {
+    state$rois <- display_rois
+  }
+  rois <- wsi_proximity_analysis_rois(state, display_rois)
+  area <- tolower(as.character(rois$geometry_type %||% "")) %in%
+    c("polygon", "multipolygon")
+  rois <- rois[area, , drop = FALSE]
+  class(rois) <- unique(c("wsi_roi", class(rois)))
+  if (!nrow(rois)) {
+    wsi_abort("Draw or import at least one area annotation before assigning spots/cells.")
+  }
+  source <- payload$point_source %||% "spatial:points"
+  points <- wsi_prediction_points(context, source)
+  association <- wsi_associate_annotations(points, rois, engine = "auto")
+  registration <- data.frame(
+    id = as.character(points$id),
+    label = as.character(points$label %||% points$id),
+    x = as.numeric(points$x),
+    y = as.numeric(points$y),
+    layer_id = rep_len(as.character(points$layer_id %||% NA_character_), nrow(points)),
+    layer_name = rep_len(as.character(points$layer_name %||% NA_character_), nrow(points)),
+    stringsAsFactors = FALSE
+  )
+  state$annotation_spots <- wsi_spatial_object_annotation_spots(association, registration)
+  wsi_assign_viewer_state(state)
+  assigned <- sum(!is.na(association$annotation_id) & nzchar(association$annotation_id))
+  detail <- list(
+    count = nrow(association),
+    assigned_count = assigned,
+    unassigned_count = nrow(association) - assigned,
+    annotation_count = nrow(rois),
+    point_source = source
+  )
+  wsi_viewer_state_record_event(state, "annotation_spots_updated", detail)
+  response <- wsi_viewer_state_response(state)
+  response$annotation_association <- detail
+  response
+}
+
 wsi_proximity_response <- function(context, state, payload) {
   payload <- wsi_proximity_validate_payload(payload)
   action <- tolower(as.character(payload$action %||% "distance"))
+  if (action %in% c("associate", "association")) {
+    return(wsi_annotation_association_response(context = context, state = state, payload = payload))
+  }
   if (identical(action, "stats") || identical(action, "statistics")) {
     return(wsi_proximity_stats_response(context = context, state = state, payload = payload))
   }
