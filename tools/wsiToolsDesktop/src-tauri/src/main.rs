@@ -208,6 +208,28 @@ fn stop_previous_session_pid(session_dir: &PathBuf, logs: &Arc<Mutex<Vec<String>
     remove_pid_file(session_dir);
 }
 
+fn clear_legacy_viewer_artifacts(session_dir: &PathBuf, logs: &Arc<Mutex<Vec<String>>>) {
+    let legacy_html = session_dir.join("wsiTools_desktop_live_viewer.html");
+    let legacy_tiles = session_dir.join("wsiTools_desktop_live_viewer_tiles");
+    let mut cleared = Vec::new();
+
+    if legacy_html.exists() && fs::remove_file(&legacy_html).is_ok() {
+        cleared.push("shared viewer HTML");
+    }
+    if legacy_tiles.exists() && fs::remove_dir_all(&legacy_tiles).is_ok() {
+        cleared.push("shared legacy tile cache");
+    }
+    if !cleared.is_empty() {
+        push_log(
+            logs,
+            format!(
+                "Cleared {} before opening the new project.",
+                cleared.join(" and ")
+            ),
+        );
+    }
+}
+
 fn command_works(path: &str) -> bool {
     Command::new(path)
         .arg("--version")
@@ -961,6 +983,7 @@ fn launch_r_new_project_target(
     push_log(&state.logs, "Preparing a clean desktop viewer session.");
     stop_previous_session_pid(&session_dir, &state.logs);
     stop_existing_child(&state);
+    clear_legacy_viewer_artifacts(&session_dir, &state.logs);
 
     push_log(&state.logs, format!("Rscript: {rscript}"));
     push_log(
@@ -1203,6 +1226,7 @@ fn launch_r_target(
     push_log(&state.logs, "Preparing a clean desktop viewer session.");
     stop_previous_session_pid(&session_dir, &state.logs);
     stop_existing_child(&state);
+    clear_legacy_viewer_artifacts(&session_dir, &state.logs);
 
     push_log(&state.logs, format!("Rscript: {rscript}"));
     push_log(

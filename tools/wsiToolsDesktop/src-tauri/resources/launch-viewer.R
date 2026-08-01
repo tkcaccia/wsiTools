@@ -1565,7 +1565,12 @@ desktop_open_spatial_target <- function(object, image_paths, output, log_file,
         single_args$sample_id <- sample_ids[[1L]]
       }
     }
-    return(do.call(wsiTools::wsi_viewer_spatial, single_args))
+    viewer <- if (use_prebuilt_tiles) {
+      do.call(wsiTools::wsi_viewer_spatial, single_args)
+    } else {
+      desktop_force_dynamic_tiles(do.call(wsiTools::wsi_viewer_spatial, single_args))
+    }
+    return(viewer)
   }
   if (inherits(object, "Seurat")) {
     return(wsiTools::wsi_viewer_seurat_project(
@@ -1671,6 +1676,19 @@ desktop_build_missing_tiles <- function() {
 desktop_use_prebuilt_tiles <- function() {
   tolower(Sys.getenv("WSITOOLS_DESKTOP_USE_PREBUILT_TILES", "true")) %in%
     c("1", "true", "yes", "on")
+}
+
+desktop_force_dynamic_tiles <- function(expr) {
+  previous <- Sys.getenv("WSITOOLS_FORCE_DYNAMIC_TILES", unset = NA_character_)
+  Sys.setenv(WSITOOLS_FORCE_DYNAMIC_TILES = "true")
+  on.exit({
+    if (is.na(previous)) {
+      Sys.unsetenv("WSITOOLS_FORCE_DYNAMIC_TILES")
+    } else {
+      Sys.setenv(WSITOOLS_FORCE_DYNAMIC_TILES = previous)
+    }
+  }, add = TRUE)
+  force(expr)
 }
 
 desktop_deepzoom_cache_valid <- function(slide, tile_dir,

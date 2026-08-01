@@ -3126,6 +3126,13 @@ test_that("desktop launcher isolates static viewer assets from live R work", {
   expect_match(launcher, "ETag", fixed = TRUE)
   expect_match(launcher, "dense_geojson_sources", fixed = TRUE)
   expect_match(launcher, "immediate browser-side level-of-detail rendering", fixed = TRUE)
+  expect_match(launcher, "desktop_force_dynamic_tiles", fixed = TRUE)
+  expect_match(launcher, "WSITOOLS_FORCE_DYNAMIC_TILES", fixed = TRUE)
+  expect_match(
+    launcher,
+    "desktop_force_dynamic_tiles(do.call(wsiTools::wsi_viewer_spatial, single_args))",
+    fixed = TRUE
+  )
 })
 
 test_that("dense tissue annotations load once and coalesce viewport work", {
