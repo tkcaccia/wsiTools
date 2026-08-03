@@ -185,9 +185,13 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "overlayFocusRoiAllowed", fixed = TRUE)
   expect_match(html, "overlayFocusChannelAllowed", fixed = TRUE)
   expect_match(html, "overlayFocusTrajectoryVisible", fixed = TRUE)
+  expect_match(html, "spots?|proximity|distance[_ -]?to[_ -]?reference", fixed = TRUE)
+  expect_match(html, "function revealCoordinateOverlays()", fixed = TRUE)
   expect_match(html, "mode==='coordinates_annotation'&&(wanted==='coordinates'||wanted==='annotation')", fixed = TRUE)
   expect_match(html, "current===other)overlayFocusMode='coordinates_annotation'", fixed = TRUE)
   expect_match(html, "Showing coordinates and annotations together.", fixed = TRUE)
+  expect_match(html, "if(typeof revealCoordinateOverlays==='function')revealCoordinateOverlays();updateSeuratControls()", fixed = TRUE)
+  expect_match(html, "handleViewerCommands(body);if(typeof revealCoordinateOverlays==='function')revealCoordinateOverlays();if(typeof invalidateSpatialWebglCache==='function')invalidateSpatialWebglCache()", fixed = TRUE)
   pos_annotations_menu <- regexpr("<summary title=\"Draw, select, import, export, and manage annotations\">Annotations</summary>", html, fixed = TRUE)[[1]]
   pos_segmentation_section <- regexpr("StarDist segmentation", html, fixed = TRUE)[[1]]
   expect_gt(pos_annotations_menu, 0)
