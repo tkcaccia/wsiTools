@@ -335,6 +335,11 @@ wsi_proximity_layer <- function(result, radius = 8) {
       opacity = 0.95,
       colour = "#F97316",
       replace = TRUE,
+      metadata = list(
+        vector_rendering = TRUE,
+        coordinate_overlay = TRUE,
+        lod = list(enabled = FALSE, full_coordinates = TRUE)
+      ),
       count = 0L,
       items = list()
     ))
@@ -367,6 +372,11 @@ wsi_proximity_layer <- function(result, radius = 8) {
     opacity = 0.95,
     colour = "#F97316",
     replace = TRUE,
+    metadata = list(
+      vector_rendering = TRUE,
+      coordinate_overlay = TRUE,
+      lod = list(enabled = FALSE, full_coordinates = TRUE)
+    ),
     count = length(items),
     min_distance_px = wsi_proximity_stat(result$distance_px, min),
     max_distance_px = wsi_proximity_stat(result$distance_px, max),

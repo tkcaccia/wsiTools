@@ -225,6 +225,9 @@ test_that("proximity response stores result and queues viewer layer", {
   expect_equal(layer$legend$unit, "px")
   expect_length(layer$legend$stops, 3L)
   expect_named(layer$legend$stops[[1]], c("name", "value", "distance_px", "colour"))
+  expect_true(layer$metadata$vector_rendering)
+  expect_true(layer$metadata$coordinate_overlay)
+  expect_true(layer$metadata$lod$full_coordinates)
 })
 
 test_that("proximity uses full analysis polygons instead of compact display ROIs", {
