@@ -26,6 +26,60 @@ test_that("proximity colours use empirical quantile positions", {
     wsiTools:::wsi_proximity_quantile_position(c(4, 4, 4)),
     rep(0.5, 3)
   )
+  expect_equal(wsiTools:::wsi_proximity_colour_index(c(0, 1, 2, 100)), c(1L, 34L, 67L, 101L))
+})
+
+test_that("large proximity layers use a compact packed point payload", {
+  n <- 20000L
+  result <- data.frame(
+    id = paste0("cell_", seq_len(n)),
+    label = paste0("cell_", seq_len(n)),
+    x = seq_len(n),
+    y = seq_len(n) %% 1000,
+    distance_px = seq_len(n),
+    distance_um = seq_len(n) / 2,
+    query_class = "tumour",
+    stringsAsFactors = FALSE
+  )
+
+  layer <- wsiTools:::wsi_proximity_layer(result)
+  expect_true(layer$metadata$packed_points)
+  expect_length(layer$packed_points$x, n)
+  expect_length(layer$packed_points$y, n)
+  expect_length(layer$packed_points$colour_index, n)
+  expect_length(layer$metadata$point_palette, 101L)
+  expect_length(layer$items, 0L)
+  expect_lt(nchar(jsonlite::toJSON(layer, auto_unbox = TRUE)), 1000000L)
+})
+
+test_that("proximity ROI metadata is resolved in vectors", {
+  rois <- wsiTools:::wsi_roi_from_geojson(list(
+    type = "FeatureCollection",
+    features = list(
+      list(
+        type = "Feature", id = "roi_t",
+        properties = list(name = "Tumour", classification = list(name = "tumour")),
+        geometry = list(type = "Polygon", coordinates = list(list(
+          c(0, 0), c(2, 0), c(2, 2), c(0, 2), c(0, 0)
+        )))
+      ),
+      list(
+        type = "Feature", id = "roi_s",
+        properties = list(name = "Stroma", classification = list(name = "stroma")),
+        geometry = list(type = "Polygon", coordinates = list(list(
+          c(3, 0), c(5, 0), c(5, 2), c(3, 2), c(3, 0)
+        )))
+      )
+    )
+  ))
+  metadata <- wsiTools:::wsi_proximity_roi_metadata_vector(
+    rois,
+    roi_id = c("roi_s", "roi_t", "missing"),
+    roi_index = c(NA, 1L, NA)
+  )
+
+  expect_equal(metadata$name, c("Stroma", "Tumour", NA_character_))
+  expect_equal(metadata$class, c("stroma", "tumour", NA_character_))
 })
 
 test_that("proximity analysis computes nearest target spot distances", {
@@ -77,6 +131,15 @@ test_that("proximity analysis computes nearest target spot distances", {
   expect_equal(result$nearest_target_id[[1]], "t1")
   expect_equal(result$distance_px[[1]], 9)
   expect_equal(result$distance_um[[1]], 4.5)
+})
+
+test_that("proximity nearest-neighbour lookup returns exact indices and distances", {
+  query <- data.frame(x = c(0, 9), y = c(0, 10))
+  target <- data.frame(x = c(1, 10, 50), y = c(0, 10, 50))
+  nearest <- wsiTools:::wsi_proximity_nearest(query, target)
+
+  expect_equal(nearest$index, c(1L, 2L))
+  expect_equal(nearest$distance, c(1, 1))
 })
 
 test_that("proximity analysis supports annotation category selectors", {

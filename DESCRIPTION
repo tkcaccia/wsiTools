@@ -37,6 +37,7 @@ Suggests:
     magick,
     Matrix,
     pkgdown,
+    RANN,
     Rnanoflann,
     rmarkdown,
     S4Vectors,

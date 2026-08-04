@@ -1100,6 +1100,8 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "<button id=\"nextRoi\" title=\"Next ROI\">Next</button><button id=\"annotationSelectAll\"", fixed = TRUE)
   expect_match(html, "bindAnnotationListControls", fixed = TRUE)
   expect_match(html, "currentRoiListEntries", fixed = TRUE)
+  expect_match(html, "function unpackViewerLayerPoints", fixed = TRUE)
+  expect_match(html, "delete layer.packed_points", fixed = TRUE)
   expect_match(html, "function revealSelectedAnnotationInList", fixed = TRUE)
   expect_match(html, "requestAnimationFrame(revealSelectedAnnotationInList)", fixed = TRUE)
   expect_match(html, "item.dataset.index=String(i)", fixed = TRUE)

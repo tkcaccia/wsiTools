@@ -218,9 +218,51 @@ wsi_proximity_roi_metadata <- function(rois, roi_id, roi_index = NA_integer_) {
   )
 }
 
+wsi_proximity_roi_metadata_vector <- function(rois, roi_id, roi_index = NA_integer_) {
+  n <- max(length(roi_id), length(roi_index))
+  if (!n) {
+    return(data.frame(name = character(), class = character(), stringsAsFactors = FALSE))
+  }
+  ids <- rep_len(as.character(roi_id), n)
+  indices <- suppressWarnings(rep_len(as.integer(roi_index), n))
+  if (!inherits(rois, "wsi_roi") || !nrow(rois)) {
+    return(data.frame(
+      name = rep(NA_character_, n),
+      class = rep(NA_character_, n),
+      stringsAsFactors = FALSE
+    ))
+  }
+
+  invalid <- !is.finite(indices) | indices < 1L | indices > nrow(rois)
+  indices[invalid] <- match(ids[invalid], as.character(rois$roi_id))
+  names <- rep(NA_character_, n)
+  classes <- rep(NA_character_, n)
+  matched <- !is.na(indices)
+  if (any(matched)) {
+    roi_names <- as.character(rois$name)
+    roi_classes <- vapply(rois$class, wsi_roi_class, character(1))
+    names[matched] <- roi_names[indices[matched]]
+    missing_names <- matched & (is.na(names) | !nzchar(names))
+    names[missing_names] <- ids[missing_names]
+    classes[matched] <- roi_classes[indices[matched]]
+  }
+  data.frame(name = names, class = classes, stringsAsFactors = FALSE)
+}
+
 wsi_proximity_nearest <- function(query, target, max_pairs = 5e6) {
   if (!nrow(query) || !nrow(target)) {
     return(list(index = integer(), distance = numeric()))
+  }
+  if (requireNamespace("RANN", quietly = TRUE)) {
+    fit <- RANN::nn2(
+      as.matrix(target[, c("x", "y"), drop = FALSE]),
+      as.matrix(query[, c("x", "y"), drop = FALSE]),
+      k = 1L
+    )
+    return(list(
+      index = as.integer(fit$nn.idx[, 1L]),
+      distance = as.numeric(fit$nn.dists[, 1L])
+    ))
   }
   if (requireNamespace("Rnanoflann", quietly = TRUE)) {
     fit <- Rnanoflann::nn(
@@ -279,7 +321,13 @@ wsi_proximity_colour <- function(distance) {
     return(rep("#94A3B8", length(distance)))
   }
   value[!is.finite(value)] <- 0.5
-  grDevices::hcl.colors(101L, palette = "Inferno")[pmax(1L, pmin(101L, floor(value * 100) + 1L))]
+  grDevices::hcl.colors(101L, palette = "Inferno")[wsi_proximity_colour_index(distance)]
+}
+
+wsi_proximity_colour_index <- function(distance) {
+  value <- wsi_proximity_quantile_position(distance)
+  value[!is.finite(value)] <- 0.5
+  pmax(1L, pmin(101L, floor(value * 100) + 1L))
 }
 
 wsi_proximity_stat <- function(x, fun) {
@@ -356,25 +404,12 @@ wsi_proximity_layer <- function(result, radius = 8) {
       items = list()
     ))
   }
-  colours <- wsi_proximity_colour(result$distance_px)
-  items <- lapply(seq_len(nrow(result)), function(i) {
-    colour <- colours[[i]]
-    list(
-      id = paste0("proximity_", result$id[[i]] %||% i),
-      name = result$label[[i]] %||% result$id[[i]] %||% paste0("point_", i),
-      label = result$label[[i]] %||% result$id[[i]] %||% paste0("point_", i),
-      class = result$query_class[[i]] %||% "query",
-      type = "point",
-      x = unname(as.numeric(result$x[[i]])),
-      y = unname(as.numeric(result$y[[i]])),
-      radius = radius,
-      source = "proximity",
-      colour = colour,
-      fill = wsi_viewer_hex_to_rgba(colour, alpha = 0.36),
-      proximity_distance_px = unname(as.numeric(result$distance_px[[i]])),
-      proximity_distance_um = unname(as.numeric(result$distance_um[[i]]))
-    )
-  })
+  palette <- grDevices::hcl.colors(101L, palette = "Inferno")
+  packed_points <- list(
+    x = unname(as.numeric(result$x)),
+    y = unname(as.numeric(result$y)),
+    colour_index = unname(as.integer(wsi_proximity_colour_index(result$distance_px)))
+  )
   list(
     id = "wsi_proximity_distance",
     name = "Proximity distance",
@@ -383,17 +418,21 @@ wsi_proximity_layer <- function(result, radius = 8) {
     visible = TRUE,
     opacity = 0.95,
     colour = "#F97316",
+    radius = unname(as.numeric(radius)),
     replace = TRUE,
     metadata = list(
       vector_rendering = TRUE,
       coordinate_overlay = TRUE,
+      packed_points = TRUE,
+      point_palette = unname(palette),
       lod = list(enabled = FALSE, full_coordinates = TRUE)
     ),
-    count = length(items),
+    count = nrow(result),
     min_distance_px = wsi_proximity_stat(result$distance_px, min),
     max_distance_px = wsi_proximity_stat(result$distance_px, max),
     legend = wsi_proximity_legend(result),
-    items = items
+    packed_points = packed_points,
+    items = list()
   )
 }
 
@@ -508,13 +547,13 @@ wsi_proximity_run <- function(context, rois, point_source = "spatial:points",
   target_nearest_rows <- target_rows[nearest$index]
   px <- tryCatch(wsi_pixel_size_xy(pixel_size), error = function(err) NULL)
 
-  query_meta <- Map(
-    function(id, index) wsi_proximity_roi_metadata(rois, id, index),
+  query_meta <- wsi_proximity_roi_metadata_vector(
+    rois,
     query$roi_id[query_rows],
     query$roi_index[query_rows]
   )
-  target_meta <- Map(
-    function(id, index) wsi_proximity_roi_metadata(rois, id, index),
+  target_meta <- wsi_proximity_roi_metadata_vector(
+    rois,
     target$roi_id[target_nearest_rows],
     target$roi_index[target_nearest_rows]
   )
@@ -527,11 +566,11 @@ wsi_proximity_run <- function(context, rois, point_source = "spatial:points",
     x = as.numeric(query_points$x),
     y = as.numeric(query_points$y),
     query_annotation_id = as.character(query$roi_id[query_rows]),
-    query_annotation = vapply(query_meta, `[[`, character(1), "name"),
-    query_class = vapply(query_meta, `[[`, character(1), "class"),
+    query_annotation = query_meta$name,
+    query_class = query_meta$class,
     target_annotation_id = as.character(target$roi_id[target_nearest_rows]),
-    target_annotation = vapply(target_meta, `[[`, character(1), "name"),
-    target_class = vapply(target_meta, `[[`, character(1), "class"),
+    target_annotation = target_meta$name,
+    target_class = target_meta$class,
     nearest_target_id = as.character(target_points$id[nearest$index]),
     nearest_target_label = as.character(target_points$label[nearest$index]),
     nearest_target_x = as.numeric(target_points$x[nearest$index]),
