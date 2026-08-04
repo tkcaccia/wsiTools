@@ -18,6 +18,16 @@ test_that("proximity request validation rejects arbitrary fields", {
   )
 })
 
+test_that("proximity colours use empirical quantile positions", {
+  position <- wsiTools:::wsi_proximity_quantile_position(c(0, 1, 2, 100, NA))
+  expect_equal(position[1:4], c(0, 1 / 3, 2 / 3, 1))
+  expect_true(is.na(position[[5]]))
+  expect_equal(
+    wsiTools:::wsi_proximity_quantile_position(c(4, 4, 4)),
+    rep(0.5, 3)
+  )
+})
+
 test_that("proximity analysis computes nearest target spot distances", {
   rois <- wsiTools:::wsi_roi_from_geojson(list(
     type = "FeatureCollection",
@@ -221,8 +231,9 @@ test_that("proximity response stores result and queues viewer layer", {
   expect_equal(response$proximity$count, 1L)
   expect_true(any(vapply(response$commands, function(x) identical(x$type, "add_layer"), logical(1))))
   layer <- response$commands[[which(vapply(response$commands, function(x) identical(x$type, "add_layer"), logical(1)))[[1]]]]$payload$layer
-  expect_equal(layer$legend$title, "Distance to reference")
+  expect_equal(layer$legend$title, "Distance to reference (quantile)")
   expect_equal(layer$legend$unit, "px")
+  expect_equal(layer$legend$scale, "quantile")
   expect_length(layer$legend$stops, 3L)
   expect_named(layer$legend$stops[[1]], c("name", "value", "distance_px", "colour"))
   expect_true(layer$metadata$vector_rendering)
@@ -486,6 +497,8 @@ test_that("proximity controls are rendered only for managed point sources", {
   html <- paste(readLines(out, warn = FALSE), collapse = "\n")
   expect_match(html, "Proximity analysis", fixed = TRUE)
   expect_match(html, "runProximityAnalysis", fixed = TRUE)
+  expect_match(html, "id=\"proximityColourVisible\"", fixed = TRUE)
+  expect_match(html, "function setProximityColourVisible", fixed = TRUE)
   expect_match(html, "proximityCurrentSource", fixed = TRUE)
   expect_match(html, "syncProximityAnnotations", fixed = TRUE)
   expect_match(html, "currentProximityRoiSignature", fixed = TRUE)

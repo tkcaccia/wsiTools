@@ -255,17 +255,28 @@ wsi_proximity_nearest <- function(query, target, max_pairs = 5e6) {
   list(index = nearest_index, distance = nearest_distance)
 }
 
-wsi_proximity_colour <- function(distance) {
+wsi_proximity_quantile_position <- function(distance) {
   distance <- as.numeric(distance)
   ok <- is.finite(distance)
   if (!any(ok)) {
-    return(rep("#94A3B8", length(distance)))
+    return(rep(NA_real_, length(distance)))
   }
-  rng <- range(distance[ok])
-  if (!is.finite(diff(rng)) || diff(rng) <= .Machine$double.eps) {
-    value <- rep(0.5, length(distance))
+  value <- rep(NA_real_, length(distance))
+  finite <- distance[ok]
+  if (length(finite) == 1L || length(unique(finite)) == 1L) {
+    value[ok] <- 0.5
   } else {
-    value <- (distance - rng[[1L]]) / diff(rng)
+    value[ok] <- (rank(finite, ties.method = "average") - 1) /
+      (length(finite) - 1)
+  }
+  value
+}
+
+wsi_proximity_colour <- function(distance) {
+  distance <- as.numeric(distance)
+  value <- wsi_proximity_quantile_position(distance)
+  if (!any(is.finite(value))) {
+    return(rep("#94A3B8", length(distance)))
   }
   value[!is.finite(value)] <- 0.5
   grDevices::hcl.colors(101L, palette = "Inferno")[pmax(1L, pmin(101L, floor(value * 100) + 1L))]
@@ -317,9 +328,10 @@ wsi_proximity_legend <- function(result) {
 
   list(
     type = "continuous",
-    title = "Distance to reference",
+    title = "Distance to reference (quantile)",
     unit = if (use_um) "um" else "px",
     palette = "Inferno",
+    scale = "quantile",
     stops = stops
   )
 }
