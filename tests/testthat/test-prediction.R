@@ -88,6 +88,10 @@ test_that("prediction menu is only rendered for managed analysis sources", {
   expect_true(grepl("predictionProjectAnnotationEntries", html, fixed = TRUE))
   expect_true(grepl("predictionRoiGeojsonObject", html, fixed = TRUE))
   expect_true(grepl("wsiToolsProject", html, fixed = TRUE))
+  expect_true(grepl("predictionLegend", html, fixed = TRUE))
+  expect_true(grepl("renderPredictionLegend", html, fixed = TRUE))
+  expect_true(grepl("prediction|pls[_ -]?lda", html, fixed = TRUE))
+  expect_true(grepl("handleViewerCommands(body);if(typeof revealCoordinateOverlays==='function')revealCoordinateOverlays()", html, fixed = TRUE))
 
   out2 <- tempfile(fileext = ".html")
   wsi_viewer(slide, output = out2, open = FALSE, overwrite = TRUE)
@@ -419,6 +423,13 @@ test_that("prediction layer items retain project scope metadata", {
   expect_equal(layer$items[[1]]$project_key, "seurat_project_section2::image")
   expect_equal(layer$items[[1]]$project_image_index, 1L)
   expect_equal(layer$items[[1]]$feature_id, "spot1")
+  expect_equal(layer$legend$type, "categorical")
+  expect_equal(layer$legend$title, "Predicted class")
+  expect_equal(layer$legend$entries[[1L]]$name, "tumour")
+  expect_equal(layer$legend$entries[[1L]]$count, 1L)
+  expect_true(layer$metadata$vector_rendering)
+  expect_true(layer$metadata$coordinate_overlay)
+  expect_false(layer$metadata$lod$enabled)
 })
 
 test_that("project raw prediction keeps all sections on shared features", {

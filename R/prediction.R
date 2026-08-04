@@ -1139,6 +1139,14 @@ wsi_prediction_layer <- function(result, radius = 8) {
     ))
   }
   palette <- wsi_prediction_palette(result$predicted)
+  class_counts <- table(factor(as.character(result$predicted), levels = names(palette)))
+  legend_entries <- lapply(seq_along(palette), function(i) {
+    list(
+      name = unname(names(palette)[[i]]),
+      colour = unname(palette[[i]]),
+      count = unname(as.integer(class_counts[[i]]))
+    )
+  })
   items <- lapply(seq_len(nrow(result)), function(i) {
     pred <- as.character(result$predicted[[i]] %||% "")
     colour <- palette[[pred]] %||% "#38BDF8"
@@ -1151,7 +1159,7 @@ wsi_prediction_layer <- function(result, radius = 8) {
       y = unname(as.numeric(result$y[[i]])),
       radius = radius,
       colour = colour,
-      fill = wsi_hex_to_rgba(colour, 0.33),
+      fill = wsi_hex_to_rgba(colour, 0.72),
       predicted = pred,
       predicted_pls_lda = as.character(result$predicted_pls_lda[[i]] %||% pred),
       svm_refined = isTRUE(result$svm_refined[[i]]),
@@ -1183,14 +1191,22 @@ wsi_prediction_layer <- function(result, radius = 8) {
     type = "vector",
     source_type = "prediction",
     visible = TRUE,
-    opacity = 0.88,
+    opacity = 0.96,
     colour = "#FACC15",
     replace = TRUE,
     count = length(items),
     items = items,
+    legend = list(
+      type = "categorical",
+      title = "Predicted class",
+      entries = legend_entries
+    ),
     metadata = list(
       classes = unname(names(palette)),
       colours = unname(palette),
+      vector_rendering = TRUE,
+      coordinate_overlay = TRUE,
+      lod = list(enabled = FALSE, full_coordinates = TRUE),
       svm_refined = any(as.logical(result$svm_refined %||% FALSE), na.rm = TRUE)
     )
   )
@@ -1621,7 +1637,12 @@ wsi_prediction_response <- function(context, state, payload) {
   layer <- wsi_prediction_layer(result, radius = 8)
   state$prediction <- result
   state$layers <- wsi_viewer_set_layer(state$layers, layer)
-  wsi_viewer_queue_command(state, "add_layer", list(layer = layer))
+  wsi_viewer_queue_command(
+    state,
+    "add_layer",
+    list(layer = layer),
+    send_ws = FALSE
+  )
   detail <- list(
     count = nrow(result),
     classes = sort(unique(as.character(result$predicted))),
