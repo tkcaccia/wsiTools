@@ -194,7 +194,14 @@ wsi_proximity_result_from_payload <- function(context, state, payload, rois = NU
   layer <- wsi_proximity_layer(result)
   state$proximity <- result
   state$layers <- wsi_viewer_set_layer(state$layers, layer)
-  wsi_viewer_queue_command(state, "add_layer", list(layer = layer))
+  # The initiating HTTP response carries this potentially large point layer.
+  # Sending it over WebSocket as well can block the httpuv event loop.
+  wsi_viewer_queue_command(
+    state,
+    "add_layer",
+    list(layer = layer),
+    send_ws = FALSE
+  )
   list(result = result, rois = rois, source = source, recomputed = TRUE)
 }
 

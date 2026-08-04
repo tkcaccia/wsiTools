@@ -625,7 +625,7 @@ wsi_viewer_autosave_save <- function(state, slide = NULL, force = FALSE,
   invisible(project)
 }
 
-wsi_viewer_queue_command <- function(state, type, payload = list()) {
+wsi_viewer_queue_command <- function(state, type, payload = list(), send_ws = TRUE) {
   if (!inherits(state, "wsi_viewer_state")) {
     wsi_abort("`state` must be a `wsi_viewer_state` object.")
   }
@@ -653,7 +653,9 @@ wsi_viewer_queue_command <- function(state, type, payload = list()) {
     payload = payload %||% list()
   )
   state$commands[[length(state$commands) + 1L]] <- command
-  wsi_viewer_send_ws(state, list(ok = TRUE, commands = list(command)))
+  if (isTRUE(send_ws)) {
+    wsi_viewer_send_ws(state, list(ok = TRUE, commands = list(command)))
+  }
   invisible(command)
 }
 

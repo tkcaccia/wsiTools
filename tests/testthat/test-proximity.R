@@ -52,6 +52,26 @@ test_that("large proximity layers use a compact packed point payload", {
   expect_lt(nchar(jsonlite::toJSON(layer, auto_unbox = TRUE)), 1000000L)
 })
 
+test_that("large proximity commands can bypass immediate WebSocket delivery", {
+  sent <- new.env(parent = emptyenv())
+  sent$count <- 0L
+  state <- wsiTools:::wsi_new_viewer_state(envir = new.env(parent = emptyenv()))
+  state$ws_clients <- list(list(ws = list(send = function(text) {
+    sent$count <- sent$count + 1L
+  })))
+
+  wsiTools:::wsi_viewer_queue_command(
+    state,
+    "add_layer",
+    list(layer = list(id = "large_layer")),
+    send_ws = FALSE
+  )
+
+  expect_equal(sent$count, 0L)
+  expect_length(state$commands, 1L)
+  expect_equal(state$commands[[1L]]$payload$layer$id, "large_layer")
+})
+
 test_that("proximity ROI metadata is resolved in vectors", {
   rois <- wsiTools:::wsi_roi_from_geojson(list(
     type = "FeatureCollection",
