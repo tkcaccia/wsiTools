@@ -681,12 +681,17 @@ test_that("live Seurat gene payload keeps all cell coordinates unless explicitly
   expect_equal(payload$count, n)
   expect_equal(payload$total_count, n)
   expect_false(payload$sampled)
+  expect_true(payload$packed)
+  expect_length(payload$points, 0L)
+  expect_length(payload$packed_points$keys, n)
+  expect_equal(payload$packed_points$values[c(1L, n)], c(1, n))
 
   Sys.setenv(WSITOOLS_SPATIAL_POINT_PAYLOAD_MAX = "5000")
   capped <- wsiTools:::wsi_seurat_dynamic_gene_payload(linked, "CRABP2")
   expect_equal(capped$count, 5000)
   expect_equal(capped$total_count, n)
   expect_true(capped$sampled)
+  expect_false(capped$packed)
 })
 
 test_that("cell coordinate helpers keep compact circle radii", {

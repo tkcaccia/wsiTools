@@ -3292,23 +3292,60 @@ wsi_seurat_dynamic_gene_payload <- function(linked, gene) {
     seq_len(nrow(spots))
   }
   point_radius <- wsi_seurat_point_layer_radius(linked)
-  points <- lapply(point_idx, function(i) {
-    x <- suppressWarnings(as.numeric(spots$x[[i]] %||% spots$slide_x[[i]] %||% NA_real_))
-    y <- suppressWarnings(as.numeric(spots$y[[i]] %||% spots$slide_y[[i]] %||% NA_real_))
+  pack_threshold <- suppressWarnings(as.integer(Sys.getenv(
+    "WSITOOLS_SPATIAL_GENE_PACK_THRESHOLD",
+    "5000"
+  )))
+  if (!is.finite(pack_threshold) || pack_threshold < 1000L) {
+    pack_threshold <- 5000L
+  }
+  packed <- length(point_idx) > pack_threshold
+  point_column <- function(primary, fallback = NULL, default = NA) {
+    value <- if (primary %in% names(spots)) spots[[primary]] else NULL
+    if (is.null(value) && !is.null(fallback) && fallback %in% names(spots)) {
+      value <- spots[[fallback]]
+    }
+    if (is.null(value)) rep(default, nrow(spots)) else value
+  }
+  point_ids <- as.character(point_column("id", "barcode", ""))[point_idx]
+  point_barcodes <- as.character(point_column("barcode", "id", ""))[point_idx]
+  point_keys <- ifelse(nzchar(point_barcodes), point_barcodes, point_ids)
+  point_x <- suppressWarnings(as.numeric(point_column("x", "slide_x")))[point_idx]
+  point_y <- suppressWarnings(as.numeric(point_column("y", "slide_y")))[point_idx]
+  point_values <- values[point_idx]
+  points <- if (packed) {
+    list()
+  } else {
+    lapply(seq_along(point_idx), function(j) {
+      i <- point_idx[[j]]
+      x <- point_x[[j]]
+      y <- point_y[[j]]
+      list(
+        id = point_ids[[j]],
+        label = as.character(spots$label[[i]] %||% spots$id[[i]] %||% ""),
+        barcode = point_barcodes[[j]],
+        feature_type = feature_type,
+        x = if (is.finite(x)) x else NA_real_,
+        y = if (is.finite(y)) y else NA_real_,
+        slide_x = if (is.finite(x)) x else NA_real_,
+        slide_y = if (is.finite(y)) y else NA_real_,
+        radius = point_radius,
+        value = if (is.finite(point_values[[j]])) point_values[[j]] else NA_real_,
+        colour = as.character(colours[[i]] %||% "#d1d5db")
+      )
+    })
+  }
+  packed_points <- if (packed) {
     list(
-      id = as.character(spots$id[[i]] %||% ""),
-      label = as.character(spots$label[[i]] %||% spots$id[[i]] %||% ""),
-      barcode = as.character(spots$barcode[[i]] %||% spots$id[[i]] %||% ""),
-      feature_type = feature_type,
-      x = if (is.finite(x)) x else NA_real_,
-      y = if (is.finite(y)) y else NA_real_,
-      slide_x = if (is.finite(x)) x else NA_real_,
-      slide_y = if (is.finite(y)) y else NA_real_,
-      radius = point_radius,
-      value = if (is.finite(values[[i]])) values[[i]] else NA_real_,
-      colour = as.character(colours[[i]] %||% "#d1d5db")
+      keys = point_keys,
+      x = point_x,
+      y = point_y,
+      values = point_values,
+      radius = point_radius
     )
-  })
+  } else {
+    NULL
+  }
   list(
     ok = TRUE,
     gene = as.character(actual_gene),
@@ -3317,15 +3354,17 @@ wsi_seurat_dynamic_gene_payload <- function(linked, gene) {
     feature_label = feature_label,
     feature_plural = feature_plural,
     range = gene_expression$ranges[[actual_gene]] %||% list(min = NA_real_, max = NA_real_),
-    count = length(points),
+    count = length(point_idx),
     total_count = nrow(spots),
-    represented_count = length(points),
-    sampled = length(points) < nrow(spots),
+    represented_count = length(point_idx),
+    sampled = length(point_idx) < nrow(spots),
     display_mode = "adaptive_circles_gene_expression",
     channel_source = NULL,
     gene_mask = NULL,
     image_layer = NULL,
-    points = points
+    points = points,
+    packed_points = packed_points,
+    packed = packed
   )
 }
 
