@@ -716,6 +716,8 @@ wsi_viewer_seurat <- function(seurat, image, linked = NULL,
 #' @param tile_size,tile_format,quality,rebuild,tile_overlap Deep Zoom tiling
 #'   options used in tiled mode.
 #' @param roi_class_presets ROI classes used by the annotation UI.
+#' @param session_inputs Optional source-file and tissue/sample mapping records
+#'   included by the viewer's **History > Copy inputs** diagnostic action.
 #'
 #' @return A `wsi_viewer_session` by default. If `live = FALSE`, returns the
 #'   static HTML path.
@@ -763,6 +765,7 @@ wsi_viewer_seurat_project <- function(seurat = NULL, images = NULL, linked = NUL
                                       tile_format = c("jpg", "png"),
                                       quality = 90, rebuild = FALSE,
                                       tile_overlap = NULL,
+                                      session_inputs = NULL,
                                       roi_class_presets = wsi_roi_class_presets()) {
   mode <- match.arg(mode)
   transport <- match.arg(transport)
@@ -887,7 +890,8 @@ wsi_viewer_seurat_project <- function(seurat = NULL, images = NULL, linked = NUL
       project_images = records,
       layers = list(),
       channel_sources = project_channel_sources,
-      seurat = first
+      seurat = first,
+      session_inputs = session_inputs
     )
     if (isTRUE(live)) {
       viewer_args$dynamic_tiles <- FALSE
@@ -922,7 +926,8 @@ wsi_viewer_seurat_project <- function(seurat = NULL, images = NULL, linked = NUL
     project_images = records,
     layers = list(),
     channel_sources = project_channel_sources,
-    seurat = first
+    seurat = first,
+    session_inputs = session_inputs
   )
   if (isTRUE(live)) {
     viewer_args$dynamic_tiles <- dynamic_tiles
@@ -2126,7 +2131,9 @@ wsi_seurat_project_records <- function(linked, output, labels,
     spot_channel_id <- paste0(record$id, "_seurat_spots")
     scoped_item$spot_layer_id <- spot_channel_id
     scoped_item$viewer_output <- output
-    spot_layer <- wsi_seurat_spots_layer(scoped_item, visible = i == 1L, opacity = 1)
+    # Each record is activated independently by the Project panel. Its spatial
+    # layer must therefore be visible when that record replaces the active one.
+    spot_layer <- wsi_seurat_spots_layer(scoped_item, visible = TRUE, opacity = 1)
     record$project_key <- scoped_item$project_key
     record$layers <- list(spot_layer)
     record$channel_sources <- list()

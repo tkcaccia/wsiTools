@@ -659,6 +659,16 @@ test_that("SpatialExperiment project viewer uses one scoped spot layer per secti
   expect_match(text, "section1", fixed = TRUE)
   expect_match(text, "section2", fixed = TRUE)
   expect_match(text, "SpatialExperiment spatial spots", fixed = TRUE)
+  four_section_linked <- c(linked, linked)
+  names(four_section_linked) <- paste0("section", seq_along(four_section_linked))
+  expect_equal(lengths(lapply(
+    wsiTools:::wsi_seurat_project_records(
+      four_section_linked, output = tempfile(fileext = ".html"),
+      labels = names(four_section_linked),
+      mode = "thumbnail"
+    ),
+    function(record) Filter(function(layer) isTRUE(layer$visible), record$layers)
+  )), rep(1L, 4L))
   expect_match(text, "UMAP_neighbors15", fixed = TRUE)
   expect_match(text, "const radius=2.4;points.forEach", fixed = TRUE)
   expect_false(grepl("140/Math.sqrt(points.length)", text, fixed = TRUE))

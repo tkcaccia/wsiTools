@@ -44,6 +44,7 @@ wsi_viewer_seurat_project(
   quality = 90,
   rebuild = FALSE,
   tile_overlap = NULL,
+  session_inputs = NULL,
   roi_class_presets = wsi_roi_class_presets()
 )
 }
@@ -157,6 +158,9 @@ bridge until interrupted.}
 
 \item{tile_size, tile_format, quality, rebuild, tile_overlap}{Deep Zoom tiling
 options used in tiled mode.}
+
+\item{session_inputs}{Optional source-file and tissue/sample mapping records
+included by the viewer's \strong{History > Copy inputs} diagnostic action.}
 
 \item{roi_class_presets}{ROI classes used by the annotation UI.}
 }

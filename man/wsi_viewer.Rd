@@ -67,6 +67,7 @@ wsi_viewer(
   layers = NULL,
   seurat = NULL,
   cellphenotyper = NULL,
+  session_inputs = NULL,
   viewer_transport = c("auto", "websocket", "polling")
 )
 }
@@ -247,6 +248,9 @@ enable the top \strong{Seurat} menu and any available reduction plots.}
 
 \item{cellphenotyper}{Optional CellPhenotyper project metadata used to enable
 the top \strong{Cells} menu.}
+
+\item{session_inputs}{Optional list of source image, annotation, spatial
+object, and sample-mapping records shown by \strong{History > Copy inputs}.}
 
 \item{viewer_transport}{Browser-to-R live transport advertised to the
 viewer: \code{"auto"}, \code{"websocket"}, or \code{"polling"}. Static viewers ignore

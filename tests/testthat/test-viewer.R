@@ -1403,6 +1403,8 @@ test_that("interactive viewer can be configured with a live R state endpoint", {
   expect_match(html, "openHistoryPanel", fixed = TRUE)
   expect_match(html, "closeHistoryPanel", fixed = TRUE)
   expect_match(html, "copyAnnotationHistoryAll", fixed = TRUE)
+  expect_match(html, "copySessionInputs", fixed = TRUE)
+  expect_match(html, "wsiTools current session inputs", fixed = TRUE)
   expect_match(html, "wsiTools viewer history and R sync report", fixed = TRUE)
   expect_match(html, "R/live sync commands and events", fixed = TRUE)
   expect_match(html, "viewerSyncHistory", fixed = TRUE)
@@ -3140,6 +3142,8 @@ test_that("desktop launcher isolates static viewer assets from live R work", {
   expect_match(launcher, "immediate browser-side level-of-detail rendering", fixed = TRUE)
   expect_match(launcher, "desktop_force_dynamic_tiles", fixed = TRUE)
   expect_match(launcher, "WSITOOLS_FORCE_DYNAMIC_TILES", fixed = TRUE)
+  expect_match(launcher, "session_inputs <- lapply(items", fixed = TRUE)
+  expect_match(launcher, "session_inputs = session_inputs", fixed = TRUE)
   expect_match(
     launcher,
     "desktop_force_dynamic_tiles(do.call(wsiTools::wsi_viewer_spatial, single_args))",

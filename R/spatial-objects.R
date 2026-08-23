@@ -622,6 +622,8 @@ wsi_viewer_spatialexperiment <- function(spe, image, linked = NULL,
 #'   Defaults to `sample_ids`.
 #' @param labels Optional labels shown in the Project panel.
 #' @param assay_name Optional assay name used for live gene expression lookup.
+#' @param session_inputs Optional source-file and tissue/sample mapping records
+#'   included by the viewer's **History > Copy inputs** diagnostic action.
 #' @inheritParams wsi_link_spatialexperiment_image
 #' @inheritParams wsi_viewer_seurat_project
 #'
@@ -679,6 +681,7 @@ wsi_viewer_spatialexperiment_project <- function(spe = NULL, images = NULL,
                                                  quality = 90,
                                                  rebuild = FALSE,
                                                  tile_overlap = NULL,
+                                                 session_inputs = NULL,
                                                  roi_class_presets = wsi_roi_class_presets()) {
   mode <- match.arg(mode)
   transport <- match.arg(transport)
@@ -802,7 +805,8 @@ wsi_viewer_spatialexperiment_project <- function(spe = NULL, images = NULL,
       project_images = records,
       layers = list(),
       channel_sources = project_channel_sources,
-      seurat = first
+      seurat = first,
+      session_inputs = session_inputs
     )
     if (isTRUE(live)) {
       viewer_args$dynamic_tiles <- FALSE
@@ -837,7 +841,8 @@ wsi_viewer_spatialexperiment_project <- function(spe = NULL, images = NULL,
     project_images = records,
     layers = list(),
     channel_sources = project_channel_sources,
-    seurat = first
+    seurat = first,
+    session_inputs = session_inputs
   )
   if (isTRUE(live)) {
     viewer_args$dynamic_tiles <- dynamic_tiles

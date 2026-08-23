@@ -1520,7 +1520,8 @@ desktop_add_annotation_files <- function(viewer, cell_annotation = NULL,
 
 desktop_open_spatial_target <- function(object, image_paths, output, log_file,
                                         sample_ids = NULL,
-                                        initial_rois = NULL) {
+                                        initial_rois = NULL,
+                                        session_inputs = NULL) {
   if (!is.null(sample_ids)) {
     sample_ids <- as.character(sample_ids)
     sample_ids[is.na(sample_ids)] <- ""
@@ -1567,6 +1568,7 @@ desktop_open_spatial_target <- function(object, image_paths, output, log_file,
       output = output,
       overwrite = TRUE
     )
+    single_args$session_inputs <- session_inputs
     if (use_prebuilt_tiles) {
       single_args$tile_dir <- tile_dir
     } else {
@@ -1608,7 +1610,8 @@ desktop_open_spatial_target <- function(object, image_paths, output, log_file,
 	      open = FALSE,
 	      wait = FALSE,
 	      output = output,
-      overwrite = TRUE
+      overwrite = TRUE,
+      session_inputs = session_inputs
     ))
   }
   if (inherits(object, "SpatialExperiment") ||
@@ -1626,7 +1629,8 @@ desktop_open_spatial_target <- function(object, image_paths, output, log_file,
 	      open = FALSE,
 	      wait = FALSE,
 	      output = output,
-      overwrite = TRUE
+      overwrite = TRUE,
+      session_inputs = session_inputs
     ))
   }
   desktop_log(
@@ -1637,7 +1641,8 @@ desktop_open_spatial_target <- function(object, image_paths, output, log_file,
     image_paths,
     output = output,
     log_file = log_file,
-    initial_rois = initial_rois
+    initial_rois = initial_rois,
+    session_inputs = session_inputs
   )
 }
 
@@ -1823,6 +1828,7 @@ desktop_open_live_slide_prebuilt <- function(slide, output, log_file,
                                              project_images = list(),
                                              project_tile_sources = list(),
                                              initial_rois = NULL,
+                                             session_inputs = NULL,
                                              title = "wsiTools desktop viewer") {
   base_id <- desktop_project_source_id(slide$path %||% "image", 1L)
   base_tile_dir <- file.path(dirname(output), base_id)
@@ -1849,6 +1855,7 @@ desktop_open_live_slide_prebuilt <- function(slide, output, log_file,
       progressive_preview = FALSE,
       project_images = project_images,
       project_tile_sources = project_tile_sources,
+      session_inputs = session_inputs,
       roi = initial_rois,
       open = FALSE,
       wait = FALSE,
@@ -1874,6 +1881,7 @@ desktop_open_live_slide_prebuilt <- function(slide, output, log_file,
         rebuild = FALSE,
         project_images = project_images,
         project_tile_sources = project_tile_sources,
+        session_inputs = session_inputs,
         roi = initial_rois,
         open = FALSE,
         wait = FALSE,
@@ -1896,7 +1904,8 @@ desktop_open_live_slide_prebuilt <- function(slide, output, log_file,
 }
 
 desktop_open_live_image_project <- function(image_paths, output, log_file,
-                                            initial_rois = NULL) {
+                                            initial_rois = NULL,
+                                            session_inputs = NULL) {
   if (!length(image_paths)) {
     stop("No image paths were supplied for the desktop project.", call. = FALSE)
   }
@@ -1983,6 +1992,7 @@ desktop_open_live_image_project <- function(image_paths, output, log_file,
     project_images = project_items,
     project_tile_sources = project_tile_sources,
     initial_rois = initial_rois,
+    session_inputs = session_inputs,
     title = "wsiTools desktop project viewer"
   )
 }
@@ -2035,6 +2045,16 @@ desktop_open_new_project <- function(items, output, log_file) {
   spatial_paths <- unique(vapply(items, function(item) item$spatial_data %||% "", character(1)))
   spatial_paths <- spatial_paths[nzchar(spatial_paths)]
   initial_rois <- desktop_initial_tissue_rois(items, log_file = log_file)
+  session_inputs <- lapply(items, function(item) {
+    list(
+      image = item$image %||% "",
+      label = basename(item$image %||% ""),
+      cell_annotation = item$cell_annotation %||% "",
+      tissue_annotation = item$tissue_annotation %||% "",
+      spatial_data = item$spatial_data %||% "",
+      spatial_sample_id = item$spatial_sample_id %||% ""
+    )
+  })
   desktop_log("Opening new project with ", length(image_paths), " image(s).", log_file = log_file)
   if (length(spatial_paths) == 1L) {
     desktop_stage("spatial", "Reading the spatial object and mapping tissues")
@@ -2047,7 +2067,8 @@ desktop_open_new_project <- function(items, output, log_file) {
         output,
         log_file,
         sample_ids = sample_ids,
-        initial_rois = initial_rois
+        initial_rois = initial_rois,
+        session_inputs = session_inputs
       ),
       error = function(err) {
         desktop_log(
@@ -2063,7 +2084,8 @@ desktop_open_new_project <- function(items, output, log_file) {
           image_paths,
           output = output,
           log_file = log_file,
-          initial_rois = initial_rois
+          initial_rois = initial_rois,
+          session_inputs = session_inputs
         )
       }
     )
@@ -2077,14 +2099,16 @@ desktop_open_new_project <- function(items, output, log_file) {
       image_paths,
       output = output,
       log_file = log_file,
-      initial_rois = initial_rois
+      initial_rois = initial_rois,
+      session_inputs = session_inputs
     )
   } else {
     viewer <- desktop_open_live_image_project(
       image_paths,
       output = output,
       log_file = log_file,
-      initial_rois = initial_rois
+      initial_rois = initial_rois,
+      session_inputs = session_inputs
     )
   }
 
