@@ -16,6 +16,13 @@ viewer <- wsi_viewer_live(slide)
 viewer$open()
 ```
 
+The same HTML and viewer tools are used whether the URL is opened in a regular
+browser or by wsiTools Desktop. Base-image tile composition defaults to
+`renderer = "auto"`, which selects OpenSeadragon WebGL/WebGL2 with Canvas as a
+CPU fallback. Set `renderer = "gpu"` or `renderer = "cpu"` explicitly when
+testing performance. At close zoom, the viewer requests the maximum Deep Zoom
+level rather than enlarging the navigator preview.
+
 After drawing or editing in the browser, retrieve results from R:
 
 ```r

@@ -704,7 +704,7 @@ openProjectHome.addEventListener("click", async () => {
     showOpenProjectLog();
     appendLog(`Selected saved project: ${projectPath}`);
     await handleLaunch(
-      () => invoke("start_r_project", { projectPath }),
+      () => invoke("start_r_project", { projectPath, viewerEngine: "browser" }),
       rProjectLaunchCode(projectPath),
       "Project viewer opened"
     );
@@ -838,7 +838,7 @@ runR.addEventListener("click", async () => {
     }
   }
   await handleLaunch(
-    () => invoke("start_r_new_project", { projectItems: projectImages }),
+    () => invoke("start_r_new_project", { projectItems: projectImages, viewerEngine: "browser" }),
     rNewProjectLaunchCode(),
     "Viewer opened"
   );

@@ -12,6 +12,8 @@ wsi_viewer_project(
   height = NULL,
   title = "wsiTools project viewer",
   overwrite = FALSE,
+  renderer = c("auto", "gpu", "cpu"),
+  tile_max_per_frame = 16L,
   roi_class_presets = wsi_roi_class_presets(),
   czi_sections = TRUE
 )
@@ -37,6 +39,12 @@ not yet available.}
 \item{title}{Viewer title.}
 
 \item{overwrite}{Overwrite \code{output} if it already exists.}
+
+\item{renderer}{OpenSeadragon base-image renderer: \code{"auto"}, \code{"gpu"}, or
+\code{"cpu"}. The default is shared with \code{\link[=wsi_viewer]{wsi_viewer()}}.}
+
+\item{tile_max_per_frame}{Maximum number of newly available tiles composed in
+one animation frame.}
 
 \item{roi_class_presets}{ROI class presets used by the annotation UI.}
 

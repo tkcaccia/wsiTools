@@ -10,6 +10,7 @@ wsi_open_fast_viewer(
   live = "yes",
   tiled = "yes",
   dynamic_tiles = "yes",
+  renderer = c("auto", "gpu", "cpu"),
   tile_prefetch_margin = 1L,
   tile_cache_count = 1024L,
   tile_prefetch_cache_count = 768L,
@@ -26,6 +27,8 @@ wsi_open_fast_viewer(
 
 \item{live, tiled, dynamic_tiles}{Viewer routing flags passed to
 \code{\link[=wsi_open_viewer]{wsi_open_viewer()}}.}
+
+\item{renderer}{Base-image renderer passed to \code{\link[=wsi_open_viewer]{wsi_open_viewer()}}.}
 
 \item{tile_prefetch_margin}{Number of tile rows/columns beyond the visible
 viewport to prefetch.}

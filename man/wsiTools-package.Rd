@@ -8,6 +8,15 @@
 \description{
 A lightweight R toolkit for memory-efficient whole-slide image access and preprocessing through region-based reading, tiling, pyramidal image handling, conversion and export. The core uses light R dependencies plus a small native bridge for optional accelerated routines. OpenSlide, libvips, ZEISS libCZI, OME-Zarr pixel access, and web-service integrations are optional runtime capabilities discovered through explicit backend checks. The package avoids loading complete whole-slide images into R memory by default.
 }
+\seealso{
+Useful links:
+\itemize{
+  \item \url{https://tkcaccia.github.io/wsiTools/}
+  \item \url{https://github.com/tkcaccia/wsiTools}
+  \item Report bugs at \url{https://github.com/tkcaccia/wsiTools/issues}
+}
+
+}
 \author{
 \strong{Maintainer}: Stefano Caccia \email{tkcaccia@gmail.com}
 

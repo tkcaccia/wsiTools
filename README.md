@@ -172,6 +172,15 @@ Open one image with the simplest entry point:
 viewer <- wsi_open_viewer("sample.svs")
 ```
 
+The default `renderer = "auto"` uses OpenSeadragon WebGL/WebGL2 when
+available and falls back to Canvas. The same shared viewer is used in a browser
+and by wsiTools Desktop:
+
+```r
+viewer <- wsi_open_viewer("sample.svs", renderer = "auto")
+# renderer = "gpu" requires WebGL; renderer = "cpu" forces Canvas.
+```
+
 For a live R-connected viewer, keep the R session running and open the HTTP
 viewer URL:
 
@@ -205,6 +214,11 @@ raw SVS, CZI, OME-TIFF, or very large TIFF files directly as a single image.
 wsiTools therefore uses precomputed Deep Zoom tiles where possible, or live
 dynamic tiles from R as a fallback. The package should not load complete
 level-0 WSI images into R memory by default.
+
+At close zoom, tiled mode requests the source's maximum Deep Zoom level, which
+maps to full-resolution level-0 slide pixels. GPU rendering changes tile
+composition and overlay drawing; it does not substitute a low-resolution image
+for the source pyramid.
 
 ### Common viewer tasks
 

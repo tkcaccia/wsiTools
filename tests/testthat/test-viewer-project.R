@@ -68,3 +68,47 @@ test_that("wsi_viewer_project lists CZI paths without loading them into R", {
   expect_match(html, "multiViewTileSource", fixed = TRUE)
   expect_match(html, "project images/sections side by side", fixed = TRUE)
 })
+
+test_that("project viewers retain the shared renderer configuration", {
+  czi <- tempfile("renderer_", fileext = ".czi")
+  writeBin(as.raw(1:8), czi)
+  output <- tempfile(fileext = ".html")
+
+  wsi_viewer_project(
+    czi,
+    output = output,
+    open = FALSE,
+    renderer = "gpu",
+    tile_max_per_frame = 29
+  )
+
+  html <- paste(readLines(output, warn = FALSE), collapse = "\n")
+  expect_match(html, '"renderer":"gpu"', fixed = TRUE)
+  expect_match(html, '"tile_max_per_frame":29', fixed = TRUE)
+  expect_match(html, "drawer:baseDrawerCandidates()", fixed = TRUE)
+})
+
+test_that("project summaries preserve native WGPU state for each source", {
+  state <- wsiTools:::wsi_new_viewer_state(name = "native_project_save_test")
+  expect_true(wsiTools:::wsi_native_project_state_activate(state, "slide-a"))
+  state$layers <- list(list(id = "layer-a", visible = TRUE))
+  expect_true(wsiTools:::wsi_native_project_state_activate(state, "slide-b"))
+  state$layers <- list(list(id = "layer-b", visible = TRUE))
+
+  saved <- wsiTools:::wsi_project_viewer_summary(state)
+  expect_identical(saved$native_active_source_id, "slide-b")
+  expect_identical(saved$native_project_states[["slide-a"]]$layers[[1L]]$id, "layer-a")
+  expect_identical(saved$native_project_states[["slide-b"]]$layers[[1L]]$id, "layer-b")
+
+  path <- tempfile("native_project_", fileext = ".wsiproject")
+  wsi_save_project(wsi_project(viewer_state = state), path)
+  reopened <- wsi_read_project(path)
+  expect_identical(
+    reopened$viewer_state$native_project_states[["slide-a"]]$layers[[1L]]$id,
+    "layer-a"
+  )
+  expect_identical(
+    reopened$viewer_state$native_project_states[["slide-b"]]$layers[[1L]]$id,
+    "layer-b"
+  )
+})

@@ -32,6 +32,10 @@
 #' @param height Optional preview height.
 #' @param title Viewer title.
 #' @param overwrite Overwrite `output` if it already exists.
+#' @param renderer OpenSeadragon base-image renderer: `"auto"`, `"gpu"`, or
+#'   `"cpu"`. The default is shared with [wsi_viewer()].
+#' @param tile_max_per_frame Maximum number of newly available tiles composed in
+#'   one animation frame.
 #' @param roi_class_presets ROI class presets used by the annotation UI.
 #' @param czi_sections For CZI files, show detected scenes/sections separately
 #'   in the Project panel. Set to `FALSE` to preview the whole CZI bounding box
@@ -47,8 +51,12 @@ wsi_viewer_project <- function(images, output = NULL, open = interactive(),
                                width = 1600, height = NULL,
                                title = "wsiTools project viewer",
                                overwrite = FALSE,
+                               renderer = c("auto", "gpu", "cpu"),
+                               tile_max_per_frame = 16L,
                                roi_class_presets = wsi_roi_class_presets(),
                                czi_sections = TRUE) {
+  renderer <- wsi_viewer_renderer(if (missing(renderer)) NULL else renderer)
+  tile_max_per_frame <- as.integer(wsi_check_scalar_number(tile_max_per_frame, "tile_max_per_frame", allow_zero = FALSE))
   width <- as.integer(wsi_check_scalar_number(width, "width", allow_zero = FALSE))
   if (!is.null(height)) {
     height <- as.integer(wsi_check_scalar_number(height, "height", allow_zero = FALSE))
@@ -94,6 +102,8 @@ wsi_viewer_project <- function(images, output = NULL, open = interactive(),
       if (length(items) == 1L) "" else "s"
     ),
     viewer_mode = "project",
+    renderer = renderer,
+    tile_max_per_frame = max(1L, tile_max_per_frame),
     preference_key = preference_identity,
     slide_width = first_width,
     slide_height = first_height,
@@ -157,6 +167,10 @@ wsi_viewer_project <- function(images, output = NULL, open = interactive(),
 #' @param title Viewer title.
 #' @param overwrite Overwrite `output` if it already exists.
 #' @param tile_size,tile_overlap OpenSeadragon tile size and overlap.
+#' @param renderer OpenSeadragon base-image renderer: `"auto"`, `"gpu"`, or
+#'   `"cpu"`.
+#' @param tile_max_per_frame Maximum number of newly available tiles composed in
+#'   one animation frame. Multi-view mode divides this budget between panes.
 #' @param tile_format Dynamic tile format.
 #' @param channel Zero-based CZI channel shown as the RGB base image.
 #' @param sections Show detected CZI scenes/sections separately in the Project
@@ -189,6 +203,8 @@ wsi_viewer_czi_project_live <- function(images, output = NULL, open = interactiv
                                         overwrite = FALSE,
                                         tile_size = 512,
                                         tile_overlap = 1,
+                                        renderer = c("auto", "gpu", "cpu"),
+                                        tile_max_per_frame = 16L,
                                         tile_format = c("jpg", "png", "jpeg"),
                                         channel = 0,
                                         sections = TRUE,
@@ -243,6 +259,8 @@ wsi_viewer_czi_project_live <- function(images, output = NULL, open = interactiv
   width <- as.integer(wsi_check_scalar_number(width, "width", allow_zero = FALSE))
   tile_size <- as.integer(wsi_check_scalar_number(tile_size, "tile_size", allow_zero = FALSE))
   tile_overlap <- as.integer(wsi_check_scalar_number(tile_overlap, "tile_overlap"))
+  renderer <- wsi_viewer_renderer(if (missing(renderer)) NULL else renderer)
+  tile_max_per_frame <- as.integer(wsi_check_scalar_number(tile_max_per_frame, "tile_max_per_frame", allow_zero = FALSE))
   if (tile_overlap >= tile_size) {
     wsi_abort("`tile_overlap` must be smaller than `tile_size`.")
   }
@@ -328,6 +346,8 @@ wsi_viewer_czi_project_live <- function(images, output = NULL, open = interactiv
       if (isTRUE(sections)) "sectioned scenes" else "whole CZI bounding boxes"
     ),
     viewer_mode = "tiles",
+    renderer = renderer,
+    tile_max_per_frame = max(1L, tile_max_per_frame),
     preference_key = preference_identity,
     slide_width = first_section$width,
     slide_height = first_section$height,

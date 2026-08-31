@@ -31,6 +31,10 @@
 #' @param dynamic_tiles `"auto"`, `"yes"`, or `"no"`. Dynamic tiles require live
 #'   mode. `"auto"` uses them when prebuilt libvips Deep Zoom tiles are not the
 #'   better default.
+#' @param renderer Base-image renderer passed to every selected viewer route.
+#'   `"auto"` uses GPU-accelerated OpenSeadragon when available with a Canvas
+#'   fallback; `"gpu"` requires WebGL and `"cpu"` forces Canvas. Tauri and direct
+#'   R launches use the same option.
 #' @param open Whether to open the viewer in a browser.
 #' @param wait For live viewers, whether to service the local `httpuv` bridge
 #'   until interrupted. The default uses `TRUE` only for interactive live runs.
@@ -57,6 +61,7 @@ wsi_open_viewer <- function(input, ...,
                             live = c("auto", "yes", "no"),
                             tiled = c("auto", "yes", "no"),
                             dynamic_tiles = c("auto", "yes", "no"),
+                            renderer = c("auto", "gpu", "cpu"),
                             open = interactive(),
                             wait = NULL,
                             output = NULL,
@@ -68,6 +73,7 @@ wsi_open_viewer <- function(input, ...,
   live <- wsi_open_viewer_flag(live, "live", yes_alias = "live", no_alias = "static")
   tiled <- wsi_open_viewer_flag(tiled, "tiled", yes_alias = "tiles", no_alias = "thumbnail")
   dynamic_tiles <- wsi_open_viewer_flag(dynamic_tiles, "dynamic_tiles", yes_alias = "dynamic")
+  renderer <- wsi_viewer_renderer(if (missing(renderer)) NULL else renderer)
   if (!is.logical(open) || length(open) != 1L || is.na(open)) {
     wsi_abort("`open` must be `TRUE` or `FALSE`.")
   }
@@ -88,6 +94,7 @@ wsi_open_viewer <- function(input, ...,
   }
 
   dots <- list(...)
+  dots$renderer <- dots$renderer %||% renderer
   if (!is.null(dots$open)) {
     open <- dots$open
     dots$open <- NULL
@@ -221,6 +228,184 @@ wsi_open_viewer <- function(input, ...,
   normalizePath(html, winslash = "/", mustWork = FALSE)
 }
 
+#' Launch the native Rust/WGPU viewer from R
+#'
+#' `wsi_viewer_native()` starts the same live R bridge used by
+#' [wsi_viewer_live()] and opens its tile and state endpoints in the native
+#' Rust/WGPU desktop renderer. R remains the owner of the slide, annotations,
+#' spatial object, and analyses; the native application never loads the whole
+#' slide into memory.
+#'
+#' The function requires a wsiTools Desktop build with the `native-wgpu`
+#' feature. The desktop launcher can be supplied explicitly through
+#' `app_path`, or discovered from `WSITOOLS_DESKTOP_APP`, the macOS
+#' Applications folder, or `PATH`.
+#'
+#' @param input An image path, a vector of image paths, or an existing
+#'   `wsi_slide` object. Multiple inputs become independently navigable native
+#'   project sources.
+#' @param ... Additional arguments passed to [wsi_viewer_live()].
+#' @param backend Backend passed to [wsi_open()] when `input` is a path.
+#' @param app_path Path to the `wsitools-desktop` executable. `NULL` discovers
+#'   the installed desktop application.
+#' @param wait Whether to keep servicing the live R bridge until interrupted.
+#'   This defaults to `TRUE` in interactive R and is normally what users want.
+#' @param native_args Extra command-line arguments for the desktop executable.
+#'
+#' @return Invisibly, a `wsi_viewer_session`.
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' wsi_viewer_native("sample.svs", dynamic_tiles = TRUE)
+#' }
+wsi_viewer_native <- function(input, ...,
+                              backend = c("auto", "openslide", "vips", "native_czi", "bioformats", "omezarr", "imagemagick"),
+                              app_path = NULL,
+                              wait = interactive(),
+                              native_args = character()) {
+  backend <- match.arg(backend)
+  if (!is.logical(wait) || length(wait) != 1L || is.na(wait)) {
+    wsi_abort("`wait` must be `TRUE` or `FALSE`.")
+  }
+  if (!is.character(native_args) || anyNA(native_args)) {
+    wsi_abort("`native_args` must be a character vector.")
+  }
+  dots <- list(...)
+  input_items <- if (inherits(input, "wsi_slide")) list(input) else as.list(input)
+  if (!length(input_items) || any(!vapply(input_items, function(item) {
+    inherits(item, "wsi_slide") ||
+      (is.character(item) && length(item) == 1L && !is.na(item) && nzchar(item))
+  }, logical(1)))) {
+    wsi_abort("`input` must be an image path, a vector of image paths, or a `wsi_slide` object.")
+  }
+  open_item <- function(item) {
+    if (inherits(item, "wsi_slide")) item else wsi_open(item, backend = backend)
+  }
+  slide <- open_item(input_items[[1L]])
+  source_identity <- function(item) {
+    value <- if (inherits(item, "wsi_slide")) item$path %||% "" else item
+    value <- as.character(value %||% "")
+    if (!length(value) || is.na(value[[1L]]) || !nzchar(value[[1L]])) return("")
+    normalizePath(value[[1L]], winslash = "/", mustWork = FALSE)
+  }
+  base_identity <- source_identity(input_items[[1L]])
+  project_items <- c(input_items[-1L], dots$project_images %||% list())
+  dots$project_images <- NULL
+  project_sources <- list()
+  project_records <- list()
+  known_identities <- base_identity
+  for (index in seq_along(project_items)) {
+    item <- project_items[[index]]
+    spec <- if (is.list(item) && !inherits(item, "wsi_slide")) item else list(path = item)
+    image_input <- spec$slide %||% spec$path %||% NULL
+    if (is.null(image_input) || !(inherits(image_input, "wsi_slide") ||
+        (is.character(image_input) && length(image_input) == 1L && !is.na(image_input) && nzchar(image_input)))) {
+      wsi_abort("Each native project image must provide a slide or a single image path.")
+    }
+    identity <- source_identity(image_input)
+    if (nzchar(identity) && identity %in% known_identities) next
+    project_slide <- open_item(image_input)
+    path <- as.character(spec$path %||% project_slide$path %||% "")
+    label <- as.character(spec$label %||% spec$name %||% basename(path %||% ""))
+    if (!length(label) || is.na(label[[1L]]) || !nzchar(label[[1L]])) {
+      label <- sprintf("Image %d", index + 1L)
+    }
+    source_id <- wsi_safe_id(spec$id %||% path %||% label, sprintf("native_project_%d", index + 1L))
+    source <- wsi_dynamic_tile_source(project_slide, slide_id = source_id)
+    source$name <- label
+    source$metadata <- utils::modifyList(source$metadata %||% list(), list(
+      project_item_id = source_id,
+      id = source_id,
+      label = label,
+      path = path,
+      backend = project_slide$backend %||% "dynamic",
+      type = spec$type %||% "native_project_image",
+      status = "live dynamic tiles",
+      message = "Full-resolution image tiles are served on demand by the live R session.",
+      active = FALSE,
+      mpp = project_slide$mpp %||% NULL,
+      objective_power = project_slide$objective_power %||% NULL
+    ), keep.null = TRUE)
+    project_sources[[length(project_sources) + 1L]] <- source
+    project_records[[length(project_records) + 1L]] <- list(
+      id = source_id, label = label, path = path, backend = project_slide$backend %||% "dynamic",
+      type = source$metadata$type, status = "live dynamic tiles"
+    )
+    if (nzchar(identity)) known_identities <- c(known_identities, identity)
+  }
+  if (length(project_sources)) {
+    dots$project_tile_sources <- c(dots$project_tile_sources %||% list(), project_sources)
+    dots$project_images <- project_records
+  }
+  requested_name <- as.character(dots$name %||% "")
+  if (!length(requested_name) || is.na(requested_name[[1L]]) || !nzchar(requested_name[[1L]])) {
+    base_path <- as.character(slide$path %||% "")
+    dots$name <- if (nzchar(base_path)) basename(base_path) else "wsi_native_viewer"
+  }
+  desktop <- wsi_native_desktop_path(app_path)
+  # Native WGPU always consumes the live dynamic tile endpoint. Ignore browser
+  # launch flags supplied through `...` rather than passing duplicates to R.
+  dots$dynamic_tiles <- TRUE
+  dots$open <- FALSE
+  dots$wait <- FALSE
+  session <- do.call(wsi_viewer_live, c(list(slide = slide), dots))
+  status <- tryCatch(
+    system2(desktop, args = c("--native-viewer-url", session$url, native_args), wait = FALSE),
+    error = function(error) error
+  )
+  if (inherits(status, "error") || (!is.null(status) && !identical(status, 0L))) {
+    try(session$stop(), silent = TRUE)
+    wsi_abort(paste0(
+      "Could not launch the native Rust/WGPU viewer. ",
+      if (inherits(status, "error")) conditionMessage(status) else "The desktop process returned a non-zero status.",
+      "\nDesktop executable: ", desktop
+    ))
+  }
+  message("wsiTools native WGPU viewer launched at ", session$url)
+  if (isTRUE(wait)) {
+    message("Press Ctrl+C or Esc to stop the native live session and return to R.")
+    on.exit(try(session$stop(), silent = TRUE), add = TRUE)
+    tryCatch(
+      repeat session$service(100L),
+      interrupt = function(error) NULL
+    )
+  }
+  invisible(session)
+}
+
+wsi_native_desktop_path <- function(app_path = NULL) {
+  if (!is.null(app_path)) {
+    if (!is.character(app_path) || length(app_path) != 1L || is.na(app_path) || !nzchar(app_path)) {
+      wsi_abort("`app_path` must be `NULL` or a single non-empty executable path.")
+    }
+    if (!file.exists(app_path)) {
+      wsi_abort(paste0("The specified native desktop executable does not exist: ", app_path))
+    }
+    return(normalizePath(app_path, winslash = "/", mustWork = TRUE))
+  }
+  candidates <- c(
+    Sys.getenv("WSITOOLS_DESKTOP_APP", unset = ""),
+    if (identical(Sys.info()[["sysname"]], "Darwin")) {
+      "/Applications/wsiTools Desktop.app/Contents/MacOS/wsitools-desktop"
+    } else {
+      ""
+    },
+    Sys.which("wsitools-desktop")
+  )
+  candidates <- unique(as.character(candidates))
+  candidates <- candidates[!is.na(candidates) & nzchar(candidates)]
+  existing <- candidates[file.exists(candidates)]
+  if (!length(existing)) {
+    wsi_abort(paste(
+      "The wsiTools Desktop native renderer was not found.",
+      "Install wsiTools Desktop or set `WSITOOLS_DESKTOP_APP` to its executable path.",
+      sep = "\n"
+    ))
+  }
+  normalizePath(existing[[1L]], winslash = "/", mustWork = TRUE)
+}
+
 #' Open a large image with optimized progressive tiled viewing
 #'
 #' `wsi_open_fast_viewer()` is a convenience wrapper for large whole-slide
@@ -233,6 +418,7 @@ wsi_open_viewer <- function(input, ...,
 #' @param ... Additional arguments passed to [wsi_open_viewer()].
 #' @param live,tiled,dynamic_tiles Viewer routing flags passed to
 #'   [wsi_open_viewer()].
+#' @param renderer Base-image renderer passed to [wsi_open_viewer()].
 #' @param tile_prefetch_margin Number of tile rows/columns beyond the visible
 #'   viewport to prefetch.
 #' @param tile_cache_count Maximum number of OpenSeadragon decoded tiles kept
@@ -256,6 +442,7 @@ wsi_open_fast_viewer <- function(input, ...,
                                  live = "yes",
                                  tiled = "yes",
                                  dynamic_tiles = "yes",
+                                 renderer = c("auto", "gpu", "cpu"),
                                  tile_prefetch_margin = 1L,
                                  tile_cache_count = 1024L,
                                  tile_prefetch_cache_count = 768L,
@@ -263,12 +450,14 @@ wsi_open_fast_viewer <- function(input, ...,
                                  dynamic_tile_format = "jpg",
                                  open = interactive(),
                                  wait = interactive()) {
+  renderer <- wsi_viewer_renderer(if (missing(renderer)) NULL else renderer)
   wsi_open_viewer(
     input,
     ...,
     live = live,
     tiled = tiled,
     dynamic_tiles = dynamic_tiles,
+    renderer = renderer,
     tile_prefetch_margin = tile_prefetch_margin,
     tile_cache_count = tile_cache_count,
     tile_prefetch_cache_count = tile_prefetch_cache_count,

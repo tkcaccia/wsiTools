@@ -20,6 +20,34 @@ This does not load whole-slide images into R memory. The viewer still uses
 precomputed tiles or the dynamic tile server, depending on the image and
 available backends.
 
+The base-image renderer defaults to `auto`: OpenSeadragon uses WebGL/WebGL2
+when the system WebView supports it and falls back to the Canvas CPU renderer.
+The same renderer setting is used when the viewer is launched directly from R.
+To force a mode before starting the desktop app, set:
+
+```sh
+export WSITOOLS_VIEWER_RENDERER=gpu  # or cpu / auto
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:WSITOOLS_VIEWER_RENDERER = "gpu"
+```
+
+GPU mode accelerates tile composition and dense spatial overlays. Image-region
+reading and JPEG/TIFF/CZI decoding remain bounded CPU/backend operations; the
+complete slide is never copied into GPU or R memory. At close zoom the viewer
+requests the source's maximum Deep Zoom level, corresponding to level-0 pixels.
+
+## Viewer Choice
+
+The Desktop app always starts the browser viewer, which is the complete and
+supported wsiTools interface. It uses OpenSeadragon for tiled navigation and
+can use browser GPU acceleration where available. If WebGPU is unavailable,
+the viewer remains fully functional through the OpenSeadragon fallback; no
+separate native renderer needs to be installed or selected.
+
 ## Requirements
 
 - R installed. On first launch, the app searches `WSITOOLS_RSCRIPT`, `PATH`,

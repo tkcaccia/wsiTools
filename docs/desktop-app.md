@@ -7,11 +7,148 @@ The desktop app opens a file picker, starts R in the background, runs
 `wsi_open_viewer()` in live mode, and displays the synchronized viewer inside a
 desktop window.
 
+## Viewer Engine
+
+Before a new project starts, the desktop starter lets the user select one of
+two front ends for the same live R session:
+
+| Choice | Use |
+| --- | --- |
+| Browser viewer | The full OpenSeadragon viewer, including all established tools. |
+| Native Rust/WGPU | Experimental native GPU window. It receives only visible tiles and state snapshots from R; it does not load the whole slide or expression matrix. |
+
+The native renderer is a staged replacement and does not yet provide every
+OpenSeadragon workflow. Select **Browser viewer** for any tool that is not yet
+available natively. Restart the desktop app after an update if the engine
+selector is not shown.
+
+Current native controls include independent slide/pane navigation, linked or
+unlinked multi-view navigation, editable polygon and brush ROIs, trajectories,
+distance measurements, GeoJSON import/export, project saving, visible-tile
+channel layers, and GPU brightfield display modes (**Original H&E**,
+**Hematoxylin**, **Eosin**, and **Residual**). The stain modes run per visible
+tile on the GPU; no whole-slide image is copied into R or GPU memory.
+
+The native **Stains** menu also provides browser-equivalent base-image controls:
+show or hide the H&E/base image and set opacity from fully transparent to fully
+opaque. These values are synchronized to the live R state and preserved by a
+saved project.
+
+Native **View -> Multi-view** supports the same 1--12 pane range as the browser
+viewer. New panes are intentionally blank: select a pane, then select a slide
+from **Project**. This avoids silently duplicating a tissue in two panes.
+Spatial coordinate colours can be restored after gene/cluster colouring, and
+**Spatial -> Coordinate size** changes the displayed radius without changing
+the R-side coordinates.
+
+The native **Project** menu can save or restore a `.wsiproject` directory.
+Restoring delegates to R's existing project-state reader, preserving the same
+annotations, trajectories, measurements, layers, stain/channel settings, and
+source-scoped native state as the browser viewer. The current live session must
+still be able to access the original slide files referenced by that project.
+
+Use **View -> Save screenshot...** in the native window to export a PNG of the
+current tissue view, including visible image channels and scientific overlays
+but excluding temporary application panels and menus.
+
+Use **View -> Export full-resolution viewport...** or **Export selected ROI
+image...** when the output must contain original level-0 pixels rather than a
+screen capture. The native window opens the normal save dialog and sends the
+chosen TIFF, PNG, or JPEG path plus the bounded source region to R. R reads and
+writes only that region through the configured image backend; the full slide
+is never transferred to the desktop process.
+
+The native window can also be launched directly from R:
+
+```r
+library(wsiTools)
+wsi_viewer_native("/path/to/slide.svs", dynamic_tiles = TRUE)
+```
+
+### Native Cells Workflow
+
+Start the native session with the optional selected-ROI segmentation bridge:
+
+```r
+wsi_viewer_native(
+  "/path/to/slide.svs",
+  dynamic_tiles = TRUE,
+  stardist = TRUE
+)
+```
+
+The native **Cells** menu then appears when the live R endpoint is available.
+Select an existing ROI, choose **StarDist H&E**, **StarDist IHC**, or **Mesmer
+DAPI**, and run that ROI. R executes the configured backend; the native viewer
+receives only the resulting geometry and renders it as a read-only cell overlay.
+
+Use **Cells -> Import cell segmentation...** to load a precomputed GeoJSON,
+CSV/TSV centroid table, or image mask. The native app sends only the selected
+file path to the local R bridge. R detects the format and keeps a large
+segmentation indexed server-side, returning only geometry intersecting the
+visible viewport.
+
+### Native Spatial Analysis
+
+For live Seurat, Giotto, SpatialExperiment, or CellPhenotyper projects, the
+native window exposes the same R-owned analytical endpoints as the browser
+viewer:
+
+- **Annotations -> Associate spatial points/cells** assigns the current
+  points or cells to tissue ROIs in R.
+- **Trajectories -> Proximity analysis in R** measures nearest-neighbour
+  distances between selected ROI categories or individual ROIs.
+- **Trajectories -> Distance statistics in R** bins those distances and asks R
+  to correlate an eligible expression feature, PCA/reduction component, or
+  prediction value with distance. The native table accepts both conventional
+  row tables and R data frames serialized as named columns; select a feature
+  in the table to colour the visible spatial circles from the live R session.
+- **Trajectories -> Gradient profile along trajectory in R** profiles a selected
+  point/cell source across a selected trajectory. Choose a numeric field,
+  categorical field, or `count`, then choose the width and number of bins. R
+  evaluates the complete source layer after any active spatial registration;
+  the native renderer receives only bin summaries plus colours for points in
+  the current viewport. Results remain available through
+  `viewer$get_trajectory_profile()`.
+- **Prediction** runs PLS-LDA through optional `fastPLS`; selected annotations
+  provide training labels and all non-training points are predicted. The
+  native renderer then refreshes only visible coordinate circles with the R
+  prediction colours.
+- **Spatial registration** provides global move, independent X/Y scale,
+  rotation, and horizontal/vertical flip controls. R applies the compact
+  transform before viewport clipping, so the native GPU receives only the
+  registered points currently needed on screen.
+
+Native annotations support polygon drawing, paint-brush ROIs, selection, class
+and colour changes, deletion, GeoJSON import/export, and direct boundary
+editing. Double-click an ROI, choose **Annotations -> Edit selected ROI**,
+then drag a visible polygon vertex. The edited feature is sent back to R as one
+validated `roi_updated` event on mouse release. Large GeoJSON files are kept as
+indexed vector geometry in R and fetched only for the visible viewport; small
+imports remain editable ROI objects.
+
+For a CellPhenotyper project that contains GrandQC outputs, the native window
+also shows **Artifacts**. Choose one GrandQC file or **Load all GrandQC files**.
+The selected paths, rather than their potentially large GeoJSON payloads, are
+sent to R; R tags the imported ROIs as `GrandQC` and the native renderer then
+uses its usual editable-ROI or viewport-only rendering path. **Clear GrandQC
+annotations** removes only those tagged artifact objects and leaves user ROIs
+unchanged.
+
+No expression matrix, whole-slide image, or arbitrary R command is sent to
+the desktop process. These menus appear only when the live R session
+advertises an eligible analysis context.
+The result remains in the live R session and is included in saved projects.
+
+This starts the same local `httpuv` session and opens the installed desktop
+renderer. Set `WSITOOLS_DESKTOP_APP` or pass `app_path` to use a non-default
+desktop executable.
+
 ## Download
 
 Prebuilt desktop installers are available from the GitHub release:
 
-[Download wsiTools Desktop 0.1.4](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.4)
+[Download wsiTools Desktop 0.1.5](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.5)
 
 See [Desktop Downloads](downloads.md) for platform-specific installers,
 required R setup, and optional backend notes.

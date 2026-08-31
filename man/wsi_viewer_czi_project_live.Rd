@@ -13,6 +13,8 @@ wsi_viewer_czi_project_live(
   overwrite = FALSE,
   tile_size = 512,
   tile_overlap = 1,
+  renderer = c("auto", "gpu", "cpu"),
+  tile_max_per_frame = 16L,
   tile_format = c("jpg", "png", "jpeg"),
   channel = 0,
   sections = TRUE,
@@ -46,6 +48,12 @@ wsi_viewer_czi_project_live(
 \item{overwrite}{Overwrite \code{output} if it already exists.}
 
 \item{tile_size, tile_overlap}{OpenSeadragon tile size and overlap.}
+
+\item{renderer}{OpenSeadragon base-image renderer: \code{"auto"}, \code{"gpu"}, or
+\code{"cpu"}.}
+
+\item{tile_max_per_frame}{Maximum number of newly available tiles composed in
+one animation frame. Multi-view mode divides this budget between panes.}
 
 \item{tile_format}{Dynamic tile format.}
 

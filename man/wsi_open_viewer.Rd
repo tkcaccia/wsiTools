@@ -12,6 +12,7 @@ wsi_open_viewer(
   live = c("auto", "yes", "no"),
   tiled = c("auto", "yes", "no"),
   dynamic_tiles = c("auto", "yes", "no"),
+  renderer = c("auto", "gpu", "cpu"),
   open = interactive(),
   wait = NULL,
   output = NULL,
@@ -40,6 +41,11 @@ feasible for the selected viewer route.}
 \item{dynamic_tiles}{\code{"auto"}, \code{"yes"}, or \code{"no"}. Dynamic tiles require live
 mode. \code{"auto"} uses them when prebuilt libvips Deep Zoom tiles are not the
 better default.}
+
+\item{renderer}{Base-image renderer passed to every selected viewer route.
+\code{"auto"} uses GPU-accelerated OpenSeadragon when available with a Canvas
+fallback; \code{"gpu"} requires WebGL and \code{"cpu"} forces Canvas. Tauri and direct
+R launches use the same option.}
 
 \item{open}{Whether to open the viewer in a browser.}
 

@@ -88,12 +88,83 @@ wsi_new_viewer_state <- function(name = "wsi_viewer_live_state", envir = parent.
   state$last_event <- NULL
   state$last_payload <- NULL
   state$last_sync <- NULL
+  # The native renderer polls a read-only state snapshot. This counter changes
+  # only when a drawable/shared overlay state changes, not for camera events.
+  state$native_renderer_revision <- 0L
+  # Native WGPU can keep several project images open simultaneously. Browser
+  # state is scoped in JavaScript; native switches need a compact R-side vault
+  # so editable project data does not bleed from one source into another.
+  state$native_active_source_id <- NULL
+  state$native_project_states <- list()
   state$export_name <- name
   state$export_envir <- envir
   state$max_events <- as.integer(max_events)
   class(state) <- c("wsi_viewer_state", "environment")
   wsi_assign_viewer_state(state)
   state
+}
+
+wsi_native_project_state_snapshot <- function(state) {
+  list(
+    rois = state$rois,
+    measurements = state$measurements,
+    trajectories = state$trajectories,
+    segmentation = state$segmentation,
+    layers = state$layers,
+    selected_roi = state$selected_roi,
+    selected_rois = state$selected_rois,
+    selected_object = state$selected_object,
+    annotation_spots = state$annotation_spots,
+    annotations = state$annotations,
+    history = state$history,
+    channel_settings = state$channel_settings,
+    stain = state$stain
+  )
+}
+
+wsi_native_project_state_restore <- function(state, snapshot = NULL) {
+  snapshot <- snapshot %||% list()
+  state$rois <- snapshot$rois %||% wsi_empty_roi()
+  state$measurements <- snapshot$measurements %||% wsi_empty_measurements()
+  state$trajectories <- snapshot$trajectories %||% wsi_empty_trajectories()
+  state$segmentation <- snapshot$segmentation %||% wsi_empty_roi()
+  state$layers <- snapshot$layers %||% list()
+  state$selected_roi <- snapshot$selected_roi %||% NULL
+  state$selected_rois <- snapshot$selected_rois %||% wsi_empty_roi()
+  state$selected_object <- snapshot$selected_object %||% NULL
+  state$annotation_spots <- snapshot$annotation_spots %||% wsi_empty_annotation_spots()
+  state$annotations <- snapshot$annotations %||% list(dirty = FALSE, dirty_reason = "")
+  state$history <- snapshot$history %||% wsi_empty_annotation_history()
+  state$channel_settings <- snapshot$channel_settings %||% wsi_empty_channel_settings()
+  state$stain <- snapshot$stain %||% NULL
+  wsi_viewer_update_measurement_tables(state)
+  invisible(state)
+}
+
+wsi_native_project_state_activate <- function(state, source_id) {
+  source_id <- as.character(source_id %||% "")
+  if (!length(source_id) || is.na(source_id[[1L]]) || !nzchar(source_id[[1L]])) {
+    return(FALSE)
+  }
+  source_id <- source_id[[1L]]
+  previous <- as.character(state$native_active_source_id %||% "")
+  previous <- if (length(previous)) previous[[1L]] else ""
+  if (identical(previous, source_id)) {
+    return(FALSE)
+  }
+  # The first native selection adopts the viewer's already-initialized state
+  # (for example ROIs supplied when the live session was created), rather than
+  # replacing it with an empty project slot.
+  if (!nzchar(previous)) {
+    state$native_active_source_id <- source_id
+    return(TRUE)
+  }
+  if (nzchar(previous)) {
+    state$native_project_states[[previous]] <- wsi_native_project_state_snapshot(state)
+  }
+  wsi_native_project_state_restore(state, state$native_project_states[[source_id]] %||% NULL)
+  state$native_active_source_id <- source_id
+  TRUE
 }
 
 wsi_viewer_decimate_dense_ring <- function(ring, max_points = 500L) {
@@ -412,7 +483,7 @@ wsi_viewer_allowed_events <- function() {
     "annotation_undo", "annotation_redo",
     "viewer_log_updated", "viewer_log_cleared", "viewer_log_exported",
     "annotation_spots_exported", "annotation_spots_updated",
-    "measurement_added", "measurements_cleared",
+    "measurement_added", "measurement_deleted", "measurements_cleared",
     "trajectory_added", "trajectory_deleted", "trajectory_area_created", "trajectory_area_updated",
     "trajectories_cleared",
     "stain_updated", "image_transform_updated",
@@ -424,7 +495,7 @@ wsi_viewer_allowed_events <- function() {
     "channel_source_added", "channel_source_removed", "channel_updated",
     "artifact_detected", "artifact_flagged", "artifact_overlay_toggled",
     "artifact_sensitivity_updated", "artifacts_cleared",
-    "grandqc_loaded", "grandqc_cleared",
+    "grandqc_loaded", "grandqc_cleared", "kodama_loaded", "kodama_cleared",
     "kodama_cells_selected", "seurat_spots_selected", "seurat_gene_coloured",
     "seurat_cluster_coloured", "seurat_plot_scope_changed",
     "spatial_registration_updated", "spatial_registration_saved",
@@ -2015,6 +2086,65 @@ wsi_spatial_object_annotation_spots <- function(association, registration) {
   out
 }
 
+wsi_native_spatial_registration_from_state <- function(state, payload) {
+  if (is.null(state) || !inherits(state, "wsi_viewer_state")) {
+    wsi_abort("Native spatial registration requires a live viewer state.")
+  }
+  source_id <- as.character(payload$native_wgpu_point_source_id %||% "")
+  transform <- payload$native_wgpu_spatial_transform %||% list()
+  if (!nzchar(source_id) || !is.list(transform)) {
+    return(wsi_empty_spatial_registration())
+  }
+  layers <- state$layers %||% list()
+  layer <- Filter(function(candidate) identical(as.character(candidate$id %||% ""), source_id), layers)
+  if (!length(layer)) return(wsi_empty_spatial_registration())
+  layer <- layer[[1L]]
+  items <- layer$items %||% list()
+  if (is.data.frame(items)) items <- lapply(seq_len(nrow(items)), function(i) as.list(items[i, , drop = FALSE]))
+  value <- function(name, default) {
+    out <- suppressWarnings(as.numeric(transform[[name]] %||% default))
+    if (!length(out) || !is.finite(out[[1L]])) default else out[[1L]]
+  }
+  flag <- function(name) isTRUE(transform[[name]] %||% FALSE)
+  scale_x <- value("scale_x", 1); scale_y <- value("scale_y", 1)
+  offset_x <- value("offset_x", 0); offset_y <- value("offset_y", 0)
+  rotation <- value("rotation_degrees", 0) * pi / 180
+  centre_x <- value("center_x", 0); centre_y <- value("center_y", 0)
+  flip_h <- flag("flip_horizontal"); flip_v <- flag("flip_vertical")
+  rows <- lapply(seq_along(items), function(index) {
+    item <- items[[index]]
+    if (!is.list(item)) return(NULL)
+    x <- suppressWarnings(as.numeric(item$x %||% item$slide_x %||% NA_real_))
+    y <- suppressWarnings(as.numeric(item$y %||% item$slide_y %||% NA_real_))
+    id <- as.character(item$id %||% item$barcode %||% item$label %||% "")
+    if (!is.finite(x) || !is.finite(y) || !nzchar(id)) return(NULL)
+    dx <- x - centre_x; dy <- y - centre_y
+    if (flip_h) dx <- -dx
+    if (flip_v) dy <- -dy
+    dx <- dx * scale_x; dy <- dy * scale_y
+    if (rotation != 0) {
+      cos_r <- cos(rotation); sin_r <- sin(rotation)
+      next_x <- dx * cos_r + dy * sin_r
+      dy <- -dx * sin_r + dy * cos_r
+      dx <- next_x
+    }
+    data.frame(
+      source = as.character(layer$source_type %||% layer$type %||% "spatial"),
+      layer_id = source_id, layer_name = as.character(layer$name %||% source_id),
+      item_index = as.integer(index - 1L), id = id,
+      label = as.character(item$label %||% item$barcode %||% id),
+      x = centre_x + dx + offset_x, y = centre_y + dy + offset_y,
+      original_x = x, original_y = y,
+      changed = TRUE, stringsAsFactors = FALSE
+    )
+  })
+  rows <- Filter(Negate(is.null), rows)
+  if (!length(rows)) return(wsi_empty_spatial_registration())
+  out <- do.call(rbind, rows)
+  class(out) <- c("wsi_spatial_registration", class(out))
+  out
+}
+
 wsi_spatial_object_save_response <- function(spatial, payload, state = NULL) {
   if (!is.list(payload)) {
     wsi_abort("Spatial object save request must be a JSON object.")
@@ -2023,7 +2153,8 @@ wsi_spatial_object_save_response <- function(spatial, payload, state = NULL) {
     names(payload),
     c(
       "format", "output", "path", "file", "overwrite",
-      "spatial_registration", "annotations", "rois"
+      "spatial_registration", "annotations", "rois",
+      "native_wgpu_spatial_transform", "native_wgpu_point_source_id"
     )
   )
   if (length(unknown)) {
@@ -2045,7 +2176,11 @@ wsi_spatial_object_save_response <- function(spatial, payload, state = NULL) {
       class = "wsi_overwrite_required"
     )
   }
-  registration <- wsi_spatial_object_registration_table(payload)
+  registration <- if (!is.null(payload$native_wgpu_spatial_transform)) {
+    wsi_native_spatial_registration_from_state(state, payload)
+  } else {
+    wsi_spatial_object_registration_table(payload)
+  }
   if (!nrow(registration)) {
     wsi_abort("No registered spatial coordinates were supplied by the viewer.")
   }
@@ -2294,12 +2429,217 @@ wsi_viewer_state_apply <- function(state, payload) {
     wsi_abort("Viewer state payload must be a JSON object.")
   }
   payload <- wsi_viewer_validate_state_payload(payload)
+  native_source_id <- payload$detail$native_wgpu_source_id %||% NULL
+  native_overlay_fields <- c(
+    "rois", "selected_roi", "selected_rois", "trajectories", "measurements", "layers",
+    "stain", "channel_sources", "channel_settings", "annotation_masks"
+  )
+  native_overlay_changed <- any(vapply(native_overlay_fields, function(field) {
+    !is.null(payload[[field, exact = TRUE]])
+  }, logical(1)))
+  if (identical(payload$event, "project_image_selected") &&
+      is.character(native_source_id) && length(native_source_id) == 1L &&
+      !is.na(native_source_id) && nzchar(native_source_id)) {
+    if (isTRUE(wsi_native_project_state_activate(state, native_source_id))) {
+      native_overlay_changed <- TRUE
+    }
+  }
+  native_roi <- payload$detail$native_wgpu_roi %||% NULL
+  native_trajectory <- payload$detail$native_wgpu_trajectory %||% NULL
+  native_delete_roi_id <- payload$detail$native_wgpu_delete_roi_id %||% NULL
+  native_delete_trajectory_id <- payload$detail$native_wgpu_delete_trajectory_id %||% NULL
+  native_geojson_features <- payload$detail$native_wgpu_geojson_features %||% NULL
+  native_annotation_snapshot <- payload$detail$native_wgpu_annotations %||% NULL
+  native_trajectory_snapshot <- payload$detail$native_wgpu_trajectories %||% NULL
+  native_segmentation_path <- payload$detail$native_wgpu_segmentation_path %||% NULL
+  native_measurement <- payload$detail$native_wgpu_measurement %||% NULL
+  native_delete_measurement_id <- payload$detail$native_wgpu_delete_measurement_id %||% NULL
+  native_stain_mode <- payload$detail$native_wgpu_stain_mode %||% NULL
+  native_stain_base_visible <- payload$detail$native_wgpu_base_visible %||% NULL
+  native_stain_base_opacity <- payload$detail$native_wgpu_base_opacity %||% NULL
+  if (!is.null(native_roi)) {
+    native_overlay_changed <- TRUE
+  }
+  if (identical(payload$event, "measurement_added") && is.list(native_measurement)) {
+    native_overlay_changed <- TRUE
+  }
+  if (is.character(native_delete_measurement_id) && length(native_delete_measurement_id) == 1L &&
+      !is.na(native_delete_measurement_id) && nzchar(native_delete_measurement_id)) {
+    native_overlay_changed <- TRUE
+  }
+  if (identical(payload$event, "stain_updated") && is.character(native_stain_mode) &&
+      length(native_stain_mode) == 1L && !is.na(native_stain_mode) && nzchar(native_stain_mode)) {
+    state$stain <- state$stain %||% list()
+    state$stain$native_wgpu_stain_mode <- tolower(native_stain_mode)
+    if (is.logical(native_stain_base_visible) && length(native_stain_base_visible) == 1L && !is.na(native_stain_base_visible)) {
+      state$stain$native_wgpu_base_visible <- isTRUE(native_stain_base_visible)
+    }
+    opacity <- suppressWarnings(as.numeric(native_stain_base_opacity))
+    if (length(opacity) == 1L && is.finite(opacity)) {
+      state$stain$native_wgpu_base_opacity <- max(0, min(1, opacity))
+    }
+  }
+  if (!is.null(native_trajectory)) {
+    native_overlay_changed <- TRUE
+  }
+  if (payload$event %in% c("trajectories_cleared", "measurements_cleared")) {
+    native_overlay_changed <- TRUE
+  }
+  if (is.character(native_delete_roi_id) && length(native_delete_roi_id) == 1L &&
+      !is.na(native_delete_roi_id) && nzchar(native_delete_roi_id)) {
+    native_overlay_changed <- TRUE
+  }
+  if (is.character(native_delete_trajectory_id) && length(native_delete_trajectory_id) == 1L &&
+      !is.na(native_delete_trajectory_id) && nzchar(native_delete_trajectory_id)) {
+    native_overlay_changed <- TRUE
+  }
+  if (identical(payload$event, "geojson_imported") && is.list(native_geojson_features) && length(native_geojson_features)) {
+    native_overlay_changed <- TRUE
+  }
+  if (identical(payload$event, "segmentation_added") &&
+      is.character(native_segmentation_path) && length(native_segmentation_path) == 1L &&
+      !is.na(native_segmentation_path) && nzchar(native_segmentation_path)) {
+    native_overlay_changed <- TRUE
+  }
+  if (payload$event %in% c("annotation_undo", "annotation_redo", "rois_merged", "roi_split") &&
+      is.list(native_annotation_snapshot) && is.list(native_trajectory_snapshot)) {
+    native_overlay_changed <- TRUE
+  }
 
-  state$rois <- wsi_rois_from_payload(payload[["rois", exact = TRUE]])
-  state$measurements <- wsi_measurements_from_payload(payload[["measurements", exact = TRUE]])
-  state$trajectories <- wsi_trajectories_from_payload(payload[["trajectories", exact = TRUE]])
-  state$segmentation <- wsi_rois_from_payload(payload[["segmentation", exact = TRUE]])
-  state$layers <- wsi_viewer_update_layers_from_payload(state$layers, payload[["layers", exact = TRUE]])
+  # Browser full snapshots continue to replace their respective fields. Native
+  # WGPU events are intentionally compact (for example, camera-only), so an
+  # omitted field must mean "leave unchanged" rather than "erase state".
+  if (!is.null(payload[["rois", exact = TRUE]])) {
+    state$rois <- wsi_rois_from_payload(payload[["rois", exact = TRUE]])
+  }
+  # Native undo/redo restores compact Feature and trajectory snapshots through
+  # the same validated bridge used for single-ROI edits. R remains the source
+  # of truth before the renderer requests its next state snapshot.
+  if (payload$event %in% c("annotation_undo", "annotation_redo", "rois_merged", "roi_split") &&
+      is.list(native_annotation_snapshot) && is.list(native_trajectory_snapshot)) {
+    state$rois <- wsi_rois_from_payload(list(
+      type = "FeatureCollection",
+      features = native_annotation_snapshot
+    ))
+    state$trajectories <- wsi_trajectories_from_payload(native_trajectory_snapshot)
+    state$selected_roi <- wsi_empty_roi()
+    state$selected_rois <- wsi_empty_roi()
+  }
+  # Native WGPU authoring sends one typed Feature at a time. Append or replace
+  # it server-side so the renderer never needs to download every ROI merely to
+  # preserve existing annotations.
+  if (!is.null(native_roi) && payload$event %in% c("roi_created", "roi_updated", "roi_edited")) {
+    native_rois <- wsi_rois_from_payload(list(type = "FeatureCollection", features = list(native_roi)))
+    if (nrow(native_rois)) {
+      existing <- state$rois %||% wsi_empty_roi()
+      match_index <- match(native_rois$roi_id[[1L]], existing$roi_id)
+      if (is.na(match_index)) {
+        state$rois <- rbind(existing, native_rois)
+      } else {
+        existing[match_index, ] <- native_rois[1L, ]
+        state$rois <- existing
+      }
+      state$selected_roi <- native_rois[1L, , drop = FALSE]
+      state$selected_rois <- native_rois[1L, , drop = FALSE]
+    }
+  }
+  # Native GeoJSON import is transmitted as a bounded Feature array. Keep the
+  # browser and R semantics aligned by appending imported objects while R stays
+  # authoritative for geometry conversion, class metadata, and persistence.
+  if (identical(payload$event, "geojson_imported") && is.list(native_geojson_features) && length(native_geojson_features)) {
+    imported <- wsi_rois_from_payload(list(type = "FeatureCollection", features = native_geojson_features))
+    if (nrow(imported)) {
+      existing <- state$rois %||% wsi_empty_roi()
+      for (i in seq_len(nrow(imported))) {
+        roi_id <- imported$roi_id[[i]]
+        match_index <- match(roi_id, existing$roi_id)
+        if (is.na(match_index)) {
+          existing <- rbind(existing, imported[i, , drop = FALSE])
+        } else {
+          existing[match_index, ] <- imported[i, ]
+        }
+      }
+      state$rois <- existing
+      state$selected_roi <- imported[nrow(imported), , drop = FALSE]
+      state$selected_rois <- state$selected_roi
+    }
+  }
+  # Native WGPU deletion sends only the ROI identifier. R remains the
+  # authoritative owner of the complete annotation collection.
+  if (identical(payload$event, "roi_deleted") &&
+      is.character(native_delete_roi_id) && length(native_delete_roi_id) == 1L &&
+      !is.na(native_delete_roi_id) && nzchar(native_delete_roi_id)) {
+    existing <- state$rois %||% wsi_empty_roi()
+    if (nrow(existing)) {
+      state$rois <- existing[existing$roi_id != native_delete_roi_id, , drop = FALSE]
+    }
+    selected_id <- state$selected_roi$roi_id %||% NA_character_
+    if (length(selected_id) && identical(as.character(selected_id[[1L]]), native_delete_roi_id)) {
+      state$selected_roi <- wsi_empty_roi()
+      state$selected_rois <- wsi_empty_roi()
+    }
+  }
+  if (!is.null(payload[["measurements", exact = TRUE]])) {
+    state$measurements <- wsi_measurements_from_payload(payload[["measurements", exact = TRUE]])
+  }
+  if (identical(payload$event, "measurements_cleared")) {
+    state$measurements <- wsi_empty_measurements()
+  }
+  if (identical(payload$event, "measurement_added") && is.list(native_measurement)) {
+    added_measurement <- wsi_measurements_from_payload(list(native_measurement))
+    if (nrow(added_measurement)) {
+      existing <- state$measurements %||% wsi_empty_measurements()
+      match_index <- match(added_measurement$id[[1L]], existing$id)
+      if (is.na(match_index)) state$measurements <- rbind(existing, added_measurement)
+      else { existing[match_index, ] <- added_measurement[1L, ]; state$measurements <- existing }
+    }
+  }
+  if (identical(payload$event, "measurement_deleted") &&
+      is.character(native_delete_measurement_id) && length(native_delete_measurement_id) == 1L &&
+      !is.na(native_delete_measurement_id) && nzchar(native_delete_measurement_id)) {
+    existing <- state$measurements %||% wsi_empty_measurements()
+    if (nrow(existing)) {
+      state$measurements <- existing[existing$id != native_delete_measurement_id, , drop = FALSE]
+    }
+  }
+  if (!is.null(payload[["trajectories", exact = TRUE]])) {
+    state$trajectories <- wsi_trajectories_from_payload(payload[["trajectories", exact = TRUE]])
+  }
+  if (identical(payload$event, "trajectories_cleared")) {
+    state$trajectories <- wsi_empty_trajectories()
+  }
+  # Like native ROIs, a native WGPU trajectory is transmitted as one compact
+  # record. Append/replace it on the R side rather than asking the renderer to
+  # round-trip every saved trajectory on each edit.
+  if (!is.null(native_trajectory) && identical(payload$event, "trajectory_added")) {
+    native_trajectories <- wsi_trajectories_from_payload(list(native_trajectory))
+    if (nrow(native_trajectories)) {
+      existing <- state$trajectories %||% wsi_empty_trajectories()
+      match_index <- match(native_trajectories$id[[1L]], existing$id)
+      if (is.na(match_index)) {
+        state$trajectories <- rbind(existing, native_trajectories)
+      } else {
+        existing[match_index, ] <- native_trajectories[1L, ]
+        state$trajectories <- existing
+      }
+    }
+  }
+  # Native WGPU trajectory deletion follows the same compact, id-only pattern
+  # as ROI deletion. The R session remains responsible for all trajectory data.
+  if (identical(payload$event, "trajectory_deleted") &&
+      is.character(native_delete_trajectory_id) && length(native_delete_trajectory_id) == 1L &&
+      !is.na(native_delete_trajectory_id) && nzchar(native_delete_trajectory_id)) {
+    existing <- state$trajectories %||% wsi_empty_trajectories()
+    if (nrow(existing)) {
+      state$trajectories <- existing[existing$id != native_delete_trajectory_id, , drop = FALSE]
+    }
+  }
+  if (!is.null(payload[["segmentation", exact = TRUE]])) {
+    state$segmentation <- wsi_rois_from_payload(payload[["segmentation", exact = TRUE]])
+  }
+  if (!is.null(payload[["layers", exact = TRUE]])) {
+    state$layers <- wsi_viewer_update_layers_from_payload(state$layers, payload[["layers", exact = TRUE]])
+  }
   state$project <- payload[["project", exact = TRUE]] %||% state$project %||% list()
   detail <- payload[["detail", exact = TRUE]]
   if (is.list(detail) && !is.null(detail$project_snapshot)) {
@@ -2326,14 +2666,23 @@ wsi_viewer_state_apply <- function(state, payload) {
   if (is.list(detail) && !is.null(detail$spatial_registration)) {
     state$spatial_registration <- wsi_spatial_registration_from_payload(detail$spatial_registration)
   }
-  state$selected_roi <- wsi_selected_roi_from_payload(payload[["selected_roi", exact = TRUE]])
-  state$selected_rois <- wsi_selected_rois_from_payload(
-    payload[["selected_rois", exact = TRUE]],
-    payload[["selected_roi", exact = TRUE]]
-  )
-  state$selected_object <- payload[["selected_object", exact = TRUE]] %||% NULL
-  state$view <- payload[["view", exact = TRUE]] %||% list()
-  state$stain <- payload[["stain", exact = TRUE]] %||% NULL
+  if (!is.null(payload[["selected_roi", exact = TRUE]]) ||
+      !is.null(payload[["selected_rois", exact = TRUE]])) {
+    state$selected_roi <- wsi_selected_roi_from_payload(payload[["selected_roi", exact = TRUE]])
+    state$selected_rois <- wsi_selected_rois_from_payload(
+      payload[["selected_rois", exact = TRUE]],
+      payload[["selected_roi", exact = TRUE]]
+    )
+  }
+  if (!is.null(payload[["selected_object", exact = TRUE]])) {
+    state$selected_object <- payload[["selected_object", exact = TRUE]]
+  }
+  if (!is.null(payload[["view", exact = TRUE]])) {
+    state$view <- payload[["view", exact = TRUE]]
+  }
+  if (!is.null(payload[["stain", exact = TRUE]])) {
+    state$stain <- payload[["stain", exact = TRUE]]
+  }
   if (!is.null(payload[["channel_sources", exact = TRUE]])) {
     state$channel_sources <- wsi_channel_sources_payload(payload[["channel_sources", exact = TRUE]])
   }
@@ -2353,10 +2702,18 @@ wsi_viewer_state_apply <- function(state, payload) {
     state$seurat_selection %||% list(labels = character(), count = 0L, matched_count = 0L)
   state$performance <- payload[["performance", exact = TRUE]] %||%
     state$performance %||% list()
-  state$annotation_spots <- wsi_annotation_spots_from_payload(payload[["annotation_spots", exact = TRUE]])
-  state$annotations <- payload[["annotations", exact = TRUE]] %||% list(dirty = FALSE, dirty_reason = "")
-  state$history <- wsi_annotation_history_from_payload(payload[["history", exact = TRUE]])
-  state$logs <- wsi_viewer_logs_from_payload(payload[["logs", exact = TRUE]])
+  if (!is.null(payload[["annotation_spots", exact = TRUE]])) {
+    state$annotation_spots <- wsi_annotation_spots_from_payload(payload[["annotation_spots", exact = TRUE]])
+  }
+  if (!is.null(payload[["annotations", exact = TRUE]])) {
+    state$annotations <- payload[["annotations", exact = TRUE]]
+  }
+  if (!is.null(payload[["history", exact = TRUE]])) {
+    state$history <- wsi_annotation_history_from_payload(payload[["history", exact = TRUE]])
+  }
+  if (!is.null(payload[["logs", exact = TRUE]])) {
+    state$logs <- wsi_viewer_logs_from_payload(payload[["logs", exact = TRUE]])
+  }
   wsi_viewer_update_measurement_tables(state)
   state$last_event <- as.character(payload[["event", exact = TRUE]] %||% "viewer_state")
   if (identical(state$last_event, "prediction_cleared")) {
@@ -2377,6 +2734,9 @@ wsi_viewer_state_apply <- function(state, payload) {
   }
   state$last_payload <- payload
   state$last_sync <- Sys.time()
+  if (isTRUE(native_overlay_changed)) {
+    state$native_renderer_revision <- as.integer(state$native_renderer_revision %||% 0L) + 1L
+  }
 
   event <- list(
     event = state$last_event,
@@ -4531,8 +4891,9 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
                                           host = "127.0.0.1", port = 8788,
                                           path = "/viewer-state", max_tries = 20L,
 	                                          tile_sources = list(),
-	                                          tile_path = "/tiles",
-	                                          seurat = NULL,
+                                          tile_path = "/tiles",
+                                          seurat = NULL,
+	                                          cellphenotyper = NULL,
 	                                          seurat_gene_path = "/seurat-gene",
 	                                          spatial_tile_path = "/spatial-tiles",
 	                                          spatial_object_save_path = "/spatial-object-save",
@@ -4546,8 +4907,11 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	                                          dense_geojson_path = "/dense-geojson",
 	                                          prediction_context = NULL,
 	                                          prediction_path = "/prediction",
-	                                          proximity_context = NULL,
-	                                          proximity_path = "/proximity") {
+                                          proximity_context = NULL,
+                                          proximity_path = "/proximity",
+                                          native_renderer_path = "/native-renderer",
+                                          native_state_path = "/native-renderer-state",
+                                          native_points_path = "/native-points") {
   if (!requireNamespace("httpuv", quietly = TRUE)) {
     wsi_abort(
       "Live viewer state sync requires the optional package `httpuv`.",
@@ -4583,6 +4947,15 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	  if (!startsWith(proximity_path, "/")) {
 	    proximity_path <- paste0("/", proximity_path)
 	  }
+	  if (!startsWith(native_renderer_path, "/")) {
+	    native_renderer_path <- paste0("/", native_renderer_path)
+	  }
+	  if (!startsWith(native_state_path, "/")) {
+	    native_state_path <- paste0("/", native_state_path)
+	  }
+	  if (!startsWith(native_points_path, "/")) {
+	    native_points_path <- paste0("/", native_points_path)
+	  }
 	  tile_path <- wsi_dynamic_tile_route(tile_path)
   if (inherits(tile_sources, "wsi_dynamic_tile_source")) {
     tile_sources <- list(tile_sources)
@@ -4608,8 +4981,874 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
       payload <- payload$payload
     }
     wsi_viewer_state_apply(state, payload)
-    wsi_viewer_autosave_save(state, slide = slide, reason = state$last_event %||% "viewer_state")
+      native_project_path <- state$last_payload$detail$native_wgpu_project_path %||% NULL
+      native_project_open_path <- state$last_payload$detail$native_wgpu_project_open_path %||% NULL
+      native_association_csv_path <- state$last_payload$detail$native_wgpu_annotation_csv_path %||% NULL
+      native_spatial_object_path <- state$last_payload$detail$native_wgpu_spatial_object_path %||% NULL
+      native_geojson_path <- state$last_payload$detail$native_wgpu_geojson_path %||% NULL
+      native_segmentation_path <- state$last_payload$detail$native_wgpu_segmentation_path %||% NULL
+      native_grandqc_items <- state$last_payload$detail$native_wgpu_grandqc_items %||% NULL
+      native_kodama_items <- state$last_payload$detail$native_wgpu_kodama_items %||% NULL
+      native_grandqc_property <- function(roi) {
+        props <- roi$properties[[1L]] %||% list()
+        identical(as.character(props$source_menu %||% ""), "GrandQC")
+      }
+      if (identical(state$last_event, "grandqc_cleared")) {
+        existing <- state$rois %||% wsi_empty_roi()
+        removed <- if (nrow(existing)) sum(vapply(seq_len(nrow(existing)), function(i) {
+          native_grandqc_property(existing[i, , drop = FALSE])
+        }, logical(1))) else 0L
+        if (removed) {
+          keep <- !vapply(seq_len(nrow(existing)), function(i) {
+            native_grandqc_property(existing[i, , drop = FALSE])
+          }, logical(1))
+          state$rois <- existing[keep, , drop = FALSE]
+        }
+        wsi_viewer_state_record_event(
+          state, "grandqc_cleared",
+          list(renderer = "native_wgpu", removed = as.integer(removed), ok = TRUE)
+        )
+      }
+      if (identical(state$last_event, "grandqc_loaded") &&
+          is.list(native_grandqc_items) && length(native_grandqc_items)) {
+        imported_result <- tryCatch({
+          existing <- state$rois %||% wsi_empty_roi()
+          if (nrow(existing)) {
+            keep <- !vapply(seq_len(nrow(existing)), function(i) {
+              native_grandqc_property(existing[i, , drop = FALSE])
+            }, logical(1))
+            existing <- existing[keep, , drop = FALSE]
+          }
+          total <- 0L
+          for (item in native_grandqc_items) {
+            item <- item %||% list()
+            item_path <- path.expand(as.character(item$path %||% ""))
+            if (!nzchar(item_path) || !file.exists(item_path) || dir.exists(item_path)) {
+              wsi_abort(sprintf("GrandQC GeoJSON file does not exist: %s", item_path))
+            }
+            imported <- read_geojson(item_path)
+            if (!nrow(imported)) next
+            grandqc_id <- as.character(item$id %||% tools::file_path_sans_ext(basename(item_path)))
+            grandqc_label <- as.character(item$label %||% basename(item_path))
+            imported$properties <- I(lapply(imported$properties, function(props) {
+              props <- props %||% list()
+              props$source_menu <- "GrandQC"
+              props$grandqc_id <- grandqc_id
+              props$grandqc_path <- normalizePath(item_path, winslash = "/", mustWork = FALSE)
+              props
+            }))
+            empty_class <- is.na(imported$class) | !nzchar(as.character(imported$class)) |
+              tolower(as.character(imported$class)) == "annotation"
+            imported$class[empty_class] <- "artifact"
+            empty_name <- is.na(imported$name) | !nzchar(as.character(imported$name))
+            imported$name[empty_name] <- grandqc_label
+            existing <- rbind(existing, imported)
+            total <- total + nrow(imported)
+          }
+          state$rois <- existing
+          if (total) {
+            state$selected_roi <- existing[nrow(existing), , drop = FALSE]
+            state$selected_rois <- state$selected_roi
+          }
+          list(count = as.integer(total), files = length(native_grandqc_items))
+        }, error = function(err) err)
+        wsi_viewer_state_record_event(
+          state, "grandqc_loaded",
+          list(
+            renderer = "native_wgpu",
+            count = if (inherits(imported_result, "error")) 0L else imported_result$count,
+            files = if (inherits(imported_result, "error")) 0L else imported_result$files,
+            ok = !inherits(imported_result, "error"),
+            error = if (inherits(imported_result, "error")) conditionMessage(imported_result) else NULL
+          )
+        )
+      }
+      native_kodama_property <- function(roi) {
+        props <- roi$properties[[1L]] %||% list()
+        identical(as.character(props$source_menu %||% ""), "KODAMA")
+      }
+      if (identical(state$last_event, "kodama_cleared")) {
+        existing <- state$rois %||% wsi_empty_roi()
+        removed <- if (nrow(existing)) sum(vapply(seq_len(nrow(existing)), function(i) {
+          native_kodama_property(existing[i, , drop = FALSE])
+        }, logical(1))) else 0L
+        if (removed) {
+          keep <- !vapply(seq_len(nrow(existing)), function(i) {
+            native_kodama_property(existing[i, , drop = FALSE])
+          }, logical(1))
+          state$rois <- existing[keep, , drop = FALSE]
+        }
+        wsi_viewer_state_record_event(
+          state, "kodama_cleared",
+          list(renderer = "native_wgpu", removed = as.integer(removed), ok = TRUE)
+        )
+      }
+      if (identical(state$last_event, "kodama_loaded") &&
+          is.list(native_kodama_items) && length(native_kodama_items)) {
+        imported_result <- tryCatch({
+          existing <- state$rois %||% wsi_empty_roi()
+          if (nrow(existing)) {
+            keep <- !vapply(seq_len(nrow(existing)), function(i) {
+              native_kodama_property(existing[i, , drop = FALSE])
+            }, logical(1))
+            existing <- existing[keep, , drop = FALSE]
+          }
+          total <- 0L
+          for (item in native_kodama_items) {
+            item <- item %||% list()
+            item_path <- path.expand(as.character(item$path %||% ""))
+            if (!nzchar(item_path) || !file.exists(item_path) || dir.exists(item_path)) {
+              wsi_abort(sprintf("KODAMA GeoJSON file does not exist: %s", item_path))
+            }
+            imported <- read_geojson(item_path)
+            if (!nrow(imported)) next
+            shift_dx <- suppressWarnings(as.numeric(item$shift_dx %||% 0))
+            shift_dy <- suppressWarnings(as.numeric(item$shift_dy %||% 0))
+            if (!is.finite(shift_dx)) shift_dx <- 0
+            if (!is.finite(shift_dy)) shift_dy <- 0
+            if (shift_dx != 0 || shift_dy != 0) {
+              imported <- wsi_translate_rois(imported, dx = shift_dx, dy = shift_dy)
+            }
+            kodama_id <- as.character(item$id %||% tools::file_path_sans_ext(basename(item_path)))
+            kodama_label <- as.character(item$label %||% basename(item_path))
+            kodama_profile <- as.character(item$profile %||% "")
+            imported$properties <- I(lapply(imported$properties, function(props) {
+              props <- props %||% list()
+              props$source_menu <- "KODAMA"
+              props$kodama_id <- kodama_id
+              props$kodama_profile <- kodama_profile
+              props$kodama_path <- normalizePath(item_path, winslash = "/", mustWork = FALSE)
+              props
+            }))
+            empty_class <- is.na(imported$class) | !nzchar(as.character(imported$class)) |
+              tolower(as.character(imported$class)) == "annotation"
+            imported$class[empty_class] <- "kodama"
+            empty_name <- is.na(imported$name) | !nzchar(as.character(imported$name))
+            imported$name[empty_name] <- kodama_label
+            existing <- rbind(existing, imported)
+            total <- total + nrow(imported)
+          }
+          state$rois <- existing
+          if (total) {
+            state$selected_roi <- existing[nrow(existing), , drop = FALSE]
+            state$selected_rois <- state$selected_roi
+          }
+          list(count = as.integer(total), files = length(native_kodama_items))
+        }, error = function(err) err)
+        wsi_viewer_state_record_event(
+          state, "kodama_loaded",
+          list(
+            renderer = "native_wgpu",
+            count = if (inherits(imported_result, "error")) 0L else imported_result$count,
+            files = if (inherits(imported_result, "error")) 0L else imported_result$files,
+            ok = !inherits(imported_result, "error"),
+            error = if (inherits(imported_result, "error")) conditionMessage(imported_result) else NULL
+          )
+        )
+      }
+      if (identical(state$last_event, "segmentation_added") &&
+          is.character(native_segmentation_path) && length(native_segmentation_path) == 1L &&
+          !is.na(native_segmentation_path) && nzchar(native_segmentation_path)) {
+        segmentation_path <- path.expand(native_segmentation_path)
+        imported_segmentation <- tryCatch({
+          if (!file.exists(segmentation_path) || dir.exists(segmentation_path)) {
+            wsi_abort(sprintf("Selected cell segmentation file does not exist: %s", segmentation_path))
+          }
+          segmentation_type <- wsi_segmentation_type(segmentation_path, "auto")
+          raw_segmentation <- if (identical(segmentation_type, "mask")) {
+            import_segmentation(segmentation_path, mask_as_rois = TRUE)
+          } else {
+            import_segmentation(segmentation_path)
+          }
+          imported <- wsi_viewer_coerce_segmentation(raw_segmentation)
+          if (!inherits(imported, "wsi_roi") || !nrow(imported)) {
+            wsi_abort("The selected segmentation contains no supported cell objects.")
+          }
+          if (nrow(imported) > 10000L) {
+            source_id <- paste0(
+              "native_segmentation_",
+              wsi_safe_id(tools::file_path_sans_ext(basename(segmentation_path)), "cells"),
+              "_", as.integer(Sys.time())
+            )
+            source <- list(
+              id = source_id,
+              name = basename(segmentation_path),
+              path = normalizePath(segmentation_path, winslash = "/", mustWork = FALSE),
+              target_source_id = as.character(state$native_active_source_id %||% ""),
+              rois = imported,
+              source_type = "cell_segmentation",
+              kind = "cell_segmentation",
+              visible = TRUE,
+              opacity = 0.92,
+              colour = "#F97316",
+              fill_alpha = 0.18,
+              line_width = 1.8,
+              min_zoom = 1,
+              full_resolution_zoom = 3,
+              max_points_per_roi = 24000L,
+              total_count = nrow(imported),
+              bbox_index = wsi_bbox_index_create(imported)
+            )
+            dense_geojson_context$sources[[source_id]] <- source
+            state$layers <- wsi_viewer_update_layers_from_payload(
+              state$layers,
+              list(list(
+                id = source_id,
+                name = source$name,
+                type = "vector",
+                source_type = source$source_type,
+                visible = TRUE,
+                opacity = source$opacity,
+                colour = source$colour,
+                metadata = list(viewport_only = TRUE, total_count = nrow(imported))
+              ))
+            )
+            list(mode = "dense", count = nrow(imported), source_id = source_id)
+          } else {
+            state$segmentation <- wsi_viewer_bind_rois(state$segmentation, imported)
+            list(mode = "editable", count = nrow(imported), source_id = NULL)
+          }
+        }, error = function(err) err)
+        wsi_viewer_state_record_event(
+          state,
+          "segmentation_added",
+          list(
+            renderer = "native_wgpu",
+            path = normalizePath(segmentation_path, winslash = "/", mustWork = FALSE),
+            mode = if (inherits(imported_segmentation, "error")) NULL else imported_segmentation$mode,
+            count = if (inherits(imported_segmentation, "error")) 0L else imported_segmentation$count,
+            source_id = if (inherits(imported_segmentation, "error")) NULL else imported_segmentation$source_id,
+            ok = !inherits(imported_segmentation, "error"),
+            error = if (inherits(imported_segmentation, "error")) conditionMessage(imported_segmentation) else NULL
+          )
+        )
+      }
+      if (identical(state$last_event, "geojson_imported") &&
+          is.character(native_geojson_path) && length(native_geojson_path) == 1L &&
+          !is.na(native_geojson_path) && nzchar(native_geojson_path)) {
+        geojson_path <- path.expand(native_geojson_path)
+        extension <- tolower(tools::file_ext(geojson_path))
+        imported_result <- tryCatch({
+          if (!extension %in% c("geojson", "json")) {
+            wsi_abort("Native GeoJSON import accepts only .geojson or .json files.")
+          }
+          if (!file.exists(geojson_path) || dir.exists(geojson_path)) {
+            wsi_abort(sprintf("Selected GeoJSON file does not exist: %s", geojson_path))
+          }
+          imported <- read_geojson(geojson_path)
+          if (!nrow(imported)) {
+            wsi_abort("The selected GeoJSON file contains no supported features.")
+          }
+          # Large cell/segmentation files stay in R and are served only for the
+          # visible viewport. Tissue-scale imports remain normal editable ROIs.
+          if (nrow(imported) > 10000L) {
+            source_id <- paste0(
+              "native_dense_",
+              wsi_safe_id(tools::file_path_sans_ext(basename(geojson_path)), "geojson"),
+              "_", as.integer(Sys.time())
+            )
+            source <- list(
+              id = source_id,
+              name = basename(geojson_path),
+              path = normalizePath(geojson_path, winslash = "/", mustWork = FALSE),
+              target_source_id = as.character(state$native_active_source_id %||% ""),
+              rois = imported,
+              source_type = "cell_segmentation",
+              kind = "cell_segmentation",
+              visible = TRUE,
+              opacity = 0.92,
+              colour = "#F97316",
+              fill_alpha = 0.18,
+              line_width = 1.8,
+              min_zoom = 1,
+              full_resolution_zoom = 3,
+              max_points_per_roi = 24000L,
+              total_count = nrow(imported),
+              bbox_index = wsi_bbox_index_create(imported)
+            )
+            dense_geojson_context$sources[[source_id]] <- source
+            state$layers <- wsi_viewer_update_layers_from_payload(
+              state$layers,
+              list(list(
+                id = source_id,
+                name = source$name,
+                type = "vector",
+                source_type = source$source_type,
+                visible = TRUE,
+                opacity = source$opacity,
+                colour = source$colour,
+                metadata = list(viewport_only = TRUE, total_count = nrow(imported))
+              ))
+            )
+            list(mode = "dense", count = nrow(imported), source_id = source_id)
+          } else {
+            existing <- state$rois %||% wsi_empty_roi()
+            for (i in seq_len(nrow(imported))) {
+              roi_id <- imported$roi_id[[i]]
+              match_index <- match(roi_id, existing$roi_id)
+              if (is.na(match_index)) existing <- rbind(existing, imported[i, , drop = FALSE])
+              else existing[match_index, ] <- imported[i, ]
+            }
+            state$rois <- existing
+            state$selected_roi <- imported[nrow(imported), , drop = FALSE]
+            state$selected_rois <- state$selected_roi
+            list(mode = "editable", count = nrow(imported), source_id = NULL)
+          }
+        }, error = function(err) err)
+        wsi_viewer_state_record_event(
+          state,
+          "geojson_imported",
+          list(
+            renderer = "native_wgpu",
+            path = normalizePath(geojson_path, winslash = "/", mustWork = FALSE),
+            mode = if (inherits(imported_result, "error")) NULL else imported_result$mode,
+            count = if (inherits(imported_result, "error")) 0L else imported_result$count,
+            source_id = if (inherits(imported_result, "error")) NULL else imported_result$source_id,
+            ok = !inherits(imported_result, "error"),
+            error = if (inherits(imported_result, "error")) conditionMessage(imported_result) else NULL
+          )
+        )
+      }
+    if (identical(state$last_event, "project_save_requested") &&
+        is.character(native_project_path) && length(native_project_path) == 1L &&
+        !is.na(native_project_path) && nzchar(native_project_path)) {
+      saved_project <- tryCatch(
+        wsi_project(
+          native_project_path,
+          slide = slide,
+          viewer_state = state,
+          overwrite = TRUE
+        ),
+        error = function(err) err
+      )
+      if (inherits(saved_project, "error")) {
+        wsi_viewer_state_record_event(
+          state,
+          "project_saved",
+          list(renderer = "native_wgpu", path = native_project_path, ok = FALSE,
+               error = conditionMessage(saved_project))
+        )
+      } else {
+        state$annotations <- list(dirty = FALSE, dirty_reason = "project_saved")
+        wsi_viewer_state_record_event(
+          state,
+          "project_saved",
+          list(renderer = "native_wgpu", path = saved_project$path, ok = TRUE)
+        )
+      }
+    }
+    if (identical(state$last_event, "project_opened") &&
+        is.character(native_project_open_path) && length(native_project_open_path) == 1L &&
+        !is.na(native_project_open_path) && nzchar(native_project_open_path)) {
+      restored_project <- tryCatch({
+        project_path <- path.expand(native_project_open_path)
+        if (!dir.exists(project_path)) {
+          wsi_abort(sprintf("Selected project directory does not exist: %s", project_path))
+        }
+        # `restore_project_state()` only needs the live state container when
+        # service is disabled; this handler runs before the public session
+        # object is assembled, so a compact session-shaped wrapper is enough.
+        native_session <- structure(list(state = state), class = "wsi_viewer_session")
+        restore_project_state(native_session, project_path, service = FALSE)
+        normalizePath(project_path, winslash = "/", mustWork = TRUE)
+      }, error = function(err) err)
+      wsi_viewer_state_record_event(
+        state,
+        "project_opened",
+        list(
+          renderer = "native_wgpu",
+          path = if (inherits(restored_project, "error")) native_project_open_path else restored_project,
+          ok = !inherits(restored_project, "error"),
+          error = if (inherits(restored_project, "error")) conditionMessage(restored_project) else NULL
+        )
+      )
+    }
+      if (identical(state$last_event, "annotation_spots_exported") &&
+        is.character(native_association_csv_path) && length(native_association_csv_path) == 1L &&
+        !is.na(native_association_csv_path) && nzchar(native_association_csv_path)) {
+      export_result <- tryCatch({
+        utils::write.csv(
+          state$annotation_spots %||% wsi_empty_annotation_spots(),
+          native_association_csv_path,
+          row.names = FALSE
+        )
+        TRUE
+      }, error = function(err) err)
+      wsi_viewer_state_record_event(
+        state,
+        "annotation_spots_exported",
+        list(
+          renderer = "native_wgpu",
+          path = native_association_csv_path,
+          count = nrow(state$annotation_spots %||% wsi_empty_annotation_spots()),
+          ok = !inherits(export_result, "error"),
+          error = if (inherits(export_result, "error")) conditionMessage(export_result) else NULL
+        )
+        )
+      }
+      if (identical(state$last_event, "spatial_object_save_requested") &&
+          !is.null(seurat) && is.character(native_spatial_object_path) &&
+          length(native_spatial_object_path) == 1L && !is.na(native_spatial_object_path) &&
+          nzchar(native_spatial_object_path)) {
+        native_result <- tryCatch(
+          wsi_spatial_object_save_response(
+            seurat,
+            list(
+              format = "rds", output = native_spatial_object_path, overwrite = TRUE,
+              native_wgpu_point_source_id = state$last_payload$detail$native_wgpu_point_source_id %||% "",
+              native_wgpu_spatial_transform = state$last_payload$detail$native_wgpu_spatial_transform %||% list()
+            ),
+            state = state
+          ),
+          error = function(err) err
+        )
+        wsi_viewer_state_record_event(
+          state,
+          "spatial_registration_saved",
+          list(
+            renderer = "native_wgpu", path = native_spatial_object_path,
+            ok = !inherits(native_result, "error"),
+            count = if (inherits(native_result, "error")) 0L else native_result$count %||% 0L,
+            error = if (inherits(native_result, "error")) conditionMessage(native_result) else NULL
+          )
+        )
+      }
+      wsi_viewer_autosave_save(state, slide = slide, reason = state$last_event %||% "viewer_state")
     wsi_viewer_state_response(state, dequeue_commands = dequeue_commands)
+  }
+
+  native_point_layers <- function() {
+    layers <- state$layers %||% list()
+    Filter(function(layer) {
+      if (!is.list(layer) || !length(layer$items %||% list())) return(FALSE)
+      source_type <- tolower(as.character(layer$source_type %||% layer$type %||% ""))
+      # Do not accidentally marshal polygon-heavy tissue/cell geometry through
+      # the point endpoint. Point layers have an explicit point source type or
+      # point-like records with finite x/y coordinates.
+      point_type <- grepl("point|spot|seurat|spatial|cellphenotyper|proximity|prediction", source_type)
+      first_item <- (layer$items %||% list())[[1L]] %||% list()
+      point_item <- is.list(first_item) && is.finite(suppressWarnings(as.numeric(first_item$x %||% first_item$slide_x %||% NA_real_))) &&
+        is.finite(suppressWarnings(as.numeric(first_item$y %||% first_item$slide_y %||% NA_real_)))
+      isTRUE(point_type || point_item)
+    }, layers)
+  }
+
+  native_point_sources <- function() {
+    lapply(native_point_layers(), function(layer) {
+      metadata <- layer$metadata %||% list()
+      target_fields <- c(
+        "target_id", "target_project_id", "target_project_item_id",
+        "target_project_image_id", "target_item_id", "target_path",
+        "target_source_path", "target_tile_source_id", "base_id", "base_path",
+        "base_slide_path", "slide_path", "project_item_id", "project_image_id", "item_id",
+        "tile_source_id"
+      )
+      target_ids <- unlist(c(layer[target_fields], metadata[target_fields]), use.names = FALSE)
+      target_ids <- unique(as.character(target_ids[!is.na(target_ids) & nzchar(as.character(target_ids))]))
+      list(
+        id = as.character(layer$id %||% ""),
+        name = as.character(layer$name %||% layer$id %||% "Spatial points"),
+        source_type = as.character(layer$source_type %||% layer$type %||% "points"),
+        visible = isTRUE(layer$visible %||% TRUE),
+        opacity = suppressWarnings(as.numeric(layer$opacity %||% 1)),
+        colour = as.character(layer$colour %||% layer$color %||% "#38bdf8"),
+        radius = suppressWarnings(as.numeric(layer$radius %||% 6)),
+        count = suppressWarnings(as.integer(layer$total_count %||% layer$count %||% length(layer$items %||% list()))),
+        target_ids = target_ids
+      )
+    })
+  }
+
+  native_layer_summaries <- function(layers = state$layers) {
+    lapply(layers %||% list(), function(layer) {
+      if (!is.list(layer)) return(list())
+      layer[c("id", "name", "type", "source_type", "visible", "opacity", "colour", "color", "radius", "count", "total_count", "metadata")]
+    })
+  }
+
+  native_points_response <- function(req) {
+    method <- req$REQUEST_METHOD %||% "GET"
+    if (!identical(method, "POST")) {
+      return(wsi_http_json_response(status = 405L, body = list(error = "Use POST for native viewport points.")))
+    }
+    tryCatch({
+      body <- wsi_http_request_body(req)
+      payload <- if (nzchar(body)) jsonlite::fromJSON(body, simplifyVector = FALSE) else list()
+      source_id <- as.character(payload$source_id %||% "")
+      candidates <- native_point_layers()
+      matches <- which(vapply(candidates, function(x) identical(as.character(x$id %||% ""), source_id), logical(1)))
+      if (!length(matches)) {
+        return(wsi_http_json_response(status = 404L, body = list(ok = FALSE, error = "Unknown native point layer.")))
+      }
+      layer <- candidates[[matches[[1L]]]]
+      items <- layer$items %||% list()
+      if (is.data.frame(items)) items <- lapply(seq_len(nrow(items)), function(i) as.list(items[i, , drop = FALSE]))
+      # Prediction remains R-side.  Recolour the existing viewport point layer
+      # by its compact id lookup instead of sending a second full-slide layer
+      # to the native renderer.
+      prediction <- state$prediction %||% wsi_empty_prediction_result()
+      prediction_colours <- character()
+      if (is.data.frame(prediction) && nrow(prediction) && "id" %in% names(prediction)) {
+        palette <- wsi_prediction_palette(as.character(prediction$predicted %||% character()))
+        ids <- as.character(prediction$id)
+        values <- unname(palette[as.character(prediction$predicted)])
+        keep <- !is.na(ids) & nzchar(ids) & !is.na(values) & nzchar(values)
+        prediction_colours <- stats::setNames(as.character(values[keep]), ids[keep])
+      }
+      xmin <- suppressWarnings(as.numeric(payload$xmin %||% -Inf))
+      ymin <- suppressWarnings(as.numeric(payload$ymin %||% -Inf))
+      xmax <- suppressWarnings(as.numeric(payload$xmax %||% Inf))
+      ymax <- suppressWarnings(as.numeric(payload$ymax %||% Inf))
+      zoom <- suppressWarnings(as.numeric(payload$zoom %||% 1))
+      max_items <- suppressWarnings(as.integer(payload$max_items %||% 50000L))
+      if (!is.finite(max_items) || max_items < 100L) max_items <- 50000L
+      # Native WGPU sends only a compact global coordinate transform with each
+      # viewport request.  Apply it here, before clipping, so registration does
+      # not require transferring or duplicating a full spatial point table.
+      transform <- payload$spatial_transform %||% list()
+      transform_value <- function(name, default) {
+        value <- suppressWarnings(as.numeric(transform[[name]] %||% default))
+        if (!length(value) || !is.finite(value[[1L]])) default else value[[1L]]
+      }
+      transform_flag <- function(name) isTRUE(transform[[name]] %||% FALSE)
+      scale_x <- transform_value("scale_x", 1)
+      scale_y <- transform_value("scale_y", 1)
+      offset_x <- transform_value("offset_x", 0)
+      offset_y <- transform_value("offset_y", 0)
+      rotation <- transform_value("rotation_degrees", 0) * pi / 180
+      flip_h <- transform_flag("flip_horizontal")
+      flip_v <- transform_flag("flip_vertical")
+      centre_x <- transform_value("center_x", 0)
+      centre_y <- transform_value("center_y", 0)
+      if (identical(as.character(payload$action %||% ""), "trajectory_profile")) {
+        profile_result <- tryCatch({
+          trajectory <- payload$trajectory %||% list()
+          trajectory_points <- trajectory$points %||% trajectory$coordinates %||% list()
+          trajectory_points <- lapply(trajectory_points, function(point) {
+            if (is.list(point)) c(x = as.numeric(point$x %||% point[[1L]] %||% NA_real_), y = as.numeric(point$y %||% point[[2L]] %||% NA_real_))
+            else as.numeric(point)
+          })
+          trajectory_points <- Filter(function(point) length(point) >= 2L && all(is.finite(point[1:2])), trajectory_points)
+          if (length(trajectory_points) < 2L) wsi_abort("Trajectory profiling needs a path with at least two points.")
+          trajectory_matrix <- do.call(rbind, lapply(trajectory_points, function(point) point[1:2]))
+          dx <- diff(trajectory_matrix[, 1L]); dy <- diff(trajectory_matrix[, 2L])
+          segment_length <- sqrt(dx * dx + dy * dy)
+          valid_segment <- is.finite(segment_length) & segment_length > 0
+          if (!any(valid_segment)) wsi_abort("Trajectory profiling needs a non-zero path length.")
+          starts <- trajectory_matrix[-nrow(trajectory_matrix), , drop = FALSE]
+          starts <- starts[valid_segment, , drop = FALSE]
+          dx <- dx[valid_segment]; dy <- dy[valid_segment]; segment_length <- segment_length[valid_segment]
+          cumulative <- c(0, cumsum(segment_length))
+          total_length <- sum(segment_length)
+          bins <- suppressWarnings(as.integer(payload$bins %||% 20L))
+          bins <- max(2L, min(200L, if (is.finite(bins)) bins else 20L))
+          width <- suppressWarnings(as.numeric(payload$width_px %||% 250))
+          width <- max(1, if (is.finite(width)) width else 250)
+          feature <- as.character(payload$feature %||% "count")
+          project_point <- function(item) {
+            x <- suppressWarnings(as.numeric(item$x %||% item$slide_x %||% NA_real_))
+            y <- suppressWarnings(as.numeric(item$y %||% item$slide_y %||% NA_real_))
+            if (!is.finite(x) || !is.finite(y) || identical(item$visible, FALSE)) return(NULL)
+            px <- x - centre_x; py <- y - centre_y
+            if (flip_h) px <- -px
+            if (flip_v) py <- -py
+            px <- px * scale_x; py <- py * scale_y
+            if (rotation != 0) {
+              cos_r <- cos(rotation); sin_r <- sin(rotation)
+              rotated_x <- px * cos_r + py * sin_r
+              py <- -px * sin_r + py * cos_r; px <- rotated_x
+            }
+            x <- centre_x + px + offset_x; y <- centre_y + py + offset_y
+            best_distance <- Inf; best_along <- 0
+            for (j in seq_along(segment_length)) {
+              vx <- x - starts[j, 1L]; vy <- y - starts[j, 2L]
+              t <- max(0, min(1, (vx * dx[j] + vy * dy[j]) / (segment_length[j] * segment_length[j])))
+              qx <- starts[j, 1L] + t * dx[j]; qy <- starts[j, 2L] + t * dy[j]
+              distance <- sqrt((x - qx)^2 + (y - qy)^2)
+              if (distance < best_distance) { best_distance <- distance; best_along <- cumulative[j] + t * segment_length[j] }
+            }
+            if (!is.finite(best_distance) || best_distance > width / 2) return(NULL)
+            value <- if (identical(feature, "count")) 1 else item[[feature]] %||% NA
+            list(id = as.character(item$id %||% item$barcode %||% item$label %||% ""), value = value, along = best_along, distance = best_distance)
+          }
+          included <- Filter(Negate(is.null), lapply(items, project_point))
+          if (!length(included)) wsi_abort("No points fell within the selected trajectory width.")
+          bin_index <- vapply(included, function(point) min(bins, max(1L, floor(point$along / total_length * bins) + 1L)), integer(1))
+          numeric_values <- vapply(included, function(point) {
+            value <- point$value %||% NA
+            suppressWarnings(as.numeric(value[[1L]] %||% NA_real_))
+          }, numeric(1))
+          is_numeric <- identical(feature, "count") || sum(is.finite(numeric_values)) >= max(2L, floor(length(included) / 2L))
+          rows <- lapply(seq_len(bins), function(bin) {
+            hit <- which(bin_index == bin); values <- if (is_numeric) numeric_values[hit] else as.character(vapply(included[hit], function(point) point$value[[1L]] %||% "", character(1)))
+            valid <- if (is_numeric) values[is.finite(values)] else values[nzchar(values)]
+            dominant <- if (!is_numeric && length(valid)) names(sort(table(valid), decreasing = TRUE))[[1L]] else ""
+            list(trajectory_id = as.character(trajectory$id %||% ""), trajectory_name = as.character(trajectory$name %||% "Trajectory"), source_id = source_id, source_name = as.character(layer$name %||% source_id), feature = feature, feature_type = if (is_numeric) "numeric" else "category", category = if (is_numeric) "" else dominant, bin = bin, bin_start_px = (bin - 1) / bins * total_length, bin_end_px = bin / bins * total_length, distance_px = ((bin - .5) / bins) * total_length, distance_fraction = (bin - .5) / bins, width_px = width, total_length_px = total_length, count = length(hit), mean = if (is_numeric && length(valid)) mean(valid) else NA_real_, median = if (is_numeric && length(valid)) stats::median(valid) else NA_real_, min = if (is_numeric && length(valid)) min(valid) else NA_real_, max = if (is_numeric && length(valid)) max(valid) else NA_real_, sd = if (is_numeric && length(valid) > 1L) stats::sd(valid) else NA_real_, dominant = dominant, dominant_count = if (nzchar(dominant)) sum(valid == dominant) else 0L, fraction = length(hit) / length(included), project_image = as.character(state$project$active_image %||% ""), project_section = as.character(state$project$active_section %||% ""))
+          })
+          palette <- grDevices::colorRampPalette(c("#2563eb", "#facc15", "#dc2626"))(101L)
+          colours <- stats::setNames(vapply(included, function(point) palette[[min(101L, max(1L, floor(point$along / total_length * 100) + 1L))]], character(1)), vapply(included, `[[`, character(1), "id"))
+          list(rows = rows, colours = as.list(colours), count = length(included))
+        }, error = function(err) err)
+        if (inherits(profile_result, "error")) return(wsi_http_json_response(status = 400L, body = list(ok = FALSE, error = conditionMessage(profile_result))))
+        return(wsi_http_json_response(body = list(ok = TRUE, trajectory_profile = profile_result$rows, colours = profile_result$colours, count = profile_result$count)))
+      }
+      points <- lapply(items, function(item) {
+        if (!is.list(item)) return(NULL)
+        x <- suppressWarnings(as.numeric(item$x %||% item$slide_x %||% NA_real_))
+        y <- suppressWarnings(as.numeric(item$y %||% item$slide_y %||% NA_real_))
+        if (is.finite(x) && is.finite(y)) {
+          dx <- x - centre_x
+          dy <- y - centre_y
+          if (flip_h) dx <- -dx
+          if (flip_v) dy <- -dy
+          dx <- dx * scale_x
+          dy <- dy * scale_y
+          if (rotation != 0) {
+            cos_r <- cos(rotation); sin_r <- sin(rotation)
+            rotated_x <- dx * cos_r + dy * sin_r
+            dy <- -dx * sin_r + dy * cos_r
+            dx <- rotated_x
+          }
+          x <- centre_x + dx + offset_x
+          y <- centre_y + dy + offset_y
+        }
+        if (!is.finite(x) || !is.finite(y) || x < xmin || x > xmax || y < ymin || y > ymax || identical(item$visible, FALSE)) return(NULL)
+        point_id <- as.character(item$id %||% item$barcode %||% item$label %||% "")
+        prediction_colour <- unname(prediction_colours[point_id])
+        if (!length(prediction_colour) || is.na(prediction_colour) || !nzchar(prediction_colour)) {
+          prediction_colour <- NULL
+        }
+        list(
+          x = x, y = y,
+          radius = suppressWarnings(as.numeric(item$radius %||% layer$radius %||% 6)),
+          colour = as.character(prediction_colour %||% item$colour %||% item$color %||% layer$colour %||% "#38bdf8"),
+          id = point_id,
+          cluster_values = item$cluster_values %||% item$clusters %||% list()
+        )
+      })
+      points <- Filter(Negate(is.null), points)
+      # Same progressive intent as the browser: all local points when close,
+      # then a stable deterministic subset for overview navigation.
+      stride <- if (is.finite(zoom) && zoom >= 5) 1L else if (is.finite(zoom) && zoom >= 2) 2L else 10L
+      if (length(points) > max_items) stride <- max(stride, ceiling(length(points) / max_items))
+      if (stride > 1L && length(points)) points <- points[seq.int(1L, length(points), by = stride)]
+      wsi_http_json_response(body = list(
+        ok = TRUE, source_id = source_id, total = length(items), represented = length(points),
+        stride = stride, points = points
+      ))
+    }, error = function(err) {
+      wsi_http_json_response(status = 500L, body = list(ok = FALSE, error = conditionMessage(err)))
+    })
+  }
+
+  # This intentionally contains only tile geometry and identifiers. The native
+  # desktop renderer receives the same compact source contract as the browser;
+  # pixels still arrive only through the validated tile route below.
+  native_renderer_manifest <- function() {
+    sources <- lapply(tile_sources, function(source) {
+      objective_power <- suppressWarnings(as.numeric(
+        source$objective_power %||% source$objective %||% source$magnification %||%
+          source$metadata$objective_power %||% source$slide$objective_power %||% NA_real_
+      ))
+      list(
+        id = as.character(source$id %||% ""),
+        width = as.numeric(source$width %||% source$slide$dimensions[["width"]] %||% NA_real_),
+        height = as.numeric(source$height %||% source$slide$dimensions[["height"]] %||% NA_real_),
+        tile_size = as.integer(source$tile_size %||% 512L),
+        tile_overlap = as.integer(source$tile_overlap %||% 0L),
+        tile_format = as.character(source$tile_format %||% "jpg"),
+        min_level = as.integer(source$min_level %||% 0L),
+        max_level = as.integer(source$max_level %||% 0L),
+        label = as.character(source$name %||% source$label %||% source$id %||% "slide"),
+        mpp = wsi_viewer_mpp_payload(
+          source$mpp %||% source$pixel_size %||% source$metadata$mpp %||%
+            source$metadata$pixel_size %||% source$slide$mpp %||% NULL
+        ),
+        objective_power = if (is.finite(objective_power) && objective_power > 0) objective_power else NULL
+      )
+    })
+    sources <- sources[vapply(sources, function(source) {
+      nzchar(source$id) && is.finite(source$width) && is.finite(source$height) &&
+        source$width > 0 && source$height > 0
+    }, logical(1))]
+    dense_sources <- dense_geojson_sources()
+    dense_sources <- lapply(dense_sources, function(source) {
+      list(
+        id = as.character(source$id %||% ""),
+        name = as.character(source$name %||% "Dense annotation"),
+        source_type = as.character(source$source_type %||% source$kind %||% "annotation"),
+        visible = isTRUE(source$visible %||% TRUE),
+        min_zoom = suppressWarnings(as.numeric(source$min_zoom %||% 0)),
+        colour = as.character(source$colour %||% "#F97316")
+      )
+    })
+    dense_sources <- dense_sources[vapply(dense_sources, function(source) nzchar(source$id), logical(1))]
+    # Native WGPU rendering uses the existing authenticated/session-scoped tile
+    # route. Only advertise channel sources backed by that route: arbitrary
+    # file:// channels remain browser-only rather than making the native client
+    # guess how a local static pyramid should be opened.
+    dynamic_ids <- vapply(tile_sources, function(source) {
+      as.character(source$id %||% "")
+    }, character(1))
+    channel_sources <- state$channel_sources %||% list()
+    channel_sources <- lapply(channel_sources, function(source) {
+      metadata <- source$metadata %||% list()
+      target_fields <- c(
+        "target_id", "target_project_id", "target_project_item_id",
+        "target_project_image_id", "target_item_id", "target_path",
+        "target_source_path", "target_tile_source_id", "base_id", "base_path",
+        "base_slide_path", "slide_path", "project_item_id", "project_image_id", "item_id",
+        "tile_source_id"
+      )
+      target_ids <- unlist(c(source[target_fields], metadata[target_fields]), use.names = FALSE)
+      target_ids <- unique(as.character(target_ids[!is.na(target_ids) & nzchar(as.character(target_ids))]))
+      list(
+        id = as.character(source$id %||% ""),
+        width = suppressWarnings(as.numeric(source$width %||% NA_real_)),
+        height = suppressWarnings(as.numeric(source$height %||% NA_real_)),
+        tile_size = as.integer(source$tile_size %||% 512L),
+        tile_overlap = as.integer(source$tile_overlap %||% 0L),
+        tile_format = as.character(source$tile_format %||% "png"),
+        min_level = as.integer(source$min_level %||% 0L),
+        max_level = suppressWarnings(as.integer(source$max_level %||% NA_integer_)),
+        label = as.character(source$name %||% source$id %||% "channel"),
+        source_type = as.character(source$type %||% "dynamic"),
+        visible = isTRUE(source$visible %||% TRUE),
+        opacity = suppressWarnings(as.numeric(source$opacity %||% 1)),
+        colour = as.character(source$colour %||% source$color %||% "#ffffff"),
+        gain = suppressWarnings(as.numeric(source$gain %||% source$strength %||% 1)),
+        contrast_min = suppressWarnings(as.numeric(source$contrast_min %||% 0)),
+        contrast_max = suppressWarnings(as.numeric(source$contrast_max %||% 1)),
+        target_ids = target_ids
+      )
+    })
+    channel_sources <- channel_sources[vapply(channel_sources, function(source) {
+      nzchar(source$id) && source$id %in% dynamic_ids &&
+        is.finite(source$width) && is.finite(source$height) &&
+        source$width > 0 && source$height > 0 &&
+        is.finite(source$max_level) && source$max_level >= source$min_level
+    }, logical(1))]
+    list(
+      protocol = "wsiTools-native-renderer/v1",
+      tile_route = tile_path,
+      state_route = path,
+	      state_snapshot_route = native_state_path,
+      dense_geojson_route = dense_geojson_path,
+      native_points_route = native_points_path,
+      spatial_gene_route = seurat_gene_path,
+      prediction_route = prediction_path,
+      prediction_enabled = wsi_prediction_context_enabled(
+        prediction_context %||% list(spatial = seurat)
+      ),
+      prediction = {
+        prediction_context_native <- prediction_context %||% list(spatial = seurat)
+        spatial_native <- prediction_context_native$spatial %||% prediction_context_native$seurat %||% NULL
+        cells_native <- prediction_context_native$cellphenotyper_project %||% prediction_context_native$cellphenotyper %||% NULL
+        wsi_prediction_config(
+          seurat = if (inherits(spatial_native, "wsi_seurat_spatial") || inherits(spatial_native, "wsi_spatial_object")) wsi_viewer_seurat_config(spatial_native) else list(enabled = FALSE),
+          cellphenotyper = if (inherits(cells_native, "wsi_cellphenotyper_project")) wsi_viewer_cellphenotyper_config(cells_native) else list(enabled = FALSE)
+        )
+      },
+      # Keep analytical requests on the same local, validated R bridge used
+      # by the browser viewer.  The native client never receives an R console.
+      proximity_route = proximity_path,
+      image_export_route = image_export_path,
+      proximity_enabled = wsi_prediction_context_enabled(
+        proximity_context %||% prediction_context %||% list(spatial = seurat)
+      ),
+      segmentation_run_url = as.character(state$native_segmentation_run_url %||% ""),
+      spatial_clusters = if (inherits(seurat, "wsi_seurat_spatial") || inherits(seurat, "wsi_spatial_object")) {
+        seurat$clusters %||% wsi_spatial_cluster_config(seurat$cluster_values %||% data.frame())
+      } else list(enabled = FALSE, fields = list(), default_field = NULL),
+      # Reduction plots are sampled by wsi_viewer_seurat_config(). The native
+      # renderer receives IDs and two-dimensional coordinates only; expression
+      # matrices and full spatial objects remain in the R session.
+      spatial = if (inherits(seurat, "wsi_seurat_spatial") || inherits(seurat, "wsi_spatial_object")) {
+        wsi_viewer_seurat_config(seurat)
+      } else list(enabled = FALSE, plots = list(), spot_count = 0L),
+      cellphenotyper = if (inherits(cellphenotyper, "wsi_cellphenotyper_project") || is.list(cellphenotyper)) {
+        wsi_viewer_cellphenotyper_config(cellphenotyper)
+      } else list(enabled = FALSE),
+	      source_count = length(sources),
+	      sources = sources,
+	      dense_sources = dense_sources,
+	      point_sources = native_point_sources(),
+	      channel_sources = channel_sources,
+      capabilities = list(
+        tiles = TRUE,
+        full_resolution_level = TRUE,
+        project_state = TRUE,
+        typed_events = TRUE,
+        native_controls = c(
+          "navigation", "roi_selection", "polygon_draft", "dense_overlays",
+          "annotation_fills", "native_panels", "dynamic_channel_layers", "viewport_points",
+          "measurements", "gpu_stain_display", "selected_roi_segmentation",
+          "proximity_analysis", "pls_lda_prediction", "annotation_association",
+          "spatial_registration_global"
+        )
+      )
+    )
+  }
+
+  # A read-only snapshot for the native renderer. It intentionally excludes
+  # dense segmentation/cell geometry: those are fetched per viewport through
+  # the existing dense GeoJSON route once the native overlay renderer requests
+  # them. This avoids turning a state refresh into a whole-slide transfer.
+  native_renderer_state <- function(source_id = NULL) {
+    source_id <- as.character(source_id %||% "")
+    source_id <- if (length(source_id)) source_id[[1L]] else ""
+    active_source_id <- as.character(state$native_active_source_id %||% "")
+    active_source_id <- if (length(active_source_id)) active_source_id[[1L]] else ""
+    snapshot <- if (nzchar(source_id) && !identical(source_id, active_source_id)) {
+      state$native_project_states[[source_id]] %||% list()
+    } else {
+      list()
+    }
+    using_snapshot <- length(snapshot) > 0L
+    rois <- if (using_snapshot) snapshot$rois else state$rois
+    rois <- rois %||% wsi_empty_roi()
+    limit <- 5000L
+    listed <- min(nrow(rois), limit)
+    visible_rois <- if (listed) rois[seq_len(listed), , drop = FALSE] else rois
+    selected <- (if (using_snapshot) snapshot$selected_roi else state$selected_roi) %||% wsi_empty_roi()
+    segmentation <- (if (using_snapshot) snapshot$segmentation else state$segmentation) %||% wsi_empty_roi()
+    segmentation_limit <- 5000L
+    segmentation_listed <- min(nrow(segmentation), segmentation_limit)
+    visible_segmentation <- if (segmentation_listed) segmentation[seq_len(segmentation_listed), , drop = FALSE] else segmentation
+    list(
+      protocol = "wsiTools-native-renderer-state/v1",
+      source_id = if (nzchar(source_id)) source_id else active_source_id,
+      event = state$last_event %||% "viewer_state",
+      revision = as.integer(state$native_renderer_revision %||% 0L),
+      annotations = wsi_viewer_rois_to_geojson(visible_rois),
+      annotations_total = nrow(rois),
+      annotations_truncated = nrow(rois) > listed,
+      selected_roi = if (nrow(selected)) wsi_viewer_rois_to_geojson(selected)$features[[1L]] else NULL,
+      segmentation = wsi_viewer_rois_to_geojson(visible_segmentation),
+      segmentation_total = nrow(segmentation),
+      segmentation_truncated = nrow(segmentation) > segmentation_listed,
+      trajectories = wsi_trajectories_to_payload((if (using_snapshot) snapshot$trajectories else state$trajectories) %||% wsi_empty_trajectories()),
+      measurements = {
+        measures <- (if (using_snapshot) snapshot$measurements else state$measurements) %||% wsi_empty_measurements()
+        if (is.data.frame(measures) && nrow(measures)) lapply(seq_len(nrow(measures)), function(i) as.list(measures[i, , drop = FALSE])) else list()
+      },
+      layers = native_layer_summaries(if (using_snapshot) snapshot$layers %||% list() else state$layers),
+      channel_settings = (if (using_snapshot) snapshot$channel_settings else state$channel_settings) %||% wsi_empty_channel_settings(),
+      stain = (if (using_snapshot) snapshot$stain else state$stain) %||% list(),
+      dense_sources = lapply(Filter(function(source) {
+        target <- as.character(source$target_source_id %||% "")
+        !length(target) || !nzchar(target[[1L]]) || identical(target[[1L]], if (nzchar(source_id)) source_id else active_source_id)
+      }, dense_geojson_sources()), function(source) list(
+        id = as.character(source$id %||% ""),
+        name = as.character(source$name %||% "Dense annotation"),
+        source_type = as.character(source$source_type %||% source$kind %||% "annotation"),
+        visible = isTRUE(source$visible %||% TRUE),
+        min_zoom = suppressWarnings(as.numeric(source$min_zoom %||% 0)),
+        colour = as.character(source$colour %||% "#F97316")
+      )),
+      project = state$project %||% list(),
+      view = state$view %||% list()
+    )
   }
 
   dense_geojson_sources <- function() {
@@ -5185,6 +6424,22 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	      if (identical(request_path, proximity_path)) {
 	        return(proximity_response(req))
 	      }
+	      if (identical(request_path, native_renderer_path)) {
+	        if (!identical(method, "GET")) {
+	          return(wsi_http_json_response(status = 405L, body = list(error = "Use GET for native renderer metadata.")))
+	        }
+	        return(wsi_http_json_response(body = native_renderer_manifest()))
+	      }
+      if (identical(request_path, native_state_path)) {
+	        if (!identical(method, "GET")) {
+	          return(wsi_http_json_response(status = 405L, body = list(error = "Use GET for native renderer state.")))
+	        }
+        query <- wsi_http_query_params(req$QUERY_STRING %||% "")
+        return(wsi_http_json_response(body = native_renderer_state(query$source_id %||% NULL)))
+	      }
+	      if (identical(request_path, native_points_path)) {
+	        return(native_points_response(req))
+	      }
       tile_request <- wsi_dynamic_tile_parse(request_path, route = tile_path)
       if (!is.null(tile_request)) {
         if (!identical(method, "GET")) {
@@ -5282,6 +6537,9 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	        dense_geojson_path = dense_geojson_path,
 	        prediction_path = prediction_path,
 	        proximity_path = proximity_path,
+	        native_renderer_path = native_renderer_path,
+	        native_state_path = native_state_path,
+	        native_points_path = native_points_path,
 	        seurat_gene_url = if (wsi_seurat_live_gene_available(seurat) ||
             wsi_prediction_context_enabled(proximity_context %||% prediction_context %||% list(spatial = seurat))) {
             sprintf("http://%s:%d%s", host, candidate, seurat_gene_path)
@@ -5295,6 +6553,9 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	        dense_geojson_url = sprintf("http://%s:%d%s", host, candidate, dense_geojson_path),
 	        prediction_url = if (wsi_prediction_context_enabled(prediction_context %||% list(spatial = seurat))) sprintf("http://%s:%d%s", host, candidate, prediction_path) else NULL,
 	        proximity_url = if (wsi_prediction_context_enabled(proximity_context %||% prediction_context %||% list(spatial = seurat))) sprintf("http://%s:%d%s", host, candidate, proximity_path) else NULL,
+	        native_renderer_url = sprintf("http://%s:%d%s", host, candidate, native_renderer_path),
+	        native_state_url = sprintf("http://%s:%d%s", host, candidate, native_state_path),
+	        native_points_url = sprintf("http://%s:%d%s", host, candidate, native_points_path),
 	        tile_sources = tile_sources
 	      ))
     }
@@ -5682,6 +6943,8 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   if (is.null(live_prediction_context$spatial) && !is.null(live_seurat)) {
     live_prediction_context$spatial <- live_seurat
   }
+	  live_cellphenotyper <- dots$cellphenotyper %||% dots$cellphenotyper_project %||%
+	    live_prediction_context$cellphenotyper_project %||% live_prediction_context$cellphenotyper %||% NULL
   live_proximity_context <- proximity_context %||% live_prediction_context
   if (is.null(live_proximity_context$spatial) && !is.null(live_seurat)) {
     live_proximity_context$spatial <- live_seurat
@@ -5759,6 +7022,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
 	    tile_sources = all_dynamic_sources,
 	    tile_path = dynamic_tile_path,
 	    seurat = live_seurat,
+	    cellphenotyper = live_cellphenotyper,
 	    seurat_gene_path = seurat_gene_path,
 	    spatial_tile_path = spatial_tile_path,
 	    spatial_object_save_path = spatial_object_save_path,
@@ -5865,6 +7129,10 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
     dots$segmentation_run_url <- stardist_bridge$url
     dots$segmentation_engines <- segmentation_engines
     dots$segmentation_default_engine <- segmentation_default_engine
+    # The native WGPU manifest is served from the same R session. Store the
+    # selected-ROI endpoint in state so the native Cells menu can request only
+    # the three allowlisted engines without accepting arbitrary commands.
+    state$native_segmentation_run_url <- stardist_bridge$url
   }
   dots$viewer_state_url <- bridge$url
   dots$viewer_state_ws_url <- if (identical(transport, "polling")) NULL else bridge$ws_url
@@ -6038,6 +7306,8 @@ wsi_viewer_state <- function(x) {
     job_details = state$jobs %||% list(),
     events = state$events,
     pending_commands = state$commands %||% list(),
+    native_active_source_id = state$native_active_source_id %||% NULL,
+    native_project_states = state$native_project_states %||% list(),
     last_event = state$last_event,
     last_payload = state$last_payload,
     last_sync = state$last_sync

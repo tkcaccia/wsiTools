@@ -53,4 +53,4 @@ SystemRequirements: None required for installation. Optional runtime tools:
     local web services for interactive workflows.
 Config/testthat/edition: 3
 VignetteBuilder: knitr
-Config/roxygen2/version: 8.0.0
+Config/roxygen2/version: 8.1.0

@@ -18,6 +18,7 @@ tools/wsiToolsDesktop/dist/
 tools/wsiToolsDesktop/src-tauri/target/
 tools/wsiToolsDesktop/src-tauri/gen/
 tools/wsiToolsDesktop/src-tauri/Cargo.lock
+tools/wasm-overlay-core/target/
 release-artifacts/
 tmp/
 tmp_dress_check/

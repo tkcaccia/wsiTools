@@ -13,17 +13,27 @@ use std::{
 use tauri::{path::BaseDirectory, AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
+#[cfg(feature = "native-wgpu")]
+mod native_renderer;
+
 const VIEWER_WINDOW_LABEL: &str = "viewer-main";
 
 #[derive(Default)]
 struct RViewerState {
     child: Mutex<Option<Child>>,
+    native_child: Mutex<Option<Child>>,
     logs: Arc<Mutex<Vec<String>>>,
 }
 
 impl Drop for RViewerState {
     fn drop(&mut self) {
         if let Ok(mut guard) = self.child.lock() {
+            if let Some(mut child) = guard.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+        if let Ok(mut guard) = self.native_child.lock() {
             if let Some(mut child) = guard.take() {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -39,6 +49,7 @@ struct ViewerLaunch {
     sync_url: String,
     log_file: String,
     r_pid: u32,
+    viewer_engine: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -100,6 +111,55 @@ struct SavePathSelection {
     overwrite_confirmed: bool,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeRendererStatus {
+    available: bool,
+    backend: String,
+    adapter: String,
+    device_type: String,
+    message: String,
+}
+
+#[tauri::command]
+fn native_renderer_diagnostics() -> NativeRendererStatus {
+    #[cfg(feature = "native-wgpu")]
+    {
+        return match native_renderer::probe_wgpu() {
+            Ok(status) => NativeRendererStatus {
+                available: status.available,
+                backend: status.backend,
+                adapter: status.adapter,
+                device_type: status.device_type,
+                message: status.message,
+            },
+            Err(error) => NativeRendererStatus {
+                // A surface-less adapter probe can fail on macOS before winit
+                // creates the native window. The child renderer performs the
+                // authoritative surface-compatible probe at launch and reports
+                // its result through the startup status handshake.
+                available: true,
+                backend: "launch-probe-deferred".to_string(),
+                adapter: String::new(),
+                device_type: String::new(),
+                message: format!(
+                    "Native WGPU is compiled; adapter verification is deferred until its window opens ({error})"
+                ),
+            },
+        };
+    }
+    #[cfg(not(feature = "native-wgpu"))]
+    {
+        NativeRendererStatus {
+            available: false,
+            backend: "not-built".to_string(),
+            adapter: String::new(),
+            device_type: String::new(),
+            message: "This desktop build does not include the optional native WGPU renderer. Rebuild wsiTools Desktop with `--features native-wgpu`.".to_string(),
+        }
+    }
+}
+
 fn confirm_file_replacement(app: &AppHandle, window: &tauri::WebviewWindow, path: &Path) -> bool {
     if !path.exists() {
         return true;
@@ -143,6 +203,77 @@ fn stop_existing_child(state: &RViewerState) {
     if let Some(mut child) = state.child.lock().unwrap().take() {
         let _ = child.kill();
         let _ = child.wait();
+    }
+}
+
+fn stop_existing_native_child(state: &RViewerState) {
+    if let Some(mut child) = state.native_child.lock().unwrap().take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
+#[cfg(feature = "native-wgpu")]
+fn native_startup_status(path: &Path) -> Option<(String, String)> {
+    let value = fs::read(path).ok()?;
+    let value = serde_json::from_slice::<serde_json::Value>(&value).ok()?;
+    let state = value.get("state")?.as_str()?.trim().to_string();
+    let message = value
+        .get("message")
+        .and_then(|item| item.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    Some((state, message))
+}
+
+#[cfg(feature = "native-wgpu")]
+fn native_startup_status_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let directory = session_dir(app)?;
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    Ok(directory.join(format!("native-wgpu-startup-{stamp}.json")))
+}
+
+#[cfg(feature = "native-wgpu")]
+fn wait_for_native_startup(
+    child: &mut Child,
+    status_path: &Path,
+    logs: &Arc<Mutex<Vec<String>>>,
+) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("Could not inspect native WGPU viewer process: {error}"))?
+        {
+            let detail = native_startup_status(status_path)
+                .map(|(_, message)| message)
+                .filter(|message| !message.is_empty())
+                .unwrap_or_else(|| format!("The native process exited with status {status}."));
+            return Err(format!("Native Rust/WGPU viewer failed during startup: {detail}"));
+        }
+        if let Some((state, message)) = native_startup_status(status_path) {
+            if state == "ready" {
+                push_log(logs, format!("Native Rust/WGPU startup ready: {message}"));
+                return Ok(());
+            }
+            if state == "error" {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("Native Rust/WGPU viewer failed during startup: {message}"));
+            }
+        }
+        if Instant::now() >= deadline {
+            push_log(
+                logs,
+                "Native Rust/WGPU process is still starting; it remains connected to the live R session.",
+            );
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(40));
     }
 }
 
@@ -338,6 +469,33 @@ fn augmented_path_env() -> String {
         .unwrap_or_else(|_| env::var("PATH").unwrap_or_default())
 }
 
+fn viewer_renderer_env() -> String {
+    match env::var("WSITOOLS_VIEWER_RENDERER")
+        .unwrap_or_else(|_| "auto".to_string())
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "gpu" => "gpu".to_string(),
+        "cpu" => "cpu".to_string(),
+        _ => "auto".to_string(),
+    }
+}
+
+fn viewer_tile_compositor_env(selected_engine: &str) -> String {
+    let _ = selected_engine;
+    // The browser viewer owns the complete UI. It may use WebGPU when available,
+    // and remains fully functional through the OpenSeadragon fallback otherwise.
+    "auto".to_string()
+}
+
+fn viewer_engine(value: &str) -> String {
+    let _ = value;
+    // Desktop has one supported viewer path. The browser preserves the full
+    // application UI and falls back to OpenSeadragon when WebGPU is absent.
+    "browser".to_string()
+}
+
 fn path_candidates_from_env() -> Vec<String> {
     let mut out = Vec::new();
     let path_value = augmented_path_env();
@@ -523,6 +681,7 @@ fn stop_r_viewer(app: AppHandle, state: State<'_, Arc<RViewerState>>) -> Result<
         remove_pid_file(&dir);
     }
     stop_existing_child(&state);
+    stop_existing_native_child(&state);
     if let Some(window) = app.get_webview_window(VIEWER_WINDOW_LABEL) {
         let _ = window.close();
     }
@@ -662,11 +821,28 @@ fn recent_log_tail(logs: &Arc<Mutex<Vec<String>>>) -> String {
     tail.join("\n")
 }
 
-fn wait_for_viewer_url(rx: &mpsc::Receiver<()>, state: &Arc<RViewerState>) -> Result<(), String> {
+fn viewer_launch_ready(launch: &ViewerLaunch, require_live_sync_url: bool) -> bool {
+    !launch.viewer_url.is_empty() && (!require_live_sync_url || !launch.sync_url.is_empty())
+}
+
+fn wait_for_viewer_url(
+    rx: &mpsc::Receiver<()>,
+    launch: &Arc<Mutex<ViewerLaunch>>,
+    state: &Arc<RViewerState>,
+    require_live_sync_url: bool,
+) -> Result<(), String> {
     let start = Instant::now();
     loop {
         match rx.recv_timeout(Duration::from_millis(250)) {
-            Ok(()) => return Ok(()),
+            Ok(()) => {
+                let ready = {
+                    let launch = launch.lock().unwrap();
+                    viewer_launch_ready(&launch, require_live_sync_url)
+                };
+                if ready {
+                    return Ok(());
+                }
+            }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 let status = {
                     let mut guard = state.child.lock().unwrap();
@@ -685,7 +861,12 @@ fn wait_for_viewer_url(rx: &mpsc::Receiver<()>, state: &Arc<RViewerState>) -> Re
                 if let Some(status) = status {
                     let tail = recent_log_tail(&state.logs);
                     return Err(format!(
-                        "R exited before returning a viewer URL (status: {status}).{}{}",
+                        "R exited before returning the {} (status: {status}).{}{}",
+                        if require_live_sync_url {
+                            "live synchronization URL required by the Native Rust/WGPU viewer"
+                        } else {
+                            "viewer URL"
+                        },
                         if tail.is_empty() {
                             ""
                         } else {
@@ -697,7 +878,11 @@ fn wait_for_viewer_url(rx: &mpsc::Receiver<()>, state: &Arc<RViewerState>) -> Re
                 if start.elapsed() > Duration::from_secs(180) {
                     stop_existing_child(state);
                     return Err(
-                        "Timed out waiting for R to start the live viewer. Open the log panel for details."
+                        if require_live_sync_url {
+                            "Timed out waiting for R to return the live synchronization URL required by the Native Rust/WGPU viewer. Open the log panel for details."
+                        } else {
+                            "Timed out waiting for R to start the live viewer. Open the log panel for details."
+                        }
                             .to_string(),
                     );
                 }
@@ -705,7 +890,12 @@ fn wait_for_viewer_url(rx: &mpsc::Receiver<()>, state: &Arc<RViewerState>) -> Re
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 let tail = recent_log_tail(&state.logs);
                 return Err(format!(
-                    "R viewer output stream closed before a viewer URL was returned.{}{}",
+                    "R viewer output stream closed before the {} was returned.{}{}",
+                    if require_live_sync_url {
+                        "live synchronization URL required by the Native Rust/WGPU viewer"
+                    } else {
+                        "viewer URL"
+                    },
                     if tail.is_empty() {
                         ""
                     } else {
@@ -957,6 +1147,7 @@ fn launch_r_new_project_target(
     app: AppHandle,
     state: Arc<RViewerState>,
     project_items: Vec<NewProjectItem>,
+    selected_engine: String,
 ) -> Result<ViewerLaunch, String> {
     if project_items.is_empty() {
         return Err("Select at least one image before running R.".to_string());
@@ -990,6 +1181,15 @@ fn launch_r_new_project_target(
         &state.logs,
         format!("Backend PATH for R: {}", augmented_path_env()),
     );
+    let renderer = viewer_renderer_env();
+    let selected_engine = viewer_engine(&selected_engine);
+    let tile_compositor = viewer_tile_compositor_env(&selected_engine);
+    push_log(
+        &state.logs,
+        format!("Desktop viewer engine: {selected_engine}"),
+    );
+    push_log(&state.logs, format!("Viewer renderer: {renderer}"));
+    push_log(&state.logs, format!("Tile compositor: {tile_compositor}"));
     push_log(&state.logs, "Mode: new-project");
     for (index, item) in items.iter().enumerate() {
         push_log(
@@ -1080,6 +1280,7 @@ fn launch_r_new_project_target(
     push_log(&state.logs, "  project_images$image,");
     push_log(&state.logs, "  live = \"yes\",");
     push_log(&state.logs, "  tiled = \"yes\",");
+    push_log(&state.logs, format!("  renderer = \"{renderer}\","));
     push_log(
         &state.logs,
         "  dynamic_tiles = \"auto\"  # dynamic on first open; prebuilt when cache exists,",
@@ -1117,6 +1318,8 @@ fn launch_r_new_project_target(
     let mut child = Command::new(&rscript)
         .args(args)
         .env("PATH", augmented_path_env())
+        .env("WSITOOLS_VIEWER_RENDERER", &renderer)
+        .env("WSITOOLS_TILE_COMPOSITOR", &tile_compositor)
         .env("WSITOOLS_DESKTOP_SESSION_DIR", &session_dir)
         .env("WSITOOLS_DESKTOP_SOURCE_DIR", env!("CARGO_MANIFEST_DIR"))
         .stdout(Stdio::piped())
@@ -1132,6 +1335,7 @@ fn launch_r_new_project_target(
 
     let launch = Arc::new(Mutex::new(ViewerLaunch {
         r_pid: pid,
+        viewer_engine: selected_engine.clone(),
         ..ViewerLaunch::default()
     }));
     let (tx, rx) = mpsc::channel::<()>();
@@ -1153,6 +1357,7 @@ fn launch_r_new_project_target(
                     launch_state.lock().unwrap().html_file = value.trim().to_string();
                 } else if let Some(value) = line.strip_prefix("WSITOOLS_SYNC_URL=") {
                     launch_state.lock().unwrap().sync_url = value.trim().to_string();
+                    let _ = tx.send(());
                 } else if let Some(value) = line.strip_prefix("WSITOOLS_LOG_FILE=") {
                     launch_state.lock().unwrap().log_file = value.trim().to_string();
                 } else if let Some(value) = line.strip_prefix("WSITOOLS_STAGE=") {
@@ -1173,14 +1378,20 @@ fn launch_r_new_project_target(
         });
     }
 
-    wait_for_viewer_url(&rx, &state)?;
+    let require_live_sync_url = selected_engine == "native";
+    wait_for_viewer_url(&rx, &launch, &state, require_live_sync_url)?;
 
     let result = launch.lock().unwrap().clone();
     if result.viewer_url.is_empty() {
         stop_existing_child(&state);
         return Err("R started but did not return a viewer URL.".to_string());
     }
-    wait_for_viewer_http_ready(&result.viewer_url, &state.logs)?;
+    let ready_url = if require_live_sync_url {
+        &result.sync_url
+    } else {
+        &result.viewer_url
+    };
+    wait_for_viewer_http_ready(ready_url, &state.logs)?;
     Ok(result)
 }
 
@@ -1189,6 +1400,7 @@ fn launch_r_target(
     state: Arc<RViewerState>,
     target_path: String,
     target_mode: &str,
+    selected_engine: String,
 ) -> Result<ViewerLaunch, String> {
     let mode = match target_mode {
         "project" => "project",
@@ -1233,6 +1445,15 @@ fn launch_r_target(
         &state.logs,
         format!("Backend PATH for R: {}", augmented_path_env()),
     );
+    let renderer = viewer_renderer_env();
+    let selected_engine = viewer_engine(&selected_engine);
+    let tile_compositor = viewer_tile_compositor_env(&selected_engine);
+    push_log(
+        &state.logs,
+        format!("Desktop viewer engine: {selected_engine}"),
+    );
+    push_log(&state.logs, format!("Viewer renderer: {renderer}"));
+    push_log(&state.logs, format!("Tile compositor: {tile_compositor}"));
     push_log(&state.logs, format!("Mode: {mode}"));
     push_log(&state.logs, format!("Target: {}", target.display()));
     push_log(&state.logs, "R code sent to R:");
@@ -1256,6 +1477,7 @@ fn launch_r_target(
     }
     push_log(&state.logs, "  live = \"yes\",");
     push_log(&state.logs, "  tiled = \"yes\",");
+    push_log(&state.logs, format!("  renderer = \"{renderer}\","));
     push_log(&state.logs, "  dynamic_tiles = FALSE,");
     push_log(&state.logs, "  open = FALSE,");
     push_log(&state.logs, "  wait = FALSE");
@@ -1273,6 +1495,8 @@ fn launch_r_target(
         .arg(mode)
         .arg(target)
         .env("PATH", augmented_path_env())
+        .env("WSITOOLS_VIEWER_RENDERER", &renderer)
+        .env("WSITOOLS_TILE_COMPOSITOR", &tile_compositor)
         .env("WSITOOLS_DESKTOP_SESSION_DIR", &session_dir)
         .env("WSITOOLS_DESKTOP_SOURCE_DIR", env!("CARGO_MANIFEST_DIR"))
         .stdout(Stdio::piped())
@@ -1288,6 +1512,7 @@ fn launch_r_target(
 
     let launch = Arc::new(Mutex::new(ViewerLaunch {
         r_pid: pid,
+        viewer_engine: selected_engine.clone(),
         ..ViewerLaunch::default()
     }));
     let (tx, rx) = mpsc::channel::<()>();
@@ -1309,6 +1534,7 @@ fn launch_r_target(
                     launch_state.lock().unwrap().html_file = value.trim().to_string();
                 } else if let Some(value) = line.strip_prefix("WSITOOLS_SYNC_URL=") {
                     launch_state.lock().unwrap().sync_url = value.trim().to_string();
+                    let _ = tx.send(());
                 } else if let Some(value) = line.strip_prefix("WSITOOLS_LOG_FILE=") {
                     launch_state.lock().unwrap().log_file = value.trim().to_string();
                 } else if let Some(value) = line.strip_prefix("WSITOOLS_STAGE=") {
@@ -1329,14 +1555,20 @@ fn launch_r_target(
         });
     }
 
-    wait_for_viewer_url(&rx, &state)?;
+    let require_live_sync_url = selected_engine == "native";
+    wait_for_viewer_url(&rx, &launch, &state, require_live_sync_url)?;
 
     let result = launch.lock().unwrap().clone();
     if result.viewer_url.is_empty() {
         stop_existing_child(&state);
         return Err("R started but did not return a viewer URL.".to_string());
     }
-    wait_for_viewer_http_ready(&result.viewer_url, &state.logs)?;
+    let ready_url = if require_live_sync_url {
+        &result.sync_url
+    } else {
+        &result.viewer_url
+    };
+    wait_for_viewer_http_ready(ready_url, &state.logs)?;
     Ok(result)
 }
 
@@ -1345,11 +1577,14 @@ async fn start_r_viewer(
     app: AppHandle,
     state: State<'_, Arc<RViewerState>>,
     file_path: String,
+    viewer_engine: String,
 ) -> Result<ViewerLaunch, String> {
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || launch_r_target(app, state, file_path, "image"))
-        .await
-        .map_err(|err| format!("R launcher task failed: {err}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        launch_r_target(app, state, file_path, "image", viewer_engine)
+    })
+    .await
+    .map_err(|err| format!("R launcher task failed: {err}"))?
 }
 
 #[tauri::command]
@@ -1357,10 +1592,11 @@ async fn start_r_project(
     app: AppHandle,
     state: State<'_, Arc<RViewerState>>,
     project_path: String,
+    viewer_engine: String,
 ) -> Result<ViewerLaunch, String> {
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        launch_r_target(app, state, project_path, "project")
+        launch_r_target(app, state, project_path, "project", viewer_engine)
     })
     .await
     .map_err(|err| format!("R launcher task failed: {err}"))?
@@ -1371,10 +1607,11 @@ async fn start_r_new_project(
     app: AppHandle,
     state: State<'_, Arc<RViewerState>>,
     project_items: Vec<NewProjectItem>,
+    viewer_engine: String,
 ) -> Result<ViewerLaunch, String> {
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        launch_r_new_project_target(app, state, project_items)
+        launch_r_new_project_target(app, state, project_items, viewer_engine)
     })
     .await
     .map_err(|err| format!("R launcher task failed: {err}"))?
@@ -1447,7 +1684,63 @@ fn open_viewer_window(app: AppHandle, url: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn open_native_viewer(
+    app: AppHandle,
+    url: String,
+    state: State<'_, Arc<RViewerState>>,
+) -> Result<(), String> {
+    #[cfg(feature = "native-wgpu")]
+    {
+        let executable = env::current_exe()
+            .map_err(|error| format!("Could not locate wsiTools Desktop executable: {error}"))?;
+        stop_existing_native_child(&state);
+        let status_path = native_startup_status_path(&app)?;
+        let _ = fs::remove_file(&status_path);
+        let mut child = Command::new(executable)
+            .arg("--native-viewer-url")
+            .arg(url)
+            .arg("--native-viewer-status")
+            .arg(&status_path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| format!("Could not start native WGPU viewer: {error}"))?;
+        if let Some(stderr) = child.stderr.take() {
+            let logs = state.logs.clone();
+            thread::spawn(move || {
+                let reader = BufReader::new(stderr);
+                for line in reader.lines().map_while(Result::ok) {
+                    push_log(&logs, format!("[Native WGPU] {line}"));
+                }
+            });
+        }
+        wait_for_native_startup(&mut child, &status_path, &state.logs)?;
+        *state.native_child.lock().unwrap() = Some(child);
+        return Ok(());
+    }
+    #[cfg(not(feature = "native-wgpu"))]
+    Err("This desktop build does not include WGPU support.".to_string())
+}
+
 fn main() {
+    #[cfg(feature = "native-wgpu")]
+    if let Some(viewer_url) = std::env::args()
+        .skip(1)
+        .collect::<Vec<_>>()
+        .windows(2)
+        .find_map(|args| (args[0] == "--native-viewer-url").then(|| args[1].clone()))
+    {
+        let native_args = std::env::args().skip(1).collect::<Vec<_>>();
+        let startup_status = native_args
+            .windows(2)
+            .find_map(|args| (args[0] == "--native-viewer-status").then(|| PathBuf::from(&args[1])));
+        if let Err(error) = native_renderer::run_native_viewer(viewer_url, startup_status) {
+            eprintln!("wsiTools native WGPU viewer failed: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Arc::new(RViewerState::default()))
@@ -1458,8 +1751,10 @@ fn main() {
             start_r_project,
             start_r_new_project,
             inspect_spatial_object,
+            native_renderer_diagnostics,
             open_viewer_loading_window,
             open_viewer_window,
+            open_native_viewer,
             close_viewer_window,
             stop_r_viewer,
             viewer_logs,
@@ -1469,4 +1764,25 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running wsiTools Desktop");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_launch_waits_for_the_live_sync_url() {
+        let browser_only = ViewerLaunch {
+            viewer_url: "file:///tmp/wsi-viewer.html".to_string(),
+            ..ViewerLaunch::default()
+        };
+        assert!(viewer_launch_ready(&browser_only, false));
+        assert!(!viewer_launch_ready(&browser_only, true));
+
+        let native_ready = ViewerLaunch {
+            sync_url: "http://127.0.0.1:8788/viewer-state".to_string(),
+            ..browser_only
+        };
+        assert!(viewer_launch_ready(&native_ready, true));
+    }
 }

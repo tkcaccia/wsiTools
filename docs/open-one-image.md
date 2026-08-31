@@ -20,6 +20,19 @@ library(wsiTools)
 viewer <- wsi_open_viewer("/path/to/image.svs")
 ```
 
+Renderer selection is identical for direct R and Tauri launches:
+
+```r
+viewer <- wsi_open_viewer(
+  "/path/to/image.svs",
+  renderer = "auto" # WebGL/WebGL2, with Canvas fallback
+)
+```
+
+Use `renderer = "gpu"` to require WebGL or `renderer = "cpu"` to force the
+Canvas fallback. Tiled close zoom always retains access to the source maximum
+pyramid level (level-0/full-resolution pixels).
+
 If live mode is available, this returns a `wsi_viewer_session`. If live mode is
 not available, it returns the static HTML viewer path.
 

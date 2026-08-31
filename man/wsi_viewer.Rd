@@ -27,6 +27,8 @@ wsi_viewer(
   tile_prefetch_cache_count = 512L,
   tile_image_loader_limit = 0L,
   tile_timeout_ms = 30000L,
+  renderer = c("auto", "gpu", "cpu"),
+  tile_max_per_frame = 16L,
   progressive_preview = TRUE,
   tile_url_style = c("deepzoom", "slash"),
   max_level = NULL,
@@ -126,6 +128,15 @@ prefetch tile images kept by wsiTools.}
 tile image loads. Use \code{0} to let OpenSeadragon choose its default.}
 
 \item{tile_timeout_ms}{Timeout in milliseconds for browser tile image loads.}
+
+\item{renderer}{Base-image tile renderer. \code{"auto"} tries the OpenSeadragon
+WebGL/WebGL2 drawer and falls back to Canvas, \code{"gpu"} requires WebGL, and
+\code{"cpu"} forces Canvas. The default can also be set with the
+\code{WSITOOLS_VIEWER_RENDERER} environment variable, which is inherited by the
+Tauri desktop launcher.}
+
+\item{tile_max_per_frame}{Maximum number of newly available tiles composed in
+one animation frame. Multi-view mode divides this budget between panes.}
 
 \item{progressive_preview}{Whether tiled viewers should keep the
 low-resolution navigator preview behind the tile canvas while sharper

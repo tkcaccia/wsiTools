@@ -241,6 +241,15 @@ wsi_project_viewer_summary <- function(viewer) {
   if (is.null(viewer)) {
     return(NULL)
   }
+  # Native WGPU keeps editable state per project source. Capture the active
+  # source as well as previously visited sources so saving from one pane does
+  # not silently discard annotations made on another slide.
+  native_states <- viewer$native_project_states %||% list()
+  native_active_source <- as.character(viewer$native_active_source_id %||% "")
+  native_active_source <- if (length(native_active_source)) native_active_source[[1L]] else ""
+  if (nzchar(native_active_source) && exists("wsi_native_project_state_snapshot", mode = "function")) {
+    native_states[[native_active_source]] <- wsi_native_project_state_snapshot(viewer)
+  }
   list(
     view = viewer$view %||% list(),
     project = viewer$project_snapshot %||% viewer$project %||% NULL,
@@ -259,7 +268,9 @@ wsi_project_viewer_summary <- function(viewer) {
     last_segmentation = viewer$last_segmentation %||% NULL,
     last_event = viewer$last_event %||% NULL,
     last_sync = as.character(viewer$last_sync %||% NA_character_),
-    events = viewer$events %||% list()
+    events = viewer$events %||% list(),
+    native_active_source_id = native_active_source,
+    native_project_states = native_states
   )
 }
 
@@ -672,6 +683,16 @@ restore_project_state <- function(viewer, project, service = TRUE) {
   state$tile_sources <- saved$tile_sources %||% list()
   state$annotations <- saved$annotations %||% list(dirty = FALSE, dirty_reason = "project_restored")
   state$history <- wsi_annotation_history_from_payload(saved$history %||% NULL)
+  state$native_project_states <- saved$native_project_states %||% list()
+  state$native_active_source_id <- saved$native_active_source_id %||% NULL
+  active_native_source <- as.character(state$native_active_source_id %||% "")
+  active_native_source <- if (length(active_native_source)) active_native_source[[1L]] else ""
+  if (nzchar(active_native_source) && exists("wsi_native_project_state_restore", mode = "function")) {
+    wsi_native_project_state_restore(
+      state,
+      state$native_project_states[[active_native_source]] %||% NULL
+    )
+  }
   state$last_segmentation <- saved$last_segmentation %||% NULL
   state$last_event <- "r_restore_project_state"
   state$last_sync <- Sys.time()

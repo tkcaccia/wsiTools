@@ -48,6 +48,55 @@ test_that("wsi_open_viewer accepts friendly flag aliases", {
   expect_equal(wsiTools:::wsi_open_viewer_flag("tiles", "tiled", yes_alias = "tiles"), "yes")
 })
 
+test_that("viewer renderer selection is shared by direct R launches", {
+  old <- Sys.getenv("WSITOOLS_VIEWER_RENDERER", unset = NA_character_)
+  on.exit({
+    if (is.na(old)) {
+      Sys.unsetenv("WSITOOLS_VIEWER_RENDERER")
+    } else {
+      Sys.setenv(WSITOOLS_VIEWER_RENDERER = old)
+    }
+  }, add = TRUE)
+
+  Sys.setenv(WSITOOLS_VIEWER_RENDERER = "cpu")
+  expect_identical(wsiTools:::wsi_viewer_renderer(), "cpu")
+  expect_identical(wsiTools:::wsi_viewer_renderer("GPU"), "gpu")
+  expect_error(wsiTools:::wsi_viewer_renderer("metal"), "auto.*gpu.*cpu")
+
+  slide <- wsiTools:::wsi_mock_slide(width = 800, height = 400, levels = c(1, 4))
+  output <- tempfile(fileext = ".html")
+  wsi_viewer(
+    slide,
+    output = output,
+    open = FALSE,
+    renderer = "gpu",
+    tile_max_per_frame = 23
+  )
+  html <- paste(readLines(output, warn = FALSE), collapse = "\n")
+  expect_match(html, '"renderer":"gpu"', fixed = TRUE)
+  expect_match(html, '"tile_max_per_frame":23', fixed = TRUE)
+})
+
+test_that("browser WebGPU tile compositor selection is validated", {
+  old <- Sys.getenv("WSITOOLS_TILE_COMPOSITOR", unset = NA_character_)
+  on.exit({
+    if (is.na(old)) {
+      Sys.unsetenv("WSITOOLS_TILE_COMPOSITOR")
+    } else {
+      Sys.setenv(WSITOOLS_TILE_COMPOSITOR = old)
+    }
+  }, add = TRUE)
+
+  Sys.setenv(WSITOOLS_TILE_COMPOSITOR = "webgpu")
+  expect_identical(wsiTools:::wsi_viewer_tile_compositor(), "webgpu")
+  expect_identical(wsiTools:::wsi_viewer_tile_compositor("AUTO"), "auto")
+  expect_error(
+    wsiTools:::wsi_viewer_tile_compositor("metal"),
+    "openseadragon.*webgpu.*auto"
+  )
+
+})
+
 test_that("wsi_open_viewer detects large files for progressive dynamic tiling", {
   tmp <- tempfile(fileext = ".svs")
   writeBin(as.raw(c(1, 2)), tmp)
@@ -142,6 +191,13 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_false(grepl("<button id=\"toolSelect\"", html, fixed = TRUE))
   expect_match(html, "toolDraw", fixed = TRUE)
   expect_match(html, "toolBrush", fixed = TRUE)
+  expect_match(html, "quickToolBar", fixed = TRUE)
+  expect_match(html, "toolWand", fixed = TRUE)
+  expect_match(html, "wandTolerance", fixed = TRUE)
+  expect_match(html, "runWandAt", fixed = TRUE)
+  expect_match(html, "wandConnectedMask", fixed = TRUE)
+  expect_match(html, "mode==='wand'", fixed = TRUE)
+  expect_match(html, "Magic wand annotation", fixed = TRUE)
   expect_match(html, "setMode('draw');closeMenuAfterToolAction", fixed = TRUE)
   expect_match(html, "setMode('brush');closeMenuAfterToolAction", fixed = TRUE)
   expect_false(grepl("<button id=\"newRoi\"", html, fixed = TRUE))
@@ -217,7 +273,7 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "brushScreenRadius", fixed = TRUE)
   expect_match(html, "syncBrushRadiusToZoom", fixed = TRUE)
   expect_match(html, "effective slide-pixel size adapts automatically with zoom", fixed = TRUE)
-  expect_match(html, "m==='brush'&&typeof setRoiPanelOpen", fixed = TRUE)
+  expect_match(html, "(m==='brush'||m==='wand')&&typeof setRoiPanelOpen", fixed = TRUE)
   pos_brush <- regexpr("annotationBrushControls", html, fixed = TRUE)[[1]]
   pos_layers <- regexpr("<div class=\"sideTitle\">Layers</div>", html, fixed = TRUE)[[1]]
   pos_rois <- regexpr("<div class=\"sideTitle\">ROIs</div>", html, fixed = TRUE)[[1]]
@@ -857,8 +913,8 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "clearOpenSeadragonTransformArtifacts", fixed = TRUE)
   expect_match(html, "setImageTransformRefreshing", fixed = TRUE)
   expect_match(html, "scheduleOpenSeadragonTransformCleanup", fixed = TRUE)
-  expect_match(html, "viewerEl.querySelectorAll('canvas')", fixed = TRUE)
-  expect_match(html, "viewerEl.querySelectorAll('.openseadragon-canvas canvas')", fixed = TRUE)
+  expect_match(html, "viewerEl.querySelectorAll('canvas,img')", fixed = TRUE)
+  expect_match(html, "function screenshotOsdInternalCanvases()", fixed = TRUE)
   expect_match(html, "osdViewer.viewport.stop", fixed = TRUE)
   expect_match(html, "osdViewer.viewport.setRotation(t.rotation,true)", fixed = TRUE)
   expect_match(html, "osdViewer.viewport.setFlip(t.flip)", fixed = TRUE)
@@ -1002,7 +1058,11 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "saveAnnotationExportBlob", fixed = TRUE)
   expect_match(html, "save_mode", fixed = TRUE)
   expect_match(html, "saveAnnotationSpotsCsv", fixed = TRUE)
+  expect_match(html, "annotationSpotExportScope", fixed = TRUE)
+  expect_match(html, "All open tissues", fixed = TRUE)
   expect_match(html, "annotationSpotAssociations", fixed = TRUE)
+  expect_match(html, "projectAnnotationSpotAssociations", fixed = TRUE)
+  expect_match(html, "wsiTools_all_tissues_annotation_spots.csv", fixed = TRUE)
   expect_match(html, "annotation_spots", fixed = TRUE)
   expect_match(html, "FeatureCollection", fixed = TRUE)
   expect_match(html, "normaliseSlidePoint", fixed = TRUE)
@@ -1085,7 +1145,7 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "updateSelectionCard", fixed = TRUE)
   expect_match(html, "selectionCellCount", fixed = TRUE)
   expect_match(html, "bindSelectionCardControls", fixed = TRUE)
-  expect_match(html, ".bar{position:fixed;left:12px;right:12px;top:12px", fixed = TRUE)
+  expect_match(html, ".bar{position:fixed;left:12px;right:12px;top:54px", fixed = TRUE)
   expect_match(html, "z-index:30", fixed = TRUE)
   expect_match(html, "#workspacePanel{position:fixed;left:12px;top:72px", fixed = TRUE)
   expect_match(html, "#roiPanel{position:relative;width:auto", fixed = TRUE)
@@ -1838,6 +1898,253 @@ test_that("live viewer sessions dispatch event callbacks", {
 
   session$off(id = created_id)
   expect_false(created_id %in% session$list_callbacks()$id)
+})
+
+test_that("partial native viewport events preserve live annotation state", {
+  state <- wsiTools:::wsi_new_viewer_state(name = "native_partial")
+  feature <- list(
+    type = "Feature",
+    id = "roi-native-1",
+    properties = list(name = "Tumour", classification = list(name = "tumour")),
+    geometry = list(
+      type = "Polygon",
+      coordinates = list(list(c(0, 0), c(10, 0), c(10, 8), c(0, 8), c(0, 0)))
+    )
+  )
+  wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "roi_created",
+    rois = list(type = "FeatureCollection", features = list(feature)),
+    selected_roi = feature,
+    selected_rois = list(type = "FeatureCollection", features = list(feature))
+  ))
+
+  expect_silent(wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "viewport_changed",
+    view = list(center_x = 30, center_y = 40, pixels_per_screen_pixel = 2)
+  )))
+  expect_equal(nrow(state$rois), 1)
+  expect_equal(state$rois$roi_id, "roi-native-1")
+  expect_equal(state$selected_roi$roi_id, "roi-native-1")
+  expect_equal(state$view$center_x, 30)
+  expect_equal(state$native_renderer_revision, 1L)
+})
+
+test_that("native WGPU ROI authoring appends without replacing browser ROIs", {
+  state <- wsiTools:::wsi_new_viewer_state(name = "native_authoring")
+  existing <- list(
+    type = "Feature", id = "browser-roi",
+    properties = list(name = "Stroma", classification = list(name = "stroma")),
+    geometry = list(type = "Polygon", coordinates = list(list(c(0, 0), c(4, 0), c(4, 4), c(0, 4), c(0, 0))))
+  )
+  native <- list(
+    type = "Feature", id = "native-roi",
+    properties = list(name = "Annotation", classification = list(name = "annotation")),
+    geometry = list(type = "Polygon", coordinates = list(list(c(10, 10), c(14, 10), c(14, 14), c(10, 14), c(10, 10))))
+  )
+  wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "roi_created",
+    rois = list(type = "FeatureCollection", features = list(existing))
+  ))
+  wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "roi_created",
+    detail = list(renderer = "native_wgpu", native_wgpu_roi = native)
+  ))
+  expect_setequal(state$rois$roi_id, c("browser-roi", "native-roi"))
+  expect_equal(state$selected_roi$roi_id, "native-roi")
+  expect_equal(state$native_renderer_revision, 2L)
+})
+
+test_that("native WGPU undo restores annotation and trajectory state in R", {
+  state <- wsiTools:::wsi_new_viewer_state(name = "native_undo")
+  roi <- list(
+    type = "Feature", id = "restored-roi",
+    properties = list(name = "Tumour", classification = list(name = "Tumour")),
+    geometry = list(type = "Polygon", coordinates = list(list(c(1, 1), c(8, 1), c(8, 8), c(1, 8), c(1, 1))))
+  )
+  trajectory <- list(
+    id = "restored-trajectory", name = "Trajectory", n = 2L,
+    points = list(list(x = 1, y = 1), list(x = 8, y = 8)),
+    control_points = list(list(x = 1, y = 1), list(x = 8, y = 8))
+  )
+  expect_silent(wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "annotation_undo",
+    detail = list(
+      renderer = "native_wgpu",
+      native_wgpu_annotations = list(roi),
+      native_wgpu_trajectories = list(trajectory)
+    )
+  )))
+  expect_equal(state$rois$roi_id, "restored-roi")
+  expect_equal(state$trajectories$id, "restored-trajectory")
+  expect_equal(nrow(state$selected_roi), 0L)
+  expect_equal(state$native_renderer_revision, 1L)
+})
+
+test_that("native WGPU same-class merge replaces only annotation geometry in R", {
+  state <- wsiTools:::wsi_new_viewer_state(name = "native_merge")
+  merged <- list(
+    type = "Feature", id = "tumour-1",
+    properties = list(name = "Tumour", classification = list(name = "Tumour")),
+    geometry = list(
+      type = "MultiPolygon",
+      coordinates = list(
+        list(list(c(1, 1), c(4, 1), c(4, 4), c(1, 1))),
+        list(list(c(8, 1), c(11, 1), c(11, 4), c(8, 1)))
+      )
+    )
+  )
+  trajectory <- list(
+    id = "keep-trajectory", name = "Trajectory", n = 2L,
+    points = list(list(x = 1, y = 1), list(x = 8, y = 8)),
+    control_points = list(list(x = 1, y = 1), list(x = 8, y = 8))
+  )
+  wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "rois_merged",
+    detail = list(
+      renderer = "native_wgpu",
+      native_wgpu_annotations = list(merged),
+      native_wgpu_trajectories = list(trajectory)
+    )
+  ))
+  expect_equal(state$rois$roi_id, "tumour-1")
+  expect_equal(state$trajectories$id, "keep-trajectory")
+  expect_equal(nrow(state$selected_roi), 0L)
+})
+
+test_that("native WGPU multipart split replaces only annotation geometry in R", {
+  state <- wsiTools:::wsi_new_viewer_state(name = "native_split")
+  first <- list(
+    type = "Feature", id = "tumour-1__part_1",
+    properties = list(name = "Tumour", classification = list(name = "Tumour")),
+    geometry = list(type = "MultiPolygon", coordinates = list(list(list(c(1, 1), c(4, 1), c(4, 4), c(1, 1)))))
+  )
+  second <- list(
+    type = "Feature", id = "tumour-1__part_2",
+    properties = list(name = "Tumour", classification = list(name = "Tumour")),
+    geometry = list(type = "MultiPolygon", coordinates = list(list(list(c(8, 1), c(11, 1), c(11, 4), c(8, 1)))))
+  )
+  trajectory <- list(
+    id = "keep-trajectory", name = "Trajectory", n = 2L,
+    points = list(list(x = 1, y = 1), list(x = 8, y = 8)),
+    control_points = list(list(x = 1, y = 1), list(x = 8, y = 8))
+  )
+  wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "roi_split",
+    detail = list(
+      renderer = "native_wgpu",
+      native_wgpu_annotations = list(first, second),
+      native_wgpu_trajectories = list(trajectory)
+    )
+  ))
+  expect_setequal(state$rois$roi_id, c("tumour-1__part_1", "tumour-1__part_2"))
+  expect_equal(state$trajectories$id, "keep-trajectory")
+})
+
+test_that("native WGPU reduction selections remain available to R", {
+  state <- wsiTools:::wsi_new_viewer_state(name = "native_reduction_selection")
+  wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "seurat_spots_selected",
+    seurat_selection = list(labels = c("cell-a", "cell-b"), count = 2L, matched_count = 2L),
+    detail = list(renderer = "native_wgpu", plot_id = "pca")
+  ))
+  expect_equal(state$seurat_selection$labels, c("cell-a", "cell-b"))
+  expect_equal(state$seurat_selection$matched_count, 2L)
+})
+
+test_that("native WGPU KODAMA selections remain available to R", {
+  state <- wsiTools:::wsi_new_viewer_state(name = "native_kodama_selection")
+  wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "kodama_cells_selected",
+    kodama_selection = list(labels = c("cell-a", "cell-b"), count = 2L, matched_count = 2L),
+    detail = list(renderer = "native_wgpu", plot_id = "kodama_fine")
+  ))
+  expect_equal(state$kodama_selection$labels, c("cell-a", "cell-b"))
+  expect_equal(state$kodama_selection$matched_count, 2L)
+})
+
+test_that("native WGPU accepts a path-based cell-segmentation import event", {
+  state <- wsiTools:::wsi_new_viewer_state(name = "native_segmentation_import")
+  path <- tempfile(fileext = ".geojson")
+  wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "segmentation_added",
+    detail = list(renderer = "native_wgpu", native_wgpu_segmentation_path = path)
+  ))
+  expect_identical(state$last_event, "segmentation_added")
+  expect_identical(state$last_payload$detail$native_wgpu_segmentation_path, path)
+  expect_gt(state$native_renderer_revision, 0L)
+})
+
+test_that("native WGPU ROI deletion removes only the selected ROI in R state", {
+  state <- wsiTools:::wsi_new_viewer_state(name = "native_delete")
+  first <- list(
+    type = "Feature", id = "keep-roi",
+    properties = list(name = "Keep"),
+    geometry = list(type = "Polygon", coordinates = list(list(c(0, 0), c(4, 0), c(4, 4), c(0, 4), c(0, 0))))
+  )
+  second <- list(
+    type = "Feature", id = "delete-roi",
+    properties = list(name = "Delete"),
+    geometry = list(type = "Polygon", coordinates = list(list(c(10, 10), c(14, 10), c(14, 14), c(10, 14), c(10, 10))))
+  )
+  wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "roi_created",
+    rois = list(type = "FeatureCollection", features = list(first, second)),
+    selected_roi = second
+  ))
+  wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "roi_deleted",
+    detail = list(renderer = "native_wgpu", native_wgpu_delete_roi_id = "delete-roi")
+  ))
+  expect_equal(state$rois$roi_id, "keep-roi")
+  expect_equal(nrow(state$selected_roi), 0)
+})
+
+test_that("native WGPU trajectory authoring appends without replacing saved trajectories", {
+  state <- wsiTools:::wsi_new_viewer_state(name = "native_trajectory")
+  browser <- list(
+    id = "browser-trajectory", name = "Browser trajectory",
+    control_points = list(list(x = 1, y = 1), list(x = 4, y = 4)),
+    points = list(list(x = 1, y = 1), list(x = 4, y = 4)), length_px = 4.2
+  )
+  native <- list(
+    id = "native-trajectory", name = "Trajectory",
+    control_points = list(list(x = 10, y = 12), list(x = 20, y = 18)),
+    points = list(list(x = 10, y = 12), list(x = 20, y = 18)), length_px = 11.7
+  )
+  wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "trajectory_added", trajectories = list(browser)
+  ))
+  wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "trajectory_added",
+    detail = list(renderer = "native_wgpu", native_wgpu_trajectory = native)
+  ))
+  expect_setequal(state$trajectories$id, c("browser-trajectory", "native-trajectory"))
+  expect_equal(state$trajectories$length_px[state$trajectories$id == "native-trajectory"], 11.7)
+})
+
+test_that("native WGPU trajectory deletion removes only the requested trajectory", {
+  state <- wsiTools:::wsi_new_viewer_state(name = "native_trajectory_delete")
+  first <- list(
+    id = "keep-trajectory", name = "Keep",
+    control_points = list(list(x = 1, y = 1), list(x = 4, y = 4)),
+    points = list(list(x = 1, y = 1), list(x = 4, y = 4)), length_px = 4.2
+  )
+  second <- list(
+    id = "delete-trajectory", name = "Delete",
+    control_points = list(list(x = 10, y = 12), list(x = 20, y = 18)),
+    points = list(list(x = 10, y = 12), list(x = 20, y = 18)), length_px = 11.7
+  )
+  wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "trajectory_added", trajectories = list(first, second)
+  ))
+  wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "trajectory_deleted",
+    detail = list(
+      renderer = "native_wgpu",
+      native_wgpu_delete_trajectory_id = "delete-trajectory"
+    )
+  ))
+  expect_equal(state$trajectories$id, "keep-trajectory")
 })
 
 test_that("live viewer state validates events and payload fields strictly", {
@@ -2690,6 +2997,7 @@ test_that("viewer event validation allowlists live WebSocket events", {
     "segmentation_started", "segmentation_progress",
     "segmentation_finished", "job_status", "project_image_reordered",
     "project_image_closed", "grandqc_loaded", "grandqc_cleared",
+    "kodama_loaded", "kodama_cleared",
     "kodama_cells_selected", "seurat_cluster_coloured",
     "seurat_plot_scope_changed", "spatial_registration_saved",
     "annotation_undo", "annotation_redo",
@@ -2980,7 +3288,7 @@ test_that("interactive tiled viewer writes Deep Zoom HTML when libvips is availa
   expect_match(html, "imageToViewportCoordinates", fixed = TRUE)
   expect_match(html, "viewportToImageCoordinates", fixed = TRUE)
   expect_match(html, "id=\"overlay\"", fixed = TRUE)
-  expect_match(html, ".bar{position:fixed;left:12px;right:12px;top:12px", fixed = TRUE)
+  expect_match(html, ".bar{position:fixed;left:12px;right:12px;top:54px", fixed = TRUE)
   expect_match(html, "z-index:30", fixed = TRUE)
   expect_match(html, "#workspacePanel{position:fixed;left:12px;top:72px", fixed = TRUE)
   expect_match(html, "#roiPanel{position:relative;width:auto", fixed = TRUE)
@@ -3110,6 +3418,26 @@ test_that("tiled viewer JavaScript exposes live tile timeout and loader limit co
   expect_match(html_code, "options.imageLoaderLimit", fixed = TRUE)
 })
 
+test_that("tiled viewer avoids unsupported WebGL tile events and deprecated clearing", {
+  html_code <- paste(deparse(wsiTools:::wsi_tiled_viewer_html), collapse = "\n")
+  expect_match(html_code, "suppressUnsupportedWebGLTileDrawnEvent", fixed = TRUE)
+  expect_match(html_code, "__wsiToolsTileDrawnPatch", fixed = TRUE)
+  expect_false(grepl("drawer\\.clear\\(", html_code))
+})
+
+test_that("tiled viewer embeds the optional Wasm overlay culling module", {
+  wasm_path <- system.file("wasm", "wsi_overlay_core.wasm", package = "wsiTools")
+  expect_true(nzchar(wasm_path))
+  expect_true(file.exists(wasm_path))
+  expect_gt(file.info(wasm_path)$size, 0)
+
+  html_code <- paste(deparse(wsiTools:::wsi_tiled_viewer_html), collapse = "\n")
+  expect_match(html_code, "initWasmOverlay", fixed = TRUE)
+  expect_match(html_code, "wsi_filter_bboxes", fixed = TRUE)
+  expect_match(html_code, "wasmDenseStaticVisibleIndices", fixed = TRUE)
+  expect_match(html_code, "wasm_overlay_status", fixed = TRUE)
+})
+
 test_that("desktop launcher routes CZI files to the CZI live project viewer", {
   launcher_path <- test_path("../../tools/wsiToolsDesktop/src-tauri/resources/launch-viewer.R")
   skip_if_not(
@@ -3170,6 +3498,33 @@ test_that("dense tissue annotations load once and coalesce viewport work", {
   expect_match(html_code, "ceiling=!Number.isFinite(z)||z<1.5?5000:12000", fixed = TRUE)
 })
 
+test_that("live state service exposes a compact native renderer manifest", {
+  session_code <- paste(deparse(wsiTools:::wsi_start_viewer_state_server), collapse = "\n")
+
+  expect_match(session_code, "wsiTools-native-renderer/v1", fixed = TRUE)
+  expect_match(session_code, "native_renderer_manifest", fixed = TRUE)
+  expect_match(session_code, "native_renderer_path", fixed = TRUE)
+  expect_match(session_code, "native_renderer_url", fixed = TRUE)
+  expect_match(session_code, "native_renderer_state", fixed = TRUE)
+  expect_match(session_code, "native_state_path", fixed = TRUE)
+  expect_match(session_code, "state_snapshot_route", fixed = TRUE)
+  expect_match(session_code, "full_resolution_level", fixed = TRUE)
+  expect_match(session_code, "typed_events", fixed = TRUE)
+  expect_match(session_code, "channel_sources = channel_sources", fixed = TRUE)
+  expect_match(session_code, "dynamic_channel_layers", fixed = TRUE)
+  expect_match(session_code, "native_points_path", fixed = TRUE)
+  expect_match(session_code, "native_points_response", fixed = TRUE)
+  expect_match(session_code, "spatial_transform", fixed = TRUE)
+  expect_match(session_code, "point_sources = native_point_sources", fixed = TRUE)
+  expect_match(session_code, "viewport_points", fixed = TRUE)
+  expect_match(session_code, "proximity_route = proximity_path", fixed = TRUE)
+  expect_match(session_code, "proximity_enabled = wsi_prediction_context_enabled", fixed = TRUE)
+  expect_match(session_code, "prediction_route = prediction_path", fixed = TRUE)
+  expect_match(session_code, "prediction_enabled = wsi_prediction_context_enabled", fixed = TRUE)
+  expect_match(session_code, "spatial_registration_global", fixed = TRUE)
+  expect_match(session_code, "objective_power = if (is.finite(objective_power)", fixed = TRUE)
+})
+
 test_that("desktop viewer keeps full tissue polygons for R analysis", {
   launcher_path <- test_path("../../tools/wsiToolsDesktop/src-tauri/resources/launch-viewer.R")
   skip_if_not(file.exists(launcher_path), "Desktop launcher resources are not included in source-package checks.")
@@ -3215,6 +3570,7 @@ test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
     rois = list()
   ))
 
+  expect_match(html, "openseadragon@5.0.1", fixed = TRUE)
   expect_match(html, "openseadragon.min.js", fixed = TRUE)
   expect_match(html, "OpenSeadragon", fixed = TRUE)
   expect_match(html, "tileSources", fixed = TRUE)
@@ -3223,13 +3579,31 @@ test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
   expect_match(html, "tileCacheCount", fixed = TRUE)
   expect_match(html, "tilePrefetchCacheCount", fixed = TRUE)
   expect_match(html, "maxImageCacheCount:tileCacheCount()", fixed = TRUE)
+  expect_match(html, "baseDrawerCandidates", fixed = TRUE)
+  expect_match(html, "['webgl','canvas']", fixed = TRUE)
+  expect_match(html, "loadDestinationTilesOnAnimation:true", fixed = TRUE)
+  expect_match(html, "maxTilesPerFrame:tileMaxPerFrame(panes)", fixed = TRUE)
   expect_match(html, "blendTime:0", fixed = TRUE)
   expect_match(html, "minPixelRatio:1", fixed = TRUE)
   expect_match(html, "maxZoomPixelRatio:16", fixed = TRUE)
+  expect_match(html, "function fullResolutionLevel()", fixed = TRUE)
+  expect_match(html, "maxLevel:fullResolutionLevel()", fixed = TRUE)
+  expect_match(html, "full_resolution_tiles_loaded", fixed = TRUE)
   expect_match(html, "placeholderFillStyle:progressivePreviewEnabled()?'rgba(255,255,255,0)':'#fff'", fixed = TRUE)
   expect_match(html, "installProgressivePreviewBackground", fixed = TRUE)
   expect_match(html, "subPixelRoundingForTransparency", fixed = TRUE)
   expect_match(html, "tileOverlap:Number", fixed = TRUE)
+  expect_match(html, "webgpuBase", fixed = TRUE)
+  expect_match(html, "initWebgpuBaseCompositor", fixed = TRUE)
+  expect_match(html, "webgpuTileLayer", fixed = TRUE)
+  expect_match(html, "styleBuffer", fixed = TRUE)
+  expect_match(html, "channelItems.entries", fixed = TRUE)
+  expect_match(html, "resetWebgpuBaseCompositor", fixed = TRUE)
+  expect_match(html, "effectiveOpenSeadragonTransform", fixed = TRUE)
+  expect_match(html, "WebGPU tile compositor unavailable", fixed = TRUE)
+  expect_match(html, "function setWebgpuDiagnostic", fixed = TRUE)
+  expect_match(html, "webgpu_reason", fixed = TRUE)
+  expect_match(html, "OpenSeadragon WebGL is the supported fallback", fixed = TRUE)
   expect_match(html, "baseImageVisible", fixed = TRUE)
   expect_match(html, "baseImagePayload", fixed = TRUE)
   expect_match(html, "showNavigator:false", fixed = TRUE)
@@ -3351,6 +3725,8 @@ test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
   expect_match(html, "multiViewTargetPanes", fixed = TRUE)
   expect_match(html, "multiViewZoomAt(factor)", fixed = TRUE)
   expect_match(html, "multiViewZoomPaneAt", fixed = TRUE)
+  expect_match(html, "viewer.viewport.zoomBy(Number(factor)||1,point,false);viewer.viewport.applyConstraints(false);return true;", fixed = TRUE)
+  expect_false(grepl("viewer.viewport.applyConstraints(false);if(typeof settleOpenSeadragonHome==='function')settleOpenSeadragonHome(viewer,false)", html, fixed = TRUE))
   expect_match(html, "bindButton('zoomIn',()=>{if(typeof multiViewZoomAt==='function'&&multiViewZoomAt(1.5))return;", fixed = TRUE)
   expect_match(html, "bindButton('zoomOut',()=>{if(typeof multiViewZoomAt==='function'&&multiViewZoomAt(1/1.5))return;", fixed = TRUE)
   expect_match(html, "pane&&typeof multiViewCanvasUnitScale==='function'?multiViewCanvasUnitScale(pane):scaleBarSlideUnitScale()", fixed = TRUE)
@@ -3409,7 +3785,7 @@ test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
   expect_false(grepl("out.multi_view_sync", html, fixed = TRUE))
   expect_match(html, "multi_view_layout_updated", fixed = TRUE)
   expect_match(html, "refreshMultiViewSources", fixed = TRUE)
-  expect_match(html, ".bar{position:fixed;left:12px;right:12px;top:12px", fixed = TRUE)
+  expect_match(html, ".bar{position:fixed;left:12px;right:12px;top:54px", fixed = TRUE)
   expect_match(html, "z-index:30", fixed = TRUE)
   expect_match(html, "#workspacePanel{position:fixed;left:12px;top:72px", fixed = TRUE)
   expect_match(html, "#roiPanel{position:relative;width:auto", fixed = TRUE)
@@ -3629,4 +4005,134 @@ test_that("side-by-side comparison viewer writes synchronized controls", {
   expect_match(html, "linked cursor", fixed = TRUE)
   expect_match(html, "canvas0", fixed = TRUE)
   expect_match(html, "canvas1", fixed = TRUE)
+})
+
+test_that("native desktop launcher resolves an explicit executable path", {
+  executable <- tempfile("wsitools-desktop-")
+  writeLines("placeholder", executable)
+  expect_identical(
+    wsiTools:::wsi_native_desktop_path(executable),
+    normalizePath(executable, winslash = "/", mustWork = TRUE)
+  )
+  expect_error(
+    wsiTools:::wsi_native_desktop_path(file.path(tempdir(), "does-not-exist")),
+    "specified native desktop executable does not exist"
+  )
+})
+
+test_that("native WGPU project switches retain source-scoped viewer state", {
+  state <- wsiTools:::wsi_new_viewer_state(name = "native_source_state_test")
+  state$layers <- list(list(id = "source-a-layer", visible = TRUE))
+  state$channel_settings <- data.frame(
+    id = "source-a-channel", visible = TRUE, opacity = 0.7,
+    stringsAsFactors = FALSE
+  )
+
+  expect_true(wsiTools:::wsi_native_project_state_activate(state, "source-a"))
+  state$layers <- list(list(id = "source-a-edited", visible = TRUE))
+
+  expect_true(wsiTools:::wsi_native_project_state_activate(state, "source-b"))
+  expect_length(state$layers, 0L)
+  state$layers <- list(list(id = "source-b-layer", visible = TRUE))
+
+  expect_true(wsiTools:::wsi_native_project_state_activate(state, "source-a"))
+  expect_identical(state$layers[[1L]]$id, "source-a-edited")
+  expect_identical(state$channel_settings$id, "source-a-channel")
+  expect_true(wsiTools:::wsi_native_project_state_activate(state, "source-b"))
+  expect_identical(state$layers[[1L]]$id, "source-b-layer")
+})
+
+test_that("native WGPU GeoJSON imports append editable R ROIs", {
+  state <- wsiTools:::wsi_new_viewer_state(name = "native_geojson_import_test")
+  feature <- list(
+    type = "Feature",
+    id = "native-import-1",
+    properties = list(class = "Stroma", colour = "#16A34A"),
+    geometry = list(
+      type = "Polygon",
+      coordinates = list(list(c(10, 10), c(40, 10), c(40, 35), c(10, 10)))
+    )
+  )
+  wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "geojson_imported",
+    detail = list(renderer = "native_wgpu", native_wgpu_geojson_features = list(feature))
+  ))
+  expect_equal(nrow(state$rois), 1L)
+  expect_identical(state$rois$roi_id[[1L]], "native-import-1")
+  expect_identical(state$rois$class[[1L]], "Stroma")
+})
+
+test_that("native WGPU GeoJSON path imports remain compact state events", {
+  state <- wsiTools:::wsi_new_viewer_state(name = "native_geojson_path_test")
+  path <- tempfile(fileext = ".geojson")
+  wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "geojson_imported",
+    detail = list(renderer = "native_wgpu", native_wgpu_geojson_path = path)
+  ))
+  expect_identical(state$last_payload$detail$native_wgpu_geojson_path, path)
+  expect_equal(nrow(state$rois), 0L)
+})
+
+test_that("native WGPU measurements append without replacing saved measurements", {
+  state <- wsiTools:::wsi_new_viewer_state(name = "native_measurement_test")
+  wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "measurement_added",
+    detail = list(renderer = "native_wgpu", native_wgpu_measurement = list(
+      id = "native-measure-1", start = list(x = 1, y = 2), end = list(x = 4, y = 6),
+      distance_px = 5, distance_um = 2.5
+    ))
+  ))
+  expect_equal(nrow(state$measurements), 1L)
+  expect_equal(state$measurements$distance_px[[1L]], 5)
+  expect_equal(state$measurements$distance_um[[1L]], 2.5)
+})
+
+test_that("native WGPU can delete one saved measurement", {
+  state <- wsiTools:::wsi_new_viewer_state(name = "native_measurement_delete_test")
+  state$measurements <- data.frame(
+    id = c("keep", "delete"),
+    start_x = c(0, 1), start_y = c(0, 1),
+    end_x = c(2, 3), end_y = c(2, 3),
+    distance_px = c(2, 2), distance_um = c(1, 1),
+    stringsAsFactors = FALSE
+  )
+  wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "measurement_deleted",
+    detail = list(renderer = "native_wgpu", native_wgpu_delete_measurement_id = "delete")
+  ))
+  expect_identical(state$measurements$id, "keep")
+})
+
+test_that("native WGPU clear actions remove only their saved object type", {
+  state <- wsiTools:::wsi_new_viewer_state(name = "native_clear_objects")
+  state$measurements <- data.frame(
+    id = "measure", start_x = 0, start_y = 0, end_x = 1, end_y = 1,
+    distance_px = 1, distance_um = 0.5, stringsAsFactors = FALSE
+  )
+  trajectory <- list(
+    id = "trajectory", name = "Trajectory",
+    control_points = list(list(x = 0, y = 0), list(x = 2, y = 2)),
+    points = list(list(x = 0, y = 0), list(x = 2, y = 2)), length_px = 2.8
+  )
+  wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "trajectory_added", trajectories = list(trajectory)
+  ))
+  wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "trajectories_cleared", detail = list(renderer = "native_wgpu")
+  ))
+  expect_equal(nrow(state$trajectories), 0L)
+  expect_equal(nrow(state$measurements), 1L)
+  wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "measurements_cleared", detail = list(renderer = "native_wgpu")
+  ))
+  expect_equal(nrow(state$measurements), 0L)
+})
+
+test_that("native WGPU stain display is kept in the project state", {
+  state <- wsiTools:::wsi_new_viewer_state(name = "native_stain_test")
+  wsiTools:::wsi_viewer_state_apply(state, list(
+    event = "stain_updated",
+    detail = list(renderer = "native_wgpu", native_wgpu_stain_mode = "hematoxylin")
+  ))
+  expect_identical(state$stain$native_wgpu_stain_mode, "hematoxylin")
 })

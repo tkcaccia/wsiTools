@@ -1,5 +1,19 @@
 # wsiTools 0.1.24
 
+- Added a compact annotation toolbar above the main menus with Pan, Brush, and
+  Magic Wand controls. The wand creates normal editable ROIs from connected
+  tissue colours, supports adjustable tolerance, undo, live synchronization,
+  and independent multi-view panes.
+
+- Added the initial optional Tauri Rust/WGPU renderer foundation: a versioned
+  live tile manifest, native camera and visible-tile selection, WGPU capability
+  diagnostics, and focused native tile math tests. The production viewer stays
+  OpenSeadragon while native controls are brought to feature parity.
+
+- Added a shared OpenSeadragon 5 renderer path for direct R and Tauri launches:
+  automatic WebGL with Canvas fallback, explicit GPU/CPU overrides, bounded
+  per-frame tile composition, and maximum-level tile diagnostics to verify
+  full-resolution pixels at close zoom.
 - Fixed merged Seurat projects so each spatial image uses its own
   `GetTissueCoordinates()` table while RNA/SCT assays, reductions, clusters,
   metadata, and live gene values are matched and reordered by exact cell ID.

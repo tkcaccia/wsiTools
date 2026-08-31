@@ -9,7 +9,7 @@ on:
       tag:
         description: "GitHub release tag to update"
         required: true
-        default: "desktop-v0.1.4"
+        default: "desktop-v0.1.5"
       upload_release:
         description: "Upload built installers to the GitHub release"
         required: true
