@@ -2,7 +2,7 @@ Package: wsiTools
 Title: Tools for Reading, Tiling, Converting and Exporting Whole-Slide Images
 Version: 0.1.24
 Authors@R: 
-    person(given = "Stefano", family = "Caccia",
+    person(given = "Stefano", family = "Cacciatore",
            role = c("aut", "cre"), email = "tkcaccia@gmail.com")
 Author: Stefano Cacciatore [aut, cre]
 Maintainer: Stefano Cacciatore <tkcaccia@gmail.com>

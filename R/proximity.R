@@ -101,7 +101,7 @@ wsi_proximity_validate_payload <- function(payload) {
     "max_pairs", "action", "feature_source", "method", "quantile_step",
     "max_features", "reduction_dims", "distance_unit", "project_key",
     "project_image_index", "project_section_index", "project_image",
-    "project_section"
+    "project_section", "profile_points"
   )
   unknown <- setdiff(names(payload), allowed)
   if (length(unknown)) {
@@ -992,6 +992,20 @@ wsi_annotation_association_response <- function(context, state, payload) {
 wsi_proximity_response <- function(context, state, payload) {
   payload <- wsi_proximity_validate_payload(payload)
   action <- tolower(as.character(payload$action %||% "distance"))
+  if (action %in% c("trajectory_profile_stats", "trajectory_correlations")) {
+    stats <- wsi_trajectory_correlation_table(context, payload)
+    state$trajectory_correlations <- stats
+    detail <- list(
+      count = nrow(stats),
+      method = as.character(stats$method[[1L]] %||% ""),
+      feature_source = as.character(stats$feature_source[[1L]] %||% ""),
+      trajectory_correlations = stats
+    )
+    wsi_viewer_state_record_event(state, "trajectory_profile_finished", detail)
+    response <- wsi_viewer_state_response(state)
+    response$trajectory_correlations <- stats
+    return(response)
+  }
   if (action %in% c("associate", "association")) {
     return(wsi_annotation_association_response(context = context, state = state, payload = payload))
   }

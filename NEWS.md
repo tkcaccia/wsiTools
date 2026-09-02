@@ -1,5 +1,11 @@
 # wsiTools 0.1.24
 
+- Added live trajectory gene-correlation analysis. **Run profile** now matches
+  spots/cells along the selected trajectory to the attached spatial object,
+  ranks expression features by Spearman or Pearson correlation with trajectory
+  position, displays an interactive results table, exports CSV, and exposes the
+  complete result through `viewer$get_trajectory_correlations()`.
+
 - Added a compact annotation toolbar above the main menus with Pan, Brush, and
   Magic Wand controls. The wand creates normal editable ROIs from connected
   tissue colours, supports adjustable tolerance, undo, live synchronization,

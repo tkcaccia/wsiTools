@@ -109,7 +109,9 @@ viewer more stable for real pathology workflows:
   GigaTIME/mIHC channels, GrandQC regions, KODAMA/MedSAM regions, cell masks,
   and cell-level feature overlays.
 - **Analysis overlays.** The Analysis menu opens separate Trajectory and
-  Proximity analysis windows. These support trajectory profiling,
+  Proximity analysis windows. Trajectory profiling now ranks genes by their
+  live R-side correlation with spot/cell position along the path and displays
+  the result in an exportable table. These windows also support
   distance-to-reference overlays with a draggable legend, and proximity
   statistics. Feature names in the proximity statistics table can be clicked to
   colour the corresponding spots or cells by that feature through the live R
@@ -1148,7 +1150,9 @@ annotation, trajectory, measurement, marker, or layer object. `Ctrl+Z` and
 
 The `Analysis` menu opens separate movable, resizable `Trajectory` and
 `Proximity analysis` windows. The Trajectory window draws smoothed paths and
-supports editable trajectory borders and gradient profiles. The Proximity
+supports editable trajectory borders and gradient profiles. **Run profile**
+opens a ranked Spearman/Pearson gene-correlation table; retrieve its complete
+contents in R with `viewer$get_trajectory_correlations()`. The Proximity
 analysis window measures spots or cells inside one annotation relative to
 another annotation. The Distance to Reference legend is
 draggable. Proximity statistics can be run in the live R session; clicking a

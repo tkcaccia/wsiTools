@@ -874,8 +874,13 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "Gradient profile", fixed = TRUE)
   expect_match(html, "trajectoryProfileSource", fixed = TRUE)
   expect_match(html, "trajectoryProfileFeature", fixed = TRUE)
+  expect_match(html, "trajectoryProfileCorrelationMethod", fixed = TRUE)
   expect_match(html, "runTrajectoryProfile", fixed = TRUE)
   expect_match(html, "trajectoryProfileResultRows", fixed = TRUE)
+  expect_match(html, "trajectoryCorrelationWindow", fixed = TRUE)
+  expect_match(html, "Trajectory gene correlations", fixed = TRUE)
+  expect_match(html, "trajectory_profile_stats", fixed = TRUE)
+  expect_match(html, "viewer$get_trajectory_correlations()", fixed = TRUE)
   expect_match(html, "trajectory_profile_finished", fixed = TRUE)
   expect_match(html, "viewer$get_trajectory_profile()", fixed = TRUE)
   expect_match(html, "function trajectoryProjectScope", fixed = TRUE)
@@ -1624,6 +1629,7 @@ test_that("live viewer sessions expose R-native helper methods and command queue
   expect_true(is.function(session$get_prediction))
   expect_true(is.function(session$get_proximity))
   expect_true(is.function(session$get_trajectory_profile))
+  expect_true(is.function(session$get_trajectory_correlations))
   expect_true(is.function(session$list_layers))
   expect_true(is.function(session$on))
   expect_true(is.function(session$off))
@@ -2491,6 +2497,7 @@ test_that("live viewer state payloads update R objects", {
   payload$detail <- list()
   wsiTools:::wsi_viewer_state_apply(state, payload)
   expect_equal(nrow(wsi_viewer_state(state)$trajectory_profile), 0)
+  expect_equal(nrow(wsi_viewer_state(state)$trajectory_correlations), 0)
 
   payload$event <- "segmentation_added"
   payload$detail <- list(
@@ -3045,7 +3052,7 @@ test_that("viewer event validation allowlists live WebSocket events", {
     "brush_committed", "annotation_mask_updated", "viewport_changed", "layer_updated",
     "trajectory_deleted", "trajectory_area_created", "trajectory_area_updated",
     "trajectory_profile_started", "trajectory_profile_finished",
-    "trajectory_profile_failed", "trajectory_profile_cleared",
+    "trajectory_profile_failed", "trajectory_profile_cleared", "trajectory_profile_exported",
     "segmentation_started", "segmentation_progress",
     "segmentation_finished", "job_status", "project_image_reordered",
     "project_image_closed", "grandqc_loaded", "grandqc_cleared",

@@ -607,6 +607,53 @@ test_that("proximity statistics rank live feature trends and sync state", {
   expect_equal(state$proximity_stats$feature_source[[1]], "cellphenotyper:numeric")
 })
 
+test_that("trajectory profiles rank gene expression against distance in live R", {
+  expr <- matrix(
+    c(1, 2, 3, 4, 5, 5, 4, 3, 2, 1, 2, 2, 2, 2, 2),
+    nrow = 3L,
+    byrow = TRUE,
+    dimnames = list(c("Increasing", "Decreasing", "Constant"), paste0("cell", 1:5))
+  )
+  linked <- list(
+    expression_source = list(object = expr),
+    spots = data.frame(
+      id = paste0("viewer_", 1:5),
+      barcode = paste0("cell", 1:5),
+      x = seq_len(5),
+      y = rep(1, 5),
+      stringsAsFactors = FALSE
+    )
+  )
+  class(linked) <- c("wsi_seurat_spatial", "list")
+  state <- wsiTools:::wsi_new_viewer_state(envir = new.env(parent = emptyenv()))
+  profile_points <- lapply(seq_len(5), function(i) {
+    list(id = paste0("viewer_", i), distance_fraction = (i - 1) / 4)
+  })
+
+  response <- wsiTools:::wsi_proximity_response(
+    context = wsi_prediction_context(spatial = linked),
+    state = state,
+    payload = list(
+      action = "trajectory_profile_stats",
+      point_source = "spatial:points",
+      feature_source = "spatial:raw",
+      method = "spearman",
+      profile_points = profile_points
+    )
+  )
+
+  expect_s3_class(state$trajectory_correlations, "wsi_trajectory_correlations")
+  expect_setequal(state$trajectory_correlations$feature, c("Increasing", "Decreasing"))
+  expect_equal(state$trajectory_correlations$correlation[
+    state$trajectory_correlations$feature == "Increasing"
+  ], 1)
+  expect_equal(state$trajectory_correlations$correlation[
+    state$trajectory_correlations$feature == "Decreasing"
+  ], -1)
+  expect_equal(state$trajectory_correlations$n_points, rep(5L, 2))
+  expect_equal(nrow(response$trajectory_correlations), 2L)
+})
+
 test_that("proximity statistics features can be fetched for viewer colouring", {
   project <- list(
     cells = data.frame(

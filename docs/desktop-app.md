@@ -106,10 +106,12 @@ viewer:
 - **Analysis -> Trajectory -> Run profile** profiles a selected
   point/cell source across a selected trajectory. Choose a numeric field,
   categorical field, or `count`, then choose the width and number of bins. R
-  evaluates the complete source layer after any active spatial registration;
-  the native renderer receives only bin summaries plus colours for points in
-  the current viewport. Results remain available through
-  `viewer$get_trajectory_profile()`.
+  evaluates the complete source layer after any active spatial registration.
+  In a live spatial viewer, the same action retrieves expression in R and opens
+  a ranked table of Spearman or Pearson correlations between every eligible
+  gene and normalized position along the trajectory. The binned profile is
+  available through `viewer$get_trajectory_profile()` and the complete gene
+  table through `viewer$get_trajectory_correlations()`.
 - **Prediction** runs PLS-LDA through optional `fastPLS`; selected annotations
   provide training labels and all non-training points are predicted. The
   native renderer then refreshes only visible coordinate circles with the R
