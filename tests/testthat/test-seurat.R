@@ -511,6 +511,8 @@ test_that("Seurat clustering metadata is detected and exposed to the viewer", {
   seurat_like <- list(
     meta.data = data.frame(
       seurat_clusters = c("stroma", "tumour", "stroma"),
+      tissue_compartment = c("edge", "core", "edge"),
+      nCount_RNA = c(100, 200, 300),
       row.names = c("spot_a", "spot_b", "spot_c")
     ),
     reductions = list(pca = list(cell.embeddings = embeddings)),
@@ -530,13 +532,16 @@ test_that("Seurat clustering metadata is detected and exposed to the viewer", {
 
   fields <- wsi_spatial_cluster_fields(seurat_like, spot_ids = c("spot_a", "spot_b", "spot_c"))
   expect_s3_class(fields, "wsi_spatial_cluster_fields")
-  expect_equal(fields$field, "seurat_clusters")
-  expect_equal(fields$storage, "meta.data")
-  expect_equal(fields$n_clusters, 2L)
+  expect_equal(fields$field[[1]], "seurat_clusters")
+  expect_true("tissue_compartment" %in% fields$field)
+  expect_false("nCount_RNA" %in% fields$field)
+  expect_true(all(fields$storage == "meta.data"))
+  expect_equal(fields$n_clusters[fields$field == "seurat_clusters"], 2L)
 
   clusters <- wsi_spatial_clusters(seurat_like, spot_ids = c("spot_a", "spot_b", "spot_c"))
   expect_s3_class(clusters, "wsi_spatial_clusters")
   expect_equal(clusters$seurat_clusters, c("stroma", "tumour", "stroma"))
+  expect_equal(clusters$tissue_compartment, c("edge", "core", "edge"))
 
   linked <- wsi_link_seurat_image(seurat_like, slide)
   expect_true(linked$clusters$enabled)
@@ -692,6 +697,67 @@ test_that("live Seurat gene payload keeps all cell coordinates unless explicitly
   expect_equal(capped$total_count, n)
   expect_true(capped$sampled)
   expect_false(capped$packed)
+})
+
+test_that("multi-tissue gene lookup returns only the active project tissue", {
+  make_linked <- function(key, index, x, values) {
+    ids <- paste0("cell_", index, "_", seq_along(x))
+    spots <- data.frame(
+      id = ids,
+      barcode = ids,
+      label = ids,
+      feature_type = "cell",
+      x = x,
+      y = seq_along(x),
+      project_key = key,
+      project_image_index = index,
+      project_section_index = -1L,
+      project_image = paste("Slide", index + 1L),
+      project_section = "",
+      stringsAsFactors = FALSE
+    )
+    structure(list(
+      source_name = "Seurat",
+      feature_type = "cell",
+      spots = spots,
+      mask_spots = spots,
+      project_key = key,
+      project_image_index = index,
+      project_section_index = -1L,
+      project_image = paste("Slide", index + 1L),
+      project_section = "",
+      expression_source = list(
+        object = list(assays = list(Spatial = list(data = matrix(
+          values,
+          nrow = 1,
+          dimnames = list("CRABP2", ids)
+        )))),
+        spot_ids = ids,
+        feature_type = "cell"
+      )
+    ), class = c("wsi_seurat_spatial", "list"))
+  }
+  first <- make_linked("slide_1::image", 0L, c(10, 20), c(1, 2))
+  second <- make_linked("slide_2::image", 1L, c(100, 200), c(8, 9))
+  project <- first
+  project$project_sections <- list(first, second)
+  class(project) <- c("wsi_spatial_project", class(project))
+
+  payload <- wsiTools:::wsi_seurat_dynamic_gene_payload(
+    project,
+    "CRABP2",
+    project_scope = list(
+      project_key = "slide_2::image",
+      project_image_index = 1L,
+      project_image = "Slide 2"
+    )
+  )
+
+  expect_equal(payload$project_key, "slide_2::image")
+  expect_equal(payload$project_image_index, 1L)
+  expect_equal(vapply(payload$points, `[[`, numeric(1), "x"), c(100, 200))
+  expect_equal(vapply(payload$points, `[[`, numeric(1), "value"), c(8, 9))
+  expect_false(any(vapply(payload$points, `[[`, numeric(1), "x") %in% c(10, 20)))
 })
 
 test_that("cell coordinate helpers keep compact circle radii", {
@@ -1141,7 +1207,9 @@ test_that("Seurat viewer exposes spot layer and reduction controls", {
 	  expect_match(text, "hasGenes=seuratEnabled()&&(genes.length>0||dynamic)", fixed = TRUE)
 	  expect_false(grepl("hasGenes=has&&(genes.length>0||dynamic)", text, fixed = TRUE))
   expect_match(text, "seuratGeneLayer", fixed = TRUE)
-  expect_match(text, "project_image_index:projectIndex", fixed = TRUE)
+  expect_match(text, "function seuratGenePayloadScope", fixed = TRUE)
+  expect_match(text, "seuratApplyGeneScope", fixed = TRUE)
+  expect_match(text, "Object.assign(request,scope)", fixed = TRUE)
   expect_match(text, "gene_values:{[gene]:value}", fixed = TRUE)
   expect_match(text, "layer.visible=true", fixed = TRUE)
   expect_match(text, "layer_visible", fixed = TRUE)
@@ -1151,6 +1219,19 @@ test_that("Seurat viewer exposes spot layer and reduction controls", {
   expect_match(text, "request={gene:String(gene||'').trim()}", fixed = TRUE)
   expect_match(text, "request.feature_source=String(options.feature_source)", fixed = TRUE)
   expect_match(text, "seuratPlotWindow", fixed = TRUE)
+  expect_match(text, "seuratPlotColourField", fixed = TRUE)
+  expect_match(text, "R object column", fixed = TRUE)
+  expect_match(text, ">None (dark gray)</option>", fixed = TRUE)
+  expect_false(grepl("seuratPlotColourControl", text, fixed = TRUE))
+  expect_match(text, "seuratPlotMetadataControl", fixed = TRUE)
+  expect_match(text, "function seuratPlotPixelRatio", fixed = TRUE)
+  expect_match(text, "ctx2.setTransform(tx.dpr", fixed = TRUE)
+  expect_match(text, "function updateSeuratPlotColourControl", fixed = TRUE)
+  expect_match(text, "function setSeuratPlotColourField", fixed = TRUE)
+  expect_match(text, "function seuratReductionPointColour", fixed = TRUE)
+  expect_match(text, "return '#4b5563'", fixed = TRUE)
+  expect_match(text, "fields=seuratClusterFields()", fixed = TRUE)
+  expect_match(text, "textContent='Uncoloured'", fixed = TRUE)
   expect_match(text, "Current tissue", fixed = TRUE)
   expect_match(text, "All tissues", fixed = TRUE)
   expect_match(text, "bindSeuratControls", fixed = TRUE)

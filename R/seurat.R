@@ -2119,6 +2119,13 @@ wsi_seurat_project_records <- function(linked, output, labels,
       record$tile_overlap <- as.integer(tiles$overlap %||% requested_overlap)
       record$min_level <- 0L
       record$max_level <- wsi_dz_max_level(record$width, record$height)
+      record$cache_key <- wsi_deepzoom_cache_key(
+        slide,
+        tile_size = tile_size,
+        tile_overlap = record$tile_overlap,
+        tile_format = tile_format,
+        quality = quality
+      )
       record$navigator_image_data_uri <- wsi_viewer_navigator_data_uri(slide, width = 512)
     }
     scoped_item <- wsi_seurat_project_scoped_linked(
@@ -3223,7 +3230,45 @@ wsi_seurat_live_gene_available <- function(seurat = NULL) {
   inherits(seurat, "wsi_seurat_spatial") && !is.null(seurat$expression_source$object)
 }
 
-wsi_seurat_dynamic_gene_payload <- function(linked, gene) {
+wsi_seurat_project_gene_section <- function(linked, project_scope = NULL) {
+  sections <- linked$project_sections %||% list()
+  if (!inherits(linked, "wsi_spatial_project") || !length(sections)) {
+    return(linked)
+  }
+  scope <- project_scope %||% list()
+  key <- as.character(scope$project_key %||% "")
+  image_index <- suppressWarnings(as.integer(scope$project_image_index %||% NA_integer_))
+  image <- as.character(scope$project_image %||% "")
+  if (!nzchar(key) && !is.finite(image_index) && !nzchar(image)) {
+    return(sections[[1L]])
+  }
+  hit <- integer()
+  if (nzchar(key)) {
+    hit <- which(vapply(sections, function(x) identical(as.character(x$project_key %||% ""), key), logical(1)))
+  }
+  if (!length(hit) && is.finite(image_index)) {
+    hit <- which(vapply(sections, function(x) identical(as.integer(x$project_image_index %||% NA_integer_), image_index), logical(1)))
+  }
+  if (!length(hit) && nzchar(image)) {
+    hit <- which(vapply(sections, function(x) identical(as.character(x$project_image %||% ""), image), logical(1)))
+  }
+  if (!length(hit)) {
+    wsi_abort(sprintf(
+      "Could not match the active viewer tissue `%s` to the spatial project.",
+      if (nzchar(image)) image else if (nzchar(key)) key else as.character(image_index)
+    ))
+  }
+  sections[[hit[[1L]]]]
+}
+
+wsi_seurat_dynamic_gene_payload <- function(linked, gene, project_scope = NULL) {
+  if (inherits(linked, "wsi_spatial_project")) {
+    return(wsi_seurat_dynamic_gene_payload(
+      wsi_seurat_project_gene_section(linked, project_scope),
+      gene,
+      project_scope = NULL
+    ))
+  }
   source_name <- as.character(linked$source_name %||% "spatial object")
   if (!inherits(linked, "wsi_seurat_spatial")) {
     wsi_abort("Dynamic spatial gene lookup requires an object from a wsiTools spatial-image linker.")
@@ -3353,7 +3398,7 @@ wsi_seurat_dynamic_gene_payload <- function(linked, gene) {
   } else {
     NULL
   }
-  list(
+  payload <- list(
     ok = TRUE,
     gene = as.character(actual_gene),
     requested_gene = as.character(gene),
@@ -3373,6 +3418,12 @@ wsi_seurat_dynamic_gene_payload <- function(linked, gene) {
     packed_points = packed_points,
     packed = packed
   )
+  for (field in c("project_key", "project_image_index", "project_section_index",
+                  "project_image", "project_section")) {
+    value <- linked[[field]] %||% project_scope[[field]] %||% NULL
+    if (!is.null(value) && length(value)) payload[[field]] <- value[[1L]]
+  }
+  payload
 }
 
 wsi_seurat_coordinate_transform_arg <- function(transform) {

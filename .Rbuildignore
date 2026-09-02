@@ -27,3 +27,4 @@
 ^tools/wsiToolsDesktop/dist$
 ^tools/wsiToolsDesktop/src-tauri/target($|/)
 ^tools/wsiToolsDesktop/src-tauri/gen$
+^tools/wasm-overlay-core/target($|/)

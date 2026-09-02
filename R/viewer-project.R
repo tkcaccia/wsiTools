@@ -611,7 +611,7 @@ wsi_czi_live_apply_tile_metadata <- function(items, tile_metadata) {
     if (!is.null(first)) {
       for (field in c(
         "tile_size", "tile_format", "tile_url_base", "tile_url_template",
-        "tile_url_style", "tile_overlap", "min_level", "max_level"
+        "tile_url_style", "tile_overlap", "min_level", "max_level", "cache_key"
       )) {
         item[[field]] <- first[[field]]
       }
@@ -767,7 +767,7 @@ wsi_viewer_project_item_from_record <- function(record, index = 1L, width = 768,
   }
   extra_fields <- c(
     "tile_url_base", "tile_url_template", "tile_url_style", "tile_format",
-    "tile_size", "tile_overlap", "min_level", "max_level", "content_bbox",
+    "tile_size", "tile_overlap", "min_level", "max_level", "cache_key", "content_bbox",
     "layers", "seurat", "cellphenotyper", "channel_sources", "mpp",
     "pixel_size", "objective_power"
   )

@@ -99,7 +99,9 @@ wsi_proximity_validate_payload <- function(payload) {
   allowed <- c(
     "point_source", "query_annotations", "target_annotations", "rois",
     "max_pairs", "action", "feature_source", "method", "quantile_step",
-    "max_features", "reduction_dims", "distance_unit"
+    "max_features", "reduction_dims", "distance_unit", "project_key",
+    "project_image_index", "project_section_index", "project_image",
+    "project_section"
   )
   unknown <- setdiff(names(payload), allowed)
   if (length(unknown)) {
@@ -110,6 +112,42 @@ wsi_proximity_validate_payload <- function(payload) {
     ))
   }
   payload
+}
+
+wsi_proximity_scope <- function(payload) {
+  list(
+    project_key = as.character(payload$project_key %||% ""),
+    project_image_index = suppressWarnings(as.integer(payload$project_image_index %||% NA_integer_)),
+    project_section_index = suppressWarnings(as.integer(payload$project_section_index %||% NA_integer_)),
+    project_image = as.character(payload$project_image %||% ""),
+    project_section = as.character(payload$project_section %||% "")
+  )
+}
+
+wsi_proximity_filter_points_scope <- function(points, payload) {
+  if (!is.data.frame(points) || !nrow(points)) return(points)
+  scope <- wsi_proximity_scope(payload)
+  keep <- rep(TRUE, nrow(points))
+  used <- FALSE
+  if (nzchar(scope$project_key) && "project_key" %in% names(points)) {
+    keep <- keep & as.character(points$project_key) == scope$project_key
+    used <- TRUE
+  } else if (is.finite(scope$project_image_index) && "project_image_index" %in% names(points)) {
+    keep <- keep & suppressWarnings(as.integer(points$project_image_index)) == scope$project_image_index
+    used <- TRUE
+  } else if (nzchar(scope$project_image) && "project_image" %in% names(points)) {
+    keep <- keep & as.character(points$project_image) == scope$project_image
+    used <- TRUE
+  }
+  if (is.finite(scope$project_section_index) && "project_section_index" %in% names(points)) {
+    keep <- keep & suppressWarnings(as.integer(points$project_section_index)) == scope$project_section_index
+    used <- TRUE
+  } else if (nzchar(scope$project_section) && "project_section" %in% names(points)) {
+    keep <- keep & as.character(points$project_section) == scope$project_section
+    used <- TRUE
+  }
+  if (!used) return(points)
+  points[!is.na(keep) & keep, , drop = FALSE]
 }
 
 wsi_proximity_feature_source <- function(point_source, feature_source = NULL) {
@@ -125,7 +163,8 @@ wsi_proximity_feature_source <- function(point_source, feature_source = NULL) {
   }
 }
 
-wsi_proximity_same_selection <- function(result, point_source, query_ids, target_ids) {
+wsi_proximity_same_selection <- function(result, point_source, query_ids, target_ids,
+                                         scope = NULL) {
   if (!inherits(result, "wsi_proximity_result") || !nrow(result)) {
     return(FALSE)
   }
@@ -141,8 +180,10 @@ wsi_proximity_same_selection <- function(result, point_source, query_ids, target
   }
   existing_query <- attr(result, "query_selectors", exact = TRUE) %||% result$query_annotation_id
   existing_target <- attr(result, "target_selectors", exact = TRUE) %||% result$target_annotation_id
+  existing_scope <- attr(result, "project_scope", exact = TRUE) %||% list()
   same_set(existing_query, query_ids) &&
-    same_set(existing_target, target_ids)
+    same_set(existing_target, target_ids) &&
+    identical(existing_scope, scope %||% list())
 }
 
 wsi_proximity_analysis_rois <- function(state, rois = NULL) {
@@ -175,10 +216,11 @@ wsi_proximity_result_from_payload <- function(context, state, payload, rois = NU
   }
   rois <- wsi_proximity_analysis_rois(state, display_rois)
   source <- payload$point_source %||% "spatial:points"
+  scope <- wsi_proximity_scope(payload)
   query_ids <- payload$query_annotations %||% character()
   target_ids <- payload$target_annotations %||% character()
   if (!isTRUE(force) &&
-      wsi_proximity_same_selection(state$proximity %||% NULL, source, query_ids, target_ids)) {
+      wsi_proximity_same_selection(state$proximity %||% NULL, source, query_ids, target_ids, scope)) {
     return(list(result = state$proximity, rois = rois, source = source, recomputed = FALSE))
   }
   result <- wsi_proximity_run(
@@ -189,9 +231,10 @@ wsi_proximity_result_from_payload <- function(context, state, payload, rois = NU
     target_ids = target_ids,
     association = state$annotation_spots %||% NULL,
     pixel_size = state$pixel_size %||% NULL,
-    max_pairs = payload$max_pairs %||% 5e6
+    max_pairs = payload$max_pairs %||% 5e6,
+    project_scope = scope
   )
-  layer <- wsi_proximity_layer(result)
+  layer <- wsi_proximity_layer(result, project_scope = scope)
   state$proximity <- result
   state$layers <- wsi_viewer_set_layer(state$layers, layer)
   # The initiating HTTP response carries this potentially large point layer.
@@ -391,9 +434,19 @@ wsi_proximity_legend <- function(result) {
   )
 }
 
-wsi_proximity_layer <- function(result, radius = 8) {
+wsi_proximity_layer <- function(result, radius = 8, project_scope = NULL) {
+  project_scope <- project_scope %||% attr(result, "project_scope", exact = TRUE) %||% list()
+  layer_scope <- list()
+  for (field in c("project_key", "project_image", "project_section")) {
+    value <- as.character(project_scope[[field]] %||% "")
+    if (length(value) && !is.na(value[[1L]]) && nzchar(value[[1L]])) layer_scope[[field]] <- value[[1L]]
+  }
+  for (field in c("project_image_index", "project_section_index")) {
+    value <- suppressWarnings(as.integer(project_scope[[field]] %||% NA_integer_))
+    if (length(value) && is.finite(value[[1L]])) layer_scope[[field]] <- value[[1L]]
+  }
   if (!is.data.frame(result) || !nrow(result)) {
-    return(list(
+    return(c(list(
       id = "wsi_proximity_distance",
       name = "Proximity distance",
       type = "vector",
@@ -405,11 +458,12 @@ wsi_proximity_layer <- function(result, radius = 8) {
       metadata = list(
         vector_rendering = TRUE,
         coordinate_overlay = TRUE,
+        project_scoped = length(layer_scope) > 0L,
         lod = list(enabled = FALSE, full_coordinates = TRUE)
       ),
       count = 0L,
       items = list()
-    ))
+    ), layer_scope))
   }
   palette <- grDevices::hcl.colors(101L, palette = "Inferno")
   packed_points <- list(
@@ -417,7 +471,7 @@ wsi_proximity_layer <- function(result, radius = 8) {
     y = unname(as.numeric(result$y)),
     colour_index = unname(as.integer(wsi_proximity_colour_index(result$distance_px)))
   )
-  list(
+  c(list(
     id = "wsi_proximity_distance",
     name = "Proximity distance",
     type = "vector",
@@ -430,6 +484,7 @@ wsi_proximity_layer <- function(result, radius = 8) {
     metadata = list(
       vector_rendering = TRUE,
       coordinate_overlay = TRUE,
+      project_scoped = length(layer_scope) > 0L,
       packed_points = TRUE,
       point_palette = unname(palette),
       lod = list(enabled = FALSE, full_coordinates = TRUE)
@@ -440,7 +495,7 @@ wsi_proximity_layer <- function(result, radius = 8) {
     legend = wsi_proximity_legend(result),
     packed_points = packed_points,
     items = list()
-  )
+  ), layer_scope)
 }
 
 wsi_proximity_assignment_from_table <- function(points, rois, ids, association) {
@@ -504,7 +559,8 @@ wsi_proximity_assignment_from_table <- function(points, rois, ids, association) 
 wsi_proximity_run <- function(context, rois, point_source = "spatial:points",
                               query_ids, target_ids, association = NULL,
                               pixel_size = NULL,
-                              max_pairs = 5e6) {
+                              max_pairs = 5e6,
+                              project_scope = NULL) {
   if (!inherits(rois, "wsi_roi") || !nrow(rois)) {
     wsi_abort("Draw or import at least two annotations before running proximity analysis.")
   }
@@ -520,6 +576,18 @@ wsi_proximity_run <- function(context, rois, point_source = "spatial:points",
   }
 
   points <- wsi_prediction_points(context, point_source)
+  available_point_count <- nrow(points)
+  points <- wsi_proximity_filter_points_scope(points, project_scope %||% list())
+  if (available_point_count > 0L && !nrow(points)) {
+    scope <- wsi_proximity_scope(project_scope %||% list())
+    tissue <- scope$project_section
+    if (!nzchar(tissue)) tissue <- scope$project_image
+    if (!nzchar(tissue)) tissue <- "the tissue where the trajectory was drawn"
+    wsi_abort(sprintf(
+      "No spatial points/cells matched %s. Check the image-to-spatial-sample association.",
+      tissue
+    ))
+  }
   unit <- as.character(points$unit %||% "point")
   unit <- unit[nzchar(unit) & !is.na(unit)]
   unit_label <- if (length(unit) && identical(unit[[1L]], "spot")) {
@@ -593,6 +661,7 @@ wsi_proximity_run <- function(context, rois, point_source = "spatial:points",
   attr(out, "point_source") <- as.character(point_source)
   attr(out, "query_selectors") <- query_ids
   attr(out, "target_selectors") <- target_ids
+  attr(out, "project_scope") <- project_scope %||% list()
   out
 }
 

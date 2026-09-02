@@ -4,8 +4,8 @@ Version: 0.1.24
 Authors@R: 
     person(given = "Stefano", family = "Caccia",
            role = c("aut", "cre"), email = "tkcaccia@gmail.com")
-Author: Stefano Caccia [aut, cre]
-Maintainer: Stefano Caccia <tkcaccia@gmail.com>
+Author: Stefano Cacciatore [aut, cre]
+Maintainer: Stefano Cacciatore <tkcaccia@gmail.com>
 Description: A lightweight R toolkit for memory-efficient whole-slide image
     access and preprocessing through region-based reading, tiling, pyramidal
     image handling, conversion and export. The core uses light R dependencies

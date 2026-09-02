@@ -230,9 +230,10 @@ load dense GeoJSON annotations progressively for visible regions.}
 to run optional \code{fastPLS} PLS-LDA from annotation-defined training/test
 sets in the active R session.}
 
-\item{proximity_url}{Optional live HTTP endpoint used by the Trajectories
-menu to calculate nearest-neighbour proximity from spots/cells inside one
-annotation to spots/cells inside another annotation in the active R session.}
+\item{proximity_url}{Optional live HTTP endpoint used by Analysis >
+Proximity analysis to calculate nearest-neighbour proximity from spots/cells
+inside one annotation to spots/cells inside another annotation in the active
+R session.}
 
 \item{autosave_enabled}{Whether the viewer should periodically sync state to
 the live R bridge for project autosave. This is normally set by

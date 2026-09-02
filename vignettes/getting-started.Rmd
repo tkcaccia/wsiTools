@@ -287,7 +287,7 @@ coordinate readout. It visualizes a backend-generated thumbnail, so it remains
 safe for very large WSI files.
 
 The viewer toolbar is organized into menus such as `Project`, `Annotations`,
-`Artifacts`, `Measure`, `Trajectories`, `Image`, `View`, `Stains`, and `Help`.
+`Artifacts`, `Analysis`, `Image`, `View`, `Stains`, and `Help`.
 GeoJSON import/export and ROI editing live inside
 `Annotations`. Use `Project` to reopen the left-side
 project panel or add ordinary browser-readable images as project items. Large
@@ -330,9 +330,11 @@ an existing annotation before GeoJSON export.
 Annotation colors are category-driven, so imported, drawn, and painted ROIs
 with the same class label share the same class color. `Ctrl+Z` undoes
 annotation edits in the viewer, with the last 10 committed
-annotation states retained. The `Trajectories` menu can draw a smoothed
-backbone, preview an adjustable-width corridor around it, and convert that
-corridor into an annotation area using the active pathology class.
+annotation states retained. `Analysis > Trajectory` opens a dedicated window
+that can draw a smoothed backbone, preview an adjustable-width corridor around
+it, and convert that corridor into an annotation area using the active
+pathology class. `Analysis > Proximity analysis` opens the distance and
+statistics workflow in a separate window.
 
 For full-resolution zooming, use tiled mode. OpenSeadragon is a browser tile
 viewer: it needs browser-readable tiles, not raw SVS, BTF, or OME-TIFF pixels.

@@ -6154,6 +6154,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
     feature_source <- NULL
     point_source <- NULL
     reduction_dims <- NULL
+    project_scope <- list()
     if (identical(method, "GET")) {
       query <- wsi_http_query_params(req$QUERY_STRING %||% "")
       gene <- query$gene %||% query$q %||% NULL
@@ -6165,7 +6166,11 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
       if (!is.list(payload)) {
         return(wsi_http_json_response(status = 400L, body = list(error = "Spatial gene request must be a JSON object.")))
       }
-      unknown <- setdiff(names(payload), c("gene", "q", "feature_source", "source", "point_source", "reduction_dims"))
+      unknown <- setdiff(names(payload), c(
+        "gene", "q", "feature_source", "source", "point_source", "reduction_dims",
+        "project_key", "project_image_index", "project_section_index",
+        "project_image", "project_section"
+      ))
       if (length(unknown)) {
         return(wsi_http_json_response(
           status = 400L,
@@ -6176,6 +6181,10 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
       feature_source <- payload$feature_source %||% payload$source %||% NULL
       point_source <- payload$point_source %||% NULL
       reduction_dims <- payload$reduction_dims %||% NULL
+      project_scope <- payload[c(
+        "project_key", "project_image_index", "project_section_index",
+        "project_image", "project_section"
+      )]
     } else {
       return(wsi_http_json_response(status = 405L, body = list(error = "Use GET or POST for spatial gene expression lookup.")))
     }
@@ -6192,17 +6201,25 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
             feature = trimws(gene),
             source_id = feature_source,
             point_source = if (nzchar(point_source)) point_source else NULL,
-            reduction_dims = reduction_dims
+            reduction_dims = reduction_dims,
+            project_scope = project_scope %||% list()
+          )
+        } else if (inherits(feature_context$spatial %||% NULL, "wsi_spatial_project")) {
+          wsi_seurat_dynamic_gene_payload(
+            feature_context$spatial,
+            trimws(gene),
+            project_scope = project_scope %||% list()
           )
         } else if (wsi_seurat_live_gene_available(seurat)) {
-          wsi_seurat_dynamic_gene_payload(seurat, trimws(gene))
+          wsi_seurat_dynamic_gene_payload(seurat, trimws(gene), project_scope = project_scope %||% list())
         } else {
           wsi_prediction_feature_payload(
             feature_context,
             feature = trimws(gene),
             source_id = "spatial:raw",
             point_source = if (nzchar(point_source)) point_source else NULL,
-            reduction_dims = reduction_dims
+            reduction_dims = reduction_dims,
+            project_scope = project_scope %||% list()
           )
         }
       }),

@@ -220,6 +220,37 @@ wsi_prediction_points <- function(context, source_id) {
   points
 }
 
+wsi_prediction_filter_project_scope <- function(points, project_scope = NULL) {
+  if (!is.data.frame(points) || !nrow(points) || !length(project_scope %||% list())) return(points)
+  scope <- project_scope %||% list()
+  key <- as.character(scope$project_key %||% "")
+  image_index <- suppressWarnings(as.integer(scope$project_image_index %||% NA_integer_))
+  section_index <- suppressWarnings(as.integer(scope$project_section_index %||% NA_integer_))
+  image <- as.character(scope$project_image %||% "")
+  section <- as.character(scope$project_section %||% "")
+  keep <- rep(TRUE, nrow(points))
+  used <- FALSE
+  if (nzchar(key) && "project_key" %in% names(points)) {
+    keep <- keep & as.character(points$project_key) == key
+    used <- TRUE
+  } else if (is.finite(image_index) && "project_image_index" %in% names(points)) {
+    keep <- keep & suppressWarnings(as.integer(points$project_image_index)) == image_index
+    used <- TRUE
+  } else if (nzchar(image) && "project_image" %in% names(points)) {
+    keep <- keep & as.character(points$project_image) == image
+    used <- TRUE
+  }
+  if (is.finite(section_index) && section_index >= 0L && "project_section_index" %in% names(points)) {
+    keep <- keep & suppressWarnings(as.integer(points$project_section_index)) == section_index
+    used <- TRUE
+  } else if (nzchar(section) && "project_section" %in% names(points)) {
+    keep <- keep & as.character(points$project_section) == section
+    used <- TRUE
+  }
+  if (!used) return(points)
+  points[!is.na(keep) & keep, , drop = FALSE]
+}
+
 wsi_prediction_expression_id_candidates <- function(ids, points = NULL) {
   ids <- as.character(ids)
   candidates <- list(ids = ids)
@@ -565,7 +596,8 @@ wsi_prediction_feature_vector <- function(context, source_id, ids, feature,
 wsi_prediction_feature_payload <- function(context, feature,
                                            source_id = "spatial:raw",
                                            point_source = NULL,
-                                           reduction_dims = NULL) {
+                                           reduction_dims = NULL,
+                                           project_scope = NULL) {
   feature <- as.character(feature %||% "")
   if (!nzchar(feature)) {
     wsi_abort("Provide a single non-empty feature or gene name.")
@@ -573,6 +605,7 @@ wsi_prediction_feature_payload <- function(context, feature,
   source_id <- as.character(source_id %||% "spatial:raw")
   point_source <- as.character(point_source %||% if (startsWith(source_id, "cellphenotyper:")) "cellphenotyper:cells" else "spatial:points")
   points <- wsi_prediction_points(context, point_source)
+  points <- wsi_prediction_filter_project_scope(points, project_scope)
   ids <- as.character(points$id %||% character())
   if (!length(ids)) {
     wsi_abort("No point identifiers are available for live feature lookup.")
@@ -618,7 +651,7 @@ wsi_prediction_feature_payload <- function(context, feature,
       colour = as.character(colours[[i]] %||% "#d1d5db")
     )
   })
-  list(
+  payload <- list(
     ok = TRUE,
     gene = as.character(actual),
     requested_gene = as.character(feature),
@@ -632,6 +665,12 @@ wsi_prediction_feature_payload <- function(context, feature,
     count = length(point_rows),
     points = point_rows
   )
+  for (field in c("project_key", "project_image_index", "project_section_index",
+                  "project_image", "project_section")) {
+    value <- project_scope[[field]] %||% NULL
+    if (!is.null(value) && length(value)) payload[[field]] <- value[[1L]]
+  }
+  payload
 }
 
 wsi_prediction_reduction_dim_count <- function(dimensions = NULL, max_dim = 2L, default = 2L) {
@@ -1023,6 +1062,62 @@ wsi_prediction_assign_points <- function(points, rois, ids, include_all = FALSE)
     roi_index[inside] <- i
   }
   list(label = label, roi_id = roi_id, roi_index = roi_index, indices = indices)
+}
+
+wsi_prediction_test_slide_prefix <- "__project_slide__::"
+
+wsi_prediction_test_slide_keys <- function(ids) {
+  ids <- as.character(ids %||% character())
+  keep <- !is.na(ids) & startsWith(ids, wsi_prediction_test_slide_prefix)
+  keys <- substring(ids[keep], nchar(wsi_prediction_test_slide_prefix) + 1L)
+  unique(keys[nzchar(keys)])
+}
+
+wsi_prediction_test_rows <- function(points, rois, test_ids, train_rows = integer()) {
+  test_ids <- as.character(test_ids %||% character())
+  test_ids <- test_ids[!is.na(test_ids) & nzchar(test_ids)]
+  all_unlabelled <- !length(test_ids) ||
+    any(test_ids %in% c("__all_unlabelled__", "__all_non_training__"))
+  test_roi_id <- rep(NA_character_, nrow(points))
+  test_label <- rep(NA_character_, nrow(points))
+  if (isTRUE(all_unlabelled)) {
+    return(list(
+      rows = setdiff(seq_len(nrow(points)), train_rows),
+      roi_id = test_roi_id,
+      label = test_label
+    ))
+  }
+
+  slide_keys <- wsi_prediction_test_slide_keys(test_ids)
+  slide_rows <- integer()
+  if (length(slide_keys)) {
+    key_columns <- intersect(c("project_key", "wsi_project_key"), names(points))
+    if (length(key_columns)) {
+      slide_keep <- rep(FALSE, nrow(points))
+      wanted <- tolower(slide_keys)
+      for (column in key_columns) {
+        slide_keep <- slide_keep | tolower(as.character(points[[column]])) %in% wanted
+      }
+      slide_rows <- which(slide_keep)
+    }
+  }
+
+  roi_ids <- test_ids[!startsWith(test_ids, wsi_prediction_test_slide_prefix)]
+  roi_ids <- setdiff(roi_ids, c("__all__", "__all_unlabelled__", "__all_non_training__"))
+  if (length(roi_ids)) {
+    test <- wsi_prediction_assign_points(points, rois, roi_ids, include_all = FALSE)
+    roi_rows <- which(!is.na(test$roi_id) & nzchar(test$roi_id))
+    test_roi_id <- test$roi_id
+    test_label <- test$label
+  } else {
+    roi_rows <- integer()
+  }
+
+  list(
+    rows = setdiff(sort(unique(c(slide_rows, roi_rows))), train_rows),
+    roi_id = test_roi_id,
+    label = test_label
+  )
 }
 
 wsi_prediction_scope_scalar <- function(...) {
@@ -1495,20 +1590,12 @@ wsi_prediction_run <- function(context, rois, source_id, train_ids, test_ids = c
   if (length(classes) < 2L) {
     wsi_abort("Training annotations must include at least two annotation classes.")
   }
-  all_unlabelled <- !length(test_ids) ||
-    any(as.character(test_ids) %in% c("__all_unlabelled__", "__all_non_training__"))
-  if (isTRUE(all_unlabelled)) {
-    test_rows <- setdiff(seq_len(nrow(points)), train_rows)
-    test_roi_id <- rep(NA_character_, nrow(points))
-    test_label <- rep(NA_character_, nrow(points))
-  } else {
-    test <- wsi_prediction_assign_points(points, rois, test_ids, include_all = FALSE)
-    test_rows <- which(!is.na(test$roi_id) & nzchar(test$roi_id))
-    test_roi_id <- test$roi_id
-    test_label <- test$label
-  }
+  test <- wsi_prediction_test_rows(points, rois, test_ids, train_rows = train_rows)
+  test_rows <- test$rows
+  test_roi_id <- test$roi_id
+  test_label <- test$label
   if (!length(test_rows)) {
-    wsi_abort("The selected test annotations contain no spots/cells. Select test annotations or choose all non-training points.")
+    wsi_abort("The selected test slides or annotations contain no spots/cells. Select another slide, a test annotation, or all non-training points.")
   }
 
   x <- wsi_prediction_feature_matrix(
@@ -1643,6 +1730,13 @@ wsi_prediction_response <- function(context, state, payload) {
     list(layer = layer),
     send_ws = FALSE
   )
+  project_keys <- as.character(result$project_key %||% character())
+  project_keys <- project_keys[!is.na(project_keys) & nzchar(project_keys)]
+  project_table <- table(project_keys)
+  project_counts <- as.list(stats::setNames(
+    as.integer(project_table),
+    names(project_table)
+  ))
   detail <- list(
     count = nrow(result),
     classes = sort(unique(as.character(result$predicted))),
@@ -1651,7 +1745,9 @@ wsi_prediction_response <- function(context, state, payload) {
     ncomp = as.integer(payload$ncomp %||% 2L),
     reduction_dims = attr(result, "reduction_dimensions") %||% NA_integer_,
     svm_refined = isTRUE(attr(result, "svm_refined") %||% FALSE),
-    point_unit = attr(result, "point_unit") %||% "point"
+    point_unit = attr(result, "point_unit") %||% "point",
+    project_count = length(project_counts),
+    project_counts = project_counts
   )
   wsi_viewer_state_record_event(state, "prediction_finished", detail)
   response <- wsi_viewer_state_response(state)

@@ -79,6 +79,13 @@ test_that("prediction menu is only rendered for managed analysis sources", {
   wsi_viewer(slide, output = out, open = FALSE, overwrite = TRUE, seurat = linked)
   html <- paste(readLines(out, warn = FALSE), collapse = "\n")
   expect_true(grepl("Prediction", html, fixed = TRUE))
+  expect_false(grepl(">Prediction</button>", html, fixed = TRUE))
+  expect_true(grepl("quickPredictionButton", html, fixed = TRUE))
+  expect_true(grepl("aria-label=\"Open prediction window\"", html, fixed = TRUE))
+  expect_true(grepl("aria-label=\"Viewer tools\"", html, fixed = TRUE))
+  expect_true(grepl("aria-controls=\"predictionWindow\"", html, fixed = TRUE))
+  expect_false(grepl("predictionMenuFeatureSource", html, fixed = TRUE))
+  expect_false(grepl("PLS-LDA annotation prediction", html, fixed = TRUE))
   expect_true(grepl("predictionWindow", html, fixed = TRUE))
   expect_true(grepl("predictionReductionDims", html, fixed = TRUE))
   expect_true(grepl("syncPredictionReductionDimsControl", html, fixed = TRUE))
@@ -86,12 +93,21 @@ test_that("prediction menu is only rendered for managed analysis sources", {
   expect_true(grepl("predictionRefineSvm", html, fixed = TRUE))
   expect_true(grepl("refine_svm", html, fixed = TRUE))
   expect_true(grepl("predictionProjectAnnotationEntries", html, fixed = TRUE))
+  expect_true(grepl("predictionProjectSlideEntries", html, fixed = TRUE))
+  expect_true(grepl("__project_slide__::", html, fixed = TRUE))
+  expect_true(grepl("Whole slides", html, fixed = TRUE))
   expect_true(grepl("predictionRoiGeojsonObject", html, fixed = TRUE))
   expect_true(grepl("wsiToolsProject", html, fixed = TRUE))
   expect_true(grepl("predictionLegend", html, fixed = TRUE))
   expect_true(grepl("renderPredictionLegend", html, fixed = TRUE))
   expect_true(grepl("prediction|pls[_ -]?lda", html, fixed = TRUE))
-  expect_true(grepl("handleViewerCommands(body);if(typeof revealCoordinateOverlays==='function')revealCoordinateOverlays()", html, fixed = TRUE))
+  expect_true(grepl("handleViewerCommands(body);if(typeof revealPredictionOverlay==='function')revealPredictionOverlay()", html, fixed = TRUE))
+  expect_true(grepl("id=\"overlayFocusPrediction\"", html, fixed = TRUE))
+  expect_true(grepl(">PLS-LDA prediction</button>", html, fixed = TRUE))
+  expect_true(grepl("function overlayFocusHasPrediction()", html, fixed = TRUE))
+  expect_true(grepl("return 'prediction'", html, fixed = TRUE))
+  expect_true(grepl("projectCount=Number(info.project_count||0)", html, fixed = TRUE))
+  expect_true(grepl("on '+projectCount+' slides", html, fixed = TRUE))
 
   out2 <- tempfile(fileext = ".html")
   wsi_viewer(slide, output = out2, open = FALSE, overwrite = TRUE)
@@ -286,6 +302,33 @@ test_that("prediction assignment respects project slide scopes", {
   )
   expect_equal(mapped$label, c(NA, "stroma", NA))
   expect_equal(mapped$roi_id, c(NA, "slide_b::roi_stroma", NA))
+})
+
+test_that("prediction test selection can target whole project slides", {
+  points <- data.frame(
+    id = paste0("p", 1:6),
+    label = paste0("p", 1:6),
+    x = seq_len(6),
+    y = seq_len(6),
+    project_key = rep(c("slide_a::image", "slide_b::image", "slide_c::image"), each = 2),
+    stringsAsFactors = FALSE
+  )
+  selected <- wsiTools:::wsi_prediction_test_rows(
+    points,
+    wsiTools:::wsi_empty_roi(),
+    test_ids = c("__project_slide__::slide_b::image", "__project_slide__::slide_c::image"),
+    train_rows = 5L
+  )
+  expect_equal(selected$rows, c(3L, 4L, 6L))
+  expect_true(all(is.na(selected$roi_id)))
+
+  all_points <- wsiTools:::wsi_prediction_test_rows(
+    points,
+    wsiTools:::wsi_empty_roi(),
+    test_ids = "__all_unlabelled__",
+    train_rows = c(1L, 2L)
+  )
+  expect_equal(all_points$rows, 3:6)
 })
 
 test_that("prediction project context keeps ROI scopes tied to each tissue", {
@@ -544,4 +587,23 @@ test_that("prediction feature filtering removes zero variance and limits feature
   out <- wsiTools:::wsi_prediction_feature_filter(x, max_features = 2)
   expect_equal(ncol(out), 2)
   expect_false("constant" %in% colnames(out))
+})
+
+test_that("live feature lookup filters points to the active project tissue", {
+  points <- data.frame(
+    id = c("a1", "a2", "b1", "b2"),
+    x = c(1, 2, 101, 102),
+    y = c(1, 2, 101, 102),
+    project_key = c("a::image", "a::image", "b::image", "b::image"),
+    project_image_index = c(0L, 0L, 1L, 1L),
+    stringsAsFactors = FALSE
+  )
+
+  filtered <- wsiTools:::wsi_prediction_filter_project_scope(
+    points,
+    list(project_key = "b::image", project_image_index = 1L)
+  )
+
+  expect_equal(filtered$id, c("b1", "b2"))
+  expect_equal(filtered$x, c(101, 102))
 })

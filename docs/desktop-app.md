@@ -96,14 +96,14 @@ viewer:
 
 - **Annotations -> Associate spatial points/cells** assigns the current
   points or cells to tissue ROIs in R.
-- **Trajectories -> Proximity analysis in R** measures nearest-neighbour
+- **Analysis -> Proximity analysis** measures nearest-neighbour
   distances between selected ROI categories or individual ROIs.
-- **Trajectories -> Distance statistics in R** bins those distances and asks R
+- **Analysis -> Proximity analysis -> Run statistics** bins those distances and asks R
   to correlate an eligible expression feature, PCA/reduction component, or
   prediction value with distance. The native table accepts both conventional
   row tables and R data frames serialized as named columns; select a feature
   in the table to colour the visible spatial circles from the live R session.
-- **Trajectories -> Gradient profile along trajectory in R** profiles a selected
+- **Analysis -> Trajectory -> Run profile** profiles a selected
   point/cell source across a selected trajectory. Choose a numeric field,
   categorical field, or `count`, then choose the width and number of bins. R
   evaluates the complete source layer after any active spatial registration;

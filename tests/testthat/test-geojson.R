@@ -32,6 +32,43 @@ test_that("GeoJSON parser reads a small QuPath-style polygon", {
   expect_true(is.list(roi$coordinates))
 })
 
+test_that("QuPath RGB arrays retain distinct annotation colours", {
+  geojson <- list(
+    type = "FeatureCollection",
+    features = list(
+      list(
+        type = "Feature",
+        id = "roi-magenta",
+        properties = list(
+          classification = list(name = "lamina propria dysplasia", color = list(219, 50, 219))
+        ),
+        geometry = list(
+          type = "Polygon",
+          coordinates = list(list(c(0, 0), c(10, 0), c(10, 10), c(0, 10), c(0, 0)))
+        )
+      ),
+      list(
+        type = "Feature",
+        id = "roi-green",
+        properties = list(
+          classification = list(name = "dysplasia", color = list(36, 252, 129))
+        ),
+        geometry = list(
+          type = "Polygon",
+          coordinates = list(list(c(20, 0), c(30, 0), c(30, 10), c(20, 10), c(20, 0)))
+        )
+      )
+    )
+  )
+
+  rois <- wsiTools:::wsi_roi_from_geojson(geojson)
+  viewer_rois <- wsiTools:::wsi_viewer_roi_features(rois)
+
+  expect_equal(rois$color, c("#DB32DB", "#24FC81"))
+  expect_equal(vapply(viewer_rois, `[[`, character(1), "colour"), c("#DB32DB", "#24FC81"))
+  expect_equal(vapply(viewer_rois, `[[`, character(1), "fill"), c("rgba(219,50,219,0.150)", "rgba(36,252,129,0.150)"))
+})
+
 test_that("GeoJSON writer preserves ROI classes and blocks accidental overwrite", {
   path <- tempfile(fileext = ".geojson")
   writeLines(

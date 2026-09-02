@@ -70,7 +70,8 @@ wsi_spatial_cluster_fields <- function(object, spot_ids = NULL) {
     return(wsi_empty_spatial_cluster_fields())
   }
   out <- do.call(rbind, rows)
-  out <- out[order(out$field, -out$matched_count, out$storage), , drop = FALSE]
+  priority <- wsi_spatial_cluster_field_priority(out$field)
+  out <- out[order(-priority, out$field, -out$matched_count, out$storage), , drop = FALSE]
   out <- out[!duplicated(tolower(out$field)), , drop = FALSE]
   rownames(out) <- NULL
   class(out) <- c("wsi_spatial_cluster_fields", "data.frame")
@@ -251,20 +252,28 @@ wsi_spatial_cluster_candidate_columns <- function(data) {
   if (!length(candidates)) {
     return(character())
   }
-  key <- tolower(gsub("[^a-z0-9]+", "_", candidates))
-  name_hit <- grepl(
+  key <- gsub("[^a-z0-9]+", "_", tolower(candidates))
+  technical <- grepl("^(x|y|z)$", key) |
+    grepl("(^|_)(coord|coordinate|spatial|image)(_|$)", key) |
+    grepl("(^|_)(row|col|column)(_|$)", key) |
+    grepl("^(ncount|nfeature|percent_|pct_)", key) |
+    grepl("(^|_)(area|radius|diameter|distance)(_|$)", key)
+  candidates <- candidates[!technical]
+  candidates[vapply(candidates, function(nm) wsi_spatial_cluster_value_column(data[[nm]]), logical(1))]
+}
+
+wsi_spatial_cluster_field_priority <- function(fields) {
+  key <- gsub("[^a-z0-9]+", "_", tolower(as.character(fields)))
+  as.integer(grepl(
     paste(
-      "seurat_clusters", "cluster", "clusters", "clustering", "leiden",
-      "louvain", "community", "subcluster", "kmeans", "graphclust",
-      "membership", "cell_type", "celltype", "annotation", "annot",
-      "active_ident", "identity", "ident", "class", "group", "groups",
-      "snn_res", "res",
+      "seurat_clusters", "cluster", "clustering", "leiden", "louvain",
+      "community", "subcluster", "kmeans", "membership", "cell_type",
+      "celltype", "annotation", "annot", "active_ident", "identity",
+      "ident", "class", "group", "snn_res",
       sep = "|"
     ),
     key
-  )
-  candidates <- candidates[name_hit]
-  candidates[vapply(candidates, function(nm) wsi_spatial_cluster_value_column(data[[nm]]), logical(1))]
+  ))
 }
 
 wsi_spatial_cluster_value_column <- function(x) {

@@ -138,6 +138,14 @@ wsi_color_to_hex <- function(x) {
     }
     return(NA_character_)
   }
+  if (is.numeric(x) && length(x) >= 3L && all(is.finite(x[seq_len(3L)]))) {
+    rgb <- as.numeric(x[seq_len(3L)])
+    if (max(rgb) <= 1) {
+      rgb <- rgb * 255
+    }
+    rgb <- pmax(0, pmin(255, round(rgb)))
+    return(sprintf("#%02X%02X%02X", as.integer(rgb[[1L]]), as.integer(rgb[[2L]]), as.integer(rgb[[3L]])))
+  }
   if (is.numeric(x) && length(x) >= 1L && is.finite(x[[1L]])) {
     rgb <- as.numeric(x[[1L]]) %% 16777216
     red <- floor(rgb / 65536) %% 256
@@ -146,6 +154,16 @@ wsi_color_to_hex <- function(x) {
     return(sprintf("#%02X%02X%02X", as.integer(red), as.integer(green), as.integer(blue)))
   }
   if (is.list(x)) {
+    if (length(x) >= 3L) {
+      rgb <- suppressWarnings(as.numeric(unlist(x[seq_len(3L)], use.names = FALSE)))
+      if (length(rgb) == 3L && all(is.finite(rgb))) {
+        if (max(rgb) <= 1) {
+          rgb <- rgb * 255
+        }
+        rgb <- pmax(0, pmin(255, round(rgb)))
+        return(sprintf("#%02X%02X%02X", as.integer(rgb[[1L]]), as.integer(rgb[[2L]]), as.integer(rgb[[3L]])))
+      }
+    }
     red <- wsi_color_component(x, c("r", "red"))
     green <- wsi_color_component(x, c("g", "green"))
     blue <- wsi_color_component(x, c("b", "blue"))

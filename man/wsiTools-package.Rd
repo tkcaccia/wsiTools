@@ -18,11 +18,11 @@ Useful links:
 
 }
 \author{
-\strong{Maintainer}: Stefano Caccia \email{tkcaccia@gmail.com}
+\strong{Maintainer}: Stefano Cacciatore \email{tkcaccia@gmail.com}
 
 Authors:
 \itemize{
-  \item Stefano Caccia \email{tkcaccia@gmail.com}
+  \item Stefano Cacciatore \email{tkcaccia@gmail.com}
 }
 
 }

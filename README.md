@@ -108,7 +108,8 @@ viewer more stable for real pathology workflows:
   all genes into the browser. CellPhenotyper projects can show H&E, registered
   GigaTIME/mIHC channels, GrandQC regions, KODAMA/MedSAM regions, cell masks,
   and cell-level feature overlays.
-- **Analysis overlays.** The Trajectories menu supports proximity analysis,
+- **Analysis overlays.** The Analysis menu opens separate Trajectory and
+  Proximity analysis windows. These support trajectory profiling,
   distance-to-reference overlays with a draggable legend, and proximity
   statistics. Feature names in the proximity statistics table can be clicked to
   colour the corresponding spots or cells by that feature through the live R
@@ -233,7 +234,7 @@ for the source pyramid.
 | Save annotation-spot links | `viewer$get_annotation_spots()` | Use Annotations to export annotation/spot associations as CSV |
 | Extract tiles | `extract_tiles()` or `wsi_tile()` | Preview tile grids before exporting when available |
 | Compare tissues | `wsi_viewer_live(..., mode = "tiles")` | Use View / Multi-view and drag project images into panes |
-| Run proximity analysis | `viewer$get_proximity()`, `viewer$get_proximity_stats()` | Use Trajectories / Proximity; click statistic-table features to colour spots/cells |
+| Run proximity analysis | `viewer$get_proximity()`, `viewer$get_proximity_stats()` | Use Analysis / Proximity analysis; click statistic-table features to colour spots/cells |
 | Inspect warnings | `viewer$get_logs()` | Open the Logs panel; warnings and disappearing toasts are retained there |
 | Diagnose setup | `wsi_backends()`, `wsi_diagnose()` | Open the Logs/History panel for viewer warnings |
 
@@ -1093,7 +1094,7 @@ session <- wsi_viewer_live(
 ```
 
 The interactive toolbar is organized into top menus such as `Project`,
-`Annotations`, `Cells`, `Artifacts`, `Measure`, `Trajectories`, `View`,
+`Annotations`, `Cells`, `Artifacts`, `Analysis`, `View`,
 `Stains`, and `Help`. Menus appear only when their data are relevant: for
 example, `Cells`, `Artifacts`, and `CellPhenotyper` appear for CellPhenotyper
 projects, while Seurat/Giotto/SpatialExperiment menus appear for spatial omics
@@ -1145,9 +1146,11 @@ straight-line vertices manually. Delete/Backspace removes the selected
 annotation, trajectory, measurement, marker, or layer object. `Ctrl+Z` and
 `Ctrl+Shift+Z`/`Ctrl+Y` undo and redo recent annotation/object edits.
 
-The `Trajectories` menu draws smoothed paths, supports editable trajectory
-borders, and can run proximity analysis for spots or cells inside one
-annotation relative to another annotation. The Distance to Reference legend is
+The `Analysis` menu opens separate movable, resizable `Trajectory` and
+`Proximity analysis` windows. The Trajectory window draws smoothed paths and
+supports editable trajectory borders and gradient profiles. The Proximity
+analysis window measures spots or cells inside one annotation relative to
+another annotation. The Distance to Reference legend is
 draggable. Proximity statistics can be run in the live R session; clicking a
 feature name in the statistics table asks R for that feature and colours the
 corresponding spatial spots or CellPhenotyper cells.

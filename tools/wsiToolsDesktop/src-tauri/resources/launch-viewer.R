@@ -1778,6 +1778,13 @@ desktop_create_deepzoom_project_item <- function(slide, index, output, log_file,
     tile_format = "jpg",
     tile_size = 512,
     tile_overlap = tiles$overlap %||% 1L,
+    cache_key = getFromNamespace("wsi_deepzoom_cache_key", "wsiTools")(
+      slide,
+      tile_size = 512,
+      tile_overlap = tiles$overlap %||% 1L,
+      tile_format = "jpg",
+      quality = 90
+    ),
     min_level = 0L,
     max_level = dz_max_level(slide$dimensions[["width"]], slide$dimensions[["height"]]),
     image_data_uri = NULL,

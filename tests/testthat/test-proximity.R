@@ -162,6 +162,82 @@ test_that("proximity nearest-neighbour lookup returns exact indices and distance
   expect_equal(nearest$distance, c(1, 1))
 })
 
+test_that("proximity analysis is restricted to the trajectory tissue", {
+  rois <- wsiTools:::wsi_roi_from_geojson(list(
+    type = "FeatureCollection",
+    features = list(
+      list(
+        type = "Feature", id = "query_roi",
+        properties = list(name = "Stroma", classification = list(name = "stroma")),
+        geometry = list(type = "Polygon", coordinates = list(list(
+          c(0, 0), c(4, 0), c(4, 4), c(0, 4), c(0, 0)
+        )))
+      ),
+      list(
+        type = "Feature", id = "target_roi",
+        properties = list(name = "Tumour", classification = list(name = "tumour")),
+        geometry = list(type = "Polygon", coordinates = list(list(
+          c(9, 0), c(14, 0), c(14, 4), c(9, 4), c(9, 0)
+        )))
+      )
+    )
+  ))
+  linked <- list(
+    source_name = "SpatialExperiment",
+    spots = data.frame(
+      id = c("slide_a_q", "slide_a_t", "slide_b_q", "slide_b_t"),
+      label = c("slide_a_q", "slide_a_t", "slide_b_q", "slide_b_t"),
+      x = c(1, 10, 1, 10),
+      y = c(1, 1, 1, 1),
+      project_key = c("slide_a::image", "slide_a::image", "slide_b::image", "slide_b::image"),
+      project_image_index = c(0L, 0L, 1L, 1L),
+      project_image = c("Slide A", "Slide A", "Slide B", "Slide B"),
+      stringsAsFactors = FALSE
+    )
+  )
+  class(linked) <- c("wsi_spatial_object", "list")
+  scope <- list(
+    project_key = "slide_b::image",
+    project_image_index = 1L,
+    project_section_index = -1L,
+    project_image = "Slide B",
+    project_section = ""
+  )
+
+  result <- wsiTools:::wsi_proximity_run(
+    context = list(spatial = linked),
+    rois = rois,
+    point_source = "spatial:points",
+    query_ids = "query_roi",
+    target_ids = "target_roi",
+    project_scope = scope
+  )
+  layer <- wsiTools:::wsi_proximity_layer(result)
+
+  expect_equal(result$id, "slide_b_q")
+  expect_equal(result$nearest_target_id, "slide_b_t")
+  expect_identical(attr(result, "project_scope"), scope)
+  expect_equal(layer$project_key, "slide_b::image")
+  expect_equal(layer$project_image_index, 1L)
+  expect_true(layer$metadata$project_scoped)
+})
+
+test_that("proximity payload accepts active tissue scope", {
+  payload <- wsiTools:::wsi_proximity_validate_payload(list(
+    point_source = "spatial:points",
+    query_annotations = "query_roi",
+    target_annotations = "target_roi",
+    project_key = "slide_b::image",
+    project_image_index = 1L,
+    project_section_index = -1L,
+    project_image = "Slide B",
+    project_section = ""
+  ))
+
+  expect_equal(payload$project_key, "slide_b::image")
+  expect_equal(payload$project_image_index, 1L)
+})
+
 test_that("proximity analysis supports annotation category selectors", {
   rois <- wsiTools:::wsi_roi_from_geojson(list(
     type = "FeatureCollection",
@@ -579,6 +655,10 @@ test_that("proximity controls are rendered only for managed point sources", {
   wsi_viewer(slide, output = out, open = FALSE, overwrite = TRUE, seurat = linked)
   html <- paste(readLines(out, warn = FALSE), collapse = "\n")
   expect_match(html, "Proximity analysis", fixed = TRUE)
+  expect_match(html, "id=\"openProximityAnalysis\"", fixed = TRUE)
+  expect_match(html, "id=\"proximityAnalysisWindow\"", fixed = TRUE)
+  expect_match(html, "id=\"proximityAnalysisClose\"", fixed = TRUE)
+  expect_match(html, "openProximityAnalysisWindow", fixed = TRUE)
   expect_match(html, "runProximityAnalysis", fixed = TRUE)
   expect_match(html, "id=\"proximityColourVisible\"", fixed = TRUE)
   expect_match(html, "function setProximityColourVisible", fixed = TRUE)
@@ -608,5 +688,7 @@ test_that("proximity controls are rendered only for managed point sources", {
   out2 <- tempfile(fileext = ".html")
   wsi_viewer(slide, output = out2, open = FALSE, overwrite = TRUE)
   html2 <- paste(readLines(out2, warn = FALSE), collapse = "\n")
+  expect_false(grepl("id=\"openProximityAnalysis\"", html2, fixed = TRUE))
+  expect_false(grepl("id=\"proximityAnalysisWindow\"", html2, fixed = TRUE))
   expect_false(grepl("id=\"runProximityAnalysis\"", html2, fixed = TRUE))
 })
