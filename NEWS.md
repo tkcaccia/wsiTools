@@ -4,6 +4,9 @@
   Wand. Selecting an optimized annotation promotes only that region to an
   editable ROI; Brush extends it (or subtracts with `Alt`/`Command`) and Wand
   refines its connected boundary while preserving its identity and category.
+  `Alt` + Wand now removes the connected wand region from the selected
+  annotation (`Command` is also accepted on macOS), with undo and live-R
+  history support.
 
 - Tissue annotation boundaries now retain every GeoJSON vertex at all zoom
   levels instead of changing to simplified polygons, boxes, or centroids.

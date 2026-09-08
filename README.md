@@ -1146,7 +1146,9 @@ Brush mode uses a 32 px default brush. Select an existing tissue annotation,
 then paint to extend that same annotation; holding `Alt` on Windows/Linux or
 `Command` on macOS subtracts from it. The Magic Wand similarly refines the
 selected tissue annotation, preserving its category and name, or creates a new
-ROI when no annotation is selected. Optimized imported GeoJSON remains
+ROI when no annotation is selected. Hold `Alt` while clicking with the Wand to
+remove that connected region from the selected annotation; `Command` + Wand is
+also supported on macOS. Optimized imported GeoJSON remains
 lightweight until a region is selected for editing. The brush selection is
 handled as a buffered geometry, so polygons, multipolygons, rectangles, and
 freehand regions can be edited. Smooth curve-based editing lets users refine
