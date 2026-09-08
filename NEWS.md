@@ -1,5 +1,10 @@
 # wsiTools 0.1.24
 
+- Imported tissue annotations can now be edited directly with Brush and Magic
+  Wand. Selecting an optimized annotation promotes only that region to an
+  editable ROI; Brush extends it (or subtracts with `Alt`/`Command`) and Wand
+  refines its connected boundary while preserving its identity and category.
+
 - Added live trajectory gene-correlation analysis. **Run profile** now matches
   spots/cells along the selected trajectory to the attached spatial object,
   ranks expression features by Spearman or Pearson correlation with trajectory
@@ -7,9 +12,9 @@
   complete result through `viewer$get_trajectory_correlations()`.
 
 - Added a compact annotation toolbar above the main menus with Pan, Brush, and
-  Magic Wand controls. The wand creates normal editable ROIs from connected
-  tissue colours, supports adjustable tolerance, undo, live synchronization,
-  and independent multi-view panes.
+  Magic Wand controls. The wand creates new editable ROIs or refines the
+  selected tissue annotation from connected tissue colours, with adjustable
+  tolerance, undo, live synchronization, and independent multi-view panes.
 
 - Added the initial optional Tauri Rust/WGPU renderer foundation: a versioned
   live tile manifest, native camera and visible-tile selection, WGPU capability

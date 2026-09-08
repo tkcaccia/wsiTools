@@ -1139,12 +1139,16 @@ touch; different categories are clipped to prevent overlap. GeoJSON import and
 export use slide coordinates so ROIs remain aligned after closing and reopening
 a viewer.
 
-Brush mode uses a 32 px default brush. Holding `Alt` on Windows/Linux or
-`Command` on macOS subtracts from the selected annotation. The brush selection
-is handled as a buffered geometry, so all touched polygons, multipolygons,
-rectangles, and freehand regions can be selected or edited. Smooth curve-based
-editing lets users refine complex tissue boundaries without having to place many
-straight-line vertices manually. Delete/Backspace removes the selected
+Brush mode uses a 32 px default brush. Select an existing tissue annotation,
+then paint to extend that same annotation; holding `Alt` on Windows/Linux or
+`Command` on macOS subtracts from it. The Magic Wand similarly refines the
+selected tissue annotation, preserving its category and name, or creates a new
+ROI when no annotation is selected. Optimized imported GeoJSON remains
+lightweight until a region is selected for editing. The brush selection is
+handled as a buffered geometry, so polygons, multipolygons, rectangles, and
+freehand regions can be edited. Smooth curve-based editing lets users refine
+complex tissue boundaries without having to place many straight-line vertices
+manually. Delete/Backspace removes the selected
 annotation, trajectory, measurement, marker, or layer object. `Ctrl+Z` and
 `Ctrl+Shift+Z`/`Ctrl+Y` undo and redo recent annotation/object edits.
 
