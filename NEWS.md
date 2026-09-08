@@ -8,6 +8,11 @@
   annotation (`Command` is also accepted on macOS), with undo and live-R
   history support.
 
+- Enclosed Brush and Magic Wand subtraction now uses a local geometry update
+  instead of rasterizing the full annotation. This substantially reduces edit
+  latency on large imported regions while retaining their detailed outer
+  boundaries.
+
 - Fixed a JavaScript call-stack overflow when Brush or Wand promoted and edited
   tissue annotations containing tens of thousands of vertices. Annotation
   bounds are now scanned incrementally instead of expanding every coordinate
