@@ -8,6 +8,11 @@
   annotation (`Command` is also accepted on macOS), with undo and live-R
   history support.
 
+- Fixed a JavaScript call-stack overflow when Brush or Wand promoted and edited
+  tissue annotations containing tens of thousands of vertices. Annotation
+  bounds are now scanned incrementally instead of expanding every coordinate
+  into `Math.min()` and `Math.max()` arguments.
+
 - Tissue annotation boundaries now retain every GeoJSON vertex at all zoom
   levels instead of changing to simplified polygons, boxes, or centroids.
   Viewport culling remains active, and dense cell segmentations retain their

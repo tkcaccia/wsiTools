@@ -222,6 +222,8 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "subtractBrushGroupsFromRoi", fixed = TRUE)
   expect_match(html, "wand_subtract", fixed = TRUE)
   expect_match(html, "Alt + Wand", fixed = TRUE)
+  expect_match(html, "function boundsFromRing(ring){let xmin=Infinity", fixed = TRUE)
+  expect_match(html, "function refreshRoiGeometry(roi){if(!isDrawable(roi))return;let bounds=null", fixed = TRUE)
   expect_match(html, "setMode('draw');closeMenuAfterToolAction", fixed = TRUE)
   expect_match(html, "setMode('brush');closeMenuAfterToolAction", fixed = TRUE)
   expect_false(grepl("<button id=\"newRoi\"", html, fixed = TRUE))
