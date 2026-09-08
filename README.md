@@ -1137,7 +1137,10 @@ meaningful pathology class. Separate objects with the same category keep the
 same category label and colour. Same-category brush strokes merge when they
 touch; different categories are clipped to prevent overlap. GeoJSON import and
 export use slide coordinates so ROIs remain aligned after closing and reopening
-a viewer.
+a viewer. Tissue annotation boundaries retain their complete GeoJSON geometry
+at every zoom level; only off-screen regions are culled. Dense cell segmentation
+continues to use close-zoom rendering limits because it can contain millions of
+objects.
 
 Brush mode uses a 32 px default brush. Select an existing tissue annotation,
 then paint to extend that same annotation; holding `Alt` on Windows/Linux or

@@ -5929,7 +5929,9 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
           colour = as.character(source$colour %||% "#22C55E"),
           fill_alpha = suppressWarnings(as.numeric(source$fill_alpha %||% 0.16)),
           line_width = suppressWarnings(as.numeric(source$line_width %||% 2.2)),
-          full_resolution_zoom = suppressWarnings(as.numeric(source$full_resolution_zoom %||% 3)),
+          full_resolution_zoom = if (identical(as.character(source$kind %||% ""), "tissue") ||
+            identical(as.character(source$source_type %||% ""), "annotation")) 0 else
+            suppressWarnings(as.numeric(source$full_resolution_zoom %||% 3)),
           total_count = suppressWarnings(as.integer(source$total_count %||% NA_integer_))
         )
       ))
@@ -6036,15 +6038,26 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
     viewport_height <- bounds[["ymax"]] - bounds[["ymin"]]
     broad_view <- is.finite(viewport_width) && is.finite(viewport_height) &&
       max(viewport_width, viewport_height) > 18000
-    source_cap <- suppressWarnings(as.numeric(source$max_points_per_roi %||% 1200L))
+    source_type <- as.character(source$source_type %||% if (identical(source$kind %||% "", "tissue")) {
+      "annotation"
+    } else {
+      "cell_segmentation"
+    })
+    tissue_source <- identical(as.character(source$kind %||% ""), "tissue") ||
+      tolower(source_type) %in% c("annotation", "tissue_annotation")
+    source_cap <- if (tissue_source) Inf else
+      suppressWarnings(as.numeric(source$max_points_per_roi %||% 1200L))
     if (is.na(source_cap) || source_cap <= 0) {
       source_cap <- 1200L
     }
-    full_resolution_zoom <- suppressWarnings(as.numeric(source$full_resolution_zoom %||% Inf))
+    full_resolution_zoom <- if (tissue_source) 0 else
+      suppressWarnings(as.numeric(source$full_resolution_zoom %||% Inf))
     if (is.na(full_resolution_zoom) || full_resolution_zoom < 0) {
       full_resolution_zoom <- Inf
     }
-    zoom_cap <- if (is.finite(zoom) && zoom >= full_resolution_zoom && zoom < 5) {
+    zoom_cap <- if (tissue_source) {
+      Inf
+    } else if (is.finite(zoom) && zoom >= full_resolution_zoom && zoom < 5) {
       2400L
     } else if (is.finite(zoom) && zoom >= full_resolution_zoom && zoom < 10) {
       6000L
@@ -6067,11 +6080,6 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
     if (is.finite(max_points_per_roi)) {
       max_points_per_roi <- max(32L, as.integer(max_points_per_roi))
     }
-    source_type <- as.character(source$source_type %||% if (identical(source$kind %||% "", "tissue")) {
-      "annotation"
-    } else {
-      "cell_segmentation"
-    })
     source_name <- as.character(source$name %||% "Cell annotation")
     source_colour <- as.character(source$colour %||% "#F97316")
     source_fill_alpha <- suppressWarnings(as.numeric(source$fill_alpha %||% 0.22))
@@ -6083,7 +6091,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
         item
       })
     }
-    bounds_only <- (!is.finite(zoom) || zoom < 1.05) && nrow(subset) > 0L
+    bounds_only <- !tissue_source && (!is.finite(zoom) || zoom < 1.05) && nrow(subset) > 0L
     clip_pad <- max(viewport_width, viewport_height) * 0.08
     if (!is.finite(clip_pad) || clip_pad < 0) {
       clip_pad <- 0

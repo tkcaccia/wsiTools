@@ -5,6 +5,11 @@
   editable ROI; Brush extends it (or subtracts with `Alt`/`Command`) and Wand
   refines its connected boundary while preserving its identity and category.
 
+- Tissue annotation boundaries now retain every GeoJSON vertex at all zoom
+  levels instead of changing to simplified polygons, boxes, or centroids.
+  Viewport culling remains active, and dense cell segmentations retain their
+  separate close-zoom safeguards.
+
 - Added live trajectory gene-correlation analysis. **Run profile** now matches
   spots/cells along the selected trajectory to the attached spatial object,
   ranks expression features by Spearman or Pearson correlation with trajectory

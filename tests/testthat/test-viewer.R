@@ -3538,7 +3538,7 @@ test_that("desktop launcher isolates static viewer assets from live R work", {
   expect_match(launcher, "Cache-Control", fixed = TRUE)
   expect_match(launcher, "ETag", fixed = TRUE)
   expect_match(launcher, "dense_geojson_sources", fixed = TRUE)
-  expect_match(launcher, "immediate browser-side level-of-detail rendering", fixed = TRUE)
+  expect_match(launcher, "immediate browser-side full-resolution boundary rendering", fixed = TRUE)
   expect_match(launcher, "desktop_force_dynamic_tiles", fixed = TRUE)
   expect_match(launcher, "WSITOOLS_FORCE_DYNAMIC_TILES", fixed = TRUE)
   expect_match(launcher, "session_inputs <- lapply(items", fixed = TRUE)
@@ -3550,7 +3550,7 @@ test_that("desktop launcher isolates static viewer assets from live R work", {
   )
 })
 
-test_that("dense tissue annotations load once and coalesce viewport work", {
+test_that("dense tissue annotations keep full boundaries and coalesce viewport work", {
   html_code <- paste(deparse(wsiTools:::wsi_viewer_geometry_js), collapse = "\n")
   session_code <- paste(deparse(wsiTools:::wsi_start_viewer_state_server), collapse = "\n")
 
@@ -3561,12 +3561,14 @@ test_that("dense tissue annotations load once and coalesce viewport work", {
   expect_match(html_code, "scheduleDenseGeojsonViewportLoad", fixed = TRUE)
   expect_match(html_code, "denseStaticUsesFullResolution", fixed = TRUE)
   expect_match(html_code, "_dense_full_groups", fixed = TRUE)
-  expect_match(html_code, "Tissue annotation loaded with browser-side level-of-detail rendering", fixed = TRUE)
+  expect_match(html_code, "item&&item.tissue_annotation===true", fixed = TRUE)
+  expect_match(html_code, "tissueAnnotationRoi(roi)", fixed = TRUE)
+  expect_match(html_code, "Tissue annotation loaded with full boundary resolution at every zoom", fixed = TRUE)
   expect_match(session_code, "static_url", fixed = TRUE)
   expect_match(session_code, "static_source", fixed = TRUE)
   expect_match(session_code, "full_resolution_zoom", fixed = TRUE)
-  expect_match(html_code, "Math.max(256", fixed = TRUE)
-  expect_match(html_code, "ceiling=!Number.isFinite(z)||z<1.5?5000:12000", fixed = TRUE)
+  expect_match(session_code, "tissue_source", fixed = TRUE)
+  expect_match(session_code, "bounds_only <- !tissue_source", fixed = TRUE)
 })
 
 test_that("live state service exposes a compact native renderer manifest", {

@@ -1205,7 +1205,7 @@ desktop_register_dense_geojson_source <- function(viewer, item, log_file = NULL)
     fill_alpha = if (is_tissue) 0.16 else 0.22,
     line_width = if (is_tissue) 2.2 else 1.8,
     max_points_per_roi = if (is_tissue) Inf else 700L,
-    full_resolution_zoom = if (is_tissue) 3 else Inf,
+    full_resolution_zoom = if (is_tissue) 0 else Inf,
     min_zoom = if (is_tissue) 0 else 5,
     bbox_index = bbox_index
   )
@@ -1214,7 +1214,7 @@ desktop_register_dense_geojson_source <- function(viewer, item, log_file = NULL)
     "Registered ",
     item$kind,
     if (has_static_source && !has_rois) {
-      " GeoJSON for immediate browser-side level-of-detail rendering."
+      " GeoJSON for immediate browser-side full-resolution boundary rendering."
     } else {
       paste0(
         " GeoJSON for indexed rendering and R analysis: ",
