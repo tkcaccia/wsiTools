@@ -219,6 +219,8 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "mode==='wand'", fixed = TRUE)
   expect_match(html, "Magic wand annotation", fixed = TRUE)
   expect_match(html, "wandSubtractModifier", fixed = TRUE)
+  expect_match(html, "event.shiftKey&&String(event.key||'').toLowerCase()==='w'", fixed = TRUE)
+  expect_match(html, "button.addEventListener('pointerdown',e=>e.stopPropagation())", fixed = TRUE)
   expect_match(html, "subtractBrushGroupsFromRoi", fixed = TRUE)
   expect_match(html, "applyContainedSubtraction(groups,target,'wand')", fixed = TRUE)
   expect_match(html, "fast_local_subtraction", fixed = TRUE)

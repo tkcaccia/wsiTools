@@ -1,5 +1,9 @@
 # wsiTools 0.1.24
 
+- Prevented accidental Brush-to-Wand switches. Magic Wand now uses the
+  deliberate `Shift+W` shortcut instead of bare `W`, and the Brush/Wand toolbar
+  controls stop pointer propagation before changing tools.
+
 - Imported tissue annotations can now be edited directly with Brush and Magic
   Wand. Selecting an optimized annotation promotes only that region to an
   editable ROI; Brush extends it (or subtracts with `Alt`/`Command`) and Wand
