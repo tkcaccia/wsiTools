@@ -364,3 +364,55 @@ test_that("dense GeoJSON masks can be prepared as tiled channel overlays", {
   expect_true(nzchar(result$source$metadata$target_path))
   expect_equal(result$source$metadata$legend[[1]]$label, "tumour")
 })
+
+test_that("TIFF tissue masks remain lazy editable dynamic sources", {
+  skip_if_not(wsi_has_vips())
+  skip_if_not_installed("magick")
+
+  image_path <- tempfile(fileext = ".tif")
+  mask_path <- tempfile(fileext = ".ome.tif")
+  legend_path <- sub("\\.ome\\.tif$", "_labels.csv", mask_path)
+  magick::image_write(magick::image_blank(128, 96, "white"), image_path)
+  magick::image_write(
+    magick::image_read(as.raster(matrix(
+      rep(c("#000000", "#D73027"), each = 64 * 96),
+      nrow = 96,
+      ncol = 128
+    ))),
+    mask_path
+  )
+  utils::write.csv(
+    data.frame(value = 1, label = "tumour", colour = "#D73027"),
+    legend_path,
+    row.names = FALSE
+  )
+
+  cache_dir <- tempfile("editable-mask-cache-")
+  source <- wsi_annotation_mask_source(
+    mask_path,
+    slide = image_path,
+    cache_dir = cache_dir,
+    persistent_cache = FALSE
+  )
+
+  expect_s3_class(source, "wsi_dynamic_annotation_mask_tile_source")
+  expect_identical(source$kind, "mask")
+  expect_true(source$metadata$editable_annotation_mask)
+  expect_identical(source$metadata$annotation_storage, "tiled_raster_with_sparse_deltas")
+  expect_identical(source$metadata$mask_filter_mode, "palette")
+  expect_identical(source$tile_overlap, 0L)
+  expect_equal(source$metadata$extent$width, 128)
+  expect_equal(source$metadata$extent$height, 96)
+  expect_equal(source$metadata$legend[[1L]]$label, "tumour")
+  expect_length(list.files(cache_dir, pattern = "\\.(png|jpg)$", recursive = TRUE), 0L)
+
+  tile <- wsiTools:::wsi_dynamic_tile_file(
+    source,
+    level = source$max_level,
+    col = 0,
+    row = 0,
+    format = "png"
+  )
+  expect_true(file.exists(tile))
+  expect_gt(file.info(tile)$size, 0)
+})

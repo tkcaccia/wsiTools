@@ -98,6 +98,11 @@ viewer more stable for real pathology workflows:
   visually consistent, and keep same-category regions mergeable while different
   categories remain non-overlapping. Selected objects can be deleted with
   Delete/Backspace, and recent annotation/object edits can be undone/redone.
+- **Responsive annotation drawing.** A separate cursor/stroke canvas and cached
+  full-detail paths avoid rebuilding completed annotations on mouse movement.
+  Brush polygon operations run in a browser worker; routine R synchronization
+  sends changed annotations rather than every polygon. See the
+  [editing performance notes](docs/editing-performance.md) for scope and tests.
 - **Annotation export and persistence.** GeoJSON export uses slide-level
   coordinates rather than the current zoom level. Live viewers can sync ROIs
   back to R, export annotation-spot association CSV files, and save project
@@ -623,12 +628,13 @@ preview reads, and full-resolution dynamic OpenSeadragon tiles through
 libCZIAPI. The fastest interactive route is the live CZI viewer because it
 opens from metadata first and reads only the tiles requested by the browser.
 
-Full-resolution live CZI project viewing now opens with lazy previews by
-default. The Project panel is populated from CZI metadata, and OpenSeadragon
-requests only the tiles needed for the selected scene. This avoids reading every
-scene into a PNG overview before the browser appears, which is much faster for
-multi-scene CZI files. To restore the older eager-preview behaviour, use
-`czi_preview = "all"`.
+Full-resolution live CZI project viewing decodes the first scene before opening
+by default. The viewer therefore starts with real image pixels rather than a
+blank canvas or status placeholder. Later scenes stay lazy, and OpenSeadragon
+requests only the tiles needed for the selected scene, so multi-scene files do
+not need every scene converted to a PNG overview. Use `czi_preview = "all"` to
+prepare every scene preview before opening, or `czi_preview = "lazy"` only when
+an intentionally placeholder-first launch is acceptable.
 
 Static CZI project viewing can still generate low-resolution scene previews. In
 that path, wsiTools caps the first preview to about 1024 px on the longest side
@@ -642,10 +648,10 @@ Sys.setenv(WSITOOLS_CZI_MIN_PREVIEW_WIDTH = "768")
 ```
 
 ```r
-# Fast first paint for live CZI viewing.
+# Display-ready first scene, with later scenes loaded lazily.
 viewer <- wsi_viewer_czi_project_live(
   "sample.czi",
-  czi_preview = "lazy",
+  czi_preview = "first",
   sections = TRUE
 )
 
@@ -1148,7 +1154,11 @@ then paint to extend that same annotation; holding `Alt` on Windows/Linux or
 selected tissue annotation, preserving its category and name, or creates a new
 ROI when no annotation is selected. Hold `Alt` while clicking with the Wand to
 remove that connected region from the selected annotation; `Command` + Wand is
-also supported on macOS. Optimized imported GeoJSON remains
+also supported on macOS. Its adjustable **Reach** confines each selection to a
+64-512 screen-pixel radius (256 px by default), preventing a connected colour
+from expanding across the complete tissue. Newly generated Wand contours are
+limited to 768 vertices and edited in a background geometry worker. Optimized
+imported GeoJSON remains
 lightweight until a region is selected for editing. The brush selection is
 handled as a buffered geometry, so polygons, multipolygons, rectangles, and
 freehand regions can be edited. Smooth curve-based editing lets users refine
@@ -1663,6 +1673,32 @@ wsi_viewer_roi(slide, mask_rois, output = "tumour_mask_viewer.html", open = FALS
 # In a live session, use: session$add_rois(mask_rois)
 write_geojson(mask_rois, "tumour_mask_annotations.geojson", overwrite = TRUE)
 ```
+
+For large TIFF/OME-TIFF **tissue annotation masks**, keep the annotation as a
+raster instead of converting it to polygons. The live viewer requests only the
+visible mask tiles. Brush and Magic Wand edits are applied as sparse raster
+paint/erase tiles, which is substantially cheaper than repeatedly rebuilding
+large polygon geometries:
+
+```r
+slide <- wsi_open("sample.svs")
+
+viewer <- wsi_viewer_live(
+  slide,
+  annotation_masks = "tissue_annotations.ome.tiff",
+  dynamic_tiles = TRUE,
+  wait = FALSE
+)
+viewer$open()
+```
+
+Use `wsi_annotation_mask_source()` when you need an explicit legend, opacity,
+or project-image association. A sidecar named `<mask>_labels.csv`,
+`<mask>.labels.csv`, or `labels.csv` is detected automatically; it may contain
+`value`, `label`, and `colour` columns. Black pixels are treated as transparent.
+This editable raster path requires a live viewer and libvips. GeoJSON remains
+the appropriate format when individual vector ROIs must be selected or have
+their vertices edited.
 
 The same viewer can create new polygon annotations interactively and export
 them as a GeoJSON `FeatureCollection`.

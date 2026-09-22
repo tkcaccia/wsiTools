@@ -591,14 +591,7 @@ async function handleLaunch(launcher, codeLog, successPrefix) {
   appendLog("R code sent to R:");
   appendLog(codeLog);
   startLogPolling();
-  try {
-    await invoke("open_viewer_loading_window");
-    viewerWindowOpen = true;
-    stopViewer.disabled = false;
-    appendLog("Viewer window opened while R prepares the project.");
-  } catch (error) {
-    appendLog(`Could not open the viewer progress window: ${error}`);
-  }
+  appendLog("Preparing the first image before opening the viewer window.");
   try {
     const launch = await launcher();
     appendLog(`${successPrefix}: ${launch.viewer_url}`);
@@ -639,7 +632,7 @@ async function selectAssociation(id, kind) {
     tissue: {
       title: `Select tissue annotation for ${basename(item.image)}`,
       filters: [
-        { name: "Tissue annotation", extensions: ["geojson", "json"] },
+        { name: "Tissue annotation", extensions: ["geojson", "json", "tif", "tiff", "ome.tif", "ome.tiff"] },
         { name: "All files", extensions: ["*"] }
       ],
       key: "tissueAnnotation",

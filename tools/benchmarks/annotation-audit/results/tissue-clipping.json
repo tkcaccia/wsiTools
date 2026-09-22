@@ -1,0 +1,255 @@
+{
+  "date": "2026-09-09T13:25:52.155Z",
+  "environment": {
+    "node": "v26.3.0",
+    "os": "23.5.0",
+    "arch": "arm64",
+    "cpu": "Apple M3",
+    "logical_cpus": 8,
+    "ram_bytes": 8589934592,
+    "versions": {
+      "@mapbox/vector-tile": "3.0.0",
+      "clipper2-wasm": "0.4.0",
+      "earcut": "3.2.3",
+      "flatbush": "4.6.2",
+      "flatgeobuf": "4.4.0",
+      "geojson-vt": "5.0.2",
+      "pbf": "5.1.2",
+      "playwright-core": "1.63.0",
+      "rbush": "4.0.1",
+      "vt-pbf": "3.1.3"
+    }
+  },
+  "provenance": {
+    "inst/viewer/performance.js": "11f921dabe61b29db0c128a795572dbfe21e6503cd044d15215a81346a09df34",
+    "inst/viewer/geometry-worker.js": "34c54c773a1979420ba848b8e8a4ba36e5ac9b323ce94d13cff54afafa8977f7",
+    "inst/viewer/clipper.js": "a650c6946682edc1a64016f6553eeb5c32ce45eb7ca0ad5d8221961af011d97c",
+    "inst/viewer/sync.js": "fc00ccfe01f9de091d09bae0814b0fb77e757d4b65ebd27553aa13e5c9637703",
+    "inst/wasm/wsi_overlay_core.wasm": "7edb1e38aab52ef979ab3733641700f84b35e0fb11b62fceef06ce4cfbe91b0b"
+  },
+  "dataset": {
+    "file": "Visium_HD_Human_Colon_Cancer_290325.geojson",
+    "sha256": "18fa709a555d856cdf45838a00c4499cc80571994b4e53a864608cfd5ba4b735",
+    "bytes": 13274712,
+    "features": 359,
+    "vertices": 825698,
+    "largest_feature_vertices": 117669,
+    "bounds": [
+      37600,
+      0,
+      67740,
+      26143
+    ],
+    "first_read_ms": 5.137292000000002,
+    "first_parse_ms": 86.78945899999997,
+    "heap_delta_text_and_object": 62396792
+  },
+  "operations": [
+    {
+      "feature_index": 354,
+      "vertices": 117669,
+      "claim_width_px": 160,
+      "original_area": 94661067.24479342,
+      "union": {
+        "current_js_clipper": {
+          "median_ms": 14857.47775,
+          "min_ms": 14857.47775,
+          "max_ms": 14857.47775,
+          "n": 1,
+          "area": 94673546.53687611
+        },
+        "wasm_import": {
+          "median_ms": 12.75879200000054,
+          "min_ms": 10.326540999998542,
+          "max_ms": 20.35020799999984,
+          "n": 3
+        },
+        "wasm_resident_kernel": {
+          "median_ms": 30.684375000000728,
+          "min_ms": 30.359957999999097,
+          "max_ms": 47.05829199999971,
+          "n": 3
+        },
+        "wasm_with_import_output": {
+          "median_ms": 43.32574999999997,
+          "min_ms": 42.95091599999978,
+          "max_ms": 47.17200000000048,
+          "n": 3
+        },
+        "js_area": 94673546.53687611,
+        "wasm_area": 94673546.75684369,
+        "absolute_area_difference": 0.2199675738811493,
+        "wasm_output_vertices": 117529
+      },
+      "subtract": {
+        "current_js_clipper": {
+          "timeout_ms": 15000
+        },
+        "wasm_import": {
+          "median_ms": 10.327958000001672,
+          "min_ms": 9.530374999998457,
+          "max_ms": 12.32641700000022,
+          "n": 3
+        },
+        "wasm_resident_kernel": {
+          "median_ms": 27.148999999997613,
+          "min_ms": 27.07604100000026,
+          "max_ms": 29.80541699999958,
+          "n": 3
+        },
+        "wasm_with_import_output": {
+          "median_ms": 42.44108300000153,
+          "min_ms": 37.50241599999936,
+          "max_ms": 43.19608299999891,
+          "n": 3
+        },
+        "js_area": null,
+        "wasm_area": 94647946.75684369,
+        "absolute_area_difference": null,
+        "wasm_output_vertices": 117531
+      },
+      "lazy_claim_record_bytes": 126
+    },
+    {
+      "feature_index": 59,
+      "vertices": 1994,
+      "claim_width_px": 160,
+      "original_area": 129060.30914986134,
+      "union": {
+        "current_js_clipper": {
+          "median_ms": 7.499833999998373,
+          "min_ms": 6.789416999999958,
+          "max_ms": 17.455583999999362,
+          "n": 3,
+          "area": 145054.1497014761
+        },
+        "wasm_import": {
+          "median_ms": 0.2721669999991718,
+          "min_ms": 0.17766699999992852,
+          "max_ms": 0.8141250000007858,
+          "n": 3
+        },
+        "wasm_resident_kernel": {
+          "median_ms": 0.2672920000004524,
+          "min_ms": 0.24708400000235997,
+          "max_ms": 0.27933300000222516,
+          "n": 3
+        },
+        "wasm_with_import_output": {
+          "median_ms": 0.4961249999978463,
+          "min_ms": 0.48858299999847077,
+          "max_ms": 0.5491250000013679,
+          "n": 3
+        },
+        "js_area": 145054.1497014761,
+        "wasm_area": 145054.1493511703,
+        "absolute_area_difference": 0.00035030581057071686,
+        "wasm_output_vertices": 1906
+      },
+      "subtract": {
+        "current_js_clipper": {
+          "median_ms": 9.018542000001617,
+          "min_ms": 8.952042000000802,
+          "max_ms": 16.99266600000192,
+          "n": 3,
+          "area": 119454.1497014761
+        },
+        "wasm_import": {
+          "median_ms": 0.506667000001471,
+          "min_ms": 0.24441599999772734,
+          "max_ms": 0.5091250000004948,
+          "n": 3
+        },
+        "wasm_resident_kernel": {
+          "median_ms": 0.25379199999952107,
+          "min_ms": 0.25054200000158744,
+          "max_ms": 0.2956250000024738,
+          "n": 3
+        },
+        "wasm_with_import_output": {
+          "median_ms": 0.46333400000003166,
+          "min_ms": 0.40716600000087055,
+          "max_ms": 1.0582920000015292,
+          "n": 3
+        },
+        "js_area": 119454.1497014761,
+        "wasm_area": 119454.14935117029,
+        "absolute_area_difference": 0.00035030581057071686,
+        "wasm_output_vertices": 1904
+      },
+      "lazy_claim_record_bytes": 125
+    },
+    {
+      "feature_index": 127,
+      "vertices": 339,
+      "claim_width_px": 160,
+      "original_area": 67413.99924981594,
+      "union": {
+        "current_js_clipper": {
+          "median_ms": 2.3840840000011667,
+          "min_ms": 1.854166000000987,
+          "max_ms": 6.041291000001365,
+          "n": 3,
+          "area": 83149.8399912715
+        },
+        "wasm_import": {
+          "median_ms": 0.1118750000023283,
+          "min_ms": 0.11179199999969569,
+          "max_ms": 0.12670799999978044,
+          "n": 3
+        },
+        "wasm_resident_kernel": {
+          "median_ms": 0.09991599999921164,
+          "min_ms": 0.06937499999912689,
+          "max_ms": 0.17054099999950267,
+          "n": 3
+        },
+        "wasm_with_import_output": {
+          "median_ms": 0.18516699999963748,
+          "min_ms": 0.1349579999987327,
+          "max_ms": 0.20770900000206893,
+          "n": 3
+        },
+        "js_area": 83149.8399912715,
+        "wasm_area": 83149.8399235066,
+        "absolute_area_difference": 0.00006776489317417145,
+        "wasm_output_vertices": 293
+      },
+      "subtract": {
+        "current_js_clipper": {
+          "median_ms": 2.1694170000009763,
+          "min_ms": 1.6372499999997672,
+          "max_ms": 6.281041000002006,
+          "n": 3,
+          "area": 57549.839991271496
+        },
+        "wasm_import": {
+          "median_ms": 0.1126670000012382,
+          "min_ms": 0.09333300000071176,
+          "max_ms": 0.20158400000218535,
+          "n": 3
+        },
+        "wasm_resident_kernel": {
+          "median_ms": 0.06233300000167219,
+          "min_ms": 0.060499999999592546,
+          "max_ms": 0.07875000000058208,
+          "n": 3
+        },
+        "wasm_with_import_output": {
+          "median_ms": 0.16274999999950523,
+          "min_ms": 0.12220800000068266,
+          "max_ms": 0.22433399999863468,
+          "n": 3
+        },
+        "js_area": 57549.839991271496,
+        "wasm_area": 57549.8399235066,
+        "absolute_area_difference": 0.00006776489317417145,
+        "wasm_output_vertices": 291
+      },
+      "lazy_claim_record_bytes": 121
+    }
+  ],
+  "wasm_initialization_ms": 14.954124999999976,
+  "note": "Single-feature union/subtraction component benchmarks. Current JS uses 1/4096 px; Clipper2-WASM uses 1e-4 px. WASM output extracted to packed arrays; current JS reconstructs nested polygon arrays. Area agreement is not a topology proof. No end-to-end speedup inferred.",
+  "max_rss_kib": 358624
+}

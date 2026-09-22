@@ -1165,13 +1165,17 @@ wsi_stardist_response_body <- function(result, cell_radius = 8) {
 }
 
 wsi_http_json_response <- function(status = 200L, body = list(), content_type = "application/json") {
-  text <- if (is.character(body) && length(body) == 1L) {
+  status <- as.integer(status)
+  # NULL prevents httpuv from gzip-encoding a forbidden body on 204/304 replies.
+  text <- if (status < 200L || status %in% c(204L, 304L)) {
+    NULL
+  } else if (is.character(body) && length(body) == 1L) {
     body
   } else {
     jsonlite::toJSON(body, auto_unbox = TRUE, null = "null")
   }
   list(
-    status = as.integer(status),
+    status = status,
     headers = list(
       "Content-Type" = content_type,
       "Access-Control-Allow-Origin" = "*",

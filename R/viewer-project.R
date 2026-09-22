@@ -176,10 +176,11 @@ wsi_viewer_project <- function(images, output = NULL, open = interactive(),
 #' @param sections Show detected CZI scenes/sections separately in the Project
 #'   panel. Set to `FALSE` to expose the whole CZI bounding box as one tiled
 #'   image.
-#' @param czi_preview Preview strategy for CZI scenes. `"lazy"` (default)
-#'   avoids reading preview pixels before the viewer opens and uses the live
-#'   tile server for the selected scene. `"all"` preserves the older behavior
-#'   and generates low-resolution previews for all scenes before opening.
+#' @param czi_preview Preview strategy for CZI scenes. `"first"` (default)
+#'   decodes the first scene before exposing the viewer, so the initial window
+#'   always contains image pixels while later scenes remain lazy. `"lazy"`
+#'   avoids all preview reads, and `"all"` generates low-resolution previews
+#'   for every scene before opening.
 #' @param host,port,path,max_tries Local HTTP/WebSocket bridge address.
 #' @param transport Live browser-to-R transport.
 #' @param tile_path HTTP route used for dynamic tiles.
@@ -208,7 +209,7 @@ wsi_viewer_czi_project_live <- function(images, output = NULL, open = interactiv
                                         tile_format = c("jpg", "png", "jpeg"),
                                         channel = 0,
                                         sections = TRUE,
-                                        czi_preview = c("lazy", "all"),
+                                        czi_preview = c("first", "lazy", "all"),
                                         host = "127.0.0.1",
                                         port = 8798,
                                         path = "/viewer-state",
@@ -288,7 +289,7 @@ wsi_viewer_czi_project_live <- function(images, output = NULL, open = interactiv
       tile_format = tile_format,
       channel = channel,
       sections = sections,
-      preview = czi_preview,
+      preview = if (identical(czi_preview, "first") && i > 1L) "lazy" else czi_preview,
       cache_dir = shared_cache,
       route = tile_path,
       persistent_cache = persistent_cache
@@ -444,21 +445,49 @@ wsi_viewer_czi_project_live <- function(images, output = NULL, open = interactiv
 wsi_czi_live_project_item <- function(path, index = 1L, width = 1024,
                                       tile_size = 512, tile_overlap = 1,
                                       tile_format = "jpg", channel = 0,
-                                      sections = TRUE, preview = c("lazy", "all"),
+                                      sections = TRUE, preview = c("first", "lazy", "all"),
                                       cache_dir = NULL,
                                       route = "/tiles",
                                       persistent_cache = FALSE) {
   preview <- match.arg(preview)
   info <- wsi_native_czi_info(path)
   mpp <- wsi_viewer_mpp_payload(wsi_native_czi_mpp(info$metadata_xml %||% NA_character_))
+  section_rows <- wsi_czi_live_section_rows(info, sections = sections)
   preview_payload <- NULL
-  if (identical(preview, "all")) {
+  if (identical(preview, "first")) {
+    preview_info <- info
+    if (isTRUE(sections)) {
+      preview_info$scenes <- section_rows[1L, , drop = FALSE]
+    }
+    first_previews <- tryCatch(
+      if (isTRUE(sections)) {
+        wsi_native_czi_scene_previews(path, preview_info, width = width)
+      } else {
+        wsi_native_czi_project_preview(path, width = width, sections = FALSE)$sections
+      },
+      error = function(err) {
+        wsi_abort(
+          paste0(
+            "The CZI viewer did not open because its first scene could not be decoded: ",
+            conditionMessage(err)
+          ),
+          class = "wsi_backend_error"
+        )
+      }
+    )
+    if (!length(first_previews)) {
+      wsi_abort(
+        "The CZI viewer did not open because its first scene did not produce a display-ready preview.",
+        class = "wsi_backend_error"
+      )
+    }
+    preview_payload <- list(sections = first_previews)
+  } else if (identical(preview, "all")) {
     preview_payload <- tryCatch(
       wsi_native_czi_project_preview(path, width = width, sections = sections),
       error = function(err) NULL
     )
   }
-  section_rows <- wsi_czi_live_section_rows(info, sections = sections)
   scene_meta <- wsi_native_czi_scene_metadata(info$metadata_xml %||% NA_character_)
   previews <- preview_payload$sections %||% list()
   pyramid_factors <- wsi_czi_pyramid_factors(info$pyramid_json %||% NA_character_)
@@ -499,6 +528,8 @@ wsi_czi_live_project_item <- function(path, index = 1L, width = 1024,
     )
     preview_mode_message <- if (identical(preview, "all") && length(previews)) {
       "Tiles are generated from native CZI region reads and cached on demand. Low-resolution section previews were generated before opening."
+    } else if (identical(preview, "first") && i == 1L) {
+      "The first CZI scene was decoded before opening. Full-resolution tiles are generated and cached on demand."
     } else {
       "Tiles are generated from native CZI region reads and cached on demand. Section previews are lazy so the viewer opens quickly."
     }
@@ -532,6 +563,8 @@ wsi_czi_live_project_item <- function(path, index = 1L, width = 1024,
     status = "full-resolution tiled",
     message = if (identical(preview, "all")) {
       "CZI scenes are shown as live OpenSeadragon tile sources with eager low-resolution previews."
+    } else if (identical(preview, "first")) {
+      "The first CZI scene is display-ready before opening; remaining scenes load lazily as full-resolution tiles."
     } else {
       "CZI scenes are shown as live OpenSeadragon tile sources with lazy previews for faster opening."
     },

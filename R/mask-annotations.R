@@ -1196,7 +1196,10 @@ wsi_mask_channel_legend <- function(labels) {
     return(list())
   }
   lapply(seq_len(nrow(labels)), function(i) {
-    key <- as.character(labels$key[[i]] %||% labels$name[[i]] %||% labels$class[[i]] %||% labels$value[[i]])
+    key <- as.character(
+      labels$key[[i]] %||% labels$label[[i]] %||% labels$name[[i]] %||%
+        labels$class[[i]] %||% labels$value[[i]]
+    )
     value <- as.character(labels$value[[i]] %||% i)
     colour <- as.character(labels$colour[[i]] %||% labels$color[[i]] %||% wsi_stain_palette(nrow(labels))[[i]])
     list(
@@ -1205,6 +1208,178 @@ wsi_mask_channel_legend <- function(labels) {
       class = key,
       colour = wsi_colour_to_hex(colour, "colour")
     )
+  })
+}
+
+wsi_annotation_mask_legend_file <- function(path) {
+  path <- normalizePath(path, winslash = "/", mustWork = FALSE)
+  stem <- sub("\\.ome\\.tiff?$", "", path, ignore.case = TRUE)
+  stem <- sub("\\.tiff?$", "", stem, ignore.case = TRUE)
+  candidates <- unique(c(
+    paste0(stem, "_labels.csv"),
+    paste0(stem, ".labels.csv"),
+    file.path(dirname(path), "labels.csv")
+  ))
+  hit <- candidates[file.exists(candidates)]
+  if (length(hit)) hit[[1L]] else NULL
+}
+
+wsi_annotation_mask_legend <- function(mask, legend = NULL) {
+  if (is.null(legend)) {
+    legend <- wsi_annotation_mask_legend_file(mask)
+  }
+  if (is.character(legend) && length(legend) == 1L && !is.na(legend) && nzchar(legend)) {
+    legend <- utils::read.csv(wsi_validate_input_path(legend), stringsAsFactors = FALSE)
+  }
+  if (is.data.frame(legend)) {
+    return(wsi_mask_channel_legend(legend))
+  }
+  if (is.null(legend)) {
+    return(list())
+  }
+  if (!is.list(legend)) {
+    wsi_abort("`legend` must be `NULL`, a legend CSV path, a data frame, or a list of legend entries.")
+  }
+  legend
+}
+
+#' Create an editable tiled tissue-annotation mask source
+#'
+#' Opens a TIFF/OME-TIFF annotation mask as a lazy dynamic tile source for
+#' [wsi_viewer_live()]. The complete mask is not loaded into R or the browser.
+#' Brush and Magic Wand edits are stored as sparse raster delta tiles in the
+#' viewer, avoiding polygon Boolean operations on every pointer movement.
+#'
+#' @param mask TIFF or OME-TIFF mask path readable by libvips.
+#' @param slide Base microscopy slide or image path used to define the mask's
+#'   placement in level-0 slide coordinates.
+#' @param legend Optional sidecar label information. Supply a CSV path, data
+#'   frame, or list of entries with value/label/colour fields. When `NULL`,
+#'   wsiTools looks for `<mask>_labels.csv`, `<mask>.labels.csv`, or `labels.csv`.
+#' @param name,id Display name and stable source identifier.
+#' @param opacity,visible Initial display settings.
+#' @param tile_size Dynamic mask tile size.
+#' @param cache_dir Optional tile-cache directory.
+#' @param persistent_cache Keep generated mask tiles in the fingerprinted cache.
+#' @param target_path Optional project image path. Defaults to the base slide
+#'   path and keeps the mask attached to the correct image in multi-view.
+#'
+#' @return A `wsi_dynamic_annotation_mask_tile_source` suitable for
+#'   `annotation_masks` or `channel_sources` in [wsi_viewer_live()].
+#' @export
+wsi_annotation_mask_source <- function(mask, slide, legend = NULL,
+                                       name = "Tissue annotation mask",
+                                       id = NULL, opacity = 0.55,
+                                       visible = TRUE, tile_size = 512,
+                                       cache_dir = NULL,
+                                       persistent_cache = TRUE,
+                                       target_path = NULL) {
+  if (!wsi_has_vips()) {
+    wsi_abort(
+      wsi_backend_action_message(
+        "Editable TIFF annotation masks require libvips.",
+        backend = "vips"
+      ),
+      class = "wsi_backend_unavailable"
+    )
+  }
+  mask <- wsi_validate_input_path(mask)
+  ext <- tolower(tools::file_ext(mask))
+  if (!ext %in% c("tif", "tiff")) {
+    wsi_abort("`mask` must be a TIFF or OME-TIFF file.")
+  }
+  base_slide <- if (inherits(slide, "wsi_slide")) slide else wsi_open(slide)
+  mask_slide <- wsi_open(mask)
+  base_width <- as.numeric(base_slide$dimensions[["width"]] %||% NA_real_)
+  base_height <- as.numeric(base_slide$dimensions[["height"]] %||% NA_real_)
+  if (!all(is.finite(c(base_width, base_height))) || base_width <= 0 || base_height <= 0) {
+    wsi_abort("Could not determine the base slide dimensions for the annotation mask.")
+  }
+  entries <- wsi_annotation_mask_legend(mask, legend = legend)
+  source <- wsi_dynamic_tile_source(
+    mask_slide,
+    slide_id = id %||% paste0("annotation_mask_", wsi_safe_id(basename(mask), "mask")),
+    tile_size = tile_size,
+    # Categorical masks must not blend overlapping tile margins: duplicated
+    # edge pixels otherwise appear as dark seams after alpha compositing.
+    tile_overlap = 0,
+    format = "png",
+    cache_dir = cache_dir,
+    persistent_cache = persistent_cache
+  )
+  target_path <- target_path %||% base_slide$path %||% NULL
+  if (!is.null(target_path) && nzchar(target_path)) {
+    target_path <- normalizePath(target_path, winslash = "/", mustWork = FALSE)
+  }
+  source$name <- as.character(name)
+  source$kind <- "mask"
+  source$visible <- isTRUE(visible)
+  source$opacity <- wsi_channel_opacity(opacity)
+  source$colour <- "#ffffff"
+  source$extent <- list(x = 0, y = 0, width = base_width, height = base_height)
+  source$metadata <- list(
+    kind = "mask",
+    source_type = "tissue_annotation_mask",
+    editable_annotation_mask = TRUE,
+    annotation_storage = "tiled_raster_with_sparse_deltas",
+    transparent_background = TRUE,
+    background_colour = "#000000",
+    mask_filter_mode = if (length(entries)) "palette" else "background",
+    mask_display_alpha = 255,
+    force_canvas_filter = TRUE,
+    legend = entries,
+    selected_values = if (length(entries)) {
+      vapply(entries, function(entry) as.character(entry$value %||% entry$id %||% entry$label %||% ""), character(1))
+    } else {
+      character()
+    },
+    extent = source$extent,
+    mask_downsample = c(
+      x = base_width / as.numeric(mask_slide$dimensions[["width"]]),
+      y = base_height / as.numeric(mask_slide$dimensions[["height"]])
+    ),
+    source_mask = normalizePath(mask, winslash = "/", mustWork = TRUE),
+    target_path = target_path,
+    base_slide_path = target_path,
+    project_image_id = "active_project_image"
+  )
+  source <- wsi_dynamic_finalize_source(source, persistent_cache = persistent_cache)
+  class(source) <- c(
+    "wsi_dynamic_annotation_mask_tile_source",
+    "wsi_dynamic_tile_source",
+    "list"
+  )
+  source
+}
+
+wsi_annotation_mask_sources <- function(annotation_masks, slide) {
+  if (is.null(annotation_masks)) {
+    return(list())
+  }
+  if (inherits(annotation_masks, "wsi_dynamic_annotation_mask_tile_source")) {
+    return(list(annotation_masks))
+  }
+  entries <- if (is.character(annotation_masks)) {
+    as.list(annotation_masks)
+  } else if (is.list(annotation_masks) && !is.null(annotation_masks$mask)) {
+    list(annotation_masks)
+  } else if (is.list(annotation_masks)) {
+    annotation_masks
+  } else {
+    wsi_abort("`annotation_masks` must contain TIFF paths or annotation mask sources.")
+  }
+  lapply(entries, function(entry) {
+    if (inherits(entry, "wsi_dynamic_annotation_mask_tile_source")) {
+      return(entry)
+    }
+    if (is.character(entry) && length(entry) == 1L && !is.na(entry) && nzchar(entry)) {
+      return(wsi_annotation_mask_source(entry, slide = slide))
+    }
+    if (is.list(entry) && !is.null(entry$mask)) {
+      args <- utils::modifyList(list(slide = slide), entry)
+      return(do.call(wsi_annotation_mask_source, args))
+    }
+    wsi_abort("Each `annotation_masks` entry must be a TIFF path, an annotation mask source, or a list with `mask`.")
   })
 }
 

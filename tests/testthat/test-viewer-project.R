@@ -31,7 +31,7 @@ test_that("wsi_viewer adds a left-side project section", {
   expect_match(html, "const display=projectDisplaySource(item,section)", fixed = TRUE)
   expect_match(html, "const dims=display||section||item||{}", fixed = TRUE)
   expect_match(html, "cfg.tile_url_template=String(src.tile_url_template||'')", fixed = TRUE)
-  expect_match(html, "src.cache_key||(src.metadata||{}).cache_key||cfg.tile_cache_buster", fixed = TRUE)
+  expect_match(html, "src.cache_key||meta.cache_key||cfg.tile_cache_buster", fixed = TRUE)
   expect_match(html, "let projectOsdGeneration=0", fixed = TRUE)
   expect_match(html, "generation!==projectOsdGeneration", fixed = TRUE)
   expect_match(html, "osdViewer.tileCache.clear()", fixed = TRUE)

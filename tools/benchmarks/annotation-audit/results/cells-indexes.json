@@ -1,0 +1,296 @@
+{
+  "date": "2026-09-09T13:14:00.774Z",
+  "environment": {
+    "node": "v26.3.0",
+    "os": "23.5.0",
+    "arch": "arm64",
+    "cpu": "Apple M3",
+    "logical_cpus": 8,
+    "ram_bytes": 8589934592,
+    "versions": {
+      "@mapbox/vector-tile": "3.0.0",
+      "clipper2-wasm": "0.4.0",
+      "earcut": "3.2.3",
+      "flatbush": "4.6.2",
+      "flatgeobuf": "4.4.0",
+      "geojson-vt": "5.0.2",
+      "pbf": "5.1.2",
+      "playwright-core": "1.63.0",
+      "rbush": "4.0.1",
+      "vt-pbf": "3.1.3"
+    }
+  },
+  "provenance": {
+    "inst/viewer/performance.js": "11f921dabe61b29db0c128a795572dbfe21e6503cd044d15215a81346a09df34",
+    "inst/viewer/geometry-worker.js": "34c54c773a1979420ba848b8e8a4ba36e5ac9b323ce94d13cff54afafa8977f7",
+    "inst/viewer/clipper.js": "a650c6946682edc1a64016f6553eeb5c32ce45eb7ca0ad5d8221961af011d97c",
+    "inst/viewer/sync.js": "fc00ccfe01f9de091d09bae0814b0fb77e757d4b65ebd27553aa13e5c9637703",
+    "inst/wasm/wsi_overlay_core.wasm": "7edb1e38aab52ef979ab3733641700f84b35e0fb11b62fceef06ce4cfbe91b0b"
+  },
+  "dataset": {
+    "file": "cell_segmentations.geojson",
+    "sha256": "2822f2415862256741af87ad803b93e597518f3ebfb9e344e5d8d27fe1b5b63c",
+    "bytes": 97835207,
+    "features": 220704,
+    "vertices": 3778248,
+    "largest_feature_vertices": 51,
+    "bounds": [
+      40587.5,
+      -28.8,
+      65202.7,
+      22701
+    ],
+    "first_read_ms": 37.344791999999984,
+    "first_parse_ms": 608.8864169999999,
+    "heap_delta_text_and_object": 380096296
+  },
+  "json_parse": {
+    "median_ms": 619.085041,
+    "min_ms": 604.7383329999998,
+    "max_ms": 633.9337500000001,
+    "n": 3
+  },
+  "json_stringify": {
+    "median_ms": 220.251166,
+    "min_ms": 212.04312500000015,
+    "max_ms": 224.72566700000016,
+    "n": 3
+  },
+  "pack": {
+    "median_ms": 57.46995900000002,
+    "min_ms": 56.10875000000033,
+    "max_ms": 87.70399999999972,
+    "n": 3
+  },
+  "packed_geometry_bytes": 63100428,
+  "structured_clone": {
+    "median_ms": 1603.7248329999993,
+    "min_ms": 1589.5475830000005,
+    "max_ms": 1816.3563329999997,
+    "n": 3
+  },
+  "rbush_build": {
+    "median_ms": 142.88737500000025,
+    "min_ms": 136.6298339999994,
+    "max_ms": 199.59245799999917,
+    "n": 3
+  },
+  "flatbush_build": {
+    "median_ms": 47.640957999999955,
+    "min_ms": 44.12633300000016,
+    "max_ms": 51.27220900000066,
+    "n": 3
+  },
+  "flatbush_bytes": 8475128,
+  "wasm_init_ms": 6.317124999999578,
+  "queries": [
+    {
+      "width": 512,
+      "queries": 100,
+      "average_hits": 112.98,
+      "methods": {
+        "linear": {
+          "median_ms": 187.4873749999988,
+          "min_ms": 185.34950000000026,
+          "max_ms": 190.46570799999972,
+          "n": 5,
+          "median_ms_per_query": 1.874873749999988
+        },
+        "typed_linear": {
+          "median_ms": 30.092624999999316,
+          "min_ms": 28.076709000000847,
+          "max_ms": 31.87170800000058,
+          "n": 5,
+          "median_ms_per_query": 0.3009262499999932
+        },
+        "wasm_linear": {
+          "median_ms": 38.65404099999978,
+          "min_ms": 36.2037079999991,
+          "max_ms": 39.0423750000009,
+          "n": 5,
+          "median_ms_per_query": 0.3865404099999978
+        },
+        "rbush": {
+          "median_ms": 1.6974589999990712,
+          "min_ms": 1.13629199999923,
+          "max_ms": 2.492666999998619,
+          "n": 5,
+          "median_ms_per_query": 0.016974589999990713
+        },
+        "flatbush": {
+          "median_ms": 0.44070800000008603,
+          "min_ms": 0.37033400000109395,
+          "max_ms": 0.5811250000006112,
+          "n": 5,
+          "median_ms_per_query": 0.00440708000000086
+        }
+      }
+    },
+    {
+      "width": 2048,
+      "queries": 100,
+      "average_hits": 1622.89,
+      "methods": {
+        "linear": {
+          "median_ms": 197.13624999999956,
+          "min_ms": 196.09887499999968,
+          "max_ms": 198.41620800000237,
+          "n": 5,
+          "median_ms_per_query": 1.9713624999999957
+        },
+        "typed_linear": {
+          "median_ms": 34.86170899999706,
+          "min_ms": 33.509416999997484,
+          "max_ms": 35.39641699999993,
+          "n": 5,
+          "median_ms_per_query": 0.34861708999997065
+        },
+        "wasm_linear": {
+          "median_ms": 42.66466700000092,
+          "min_ms": 41.412749999999505,
+          "max_ms": 44.02479099999982,
+          "n": 5,
+          "median_ms_per_query": 0.42664667000000916
+        },
+        "rbush": {
+          "median_ms": 13.169458000000304,
+          "min_ms": 12.082916999999725,
+          "max_ms": 17.18775000000096,
+          "n": 5,
+          "median_ms_per_query": 0.13169458000000303
+        },
+        "flatbush": {
+          "median_ms": 1.9482920000009472,
+          "min_ms": 1.4344590000000608,
+          "max_ms": 2.6443749999998545,
+          "n": 5,
+          "median_ms_per_query": 0.019482920000009472
+        }
+      }
+    },
+    {
+      "width": 8192,
+      "queries": 100,
+      "average_hits": 28826.72,
+      "methods": {
+        "linear": {
+          "median_ms": 249.0556660000002,
+          "min_ms": 243.98262500000055,
+          "max_ms": 259.17399999999907,
+          "n": 5,
+          "median_ms_per_query": 2.490556660000002
+        },
+        "typed_linear": {
+          "median_ms": 48.7322920000006,
+          "min_ms": 48.47295899999881,
+          "max_ms": 50.57237499999974,
+          "n": 5,
+          "median_ms_per_query": 0.487322920000006
+        },
+        "wasm_linear": {
+          "median_ms": 46.47949999999764,
+          "min_ms": 46.043916999999055,
+          "max_ms": 46.9710840000007,
+          "n": 5,
+          "median_ms_per_query": 0.4647949999999764
+        },
+        "rbush": {
+          "median_ms": 114.62900000000081,
+          "min_ms": 108.87912499999948,
+          "max_ms": 134.26929200000086,
+          "n": 5,
+          "median_ms_per_query": 1.1462900000000082
+        },
+        "flatbush": {
+          "median_ms": 19.1058329999978,
+          "min_ms": 16.847583999999188,
+          "max_ms": 21.104875000000902,
+          "n": 5,
+          "median_ms_per_query": 0.19105832999997802
+        }
+      }
+    },
+    {
+      "width": 24616,
+      "queries": 100,
+      "average_hits": 220704,
+      "methods": {
+        "linear": {
+          "median_ms": 479.3436249999977,
+          "min_ms": 467.5706250000003,
+          "max_ms": 501.87837500000023,
+          "n": 5,
+          "median_ms_per_query": 4.793436249999977
+        },
+        "typed_linear": {
+          "median_ms": 145.3108749999992,
+          "min_ms": 138.8623329999973,
+          "max_ms": 151.16945900000064,
+          "n": 5,
+          "median_ms_per_query": 1.4531087499999922
+        },
+        "wasm_linear": {
+          "median_ms": 40.65870899999936,
+          "min_ms": 38.94187500000044,
+          "max_ms": 41.319541999997455,
+          "n": 5,
+          "median_ms_per_query": 0.4065870899999936
+        },
+        "rbush": {
+          "median_ms": 757.9562920000026,
+          "min_ms": 729.5019169999941,
+          "max_ms": 803.9144579999993,
+          "n": 5,
+          "median_ms_per_query": 7.579562920000026
+        },
+        "flatbush": {
+          "median_ms": 126.34954199999629,
+          "min_ms": 122.24962499999674,
+          "max_ms": 133.4595829999962,
+          "n": 5,
+          "median_ms_per_query": 1.2634954199999628
+        }
+      }
+    }
+  ],
+  "rbush_single_replace": {
+    "median_ms": 0.03654200000164565,
+    "min_ms": 0.03087499999674037,
+    "max_ms": 1.1106250000011642,
+    "n": 10
+  },
+  "full_snapshot_bytes": 86781535,
+  "one_feature_patch": {
+    "median_ms": 0.03620799999771407,
+    "min_ms": 0.030542000000423286,
+    "max_ms": 0.10312500000145519,
+    "n": 10
+  },
+  "one_feature_patch_bytes": 542,
+  "worker_object_send_ack": {
+    "median_ms": 1760.3994999999995,
+    "min_ms": 1757.3245410000018,
+    "max_ms": 1956.6499160000021,
+    "n": 3
+  },
+  "worker_buffer_copy_send_ack": {
+    "median_ms": 17.151458000000275,
+    "min_ms": 11.049208999997063,
+    "max_ms": 48.70679199999722,
+    "n": 3
+  },
+  "worker_transfer_send_ack": {
+    "median_ms": 10.26670799999556,
+    "min_ms": 8.176334000003408,
+    "max_ms": 20.703332999997656,
+    "n": 3
+  },
+  "worker_transfer_only_ms": [
+    0.5730829999956768,
+    0.12429200000042329,
+    0.2254160000011325,
+    0.0742919999975129,
+    0.1426659999997355
+  ],
+  "max_rss_kib": 1374528
+}

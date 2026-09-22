@@ -1,0 +1,36 @@
+{
+  "file": "cell_segmentations.geojson",
+  "R": "R version 4.6.0 (2026-04-24)",
+  "sf": "1.1.2",
+  "libraries": ["3.13.0", "3.8.5", "9.5.1", "true", "true", "9.5.1"],
+  "sf_geojson_read": {
+    "median_ms": 4687,
+    "min_ms": 4245,
+    "max_ms": 5037,
+    "n": 3
+  },
+  "features": 220704,
+  "sf_object_bytes": 202845680,
+  "fgb_write": {
+    "median_ms": 1406,
+    "min_ms": 934.000000000001,
+    "max_ms": 1552,
+    "n": 3
+  },
+  "fgb_bytes": 83994304,
+  "fgb_full_read": {
+    "median_ms": 687.999999999999,
+    "min_ms": 646.000000000001,
+    "max_ms": 1114,
+    "n": 3
+  },
+  "fgb_query_2048": {
+    "median_ms": 7.00000000000145,
+    "min_ms": 6.9999999999979,
+    "max_ms": 10.0000000000016,
+    "n": 5
+  },
+  "fgb_query_features": 1901,
+  "fgb_query_vertices": 35913,
+  "note": "Local file tests with warm OS cache; indexed FGB via GDAL, no HTTP Range latency. CRS removed explicitly: coordinates are original WSI pixels. object.size may count shared R geometry references more than once."
+}

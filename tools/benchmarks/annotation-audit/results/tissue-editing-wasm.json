@@ -1,0 +1,201 @@
+{
+  "date": "2026-09-09",
+  "machine": "Apple M3, 8 GiB, macOS; Chrome 152; installed R package",
+  "scope": "Single-slide colorectal live viewer via desktop R launcher; warm disk tile cache. No OS-wide comparison or native Tauri UI automation.",
+  "editing": {
+    "performance": {
+      "open_ms": 139,
+      "first_tile_ms": 248,
+      "tile_loaded": 16,
+      "tile_drawn": 0,
+      "tile_failed": 0,
+      "full_resolution_level": 17,
+      "full_resolution_tiles_loaded": 2,
+      "render_frames": 29,
+      "render_total_ms": 192.20000010728836,
+      "render_max_ms": 86.7,
+      "dense_requests": 0,
+      "dense_cancelled": 0,
+      "dense_failed": 0,
+      "dense_total_ms": 0,
+      "renderer": "openseadragon-webgl",
+      "tile_renderer": "openseadragon-webgl",
+      "overlay_renderer": "canvas",
+      "webgpu_status": "not requested",
+      "webgpu_reason": "This session is configured to use the OpenSeadragon tile compositor.",
+      "webgpu_fix": "No action is required. Set WSITOOLS_TILE_COMPOSITOR=auto only to try the optional WebGPU compositor.",
+      "wasm_overlay_status": "active",
+      "wasm_overlay_reason": "Dense static annotation viewport culling is accelerated by WebAssembly.",
+      "last_updated": "2026-09-09T14:06:28.892Z",
+      "editing": {
+        "cursor_frames": 80,
+        "cursor_max_ms": 1.199999988079071,
+        "geometry_jobs": 2,
+        "geometry_worker_ms": 290.0999999642372,
+        "geometry_commit_ms": 25.899999976158142,
+        "path_builds": 449,
+        "pane_draws": 0,
+        "geometry_kernel": "clipper2-wasm",
+        "geometry_cache_bytes": 16397856,
+        "geometry_transfer_bytes": 3756300
+      },
+      "sync": {
+        "messages": 11,
+        "bytes": 6356904,
+        "full_snapshots": 1,
+        "annotation_upserts": 4
+      },
+      "elapsed_ms": 9080,
+      "render_average_ms": 6.63,
+      "dense_average_ms": 0,
+      "cache_mode": "persistent fingerprinted",
+      "multi_view_panes": 1,
+      "webgl_available": true
+    },
+    "original_points": 117669,
+    "tool_feedback_ms": 1.699999988079071,
+    "logs": [
+      {
+        "id": "log_1",
+        "time": "2026-09-09T14:06:20.326Z",
+        "level": "success",
+        "message": "Tiled viewer ready | openseadragon-webgl",
+        "source": "toast",
+        "detail": {
+          "timeout": 2600,
+          "action": null
+        }
+      },
+      {
+        "id": "log_2",
+        "time": "2026-09-09T14:06:21.678Z",
+        "level": "success",
+        "message": "Tissue annotation loaded with full boundary resolution at every zoom.",
+        "source": "annotations",
+        "detail": {
+          "source": "dense_tissue_Visium_HD_Human_Colon_Cancer_290325",
+          "count": 359
+        }
+      },
+      {
+        "id": "log_3",
+        "time": "2026-09-09T14:06:25.287Z",
+        "level": "success",
+        "message": "Undo applied",
+        "source": "toast",
+        "detail": {
+          "timeout": 2600,
+          "action": null
+        }
+      }
+    ],
+    "sync_errors": [],
+    "timings": [
+      {
+        "subtract": false,
+        "release_to_completion_ms": 340
+      },
+      {
+        "subtract": true,
+        "release_to_completion_ms": 159
+      }
+    ],
+    "errors": [],
+    "failures": []
+  },
+  "priority": {
+    "input": {
+      "selected": "d8928975-df68-412b-8fac-a12258516253",
+      "vertices": 117669,
+      "neighbor": "32211932-69dd-44e0-806b-3f16502f090e"
+    },
+    "elapsed_ms": 290.10000002384186,
+    "undo_exact": true,
+    "redo_exact": true,
+    "changed": 2,
+    "kernel": "clipper2-wasm",
+    "cache_bytes": 21989520,
+    "sync": {
+      "errors": [],
+      "acknowledged": 7,
+      "count": 2,
+      "response": {
+        "ok": true,
+        "event": "annotation_redo",
+        "sync_ack": {
+          "client": "viewer_mtu6a5k9_yw3z2vk33fg",
+          "revision": 7,
+          "project_key": "project_slide_visium_hd_human_colon_cancer_tissue_image_btf::image"
+        },
+        "roi_count": 2,
+        "measurement_count": 0,
+        "roi_summary_count": 2,
+        "cell_summary_count": 0,
+        "segmentation_count": 0,
+        "selected_roi_count": 1,
+        "layer_count": 0,
+        "channel_count": 0,
+        "history_count": 3,
+        "tile_preview_count": 0,
+        "prediction_count": 0,
+        "proximity_count": 0,
+        "proximity_stats_count": 0,
+        "trajectory_profile_count": 0,
+        "trajectory_correlation_count": 0,
+        "annotations_dirty": true,
+        "last_sync": "2026-09-09 16:07:22.253821",
+        "autosave": {
+          "enabled": false,
+          "interval": 5,
+          "overwrite": true,
+          "last_save": null
+        },
+        "jobs": [],
+        "commands": []
+      }
+    },
+    "errors": []
+  },
+  "validation": {
+    "engine": "GEOS via sf",
+    "valid": true,
+    "overlap_square_pixels": 0.000500452,
+    "tolerance_square_pixels": 0.01
+  },
+  "kernel": {
+    "input": "Data/VisiumHD/Colorectal/Visium_HD_Human_Colon_Cancer_290325.geojson",
+    "date": "2026-09-09T14:02:38.910Z",
+    "results": [
+      {
+        "engine": "clipper-js",
+        "timeout_ms": 20000
+      },
+      {
+        "engine": "clipper2-wasm",
+        "input_vertices": 117669,
+        "results": [
+          {
+            "operation": "ctUnion",
+            "times_ms": [
+              421.76950000000215,
+              350.52787499999977,
+              395.5539579999968
+            ],
+            "vertices": 117627,
+            "area": 94673546.5368752
+          },
+          {
+            "operation": "ctDifference",
+            "times_ms": [
+              359.7762079999993,
+              323.8870419999985,
+              276.4190409999974
+            ],
+            "vertices": 117628,
+            "area": 94647946.53687473
+          }
+        ]
+      }
+    ]
+  }
+}

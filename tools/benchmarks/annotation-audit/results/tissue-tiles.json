@@ -1,0 +1,248 @@
+{
+  "date": "2026-09-09T13:14:20.725Z",
+  "environment": {
+    "node": "v26.3.0",
+    "os": "23.5.0",
+    "arch": "arm64",
+    "cpu": "Apple M3",
+    "logical_cpus": 8,
+    "ram_bytes": 8589934592,
+    "versions": {
+      "@mapbox/vector-tile": "3.0.0",
+      "clipper2-wasm": "0.4.0",
+      "earcut": "3.2.3",
+      "flatbush": "4.6.2",
+      "flatgeobuf": "4.4.0",
+      "geojson-vt": "5.0.2",
+      "pbf": "5.1.2",
+      "playwright-core": "1.63.0",
+      "rbush": "4.0.1",
+      "vt-pbf": "3.1.3"
+    }
+  },
+  "provenance": {
+    "inst/viewer/performance.js": "11f921dabe61b29db0c128a795572dbfe21e6503cd044d15215a81346a09df34",
+    "inst/viewer/geometry-worker.js": "34c54c773a1979420ba848b8e8a4ba36e5ac9b323ce94d13cff54afafa8977f7",
+    "inst/viewer/clipper.js": "a650c6946682edc1a64016f6553eeb5c32ce45eb7ca0ad5d8221961af011d97c",
+    "inst/viewer/sync.js": "fc00ccfe01f9de091d09bae0814b0fb77e757d4b65ebd27553aa13e5c9637703",
+    "inst/wasm/wsi_overlay_core.wasm": "7edb1e38aab52ef979ab3733641700f84b35e0fb11b62fceef06ce4cfbe91b0b"
+  },
+  "dataset": {
+    "file": "Visium_HD_Human_Colon_Cancer_290325.geojson",
+    "sha256": "18fa709a555d856cdf45838a00c4499cc80571994b4e53a864608cfd5ba4b735",
+    "bytes": 13274712,
+    "features": 359,
+    "vertices": 825698,
+    "largest_feature_vertices": 117669,
+    "bounds": [
+      37600,
+      0,
+      67740,
+      26143
+    ],
+    "first_read_ms": 5.722499999999997,
+    "first_parse_ms": 81.71641599999998,
+    "heap_delta_text_and_object": 86738264
+  },
+  "wsi_inverse_mercator_adapter": {
+    "median_ms": 55.118791999999985,
+    "min_ms": 47.600708,
+    "max_ms": 60.75608299999999,
+    "n": 3
+  },
+  "note": "Unmodified geojson-vt 5.0.2, WSI pixels mapped through inverse Mercator solely for benchmarking; full-resolution source is not changed.",
+  "modes": [
+    {
+      "tolerance": 0,
+      "build": {
+        "median_ms": 146.76104199999997,
+        "min_ms": 140.93433300000004,
+        "max_ms": 161.68712500000004,
+        "n": 3
+      },
+      "initial_tiles": 33,
+      "heap_delta": 1690104,
+      "arraybuffer_delta": 67293568,
+      "levels": [
+        {
+          "z": 0,
+          "first_lookup_ms": 0.17758299999991323,
+          "features": 359,
+          "vertices": 825698,
+          "raw_lookup_ms": 0.0006074999999987085,
+          "legacy_lookup_ms": 22.5198675,
+          "mvt": {
+            "encode": {
+              "median_ms": 32.63479200000074,
+              "min_ms": 30.67433400000118,
+              "max_ms": 49.970792000000074,
+              "n": 3
+            },
+            "decode_all_rings": {
+              "median_ms": 33.12816700000076,
+              "min_ms": 26.56720800000039,
+              "max_ms": 86.67383300000074,
+              "n": 3
+            },
+            "bytes": 1661555,
+            "json_bytes": 9768075
+          }
+        },
+        {
+          "z": 3,
+          "first_lookup_ms": 0.0067090000011376105,
+          "features": 13,
+          "vertices": 26783,
+          "raw_lookup_ms": 0.00010249999999359716,
+          "legacy_lookup_ms": 0.25494416999999886,
+          "mvt": {
+            "encode": {
+              "median_ms": 3.3965830000015558,
+              "min_ms": 1.5522079999991547,
+              "max_ms": 8.216707999999926,
+              "n": 3
+            },
+            "decode_all_rings": {
+              "median_ms": 3.9042499999995925,
+              "min_ms": 3.1607089999997697,
+              "max_ms": 4.288624999999229,
+              "n": 3
+            },
+            "bytes": 53976,
+            "json_bytes": 301631
+          }
+        },
+        {
+          "z": 6,
+          "first_lookup_ms": 1.2861250000005384,
+          "features": 2,
+          "vertices": 354,
+          "raw_lookup_ms": 0.00015207999998892774,
+          "legacy_lookup_ms": 0.010322500000002037,
+          "mvt": {
+            "encode": {
+              "median_ms": 0.2929579999999987,
+              "min_ms": 0.16120799999953306,
+              "max_ms": 0.387166000000434,
+              "n": 3
+            },
+            "decode_all_rings": {
+              "median_ms": 0.17137499999989814,
+              "min_ms": 0.17000000000007276,
+              "max_ms": 0.18320799999855808,
+              "n": 3
+            },
+            "bytes": 828,
+            "json_bytes": 4220
+          }
+        }
+      ],
+      "pan_100_new_tiles_median_ms": 0.0002919999988080235,
+      "retained_tiles_after_pan": 185
+    },
+    {
+      "tolerance": 3,
+      "build": {
+        "median_ms": 131.34870799999953,
+        "min_ms": 128.52599999999984,
+        "max_ms": 139.08633299999929,
+        "n": 3
+      },
+      "initial_tiles": 33,
+      "heap_delta": -413536,
+      "arraybuffer_delta": 41258412,
+      "levels": [
+        {
+          "z": 0,
+          "first_lookup_ms": 0.006083000000216998,
+          "features": 359,
+          "vertices": 14968,
+          "raw_lookup_ms": 0.00013332999998965533,
+          "legacy_lookup_ms": 0.15780666000000565,
+          "mvt": {
+            "encode": {
+              "median_ms": 2.2558329999992566,
+              "min_ms": 1.3534999999992579,
+              "max_ms": 6.051916999998866,
+              "n": 3
+            },
+            "decode_all_rings": {
+              "median_ms": 2.1982499999994616,
+              "min_ms": 2.173917000000074,
+              "max_ms": 2.864208000000872,
+              "n": 3
+            },
+            "bytes": 38803,
+            "json_bytes": 196626
+          }
+        },
+        {
+          "z": 3,
+          "first_lookup_ms": 0.0035420000003796304,
+          "features": 13,
+          "vertices": 1753,
+          "raw_lookup_ms": 0.00011667000000670669,
+          "legacy_lookup_ms": 0.04959749999999986,
+          "mvt": {
+            "encode": {
+              "median_ms": 0.600124999999025,
+              "min_ms": 0.5698749999992287,
+              "max_ms": 0.6447909999988042,
+              "n": 3
+            },
+            "decode_all_rings": {
+              "median_ms": 0.6113750000004075,
+              "min_ms": 0.5123330000005808,
+              "max_ms": 8.488000000001193,
+              "n": 3
+            },
+            "bytes": 4152,
+            "json_bytes": 20444
+          }
+        },
+        {
+          "z": 6,
+          "first_lookup_ms": 1.334500000000844,
+          "features": 2,
+          "vertices": 151,
+          "raw_lookup_ms": 0.0001675000000068394,
+          "legacy_lookup_ms": 0.003936250000006112,
+          "mvt": {
+            "encode": {
+              "median_ms": 0.13204100000075414,
+              "min_ms": 0.1049170000005688,
+              "max_ms": 0.22158300000046438,
+              "n": 3
+            },
+            "decode_all_rings": {
+              "median_ms": 0.09041700000125275,
+              "min_ms": 0.09025000000110595,
+              "max_ms": 0.134249999999156,
+              "n": 3
+            },
+            "bytes": 460,
+            "json_bytes": 1864
+          }
+        }
+      ],
+      "pan_100_new_tiles_median_ms": 0.00020799999947485048,
+      "retained_tiles_after_pan": 185
+    }
+  ],
+  "flatgeobuf_unindexed": {
+    "encode": {
+      "median_ms": 44.416542000000845,
+      "min_ms": 44.072165999999925,
+      "max_ms": 66.65495899999951,
+      "n": 3
+    },
+    "bytes": 13256792,
+    "decode": {
+      "median_ms": 11.305249999999432,
+      "min_ms": 11.301542000001064,
+      "max_ms": 17.096332999999504,
+      "n": 3
+    }
+  },
+  "max_rss_kib": 1461440
+}

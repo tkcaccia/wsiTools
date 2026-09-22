@@ -1,0 +1,62 @@
+{
+  "file": "Visium_HD_Human_Colon_Cancer_290325.geojson",
+  "R": "R version 4.6.0 (2026-04-24)",
+  "sf": "1.1.2",
+  "libraries": ["3.13.0", "3.8.5", "9.5.1", "true", "true", "9.5.1"],
+  "sf_geojson_read": {
+    "median_ms": 801,
+    "min_ms": 786,
+    "max_ms": 885,
+    "n": 3
+  },
+  "features": 382,
+  "sf_object_bytes": 13745664,
+  "fgb_write": {
+    "median_ms": 61.9999999999998,
+    "min_ms": 55.0000000000002,
+    "max_ms": 67.0000000000002,
+    "n": 3
+  },
+  "fgb_bytes": 13418480,
+  "fgb_full_read": {
+    "median_ms": 36,
+    "min_ms": 36,
+    "max_ms": 36.9999999999999,
+    "n": 3
+  },
+  "fgb_query_2048": {
+    "median_ms": 4,
+    "min_ms": 3.00000000000011,
+    "max_ms": 5.99999999999978,
+    "n": 5
+  },
+  "fgb_query_features": 4,
+  "fgb_query_vertices": 51314,
+  "jsonlite_read": {
+    "median_ms": 828,
+    "min_ms": 709.000000000001,
+    "max_ms": 965,
+    "n": 3
+  },
+  "wsi_normalize": {
+    "median_ms": 3621,
+    "min_ms": 3418,
+    "max_ms": 4197,
+    "n": 3
+  },
+  "wsi_object_size_logical_bytes": 461614504,
+  "rds_write_compressed": {
+    "median_ms": 3003,
+    "min_ms": 2870,
+    "max_ms": 3156,
+    "n": 3
+  },
+  "rds_bytes": 14835493,
+  "rds_read": {
+    "median_ms": 1528,
+    "min_ms": 1141.00000000001,
+    "max_ms": 1755,
+    "n": 3
+  },
+  "note": "Local file tests with warm OS cache; indexed FGB via GDAL, no HTTP Range latency. CRS removed explicitly: coordinates are original WSI pixels. object.size may count shared R geometry references more than once."
+}

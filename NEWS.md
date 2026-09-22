@@ -1,5 +1,71 @@
 # wsiTools 0.1.24
 
+- Magic Wand edits are now confined to an adjustable local screen-space reach
+  (256 px by default) around the click. Wand contours are simplified to at most
+  768 vertices, Boolean edits run in the geometry worker, and undo retains at
+  most 10 actions within a 64-MiB estimated geometry budget.
+- Hold Ctrl and double-click to select a tissue annotation without painting or
+  running the Wand. Brush/Wand stays active; this also works in multi-view panes.
+- Magic Wand selections now fill internal holes while retaining the outer
+  boundary. This applies to vector and editable-mask annotations, including
+  Alt/Command subtraction; existing class and locked-region protection remains.
+- Local tissue edits now clip only intersecting polygon components and holes.
+  Unchanged rings use reference patches between the geometry worker and viewer;
+  unchanged component paths, hit-test indexes and undo snapshots are reused.
+  Original GeoJSON detail is preserved at every zoom.
+- Fixed an intermittent tile-worker startup race by publishing its readiness
+  descriptor only after the complete file has been written.
+- Added a bundled Clipper2 WebAssembly annotation-editing kernel with a
+  JavaScript fallback. Repeated edits reuse worker-resident geometry and use
+  transferable coordinate buffers. Original slide-pixel geometry and holes
+  are retained; this does not convert tissue annotations into masks.
+- Brush and priority-Wand edits now use changed-feature undo transactions,
+  targeted annotation-list updates and explicit R synchronization patches.
+  Caps Lock edits restore the selected region and trimmed neighbours together.
+- Added editable TIFF/OME-TIFF tissue annotation masks. Supply
+  `annotation_masks` to a live viewer, or select a TIFF mask as the tissue
+  annotation in wsiTools Desktop. The source mask remains lazily tiled while
+  Brush and Magic Wand write only sparse raster paint/erase tiles, avoiding
+  polygon conversion and repeated geometry Boolean operations.
+- TIFF mask legends are read from `<mask>_labels.csv`, `<mask>.labels.csv`, or
+  an explicit data frame/CSV. Black mask background is transparent and legend
+  classes remain individually selectable.
+- The desktop starter now keeps image-preparation progress in the starter and
+  opens the separate viewer only after R returns a display-ready image URL. It
+  no longer exposes an empty viewer progress window.
+- Desktop and live tiled viewers now wait for a decoded first-image preview
+  before exposing the viewer URL. The preview remains visible until
+  full-resolution tiles replace it. CZI projects prepare only the first scene
+  by default, keeping later scenes lazy rather than delaying startup for every
+  scene.
+- Cached full-detail annotation paths and subtraction holes, with a separate
+  lightweight canvas for the cursor and unfinished drawing. Moving the brush
+  no longer rebuilds completed annotation paths, labels, and the navigator.
+- Brush strokes now use incremental boundary-hit queries during dragging and
+  polygon clipping in a browser worker on release. Original coordinates of
+  untouched vertices are retained; new intersections use subpixel precision.
+  Obsolete results are rejected if the active tissue or geometry changed.
+- Added Caps Lock priority editing for Brush and Magic Wand. With Caps Lock
+  on, the selected tissue annotation claims the added area and overlapping
+  unlocked annotations are trimmed so regions never overlap; locked regions
+  remain protected. The complete multi-annotation edit is restored by one
+  undo action.
+- Caps Lock priority edits now include nearby annotations that are still held
+  in the optimized imported-tissue layer, not only already materialized ROIs.
+  Only bounding-box candidates near the stroke are sent to the geometry
+  worker, the selected and neighboring geometries commit atomically, and mask
+  edit cache invalidation is limited to once per animation frame.
+- Added revision-acknowledged annotation patches and compact viewport/selection
+  synchronization, with full snapshots for initialization and recovery. Undo
+  snapshots share unchanged geometry instead of cloning every polygon.
+- Fixed zero-time R session polling so getters do not enter an indefinite
+  `httpuv` service loop. Multi-view camera callbacks now invalidate individual
+  panes, and brush commits avoid duplicate panel rebuilding.
+- Fixed bodyless HTTP responses so CORS preflight requests cannot be gzip-
+  encoded into invalid 204 responses, and cached tiles return bodyless 304
+  responses. This removes intermittent HTTP parsing failures on reused browser
+  connections to the R bridge.
+
 - Prevented accidental Brush-to-Wand switches. Magic Wand now uses the
   deliberate `Shift+W` shortcut instead of bare `W`, and the Brush/Wand toolbar
   controls stop pointer propagation before changing tools.

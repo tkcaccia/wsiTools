@@ -718,6 +718,9 @@ wsi_viewer_seurat <- function(seurat, image, linked = NULL,
 #' @param roi_class_presets ROI classes used by the annotation UI.
 #' @param session_inputs Optional source-file and tissue/sample mapping records
 #'   included by the viewer's **History > Copy inputs** diagnostic action.
+#' @param dense_geojson_sources Optional browser-readable dense-annotation
+#'   manifests passed to the live viewer so image display and R-side annotation
+#'   indexing can proceed independently.
 #'
 #' @return A `wsi_viewer_session` by default. If `live = FALSE`, returns the
 #'   static HTML path.
@@ -766,9 +769,14 @@ wsi_viewer_seurat_project <- function(seurat = NULL, images = NULL, linked = NUL
                                       quality = 90, rebuild = FALSE,
                                       tile_overlap = NULL,
                                       session_inputs = NULL,
+                                      dense_geojson_sources = NULL,
+                                      annotation_masks = NULL,
                                       roi_class_presets = wsi_roi_class_presets()) {
   mode <- match.arg(mode)
   transport <- match.arg(transport)
+  if (!isTRUE(live) && !is.null(annotation_masks)) {
+    wsi_abort("Editable TIFF annotation masks require `live = TRUE`.")
+  }
   tile_format <- match.arg(tile_format)
   coordinate_scale <- match.arg(coordinate_scale)
   coordinate_flip <- wsi_seurat_coordinate_flip_arg(coordinate_flip)
@@ -891,9 +899,11 @@ wsi_viewer_seurat_project <- function(seurat = NULL, images = NULL, linked = NUL
       layers = list(),
       channel_sources = project_channel_sources,
       seurat = first,
-      session_inputs = session_inputs
+      session_inputs = session_inputs,
+      dense_geojson_sources = dense_geojson_sources
     )
     if (isTRUE(live)) {
+      viewer_args$annotation_masks <- annotation_masks
       viewer_args$dynamic_tiles <- FALSE
       viewer_args$wait <- wait
       viewer_args$transport <- transport
@@ -927,9 +937,11 @@ wsi_viewer_seurat_project <- function(seurat = NULL, images = NULL, linked = NUL
     layers = list(),
     channel_sources = project_channel_sources,
     seurat = first,
-    session_inputs = session_inputs
+    session_inputs = session_inputs,
+    dense_geojson_sources = dense_geojson_sources
   )
   if (isTRUE(live)) {
+    viewer_args$annotation_masks <- annotation_masks
     viewer_args$dynamic_tiles <- dynamic_tiles
     if (isTRUE(dynamic_tiles)) {
       viewer_args$dynamic_tile_format <- "jpg"

@@ -22,6 +22,7 @@ wsi_viewer(
   tile_overlap = NULL,
   tile_url_base = NULL,
   tile_url_template = NULL,
+  tile_url_templates = NULL,
   tile_prefetch_margin = 1L,
   tile_cache_count = 768L,
   tile_prefetch_cache_count = 512L,
@@ -30,6 +31,7 @@ wsi_viewer(
   renderer = c("auto", "gpu", "cpu"),
   tile_max_per_frame = 16L,
   progressive_preview = TRUE,
+  navigator_image_source = NULL,
   tile_url_style = c("deepzoom", "slash"),
   max_level = NULL,
   tile_source_label = NULL,
@@ -59,6 +61,7 @@ wsi_viewer(
   image_export_url = NULL,
   geojson_mask_url = NULL,
   dense_geojson_url = NULL,
+  dense_geojson_sources = NULL,
   prediction_url = NULL,
   proximity_url = NULL,
   autosave_enabled = FALSE,
@@ -113,6 +116,10 @@ for \code{mode = "tiles"}. These are normally set by \code{\link[=wsi_viewer_liv
 \code{dynamic_tiles = TRUE}; when supplied, static Deep Zoom generation is
 skipped.}
 
+\item{tile_url_templates}{Optional character vector of equivalent dynamic
+tile URL templates. The browser distributes requests across these worker
+endpoints while retaining \code{tile_url_template} as the primary fallback.}
+
 \item{tile_prefetch_margin}{Number of tile rows/columns beyond the visible
 viewport to prefetch in tiled viewers. Use \code{0} to prefetch only visible
 tiles, \code{1} or \code{2} for smoother panning, and \code{-1} to disable browser-side
@@ -142,6 +149,10 @@ one animation frame. Multi-view mode divides this budget between panes.}
 low-resolution navigator preview behind the tile canvas while sharper
 tiles stream in. This improves perceived opening speed for very large WSI
 files without loading the full image into R.}
+
+\item{navigator_image_source}{Optional data URI or browser-readable relative
+URL for a prepared navigator/tissue preview. Live sessions use this to
+reuse a fingerprinted preview rather than encoding it into every HTML file.}
 
 \item{tile_url_style}{URL style for \code{tile_url_base}: \code{"deepzoom"} uses
 \verb{/\{level\}/\{x\}_\{y\}.\{format\}}, while \code{"slash"} uses
@@ -225,6 +236,10 @@ rasterize dense GeoJSON annotation files into tiled mask overlays.}
 
 \item{dense_geojson_url}{Optional live HTTP endpoint used by the viewer to
 load dense GeoJSON annotations progressively for visible regions.}
+
+\item{dense_geojson_sources}{Optional browser-side annotation source
+manifests. They allow full-detail GeoJSON to begin loading independently
+while R prepares its analysis index in the background.}
 
 \item{prediction_url}{Optional live HTTP endpoint used by the Prediction menu
 to run optional \code{fastPLS} PLS-LDA from annotation-defined training/test

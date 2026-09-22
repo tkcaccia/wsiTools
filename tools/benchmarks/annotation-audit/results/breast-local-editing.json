@@ -1,0 +1,745 @@
+{
+  "date": "2026-09-09T14:54:48.293Z",
+  "machine": "Apple M3, 8 GiB RAM; macOS; Chrome 152; R 4.6.0",
+  "image": "crop_roi.tif",
+  "image_size": [
+    43458,
+    39886
+  ],
+  "total_vertices": 485941,
+  "edited_class_vertices": 242952,
+  "edited_outer_ring_vertices": 44176,
+  "baseline": {
+    "performance": {
+      "open_ms": 190,
+      "first_tile_ms": 304,
+      "tile_loaded": 16,
+      "tile_drawn": 0,
+      "tile_failed": 0,
+      "full_resolution_level": 16,
+      "full_resolution_tiles_loaded": 3,
+      "render_frames": 33,
+      "render_total_ms": 683.3000000119209,
+      "render_max_ms": 155.2,
+      "dense_requests": 0,
+      "dense_cancelled": 0,
+      "dense_failed": 0,
+      "dense_total_ms": 0,
+      "renderer": "openseadragon-webgl",
+      "tile_renderer": "openseadragon-webgl",
+      "overlay_renderer": "canvas",
+      "webgpu_status": "not requested",
+      "webgpu_reason": "This session is configured to use the OpenSeadragon tile compositor.",
+      "webgpu_fix": "No action is required. Set WSITOOLS_TILE_COMPOSITOR=auto only to try the optional WebGPU compositor.",
+      "wasm_overlay_status": "active",
+      "wasm_overlay_reason": "Dense static annotation viewport culling is accelerated by WebAssembly.",
+      "last_updated": "2026-09-09T14:33:08.461Z",
+      "editing": {
+        "cursor_frames": 89,
+        "cursor_max_ms": 4.099999964237213,
+        "geometry_jobs": 2,
+        "geometry_worker_ms": 237.9000000357628,
+        "geometry_commit_ms": 70.30000001192093,
+        "path_builds": 1124,
+        "pane_draws": 0,
+        "geometry_kernel": "clipper2-wasm",
+        "geometry_cache_bytes": 34997472,
+        "geometry_transfer_bytes": 7788420
+      },
+      "sync": {
+        "messages": 11,
+        "bytes": 13338897,
+        "full_snapshots": 1,
+        "annotation_upserts": 4
+      },
+      "elapsed_ms": 20135,
+      "render_average_ms": 20.71,
+      "dense_average_ms": 0,
+      "cache_mode": "persistent fingerprinted",
+      "multi_view_panes": 1,
+      "webgl_available": true
+    },
+    "original_points": 242952,
+    "tool_feedback_ms": 2.099999964237213,
+    "logs": [
+      {
+        "id": "log_1",
+        "time": "2026-09-09T14:32:48.558Z",
+        "level": "success",
+        "message": "Tiled viewer ready | openseadragon-webgl",
+        "source": "toast",
+        "detail": {
+          "timeout": 2600,
+          "action": null
+        }
+      },
+      {
+        "id": "log_2",
+        "time": "2026-09-09T14:32:49.218Z",
+        "level": "success",
+        "message": "Tissue annotation loaded with full boundary resolution at every zoom.",
+        "source": "annotations",
+        "detail": {
+          "source": "dense_tissue_Visium_HD_11mm_Human_Breast_Cancer_tissue_image_standard_grown_mask_native_fidelity_0p5pct",
+          "count": 3
+        }
+      },
+      {
+        "id": "log_3",
+        "time": "2026-09-09T14:32:53.758Z",
+        "level": "success",
+        "message": "Undo applied",
+        "source": "toast",
+        "detail": {
+          "timeout": 2600,
+          "action": null
+        }
+      }
+    ],
+    "sync_errors": [],
+    "timings": [
+      {
+        "subtract": false,
+        "release_to_completion_ms": 453,
+        "stroke_wall_ms": 1033
+      },
+      {
+        "subtract": true,
+        "release_to_completion_ms": 129,
+        "stroke_wall_ms": 419
+      }
+    ],
+    "errors": [],
+    "failures": []
+  },
+  "installed_trials": [
+    {
+      "performance": {
+        "open_ms": 119,
+        "first_tile_ms": 199,
+        "tile_loaded": 16,
+        "tile_drawn": 0,
+        "tile_failed": 0,
+        "full_resolution_level": 16,
+        "full_resolution_tiles_loaded": 2,
+        "render_frames": 24,
+        "render_total_ms": 635.0999999046326,
+        "render_max_ms": 146.5,
+        "dense_requests": 0,
+        "dense_cancelled": 0,
+        "dense_failed": 0,
+        "dense_total_ms": 0,
+        "renderer": "openseadragon-webgl",
+        "tile_renderer": "openseadragon-webgl",
+        "overlay_renderer": "canvas",
+        "webgpu_status": "not requested",
+        "webgpu_reason": "This session is configured to use the OpenSeadragon tile compositor.",
+        "webgpu_fix": "No action is required. Set WSITOOLS_TILE_COMPOSITOR=auto only to try the optional WebGPU compositor.",
+        "wasm_overlay_status": "active",
+        "wasm_overlay_reason": "Dense static annotation viewport culling is accelerated by WebAssembly.",
+        "last_updated": "2026-09-09T14:52:59.293Z",
+        "editing": {
+          "cursor_frames": 78,
+          "cursor_max_ms": 3.300000011920929,
+          "geometry_jobs": 2,
+          "geometry_worker_ms": 77.80000001192093,
+          "geometry_commit_ms": 39.19999998807907,
+          "path_builds": 1124,
+          "pane_draws": 0,
+          "geometry_kernel": "clipper2-wasm",
+          "geometry_cache_bytes": 34997472,
+          "geometry_transfer_bytes": 4184760
+        },
+        "sync": {
+          "messages": 11,
+          "bytes": 13338858,
+          "full_snapshots": 1,
+          "annotation_upserts": 4
+        },
+        "elapsed_ms": 12169,
+        "render_average_ms": 26.46,
+        "dense_average_ms": 0,
+        "cache_mode": "persistent fingerprinted",
+        "multi_view_panes": 1,
+        "webgl_available": true
+      },
+      "original_points": 242952,
+      "tool_feedback_ms": 4.5,
+      "logs": [
+        {
+          "id": "log_1",
+          "time": "2026-09-09T14:52:47.633Z",
+          "level": "success",
+          "message": "Tiled viewer ready | openseadragon-webgl",
+          "source": "toast",
+          "detail": {
+            "timeout": 2600,
+            "action": null
+          }
+        },
+        {
+          "id": "log_2",
+          "time": "2026-09-09T14:52:48.126Z",
+          "level": "success",
+          "message": "Tissue annotation loaded with full boundary resolution at every zoom.",
+          "source": "annotations",
+          "detail": {
+            "source": "dense_tissue_Visium_HD_11mm_Human_Breast_Cancer_tissue_image_standard_grown_mask_native_fidelity_0p5pct",
+            "count": 3
+          }
+        },
+        {
+          "id": "log_3",
+          "time": "2026-09-09T14:52:51.913Z",
+          "level": "success",
+          "message": "Undo applied",
+          "source": "toast",
+          "detail": {
+            "timeout": 2600,
+            "action": null
+          }
+        }
+      ],
+      "sync_errors": [],
+      "timings": [
+        {
+          "subtract": false,
+          "release_to_completion_ms": 196,
+          "stroke_wall_ms": 714
+        },
+        {
+          "subtract": true,
+          "release_to_completion_ms": 79,
+          "stroke_wall_ms": 331
+        }
+      ],
+      "errors": [],
+      "failures": []
+    },
+    {
+      "performance": {
+        "open_ms": 53,
+        "first_tile_ms": 105,
+        "tile_loaded": 16,
+        "tile_drawn": 0,
+        "tile_failed": 0,
+        "full_resolution_level": 16,
+        "full_resolution_tiles_loaded": 2,
+        "render_frames": 26,
+        "render_total_ms": 629.5000000596046,
+        "render_max_ms": 149.4,
+        "dense_requests": 0,
+        "dense_cancelled": 0,
+        "dense_failed": 0,
+        "dense_total_ms": 0,
+        "renderer": "openseadragon-webgl",
+        "tile_renderer": "openseadragon-webgl",
+        "overlay_renderer": "canvas",
+        "webgpu_status": "not requested",
+        "webgpu_reason": "This session is configured to use the OpenSeadragon tile compositor.",
+        "webgpu_fix": "No action is required. Set WSITOOLS_TILE_COMPOSITOR=auto only to try the optional WebGPU compositor.",
+        "wasm_overlay_status": "active",
+        "wasm_overlay_reason": "Dense static annotation viewport culling is accelerated by WebAssembly.",
+        "last_updated": "2026-09-09T14:53:16.511Z",
+        "editing": {
+          "cursor_frames": 79,
+          "cursor_max_ms": 1.100000023841858,
+          "geometry_jobs": 2,
+          "geometry_worker_ms": 51.700000047683716,
+          "geometry_commit_ms": 29.900000035762787,
+          "path_builds": 1124,
+          "pane_draws": 0,
+          "geometry_kernel": "clipper2-wasm",
+          "geometry_cache_bytes": 34997472,
+          "geometry_transfer_bytes": 4184760
+        },
+        "sync": {
+          "messages": 11,
+          "bytes": 13338893,
+          "full_snapshots": 1,
+          "annotation_upserts": 4
+        },
+        "elapsed_ms": 10960,
+        "render_average_ms": 24.21,
+        "dense_average_ms": 0,
+        "cache_mode": "persistent fingerprinted",
+        "multi_view_panes": 1,
+        "webgl_available": true
+      },
+      "original_points": 242952,
+      "tool_feedback_ms": 8.600000023841858,
+      "logs": [
+        {
+          "id": "log_1",
+          "time": "2026-09-09T14:53:06.009Z",
+          "level": "success",
+          "message": "Tiled viewer ready | openseadragon-webgl",
+          "source": "toast",
+          "detail": {
+            "timeout": 2600,
+            "action": null
+          }
+        },
+        {
+          "id": "log_2",
+          "time": "2026-09-09T14:53:06.536Z",
+          "level": "success",
+          "message": "Tissue annotation loaded with full boundary resolution at every zoom.",
+          "source": "annotations",
+          "detail": {
+            "source": "dense_tissue_Visium_HD_11mm_Human_Breast_Cancer_tissue_image_standard_grown_mask_native_fidelity_0p5pct",
+            "count": 3
+          }
+        },
+        {
+          "id": "log_3",
+          "time": "2026-09-09T14:53:10.117Z",
+          "level": "success",
+          "message": "Undo applied",
+          "source": "toast",
+          "detail": {
+            "timeout": 2600,
+            "action": null
+          }
+        }
+      ],
+      "sync_errors": [],
+      "timings": [
+        {
+          "subtract": false,
+          "release_to_completion_ms": 124,
+          "stroke_wall_ms": 592
+        },
+        {
+          "subtract": true,
+          "release_to_completion_ms": 55,
+          "stroke_wall_ms": 304
+        }
+      ],
+      "errors": [],
+      "failures": []
+    },
+    {
+      "performance": {
+        "open_ms": 53,
+        "first_tile_ms": 88,
+        "tile_loaded": 17,
+        "tile_drawn": 0,
+        "tile_failed": 0,
+        "full_resolution_level": 16,
+        "full_resolution_tiles_loaded": 2,
+        "render_frames": 28,
+        "render_total_ms": 634.9000000357628,
+        "render_max_ms": 143.3,
+        "dense_requests": 0,
+        "dense_cancelled": 0,
+        "dense_failed": 0,
+        "dense_total_ms": 0,
+        "renderer": "openseadragon-webgl",
+        "tile_renderer": "openseadragon-webgl",
+        "overlay_renderer": "canvas",
+        "webgpu_status": "not requested",
+        "webgpu_reason": "This session is configured to use the OpenSeadragon tile compositor.",
+        "webgpu_fix": "No action is required. Set WSITOOLS_TILE_COMPOSITOR=auto only to try the optional WebGPU compositor.",
+        "wasm_overlay_status": "active",
+        "wasm_overlay_reason": "Dense static annotation viewport culling is accelerated by WebAssembly.",
+        "last_updated": "2026-09-09T14:53:34.485Z",
+        "editing": {
+          "cursor_frames": 80,
+          "cursor_max_ms": 0.8999999761581421,
+          "geometry_jobs": 2,
+          "geometry_worker_ms": 55.59999990463257,
+          "geometry_commit_ms": 29.19999998807907,
+          "path_builds": 1124,
+          "pane_draws": 0,
+          "geometry_kernel": "clipper2-wasm",
+          "geometry_cache_bytes": 34997472,
+          "geometry_transfer_bytes": 4184760
+        },
+        "sync": {
+          "messages": 11,
+          "bytes": 13338911,
+          "full_snapshots": 1,
+          "annotation_upserts": 4
+        },
+        "elapsed_ms": 11475,
+        "render_average_ms": 22.68,
+        "dense_average_ms": 0,
+        "cache_mode": "persistent fingerprinted",
+        "multi_view_panes": 1,
+        "webgl_available": true
+      },
+      "original_points": 242952,
+      "tool_feedback_ms": 12.5,
+      "logs": [
+        {
+          "id": "log_1",
+          "time": "2026-09-09T14:53:23.463Z",
+          "level": "success",
+          "message": "Tiled viewer ready | openseadragon-webgl",
+          "source": "toast",
+          "detail": {
+            "timeout": 2600,
+            "action": null
+          }
+        },
+        {
+          "id": "log_2",
+          "time": "2026-09-09T14:53:24.054Z",
+          "level": "success",
+          "message": "Tissue annotation loaded with full boundary resolution at every zoom.",
+          "source": "annotations",
+          "detail": {
+            "source": "dense_tissue_Visium_HD_11mm_Human_Breast_Cancer_tissue_image_standard_grown_mask_native_fidelity_0p5pct",
+            "count": 3
+          }
+        },
+        {
+          "id": "log_3",
+          "time": "2026-09-09T14:53:27.688Z",
+          "level": "success",
+          "message": "Undo applied",
+          "source": "toast",
+          "detail": {
+            "timeout": 2600,
+            "action": null
+          }
+        }
+      ],
+      "sync_errors": [],
+      "timings": [
+        {
+          "subtract": false,
+          "release_to_completion_ms": 123,
+          "stroke_wall_ms": 624
+        },
+        {
+          "subtract": true,
+          "release_to_completion_ms": 55,
+          "stroke_wall_ms": 305
+        }
+      ],
+      "errors": [],
+      "failures": []
+    }
+  ],
+  "loaded_machine_check": {
+    "performance": {
+      "open_ms": 310,
+      "first_tile_ms": 1369,
+      "tile_loaded": 13,
+      "tile_drawn": 0,
+      "tile_failed": 0,
+      "full_resolution_level": 16,
+      "full_resolution_tiles_loaded": 4,
+      "render_frames": 27,
+      "render_total_ms": 948.2000003457069,
+      "render_max_ms": 255.4,
+      "dense_requests": 0,
+      "dense_cancelled": 0,
+      "dense_failed": 0,
+      "dense_total_ms": 0,
+      "renderer": "openseadragon-webgl",
+      "tile_renderer": "openseadragon-webgl",
+      "overlay_renderer": "canvas",
+      "webgpu_status": "not requested",
+      "webgpu_reason": "This session is configured to use the OpenSeadragon tile compositor.",
+      "webgpu_fix": "No action is required. Set WSITOOLS_TILE_COMPOSITOR=auto only to try the optional WebGPU compositor.",
+      "wasm_overlay_status": "active",
+      "wasm_overlay_reason": "Dense static annotation viewport culling is accelerated by WebAssembly.",
+      "last_updated": "2026-09-09T14:47:47.721Z",
+      "editing": {
+        "cursor_frames": 83,
+        "cursor_max_ms": 8.300000011920929,
+        "geometry_jobs": 2,
+        "geometry_worker_ms": 174.5,
+        "geometry_commit_ms": 121.69999998807907,
+        "path_builds": 1124,
+        "pane_draws": 0,
+        "geometry_kernel": "clipper2-wasm",
+        "geometry_cache_bytes": 34997472,
+        "geometry_transfer_bytes": 4184760
+      },
+      "sync": {
+        "messages": 10,
+        "bytes": 13336360,
+        "full_snapshots": 1,
+        "annotation_upserts": 4
+      },
+      "elapsed_ms": 42918,
+      "render_average_ms": 35.12,
+      "dense_average_ms": 0,
+      "cache_mode": "persistent fingerprinted",
+      "multi_view_panes": 1,
+      "webgl_available": true
+    },
+    "original_points": 242952,
+    "tool_feedback_ms": 4.700000047683716,
+    "logs": [
+      {
+        "id": "log_1",
+        "time": "2026-09-09T14:47:05.251Z",
+        "level": "success",
+        "message": "Tiled viewer ready | openseadragon-webgl",
+        "source": "toast",
+        "detail": {
+          "timeout": 2600,
+          "action": null
+        }
+      },
+      {
+        "id": "log_2",
+        "time": "2026-09-09T14:47:05.686Z",
+        "level": "success",
+        "message": "Tissue annotation loaded with full boundary resolution at every zoom.",
+        "source": "annotations",
+        "detail": {
+          "source": "dense_tissue_Visium_HD_11mm_Human_Breast_Cancer_tissue_image_standard_grown_mask_native_fidelity_0p5pct",
+          "count": 3
+        }
+      },
+      {
+        "id": "log_3",
+        "time": "2026-09-09T14:47:12.948Z",
+        "level": "success",
+        "message": "Undo applied",
+        "source": "toast",
+        "detail": {
+          "timeout": 2600,
+          "action": null
+        }
+      }
+    ],
+    "sync_errors": [],
+    "timings": [
+      {
+        "subtract": false,
+        "release_to_completion_ms": 596,
+        "stroke_wall_ms": 1349
+      },
+      {
+        "subtract": true,
+        "release_to_completion_ms": 336,
+        "stroke_wall_ms": 1359
+      }
+    ],
+    "errors": [],
+    "failures": []
+  },
+  "kernel_comparison": {
+    "date": "2026-09-09T14:38:38.876Z",
+    "file": "Visium_HD_11mm_Human_Breast_Cancer_tissue_image_standard_grown_mask_native_fidelity_0p5pct.geojson",
+    "total_vertices": 485941,
+    "results": [
+      {
+        "feature": 0,
+        "vertices": 228775,
+        "parts": 693,
+        "operation": "ctUnion",
+        "times_ms": {
+          "full": [
+            762.150583,
+            699.3011670000001,
+            583.2243330000001
+          ],
+          "local": [
+            125.17808300000024,
+            35.75679100000025,
+            35.85629199999994
+          ]
+        },
+        "symmetric_difference_px2": 0
+      },
+      {
+        "feature": 0,
+        "vertices": 228775,
+        "parts": 693,
+        "operation": "ctDifference",
+        "times_ms": {
+          "full": [
+            521.365875,
+            561.3361249999998,
+            633.1843339999996
+          ],
+          "local": [
+            38.12508400000024,
+            37.98133299999972,
+            37.27216700000008
+          ]
+        },
+        "symmetric_difference_px2": 0
+      },
+      {
+        "feature": 0,
+        "vertices": 228775,
+        "parts": 693,
+        "operation": "ctIntersection",
+        "times_ms": {
+          "full": [
+            272.97508299999936,
+            295.25245899999936,
+            246.6207089999998
+          ],
+          "local": [
+            22.266083000000435,
+            20.801124999999956,
+            21.466083999999682
+          ]
+        },
+        "symmetric_difference_px2": 0
+      },
+      {
+        "feature": 1,
+        "vertices": 14214,
+        "parts": 111,
+        "operation": "ctUnion",
+        "times_ms": {
+          "full": [
+            42.04320899999948,
+            40.643707999999606,
+            32.81329199999982
+          ],
+          "local": [
+            19.692958999999973,
+            6.3232090000001335,
+            7.139834000000519
+          ]
+        },
+        "symmetric_difference_px2": 0
+      },
+      {
+        "feature": 1,
+        "vertices": 14214,
+        "parts": 111,
+        "operation": "ctDifference",
+        "times_ms": {
+          "full": [
+            19.610584000000017,
+            21.78758299999936,
+            22.976582999999664
+          ],
+          "local": [
+            10.339791999999761,
+            6.969374999999673,
+            5.793249999999716
+          ]
+        },
+        "symmetric_difference_px2": 0
+      },
+      {
+        "feature": 1,
+        "vertices": 14214,
+        "parts": 111,
+        "operation": "ctIntersection",
+        "times_ms": {
+          "full": [
+            11.41295799999989,
+            11.840791999999965,
+            12.74358299999949
+          ],
+          "local": [
+            2.1844169999994847,
+            2.20575000000008,
+            2.4432090000000244
+          ]
+        },
+        "symmetric_difference_px2": 0
+      },
+      {
+        "feature": 2,
+        "vertices": 242952,
+        "parts": 298,
+        "operation": "ctUnion",
+        "times_ms": {
+          "full": [
+            1791.9292080000005,
+            1386.0337500000005,
+            1330.3184580000016
+          ],
+          "local": [
+            164.47358300000087,
+            65.58549999999923,
+            63.16862500000025
+          ]
+        },
+        "symmetric_difference_px2": 0
+      },
+      {
+        "feature": 2,
+        "vertices": 242952,
+        "parts": 298,
+        "operation": "ctDifference",
+        "times_ms": {
+          "full": [
+            2258.4122499999994,
+            2352.626708,
+            1652.6310000000012
+          ],
+          "local": [
+            65.15333400000236,
+            63.000457999998616,
+            60.396082999999635
+          ]
+        },
+        "symmetric_difference_px2": 0
+      },
+      {
+        "feature": 2,
+        "vertices": 242952,
+        "parts": 298,
+        "operation": "ctIntersection",
+        "times_ms": {
+          "full": [
+            208.03683400000227,
+            211.57595800000126,
+            218.11429099999805
+          ],
+          "local": [
+            38.46537499999977,
+            40.10858300000109,
+            42.471417000000656
+          ]
+        },
+        "symmetric_difference_px2": 0
+      }
+    ]
+  },
+  "notes": [
+    "One pre-update live baseline and three sequential installed-package trials; not a statistical benchmark.",
+    "Release-to-completion includes brush worker and UI commit, not R acknowledgement time.",
+    "Full-feature and local microbenchmarks share the updated WASM kernel; they are not live UI timings.",
+    "loaded_machine_check ran under concurrent verification load and is retained to show variability."
+  ],
+  "priority": {
+    "baseline": {
+      "input": {
+        "selected": "dense_static_2",
+        "vertices": 242952,
+        "neighbor": "dense_static_0"
+      },
+      "elapsed_ms": 330.30000001192093,
+      "undo_exact": true,
+      "redo_exact": true,
+      "changed": 2,
+      "kernel": "clipper2-wasm",
+      "errors": [],
+      "sync_errors": [],
+      "acknowledged": 7
+    },
+    "installed": {
+      "input": {
+        "selected": "dense_static_2",
+        "vertices": 242952,
+        "neighbor": "dense_static_0"
+      },
+      "elapsed_ms": 202.89999997615814,
+      "undo_exact": true,
+      "redo_exact": true,
+      "changed": 2,
+      "kernel": "clipper2-wasm",
+      "errors": [],
+      "sync_errors": [],
+      "acknowledged": 7
+    }
+  }
+}

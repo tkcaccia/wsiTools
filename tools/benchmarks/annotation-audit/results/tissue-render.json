@@ -1,0 +1,102 @@
+{
+  "date": "2026-09-09T13:26:14.068Z",
+  "environment": {
+    "node": "v26.3.0",
+    "os": "23.5.0",
+    "arch": "arm64",
+    "cpu": "Apple M3",
+    "logical_cpus": 8,
+    "ram_bytes": 8589934592,
+    "versions": {
+      "@mapbox/vector-tile": "3.0.0",
+      "clipper2-wasm": "0.4.0",
+      "earcut": "3.2.3",
+      "flatbush": "4.6.2",
+      "flatgeobuf": "4.4.0",
+      "geojson-vt": "5.0.2",
+      "pbf": "5.1.2",
+      "playwright-core": "1.63.0",
+      "rbush": "4.0.1",
+      "vt-pbf": "3.1.3"
+    }
+  },
+  "provenance": {
+    "inst/viewer/performance.js": "11f921dabe61b29db0c128a795572dbfe21e6503cd044d15215a81346a09df34",
+    "inst/viewer/geometry-worker.js": "34c54c773a1979420ba848b8e8a4ba36e5ac9b323ce94d13cff54afafa8977f7",
+    "inst/viewer/clipper.js": "a650c6946682edc1a64016f6553eeb5c32ce45eb7ca0ad5d8221961af011d97c",
+    "inst/viewer/sync.js": "fc00ccfe01f9de091d09bae0814b0fb77e757d4b65ebd27553aa13e5c9637703",
+    "inst/wasm/wsi_overlay_core.wasm": "7edb1e38aab52ef979ab3733641700f84b35e0fb11b62fceef06ce4cfbe91b0b"
+  },
+  "dataset": {
+    "file": "Visium_HD_Human_Colon_Cancer_290325.geojson",
+    "sha256": "18fa709a555d856cdf45838a00c4499cc80571994b4e53a864608cfd5ba4b735",
+    "bytes": 13274712,
+    "features": 359,
+    "vertices": 825698,
+    "largest_feature_vertices": 117669,
+    "bounds": [
+      37600,
+      0,
+      67740,
+      26143
+    ],
+    "first_read_ms": 5.46237499999998,
+    "first_parse_ms": 68.515041,
+    "heap_delta_text_and_object": 52901280
+  },
+  "browser": "152.0.7977.83",
+  "modes": [
+    {
+      "mode": "canvas_rebuild",
+      "features": 359,
+      "polygons": 437,
+      "vertices": 825698,
+      "prepare_ms": 2.699999988079071,
+      "submit_or_flush_median_ms": 71.69999998807907,
+      "submit_or_flush_max_ms": 155.5999999642372,
+      "two_raf_median_ms": 82.40000003576279,
+      "nonblank": 373974,
+      "screenshot": "/tmp/wsitools-annotation-audit-canvas_rebuild.png"
+    },
+    {
+      "mode": "canvas_cached",
+      "features": 359,
+      "polygons": 437,
+      "vertices": 825698,
+      "prepare_ms": 51.10000002384186,
+      "submit_or_flush_median_ms": 19.899999976158142,
+      "submit_or_flush_max_ms": 46.5,
+      "two_raf_median_ms": 33.30000001192093,
+      "nonblank": 373974,
+      "screenshot": "/tmp/wsitools-annotation-audit-canvas_cached.png"
+    },
+    {
+      "mode": "svg",
+      "features": 359,
+      "polygons": 437,
+      "vertices": 825698,
+      "prepare_ms": 108.90000003576279,
+      "submit_or_flush_median_ms": 0.19999998807907104,
+      "submit_or_flush_max_ms": 9.199999988079071,
+      "two_raf_median_ms": 33.700000047683716,
+      "nonblank": 437,
+      "screenshot": "/tmp/wsitools-annotation-audit-svg.png"
+    },
+    {
+      "mode": "webgl",
+      "features": 359,
+      "polygons": 437,
+      "vertices": 825698,
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)",
+      "triangulate_and_expand_ms": 363.7999999523163,
+      "vertex_buffer_bytes": 16562112,
+      "prepare_ms": 635.2999999523163,
+      "submit_or_flush_median_ms": 0,
+      "submit_or_flush_max_ms": 5.599999964237213,
+      "two_raf_median_ms": 33.5,
+      "nonblank": 369946,
+      "screenshot": "/tmp/wsitools-annotation-audit-webgl.png"
+    }
+  ],
+  "note": "Actual tissue polygon fill-only component benchmark at 1024x768 DPR1. No tissue imagery, labels, border tessellation, hit testing or R synchronization. Canvas flush uses 1px readback, WebGL uses finish, SVG uses layout then two RAF; these are not identical fences. Screenshot coverage and nonblank checks validate rendering only, not exact topology."
+}

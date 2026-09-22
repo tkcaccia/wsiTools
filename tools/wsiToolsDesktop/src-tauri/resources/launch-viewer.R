@@ -131,7 +131,7 @@ desktop_open_czi_project <- function(image_paths, output, log_file, title = "wsi
     wait = FALSE,
     overwrite = TRUE,
     title = title,
-    czi_preview = "lazy",
+    czi_preview = "first",
     sections = TRUE,
     transport = "auto",
     persistent_cache = TRUE
@@ -771,6 +771,40 @@ desktop_geojson_browser_copy <- function(path, output, kind) {
   )
 }
 
+desktop_initial_tissue_manifest <- function(items, output) {
+  if (!length(items)) {
+    return(list())
+  }
+  path <- items[[1L]]$tissue_annotation %||% ""
+  if (!nzchar(path) || !file.exists(path) ||
+      !tolower(tools::file_ext(path)) %in% c("geojson", "json") ||
+      !desktop_should_defer_geojson(path)) {
+    return(list())
+  }
+  browser_copy <- desktop_geojson_browser_copy(path, output, "tissue")
+  if (is.null(browser_copy$url) || !nzchar(browser_copy$url)) {
+    return(list())
+  }
+  id <- desktop_dense_geojson_id(path, "tissue")
+  list(list(
+    ok = TRUE,
+    loaded = TRUE,
+    source_id = id,
+    static_url = browser_copy$url,
+    static_source = list(
+      name = "Tissue annotation",
+      kind = "tissue",
+      source_type = "annotation",
+      visible = TRUE,
+      opacity = 0.86,
+      colour = "#22C55E",
+      fill_alpha = 0.16,
+      line_width = 2.2,
+      full_resolution_zoom = 0
+    )
+  ))
+}
+
 desktop_start_geojson_import_job <- function(path, output, name, kind, log_file = NULL) {
   if (!requireNamespace("callr", quietly = TRUE)) {
     desktop_log(
@@ -822,9 +856,7 @@ desktop_start_geojson_import_job <- function(path, output, name, kind, log_file 
             isTRUE(all.equal(cached_key$mtime, source_key$mtime, tolerance = 0)) &&
             identical(cached_key$cache_version, source_key$cache_version) &&
             inherits(cached$rois, "wsi_roi")) {
-          cached$cache_hit <- TRUE
-          saveRDS(cached, cache_file)
-          return(cache_file)
+          return(list(path = persistent_cache_file, cache_hit = TRUE))
         }
       }
       rois <- wsiTools::read_geojson(path)
@@ -857,9 +889,15 @@ desktop_start_geojson_import_job <- function(path, output, name, kind, log_file 
         source_key = source_key,
         cache_hit = FALSE
       )
-      try(saveRDS(result, persistent_cache_file), silent = TRUE)
-      saveRDS(result, cache_file)
-      cache_file
+      published <- tryCatch({
+        saveRDS(result, persistent_cache_file)
+        file.exists(persistent_cache_file) && file.info(persistent_cache_file)$size > 0
+      }, error = function(err) FALSE)
+      result_path <- if (isTRUE(published)) persistent_cache_file else cache_file
+      if (!isTRUE(published)) {
+        saveRDS(result, cache_file)
+      }
+      list(path = result_path, cache_hit = FALSE)
     },
     args = list(
       path = normalizePath(path, winslash = "/", mustWork = TRUE),
@@ -1294,7 +1332,12 @@ desktop_poll_pending_imports <- function(viewer, pending, log_file = NULL) {
           pending[[i]] <- item
           next
         }
-        tryCatch(job$get_result(timeout = 0), error = function(e) NULL)
+        job_result <- tryCatch(job$get_result(timeout = 0), error = function(e) NULL)
+        if (is.list(job_result) && is.character(job_result$path) &&
+            length(job_result$path) == 1L && file.exists(job_result$path)) {
+          item$cache_file <- job_result$path
+          item$cache_hit <- isTRUE(job_result$cache_hit)
+        }
       }
       if (!file.exists(item$cache_file)) {
         next
@@ -1318,7 +1361,7 @@ desktop_poll_pending_imports <- function(viewer, pending, log_file = NULL) {
       desktop_log(
         "Deferred ",
         item$kind,
-        if (isTRUE(imported$cache_hit)) " GeoJSON loaded from cache: " else " GeoJSON parsed: ",
+        if (isTRUE(item$cache_hit %||% imported$cache_hit)) " GeoJSON loaded from cache: " else " GeoJSON parsed: ",
         nrow(item$rois),
         " region(s).",
         log_file = log_file
@@ -1472,6 +1515,12 @@ desktop_add_annotation_files <- function(viewer, cell_annotation = NULL,
         desktop_register_dense_geojson_source(viewer, deferred, log_file = log_file)
         pending[[length(pending) + 1L]] <- deferred
       }
+    } else if (ext %in% c("tif", "tiff")) {
+      desktop_log(
+        "Tissue annotation mask is attached as a lazy editable raster layer: ",
+        tissue_annotation,
+        log_file = log_file
+      )
     } else {
       desktop_log("Skipped tissue annotation with unsupported extension: ", tissue_annotation, log_file = log_file)
     }
@@ -1521,7 +1570,9 @@ desktop_add_annotation_files <- function(viewer, cell_annotation = NULL,
 desktop_open_spatial_target <- function(object, image_paths, output, log_file,
                                         sample_ids = NULL,
                                         initial_rois = NULL,
-                                        session_inputs = NULL) {
+                                        session_inputs = NULL,
+                                        dense_geojson_sources = NULL,
+                                        annotation_masks = NULL) {
   if (!is.null(sample_ids)) {
     sample_ids <- as.character(sample_ids)
     sample_ids[is.na(sample_ids)] <- ""
@@ -1569,14 +1620,19 @@ desktop_open_spatial_target <- function(object, image_paths, output, log_file,
       overwrite = TRUE
     )
     single_args$session_inputs <- session_inputs
+    single_args$dense_geojson_sources <- dense_geojson_sources
+    single_args$annotation_masks <- annotation_masks
     if (use_prebuilt_tiles) {
       single_args$tile_dir <- tile_dir
     } else {
-      single_args$progressive_preview <- FALSE
+      # Keep a decoded tissue preview visible beneath OpenSeadragon until its
+      # first full-resolution tiles arrive. The desktop app must never expose
+      # an empty viewer as a ready result.
+      single_args$progressive_preview <- TRUE
       desktop_log(
         "No valid prebuilt Deep Zoom tile cache was found for ",
         basename(image_paths[[1L]]),
-        ". Opening spatial viewer immediately with live dynamic tiles.",
+        ". Preparing a display-ready preview before opening with live dynamic tiles.",
         log_file = log_file
       )
     }
@@ -1611,7 +1667,9 @@ desktop_open_spatial_target <- function(object, image_paths, output, log_file,
 	      wait = FALSE,
 	      output = output,
       overwrite = TRUE,
-      session_inputs = session_inputs
+	      session_inputs = session_inputs,
+      dense_geojson_sources = dense_geojson_sources,
+      annotation_masks = annotation_masks
     ))
   }
   if (inherits(object, "SpatialExperiment") ||
@@ -1630,7 +1688,9 @@ desktop_open_spatial_target <- function(object, image_paths, output, log_file,
 	      wait = FALSE,
 	      output = output,
       overwrite = TRUE,
-      session_inputs = session_inputs
+	      session_inputs = session_inputs,
+      dense_geojson_sources = dense_geojson_sources,
+      annotation_masks = annotation_masks
     ))
   }
   desktop_log(
@@ -1642,7 +1702,9 @@ desktop_open_spatial_target <- function(object, image_paths, output, log_file,
     output = output,
     log_file = log_file,
     initial_rois = initial_rois,
-    session_inputs = session_inputs
+    session_inputs = session_inputs,
+    dense_geojson_sources = dense_geojson_sources,
+    annotation_masks = annotation_masks
   )
 }
 
@@ -1836,6 +1898,8 @@ desktop_open_live_slide_prebuilt <- function(slide, output, log_file,
                                              project_tile_sources = list(),
                                              initial_rois = NULL,
                                              session_inputs = NULL,
+                                             dense_geojson_sources = NULL,
+                                             annotation_masks = NULL,
                                              title = "wsiTools desktop viewer") {
   base_id <- desktop_project_source_id(slide$path %||% "image", 1L)
   base_tile_dir <- file.path(dirname(output), base_id)
@@ -1847,7 +1911,7 @@ desktop_open_live_slide_prebuilt <- function(slide, output, log_file,
       "No valid prebuilt Deep Zoom tile cache was found for ",
       basename(slide$path %||% base_id),
       if (desktop_use_prebuilt_tiles()) {
-        ". Starting immediately with live dynamic tiles to avoid desktop launch timeout. Set WSITOOLS_DESKTOP_BUILD_MISSING_TILES=true to build prebuilt tiles before opening."
+        ". Preparing a display-ready preview, then using live dynamic tiles. Set WSITOOLS_DESKTOP_BUILD_MISSING_TILES=true to build prebuilt tiles before opening."
       } else {
         ". Dynamic tiles were requested with WSITOOLS_DESKTOP_USE_PREBUILT_TILES=false."
       },
@@ -1859,10 +1923,15 @@ desktop_open_live_slide_prebuilt <- function(slide, output, log_file,
       dynamic_tiles = TRUE,
       dynamic_tile_format = "jpg",
       dynamic_tile_persistent_cache = TRUE,
-      progressive_preview = FALSE,
+      # The desktop window is exposed only after this preview exists. Keep it
+      # visible beneath OpenSeadragon until the first tiled image is ready so
+      # users never enter an empty viewer.
+      progressive_preview = TRUE,
       project_images = project_images,
       project_tile_sources = project_tile_sources,
       session_inputs = session_inputs,
+      dense_geojson_sources = dense_geojson_sources,
+      annotation_masks = annotation_masks,
       roi = initial_rois,
       open = FALSE,
       wait = FALSE,
@@ -1889,6 +1958,8 @@ desktop_open_live_slide_prebuilt <- function(slide, output, log_file,
         project_images = project_images,
         project_tile_sources = project_tile_sources,
         session_inputs = session_inputs,
+        dense_geojson_sources = dense_geojson_sources,
+        annotation_masks = annotation_masks,
         roi = initial_rois,
         open = FALSE,
         wait = FALSE,
@@ -1912,7 +1983,9 @@ desktop_open_live_slide_prebuilt <- function(slide, output, log_file,
 
 desktop_open_live_image_project <- function(image_paths, output, log_file,
                                             initial_rois = NULL,
-                                            session_inputs = NULL) {
+                                            session_inputs = NULL,
+                                            dense_geojson_sources = NULL,
+                                            annotation_masks = NULL) {
   if (!length(image_paths)) {
     stop("No image paths were supplied for the desktop project.", call. = FALSE)
   }
@@ -2000,8 +2073,38 @@ desktop_open_live_image_project <- function(image_paths, output, log_file,
     project_tile_sources = project_tile_sources,
     initial_rois = initial_rois,
     session_inputs = session_inputs,
+    dense_geojson_sources = dense_geojson_sources,
+    annotation_masks = annotation_masks,
     title = "wsiTools desktop project viewer"
   )
+}
+
+desktop_annotation_mask_sources <- function(items, log_file = NULL) {
+  sources <- list()
+  for (i in seq_along(items)) {
+    item <- items[[i]]
+    path <- item$tissue_annotation %||% ""
+    if (!nzchar(path) || !file.exists(path) ||
+        !tolower(tools::file_ext(path)) %in% c("tif", "tiff")) {
+      next
+    }
+    source <- wsiTools::wsi_annotation_mask_source(
+      mask = path,
+      slide = item$image,
+      id = paste0("tissue_annotation_mask_", i),
+      name = paste0("Tissue annotation mask: ", basename(item$image)),
+      target_path = item$image,
+      persistent_cache = TRUE
+    )
+    sources[[length(sources) + 1L]] <- source
+    desktop_log(
+      "Prepared lazy editable tissue annotation mask: ",
+      path,
+      ". Brush and Wand will edit sparse raster deltas without polygon conversion.",
+      log_file = log_file
+    )
+  }
+  sources
 }
 
 desktop_apply_associated_data <- function(viewer, items, output, log_file) {
@@ -2052,6 +2155,8 @@ desktop_open_new_project <- function(items, output, log_file) {
   spatial_paths <- unique(vapply(items, function(item) item$spatial_data %||% "", character(1)))
   spatial_paths <- spatial_paths[nzchar(spatial_paths)]
   initial_rois <- desktop_initial_tissue_rois(items, log_file = log_file)
+  dense_geojson_sources <- desktop_initial_tissue_manifest(items, output)
+  annotation_masks <- desktop_annotation_mask_sources(items, log_file = log_file)
   session_inputs <- lapply(items, function(item) {
     list(
       image = item$image %||% "",
@@ -2075,7 +2180,9 @@ desktop_open_new_project <- function(items, output, log_file) {
         log_file,
         sample_ids = sample_ids,
         initial_rois = initial_rois,
-        session_inputs = session_inputs
+        session_inputs = session_inputs,
+        dense_geojson_sources = dense_geojson_sources,
+        annotation_masks = annotation_masks
       ),
       error = function(err) {
         desktop_log(
@@ -2092,7 +2199,9 @@ desktop_open_new_project <- function(items, output, log_file) {
           output = output,
           log_file = log_file,
           initial_rois = initial_rois,
-          session_inputs = session_inputs
+          session_inputs = session_inputs,
+          dense_geojson_sources = dense_geojson_sources,
+          annotation_masks = annotation_masks
         )
       }
     )
@@ -2107,7 +2216,9 @@ desktop_open_new_project <- function(items, output, log_file) {
       output = output,
       log_file = log_file,
       initial_rois = initial_rois,
-      session_inputs = session_inputs
+      session_inputs = session_inputs,
+      dense_geojson_sources = dense_geojson_sources,
+      annotation_masks = annotation_masks
     )
   } else {
     viewer <- desktop_open_live_image_project(
@@ -2115,7 +2226,9 @@ desktop_open_new_project <- function(items, output, log_file) {
       output = output,
       log_file = log_file,
       initial_rois = initial_rois,
-      session_inputs = session_inputs
+      session_inputs = session_inputs,
+      dense_geojson_sources = dense_geojson_sources,
+      annotation_masks = annotation_masks
     )
   }
 

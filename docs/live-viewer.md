@@ -109,6 +109,11 @@ viewer$get_performance()
 
 ## Performance Diagnostics
 
+The [annotation editing performance notes](editing-performance.md) describe
+cached full-resolution paths, background brush clipping, revisioned R updates,
+and the repeatable editing checks. These changes use the same generated viewer
+for direct R and desktop launches; they do not require a different renderer.
+
 Open **View / Performance** to see time to image, time to first tile, tile
 failures, overlay frame time, dense-annotation request timing, renderer, and
 cache mode. **Copy report** creates a compact diagnostic suitable for a bug

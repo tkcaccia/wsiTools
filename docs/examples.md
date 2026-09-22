@@ -273,6 +273,35 @@ rois <- wsi_read_geojson("/path/to/qupath_annotations.geojson")
 viewer$add_rois(rois)
 ```
 
+## Open an Editable TIFF Annotation Mask
+
+For a large tissue annotation mask, avoid converting every region to GeoJSON.
+The live viewer reads only visible TIFF/OME-TIFF tiles and Brush/Wand edits are
+stored as sparse raster deltas:
+
+```r
+library(wsiTools)
+
+slide <- wsi_open("/path/to/sample.svs")
+mask <- wsi_annotation_mask_source(
+  "/path/to/tissue_annotations.ome.tiff",
+  slide = slide,
+  legend = "/path/to/tissue_annotations_labels.csv"
+)
+
+viewer <- wsi_viewer_live(
+  slide,
+  annotation_masks = mask,
+  dynamic_tiles = TRUE,
+  wait = FALSE
+)
+viewer$open()
+```
+
+The legend CSV can contain `value`, `label`, and `colour`. Black mask pixels
+remain transparent. Use GeoJSON instead when you need per-object vector
+selection or vertex editing.
+
 ## Draw Annotations
 
 ```r

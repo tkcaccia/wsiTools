@@ -44,6 +44,8 @@ wsi_viewer_spatialexperiment_project(
   rebuild = FALSE,
   tile_overlap = NULL,
   session_inputs = NULL,
+  dense_geojson_sources = NULL,
+  annotation_masks = NULL,
   roi_class_presets = wsi_roi_class_presets()
 )
 }
@@ -154,6 +156,10 @@ options used in tiled mode.}
 
 \item{session_inputs}{Optional source-file and tissue/sample mapping records
 included by the viewer's \strong{History > Copy inputs} diagnostic action.}
+
+\item{dense_geojson_sources}{Optional browser-readable dense-annotation
+manifests passed to the live viewer so image display and R-side annotation
+indexing can proceed independently.}
 
 \item{roi_class_presets}{ROI classes used by the annotation UI.}
 }

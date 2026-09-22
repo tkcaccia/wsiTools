@@ -18,7 +18,7 @@ wsi_viewer_czi_project_live(
   tile_format = c("jpg", "png", "jpeg"),
   channel = 0,
   sections = TRUE,
-  czi_preview = c("lazy", "all"),
+  czi_preview = c("first", "lazy", "all"),
   host = "127.0.0.1",
   port = 8798,
   path = "/viewer-state",
@@ -63,10 +63,11 @@ one animation frame. Multi-view mode divides this budget between panes.}
 panel. Set to \code{FALSE} to expose the whole CZI bounding box as one tiled
 image.}
 
-\item{czi_preview}{Preview strategy for CZI scenes. \code{"lazy"} (default)
-avoids reading preview pixels before the viewer opens and uses the live
-tile server for the selected scene. \code{"all"} preserves the older behavior
-and generates low-resolution previews for all scenes before opening.}
+\item{czi_preview}{Preview strategy for CZI scenes. \code{"first"} (default)
+decodes the first scene before exposing the viewer, so the initial window
+always contains image pixels while later scenes remain lazy. \code{"lazy"}
+avoids all preview reads, and \code{"all"} generates low-resolution previews
+for every scene before opening.}
 
 \item{host, port, path, max_tries}{Local HTTP/WebSocket bridge address.}
 

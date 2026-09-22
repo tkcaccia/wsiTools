@@ -793,10 +793,14 @@ wsi_dynamic_tile_metadata <- function(source, base_url = NULL) {
   }
   tile_path <- paste0(source$route, "/", source$id)
   template <- paste0(tile_path, "/{level}/{x}/{y}.{format}")
+  templates <- NULL
+  tile_paths <- NULL
   if (!is.null(base_url)) {
-    base <- sub("/+$", "", base_url)
-    template <- paste0(base, template)
-    tile_path <- paste0(base, tile_path)
+    bases <- sub("/+$", "", as.character(base_url))
+    templates <- paste0(bases, template)
+    tile_paths <- paste0(bases, tile_path)
+    template <- templates[[1L]]
+    tile_path <- tile_paths[[1L]]
   }
   list(
     id = source$id,
@@ -807,6 +811,8 @@ wsi_dynamic_tile_metadata <- function(source, base_url = NULL) {
     tile_format = source$tile_format,
     tile_url_base = tile_path,
     tile_url_template = template,
+    tile_url_bases = tile_paths,
+    tile_url_templates = templates,
     tile_url_style = "slash",
     tile_overlap = source$tile_overlap,
     min_level = source$min_level,
@@ -1073,6 +1079,60 @@ wsi_dynamic_can_cache_vips_level <- function(source, level, region) {
       wsi_dynamic_level_cache_max_pixels()
 }
 
+wsi_dynamic_vips_overview_width <- function() {
+  value <- suppressWarnings(as.integer(Sys.getenv(
+    "WSITOOLS_DYNAMIC_OVERVIEW_WIDTH",
+    unset = "4096"
+  )))
+  if (length(value) != 1L || is.na(value) || value < 1024L) {
+    value <- 4096L
+  }
+  min(value, 8192L)
+}
+
+wsi_dynamic_vips_overview_file <- function(source, level_dir) {
+  width <- wsi_dynamic_vips_overview_width()
+  navigator <- wsi_navigator_cache_file(source$slide, width = width, create = FALSE)
+  if (!is.null(navigator) && wsi_dynamic_tile_cache_hit(navigator)) {
+    return(navigator)
+  }
+  overview <- file.path(level_dir, sprintf("overview_%d.tif", width))
+  if (wsi_dynamic_tile_cache_hit(overview)) {
+    return(overview)
+  }
+  lock <- wsi_dynamic_tile_lock(overview, wait_seconds = 120, stale_seconds = 600)
+  if (!isTRUE(lock$acquired)) {
+    if (wsi_dynamic_tile_cache_hit(overview)) {
+      return(overview)
+    }
+    wsi_abort("Timed out waiting for another viewer worker to create the shared slide overview.")
+  }
+  on.exit(unlink(lock$path, recursive = TRUE, force = TRUE), add = TRUE)
+  if (wsi_dynamic_tile_cache_hit(overview)) {
+    return(overview)
+  }
+  tmp <- tempfile(fileext = ".tif", tmpdir = level_dir)
+  on.exit(unlink(tmp, force = TRUE), add = TRUE)
+  wsi_run_command(
+    "vips",
+    args = c(
+      "thumbnail",
+      source$slide$path,
+      tmp,
+      as.character(width),
+      "--size",
+      "down"
+    ),
+    error_message = "libvips failed to create the shared low-resolution slide overview."
+  )
+  if (!file.rename(tmp, overview) &&
+      !wsi_dynamic_tile_cache_hit(overview) &&
+      !file.copy(tmp, overview, overwrite = FALSE)) {
+    wsi_abort(sprintf("Could not publish the shared slide overview: %s", overview))
+  }
+  overview
+}
+
 wsi_dynamic_vips_level_cache_file <- function(source, level, region) {
   namespace <- source$cache_namespace %||% source$id
   level_dir <- file.path(source$cache_dir, namespace, "_levels")
@@ -1085,17 +1145,37 @@ wsi_dynamic_vips_level_cache_file <- function(source, level, region) {
     return(level_file)
   }
 
+  lock <- wsi_dynamic_tile_lock(level_file, wait_seconds = 120, stale_seconds = 600)
+  if (!isTRUE(lock$acquired)) {
+    if (wsi_dynamic_tile_cache_hit(level_file)) {
+      return(level_file)
+    }
+    wsi_abort(sprintf("Timed out waiting for cached viewer level %d.", as.integer(level)))
+  }
+  on.exit(unlink(lock$path, recursive = TRUE, force = TRUE), add = TRUE)
+  if (wsi_dynamic_tile_cache_hit(level_file)) {
+    return(level_file)
+  }
+
   level_width <- ceiling(source$width / region$deepzoom_downsample)
   level_height <- ceiling(source$height / region$deepzoom_downsample)
-  scale <- level_width / source$width
-  vscale <- level_height / source$height
+  overview <- wsi_dynamic_vips_overview_file(source, level_dir)
+  overview_width <- suppressWarnings(as.numeric(wsi_vips_field(overview, "width")))
+  overview_height <- suppressWarnings(as.numeric(wsi_vips_field(overview, "height")))
+  use_overview <- is.finite(overview_width) && is.finite(overview_height) &&
+    overview_width >= level_width && overview_height >= level_height
+  input <- if (isTRUE(use_overview)) overview else source$slide$path
+  input_width <- if (isTRUE(use_overview)) overview_width else source$width
+  input_height <- if (isTRUE(use_overview)) overview_height else source$height
+  scale <- level_width / input_width
+  vscale <- level_height / input_height
   tmp <- tempfile(fileext = ".tif", tmpdir = level_dir)
   on.exit(unlink(tmp), add = TRUE)
   wsi_run_command(
     "vips",
     args = c(
       "resize",
-      source$slide$path,
+      input,
       tmp,
       format(scale, scientific = FALSE, trim = TRUE),
       "--vscale",
@@ -1155,7 +1235,7 @@ wsi_dynamic_mask_region_to_file <- function(source, region, output,
   if (!is.null(subifd) && (!is.finite(subifd) || subifd < 0L)) {
     subifd <- NULL
   }
-  input <- wsi_vips_image_input(input, page = 0L, subifd = subifd)
+  input <- wsi_vips_image_input(input, page = source$page %||% NULL, subifd = subifd)
   crop_x <- as.integer(floor(region$x / region$downsample))
   crop_y <- as.integer(floor(region$y / region$downsample))
   tmp_crop <- tempfile(fileext = ".png", tmpdir = dirname(output))
@@ -1685,7 +1765,7 @@ wsi_http_file_response <- function(file, content_type, status = 200L,
     headers[["X-wsiTools-Tile-Cache"]] <- as.character(cache_status)
   }
   if (!is.null(request_etag) && identical(trimws(as.character(request_etag)), etag)) {
-    return(list(status = 304L, headers = headers, body = raw()))
+    return(list(status = 304L, headers = headers, body = NULL))
   }
   body <- readBin(file, what = "raw", n = size)
   list(

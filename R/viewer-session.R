@@ -531,7 +531,7 @@ wsi_viewer_allowed_payload_fields <- function() {
     "artifacts", "view", "annotations", "history", "logs", "stain",
     "channel_sources", "annotation_masks", "channel_settings",
     "tile_sources", "kodama_selection", "seurat_selection",
-    "annotation_spots", "performance", "detail"
+    "annotation_spots", "performance", "detail", "sync"
   )
 }
 
@@ -2431,6 +2431,11 @@ wsi_viewer_state_apply <- function(state, payload) {
     wsi_abort("Viewer state payload must be a JSON object.")
   }
   payload <- wsi_viewer_validate_state_payload(payload)
+  sync_update <- wsi_viewer_sync_prepare(state, payload)
+  if (!is.null(sync_update) && isTRUE(sync_update$replay)) {
+    state$browser_sync_ack <- sync_update$ack
+    return(invisible(state))
+  }
   native_source_id <- payload$detail$native_wgpu_source_id %||% NULL
   native_overlay_fields <- c(
     "rois", "selected_roi", "selected_rois", "trajectories", "measurements", "layers",
@@ -2513,6 +2518,9 @@ wsi_viewer_state_apply <- function(state, payload) {
   # omitted field must mean "leave unchanged" rather than "erase state".
   if (!is.null(payload[["rois", exact = TRUE]])) {
     state$rois <- wsi_rois_from_payload(payload[["rois", exact = TRUE]])
+  } else if (!is.null(sync_update$rois)) {
+    state$rois <- sync_update$rois
+    native_overlay_changed <- TRUE
   }
   # Native undo/redo restores compact Feature and trajectory snapshots through
   # the same validated bridge used for single-ROI edits. R remains the source
@@ -2719,7 +2727,10 @@ wsi_viewer_state_apply <- function(state, payload) {
   if (!is.null(payload[["logs", exact = TRUE]])) {
     state$logs <- wsi_viewer_logs_from_payload(payload[["logs", exact = TRUE]])
   }
-  wsi_viewer_update_measurement_tables(state)
+  wsi_viewer_sync_commit(state, sync_update)
+  if (isTRUE(native_overlay_changed) || !is.null(payload$measurements)) {
+    wsi_viewer_update_measurement_tables(state)
+  }
   state$last_event <- as.character(payload[["event", exact = TRUE]] %||% "viewer_state")
   if (identical(state$last_event, "prediction_cleared")) {
     state$prediction <- wsi_empty_prediction_result()
@@ -2899,6 +2910,7 @@ wsi_viewer_state_response <- function(state, dequeue_commands = TRUE) {
   list(
     ok = TRUE,
     event = state$last_event,
+    sync_ack = state$browser_sync_ack %||% NULL,
     roi_count = nrow(state$rois),
     measurement_count = nrow(state$measurements),
     roi_summary_count = nrow(state$roi_summary),
@@ -3424,7 +3436,8 @@ wsi_viewer_update_layers_from_payload <- function(layers, payload_layers) {
 
 wsi_viewer_session_pump <- function(session, timeout = 0L) {
   if (inherits(session, "wsi_viewer_session") && requireNamespace("httpuv", quietly = TRUE)) {
-    try(httpuv::service(as.integer(timeout)), silent = TRUE)
+    # httpuv treats zero as an indefinite service loop, not a non-blocking poll.
+    try(httpuv::service(if (identical(as.integer(timeout), 0L)) NA_integer_ else as.integer(timeout)), silent = TRUE)
   }
   invisible(session)
 }
@@ -5909,7 +5922,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
         ok = FALSE,
         loaded = FALSE,
         error = sprintf("Dense GeoJSON source not found: %s", source_id),
-        sources = source_names
+        sources = I(unname(source_names))
       ))
     }
     static_url <- as.character(source$static_url %||% "")
@@ -5918,7 +5931,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
         ok = TRUE,
         loaded = TRUE,
         source_id = as.character(source$id %||% source_id),
-        sources = source_names,
+        sources = I(unname(source_names)),
         static_url = static_url,
         static_source = list(
           name = as.character(source$name %||% "Tissue annotation"),
@@ -5956,7 +5969,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
         ok = TRUE,
         loaded = TRUE,
         source_id = source_id,
-        sources = source_names,
+        sources = I(unname(source_names)),
         total_count = nrow(rois),
         viewport_count = 0L,
         returned_count = 0L,
@@ -6144,7 +6157,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
       ok = TRUE,
       loaded = TRUE,
       source_id = source_id,
-      sources = source_names,
+      sources = I(unname(source_names)),
       total_count = nrow(rois),
       viewport_count = viewport_count,
       returned_count = length(items),
@@ -6642,6 +6655,8 @@ wsi_project_tile_record_from_dynamic <- function(source, base_url = NULL, index 
     height = unname(as.numeric(metadata$height)),
     tile_url_base = metadata$tile_url_base,
     tile_url_template = metadata$tile_url_template,
+    tile_url_bases = metadata$tile_url_bases %||% NULL,
+    tile_url_templates = metadata$tile_url_templates %||% NULL,
     tile_url_style = metadata$tile_url_style,
     tile_format = metadata$tile_format,
     tile_size = metadata$tile_size,
@@ -6760,6 +6775,9 @@ wsi_project_images_with_dynamic_tiles <- function(project_images = NULL,
 #'   Zoom generation in [wsi_viewer()] is unchanged.
 #' @param dynamic_tile_format,dynamic_tile_cache_dir,dynamic_tile_path Format,
 #'   cache directory, and HTTP route for on-demand live tiles.
+#' @param dynamic_tile_workers Number of isolated tile-server processes. Values
+#'   from one to four keep image decoding off the live R/WebSocket process;
+#'   zero uses the legacy in-process route.
 #' @param dynamic_tile_persistent_cache Keep generated dynamic tiles across
 #'   viewer sessions in a fingerprinted, size-bounded cache. The desktop app
 #'   enables this by default; the R API leaves it opt-in for compatibility.
@@ -6786,6 +6804,10 @@ wsi_project_images_with_dynamic_tiles <- function(project_images = NULL,
 #' @param project_tile_sources Optional dynamic tile sources used only by
 #'   Project-panel image/section entries. These sources are served by the live
 #'   tile server but are not exposed as Stains/channel layers.
+#' @param annotation_masks Optional TIFF/OME-TIFF tissue annotation mask path,
+#'   [wsi_annotation_mask_source()], or list of either. Masks are served lazily
+#'   and Brush/Wand edits use sparse raster deltas instead of polygon Boolean
+#'   operations.
 #' @param wait If `TRUE`, service the HTTP bridge until interrupted. This is
 #'   the most reliable mode for plain R sessions. Press Esc or Ctrl+C to return
 #'   to the console; synced objects remain in `envir`.
@@ -6888,6 +6910,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
                                dynamic_tile_format = c("png", "jpg", "jpeg"),
 	                               dynamic_tile_cache_dir = NULL,
 	                               dynamic_tile_path = "/tiles",
+	                               dynamic_tile_workers = 2L,
 	                               seurat_gene_path = "/seurat-gene",
 	                               spatial_tile_path = "/spatial-tiles",
 	                               spatial_object_save_path = "/spatial-object-save",
@@ -6898,11 +6921,13 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
 	                               geojson_mask_dir = file.path(tempdir(), "wsiTools_geojson_masks"),
 	                               dense_geojson_path = "/dense-geojson",
 	                               dense_geojson_context = NULL,
+	                               dense_geojson_sources = NULL,
 	                               prediction_path = "/prediction",
 	                               prediction_context = NULL,
 	                               proximity_path = "/proximity",
 	                               proximity_context = NULL,
 	                               project_tile_sources = NULL,
+                               annotation_masks = NULL,
                                wait = interactive(),
                                open = interactive(),
                                autosave = !is.null(autosave_path),
@@ -6946,6 +6971,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   if (!is.logical(dynamic_tiles) || length(dynamic_tiles) != 1L || is.na(dynamic_tiles)) {
     wsi_abort("`dynamic_tiles` must be `TRUE` or `FALSE`.")
   }
+  dynamic_tile_workers <- wsi_dynamic_tile_worker_count(dynamic_tile_workers)
   if (!is.logical(dynamic_tile_persistent_cache) ||
       length(dynamic_tile_persistent_cache) != 1L ||
       is.na(dynamic_tile_persistent_cache)) {
@@ -6980,6 +7006,16 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
     dots$output <- tempfile(fileext = ".html")
     dots$overwrite <- TRUE
   }
+  navigator_preview <- NULL
+  requested_mode <- as.character(dots$mode %||% if (isTRUE(dots$tiled) || isTRUE(dynamic_tiles)) "tiles" else "thumbnail")
+  if (identical(requested_mode, "tiles") && is.null(dots$navigator_image_source)) {
+    navigator_preview <- wsi_navigator_preview_start(
+      slide,
+      dots$output,
+      width = wsi_dynamic_vips_overview_width()
+    )
+    dots$navigator_image_source <- navigator_preview$source
+  }
   live_seurat <- dots$seurat %||% NULL
   live_prediction_context <- prediction_context %||% list()
   if (is.null(live_prediction_context$spatial) && !is.null(live_seurat)) {
@@ -6992,6 +7028,13 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
     live_proximity_context$spatial <- live_seurat
   }
   requested_channel_sources <- dots$channel_sources %||% NULL
+  annotation_mask_sources <- wsi_annotation_mask_sources(annotation_masks, slide = slide)
+  if (length(annotation_mask_sources)) {
+    requested_channel_sources <- wsi_channel_sources_combine(
+      requested_channel_sources,
+      annotation_mask_sources
+    )
+  }
   dynamic_project_sources <- wsi_dynamic_channel_sources(project_tile_sources)
   dynamic_source <- NULL
   if (isTRUE(dynamic_tiles)) {
@@ -7041,7 +7084,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
     }
   }
   dynamic_channel_sources <- wsi_dynamic_channel_sources(requested_channel_sources)
-  all_dynamic_sources <- c(
+	  all_dynamic_sources <- c(
     if (is.null(dynamic_source)) list() else list(dynamic_source),
     dynamic_channel_sources,
     dynamic_project_sources
@@ -7054,7 +7097,30 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
     )
   }
 
-  bridge <- wsi_start_viewer_state_server(
+	  tile_worker_pool <- wsi_dynamic_tile_worker_start(
+	    all_dynamic_sources,
+	    host = host,
+	    workers = dynamic_tile_workers
+	  )
+	  bridge <- NULL
+	  stardist_bridge <- NULL
+	  session_ready <- FALSE
+	  on.exit({
+	    if (!isTRUE(session_ready)) {
+	      wsi_dynamic_tile_worker_stop(tile_worker_pool)
+	      if (!is.null(stardist_bridge)) {
+	        try(httpuv::stopServer(stardist_bridge$server), silent = TRUE)
+	      }
+	      if (!is.null(bridge)) {
+	        try(httpuv::stopServer(bridge$server), silent = TRUE)
+	      }
+	      if (length(all_dynamic_sources)) {
+	        lapply(all_dynamic_sources, wsi_dynamic_tile_cleanup)
+	      }
+	    }
+	  }, add = TRUE)
+
+	  bridge <- wsi_start_viewer_state_server(
     state = state,
     slide = slide,
     host = host,
@@ -7080,22 +7146,11 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
 	    proximity_context = live_proximity_context,
 	    proximity_path = proximity_path
 	  )
-
-  stardist_bridge <- NULL
-  session_ready <- FALSE
-  on.exit({
-    if (!isTRUE(session_ready)) {
-      if (!is.null(stardist_bridge)) {
-        try(httpuv::stopServer(stardist_bridge$server), silent = TRUE)
-      }
-      try(httpuv::stopServer(bridge$server), silent = TRUE)
-      if (length(all_dynamic_sources)) {
-        lapply(all_dynamic_sources, wsi_dynamic_tile_cleanup)
-      }
-    }
-  }, add = TRUE)
-
-  base_url <- sprintf("http://%s:%d", bridge$host, bridge$port)
+	  base_url <- if (!is.null(tile_worker_pool) && length(tile_worker_pool$urls)) {
+	    tile_worker_pool$urls
+	  } else {
+	    sprintf("http://%s:%d", bridge$host, bridge$port)
+	  }
   if (length(dynamic_project_sources)) {
     dots$project_images <- wsi_project_images_with_dynamic_tiles(
       dots$project_images %||% NULL,
@@ -7117,8 +7172,9 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
     }
     state$tile_sources <- list(dynamic = metadata)
     dots$mode <- dots$mode %||% "tiles"
-    dots$tile_url_base <- metadata$tile_url_base
-    dots$tile_url_template <- metadata$tile_url_template
+	    dots$tile_url_base <- metadata$tile_url_base
+	    dots$tile_url_template <- metadata$tile_url_template
+	    dots$tile_url_templates <- metadata$tile_url_templates %||% NULL
     dots$tile_url_style <- metadata$tile_url_style
     dots$tile_size <- metadata$tile_size
     dots$tile_format <- metadata$tile_format
@@ -7185,6 +7241,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
 	  dots$image_export_url <- bridge$image_export_url %||% NULL
 	  dots$geojson_mask_url <- bridge$geojson_mask_url %||% NULL
 	  dots$dense_geojson_url <- bridge$dense_geojson_url %||% NULL
+	  dots$dense_geojson_sources <- dense_geojson_sources %||% list()
 	  dots$prediction_url <- bridge$prediction_url %||% NULL
 	  dots$proximity_url <- bridge$proximity_url %||% NULL
   if (!is.null(dots$channel_sources)) {
@@ -7193,8 +7250,24 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   }
   dots$autosave_enabled <- isTRUE(state$autosave$enabled)
   dots$autosave_interval <- state$autosave$interval %||% autosave_interval
-  dots$autosave_path <- state$autosave$path %||% NULL
-  dots$open <- open
+	  dots$autosave_path <- state$autosave$path %||% NULL
+	  if (!is.null(navigator_preview) && !isTRUE(navigator_preview$cached)) {
+	    preview_ready <- wsi_navigator_preview_wait(navigator_preview, timeout = 60)
+	    if (!isTRUE(preview_ready)) {
+	      fallback_preview <- tryCatch(
+	        wsi_viewer_navigator_data_uri(slide, width = 512L),
+	        error = function(err) NULL
+	      )
+	      if (is.null(fallback_preview) || !nzchar(fallback_preview)) {
+	        wsi_abort(paste0(
+	          "The viewer did not open because no display-ready image could be prepared. ",
+	          "Check the image backend with `wsi_diagnose()` and retry."
+	        ))
+	      }
+	      dots$navigator_image_source <- fallback_preview
+	    }
+	  }
+	  dots$open <- open
   dots$slide <- slide
   html <- do.call(wsi_viewer, dots)
   state$html <- html
@@ -7216,7 +7289,9 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
         proximity_context = live_proximity_context,
         dynamic_tile_cache_dir = if (!is.null(dynamic_source)) dynamic_source$cache_dir else NULL,
         dynamic_channel_cache_dirs = unique(vapply(dynamic_channel_sources, function(x) as.character(x$cache_dir %||% ""), character(1))),
-        dynamic_project_cache_dirs = unique(vapply(dynamic_project_sources, function(x) as.character(x$cache_dir %||% ""), character(1)))
+        dynamic_project_cache_dirs = unique(vapply(dynamic_project_sources, function(x) as.character(x$cache_dir %||% ""), character(1))),
+	        navigator_preview = navigator_preview,
+	        tile_worker_pool = tile_worker_pool
       )
     ),
     class = "wsi_viewer_session"
@@ -7373,7 +7448,7 @@ wsi_viewer_service <- function(session, timeout = 100L) {
     wsi_abort("`session` must be a `wsi_viewer_session` object.")
   }
   timeout <- as.integer(wsi_check_scalar_number(timeout, "timeout", allow_zero = TRUE))
-  httpuv::service(timeout)
+  httpuv::service(if (timeout == 0L) NA_integer_ else timeout)
   invisible(session)
 }
 
@@ -7386,6 +7461,11 @@ wsi_viewer_stop <- function(session) {
   if (!is.null(session$stardist_server)) {
     try(httpuv::stopServer(session$stardist_server$server), silent = TRUE)
   }
+  if (!is.null(session$navigator_preview$process) &&
+      isTRUE(tryCatch(session$navigator_preview$process$is_alive(), error = function(err) FALSE))) {
+    try(session$navigator_preview$process$kill(), silent = TRUE)
+  }
+  wsi_dynamic_tile_worker_stop(session$tile_worker_pool %||% NULL)
   try(httpuv::stopServer(session$server), silent = TRUE)
   if (length(session$dynamic_tile_sources %||% list())) {
     lapply(session$dynamic_tile_sources, wsi_dynamic_tile_cleanup)

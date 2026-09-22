@@ -20,6 +20,7 @@ wsi_viewer_session(
   dynamic_tile_format = c("png", "jpg", "jpeg"),
   dynamic_tile_cache_dir = NULL,
   dynamic_tile_path = "/tiles",
+  dynamic_tile_workers = 2L,
   seurat_gene_path = "/seurat-gene",
   spatial_tile_path = "/spatial-tiles",
   spatial_object_save_path = "/spatial-object-save",
@@ -30,11 +31,13 @@ wsi_viewer_session(
   geojson_mask_dir = file.path(tempdir(), "wsiTools_geojson_masks"),
   dense_geojson_path = "/dense-geojson",
   dense_geojson_context = NULL,
+  dense_geojson_sources = NULL,
   prediction_path = "/prediction",
   prediction_context = NULL,
   proximity_path = "/proximity",
   proximity_context = NULL,
   project_tile_sources = NULL,
+  annotation_masks = NULL,
   wait = interactive(),
   open = interactive(),
   autosave = !is.null(autosave_path),
@@ -87,6 +90,7 @@ wsi_viewer_live(
   dynamic_tile_format = c("png", "jpg", "jpeg"),
   dynamic_tile_cache_dir = NULL,
   dynamic_tile_path = "/tiles",
+  dynamic_tile_workers = 2L,
   seurat_gene_path = "/seurat-gene",
   spatial_tile_path = "/spatial-tiles",
   spatial_object_save_path = "/spatial-object-save",
@@ -97,11 +101,13 @@ wsi_viewer_live(
   geojson_mask_dir = file.path(tempdir(), "wsiTools_geojson_masks"),
   dense_geojson_path = "/dense-geojson",
   dense_geojson_context = NULL,
+  dense_geojson_sources = NULL,
   prediction_path = "/prediction",
   prediction_context = NULL,
   proximity_path = "/proximity",
   proximity_context = NULL,
   project_tile_sources = NULL,
+  annotation_masks = NULL,
   wait = interactive(),
   open = interactive(),
   autosave = !is.null(autosave_path),
@@ -176,6 +182,10 @@ Zoom generation in \code{\link[=wsi_viewer]{wsi_viewer()}} is unchanged.}
 \item{dynamic_tile_format, dynamic_tile_cache_dir, dynamic_tile_path}{Format,
 cache directory, and HTTP route for on-demand live tiles.}
 
+\item{dynamic_tile_workers}{Number of isolated tile-server processes. Values
+from one to four keep image decoding off the live R/WebSocket process;
+zero uses the legacy in-process route.}
+
 \item{seurat_gene_path}{Local HTTP route used by live Seurat viewers to
 retrieve one gene at a time from the active R session.}
 
@@ -206,6 +216,11 @@ and CellPhenotyper viewer helpers set this automatically.}
 \item{project_tile_sources}{Optional dynamic tile sources used only by
 Project-panel image/section entries. These sources are served by the live
 tile server but are not exposed as Stains/channel layers.}
+
+\item{annotation_masks}{Optional TIFF/OME-TIFF tissue annotation mask path,
+\code{\link[=wsi_annotation_mask_source]{wsi_annotation_mask_source()}}, or list of either. Masks are served lazily
+and Brush/Wand edits use sparse raster deltas instead of polygon Boolean
+operations.}
 
 \item{wait}{If \code{TRUE}, service the HTTP bridge until interrupted. This is
 the most reliable mode for plain R sessions. Press Esc or Ctrl+C to return

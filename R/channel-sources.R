@@ -274,9 +274,12 @@ wsi_channel_source_from_dynamic <- function(source, base_url = NULL) {
         kind = metadata$kind %||% "image",
         page = metadata$page %||% NULL,
         extent = metadata$extent %||% NULL,
+        tile_url_bases = metadata$tile_url_bases %||% NULL,
+        tile_url_templates = metadata$tile_url_templates %||% NULL,
         cache_key = metadata$cache_key %||% NULL,
-        server_colourized = inherits(source, "wsi_dynamic_image_tile_source") ||
-          inherits(source, "wsi_dynamic_stain_channel_tile_source")
+        server_colourized = !inherits(source, "wsi_dynamic_annotation_mask_tile_source") &&
+          (inherits(source, "wsi_dynamic_image_tile_source") ||
+             inherits(source, "wsi_dynamic_stain_channel_tile_source"))
       ),
       keep.null = TRUE
     )

@@ -1,0 +1,12 @@
+# Generate the image for wand-no-holes.cjs, then open it in a disposable live viewer.
+args <- commandArgs(trailingOnly = TRUE)
+stopifnot(length(args) == 1L)
+png(args[[1L]], width = 800, height = 600)
+par(mar = rep(0, 4), xaxs = "i", yaxs = "i")
+plot.new()
+plot.window(xlim = c(0, 800), ylim = c(600, 0))
+rect(0, 0, 800, 600, col = "#fafafa", border = NA)
+rect(160, 120, 640, 480, col = "#ba5a90", border = NA)
+rect(280, 220, 520, 380, col = "#fafafa", border = NA)
+rect(480, 120, 530, 190, col = "#fafafa", border = NA)
+dev.off()

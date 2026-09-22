@@ -176,7 +176,7 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "roiIntersectsViewport", fixed = TRUE)
   expect_match(html, "denseGeometryVisible", fixed = TRUE)
   expect_match(html, "denseGeometryMinZoom", fixed = TRUE)
-  expect_match(html, "Annotation level-of-detail active", fixed = TRUE)
+  expect_match(html, "function wsiCachedPath(part)", fixed = TRUE)
   expect_match(html, "screenshotTool", fixed = TRUE)
   expect_match(html, "Select screenshot area", fixed = TRUE)
   expect_match(html, "PNG, JPEG, SVG, or PDF screenshot", fixed = TRUE)
@@ -214,8 +214,14 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   )
   expect_match(html, "toolWand", fixed = TRUE)
   expect_match(html, "wandTolerance", fixed = TRUE)
+  expect_match(html, "wandReach", fixed = TRUE)
   expect_match(html, "runWandAt", fixed = TRUE)
   expect_match(html, "wandConnectedMask", fixed = TRUE)
+  expect_match(html, "outers.map(outer=>[wandMappedRing(outer.ring,pane,origin)])", fixed = TRUE)
+  expect_match(html, "maxPoints=768", fixed = TRUE)
+  expect_match(html, "wsiAnnotationHistoryMaxBytes = 64 * 1024 * 1024", fixed = TRUE)
+  expect_match(html, "function wsiPickTissueAnnotation(event, surface)", fixed = TRUE)
+  expect_match(html, "Ctrl + double-click", fixed = TRUE)
   expect_match(html, "mode==='wand'", fixed = TRUE)
   expect_match(html, "Magic wand annotation", fixed = TRUE)
   expect_match(html, "wandSubtractModifier", fixed = TRUE)
@@ -227,7 +233,7 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "wand_subtract", fixed = TRUE)
   expect_match(html, "Alt + Wand", fixed = TRUE)
   expect_match(html, "function boundsFromRing(ring){let xmin=Infinity", fixed = TRUE)
-  expect_match(html, "function refreshRoiGeometry(roi){if(!isDrawable(roi))return;let bounds=null", fixed = TRUE)
+  expect_match(html, "function refreshRoiGeometry(roi){wsiInvalidateGeometry(roi);if(!isDrawable(roi))return;let bounds=null", fixed = TRUE)
   expect_match(html, "setMode('draw');closeMenuAfterToolAction", fixed = TRUE)
   expect_match(html, "setMode('brush');closeMenuAfterToolAction", fixed = TRUE)
   expect_false(grepl("<button id=\"newRoi\"", html, fixed = TRUE))
@@ -352,7 +358,7 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_false(grepl("<button id=\"splitRoi\"", html, fixed = TRUE))
   expect_match(html, "startBrush", fixed = TRUE)
   expect_match(html, "finishBrush", fixed = TRUE)
-  expect_match(html, "if(typeof closeAllToolMenus==='function')closeAllToolMenus();draw();return;", fixed = TRUE)
+  expect_match(html, "if (typeof closeAllToolMenus === 'function') closeAllToolMenus();", fixed = TRUE)
   expect_match(html, "startNewAnnotation", fixed = TRUE)
   expect_match(html, "deselectAnnotation", fixed = TRUE)
   expect_match(html, "pointNearRoi", fixed = TRUE)
@@ -467,13 +473,13 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "brushOperation", fixed = TRUE)
   expect_match(html, "brushTargetRoi", fixed = TRUE)
   expect_match(html, "brushOperation=brushTargetRoi>=0?(brushAltDown?'subtract':'extend'):'new'", fixed = TRUE)
-  expect_match(html, "brushMaskGeometry(pts,brushRadius,rois[target]", fixed = TRUE)
-  expect_match(html, "applyBrushMaskToSelectedRoi(geometry.groups,target", fixed = TRUE)
+  expect_match(html, "const result = await wsiWorkerRequest(task)", fixed = TRUE)
+  expect_match(html, "wsiSetWorkerGeometry", fixed = TRUE)
   expect_match(html, "brushClass=''", fixed = TRUE)
   expect_match(html, "brushClass=currentRoiClass()", fixed = TRUE)
-  expect_match(html, "const pts=brushPoints.slice(),op=brushOperation,target=brushTargetRoi,cls=brushClass||currentRoiClass()", fixed = TRUE)
+  expect_match(html, "points: brushPoints.slice(), radius: brushRadius", fixed = TRUE)
   expect_match(html, "brushProtectionForClass(cls,-1)", fixed = TRUE)
-  expect_match(html, "addRoiFromBrushGroups(geometry.groups,'brush','Painted ROI',cls)", fixed = TRUE)
+  expect_match(html, "source: 'brush', drawn: true", fixed = TRUE)
   expect_match(html, "brushTouchedSelection", fixed = TRUE)
   expect_match(html, "brushAdditiveSelection", fixed = TRUE)
   expect_match(html, "promoteSelectedLayerAnnotationForEdit", fixed = TRUE)
@@ -505,6 +511,17 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "viewerIsMac", fixed = TRUE)
   expect_match(html, "brushSubtractModifier", fixed = TRUE)
   expect_match(html, "brushSubtractKeyEvent", fixed = TRUE)
+  expect_match(html, "brushPriorityModifier", fixed = TRUE)
+  expect_match(html, "getModifierState('CapsLock')", fixed = TRUE)
+  expect_match(html, "wsiBrushPriorityClaim", fixed = TRUE)
+  expect_match(html, "priority_claim", fixed = TRUE)
+  expect_match(html, "wsiApplyPriorityClaim", fixed = TRUE)
+  expect_match(html, "wsiCommitPriorityNeighbors", fixed = TRUE)
+  expect_match(html, "wsiAnnotationRecords", fixed = TRUE)
+  expect_match(html, "wsiMaterializePriorityLayerRecords", fixed = TRUE)
+  expect_match(html, "wsiBrushEditBounds", fixed = TRUE)
+  expect_match(html, "Caps Lock priority edit", fixed = TRUE)
+  expect_match(html, "Locked annotations remain protected", fixed = TRUE)
   expect_match(html, "e.shiftKey||e.ctrlKey", fixed = TRUE)
   expect_match(html, "Alt on Windows/Linux or Command on Mac", fixed = TRUE)
   expect_match(html, "brushCursorState", fixed = TRUE)
@@ -740,8 +757,8 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "restoreAnnotationRedo", fixed = TRUE)
   expect_match(html, "pushHistory", fixed = TRUE)
   expect_match(html, "stack.length>10", fixed = TRUE)
-  expect_match(html, "trajectories:JSON.parse", fixed = TRUE)
-  expect_match(html, "selectedTrajectory:typeof selectedTrajectory", fixed = TRUE)
+  expect_match(html, "trajectories: JSON.parse", fixed = TRUE)
+  expect_match(html, "selectedTrajectory, trajectorySeq", fixed = TRUE)
   expect_match(html, "trajectory_count:typeof trajectories", fixed = TRUE)
   expect_match(html, "selectedMeasure=-1", fixed = TRUE)
   expect_match(html, "selectedLayerIndex=-1,selectedLayerItemIndex=-1", fixed = TRUE)
@@ -1335,6 +1352,10 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "Vector ROIs are hidden", fixed = TRUE)
   expect_match(html, "annotationMaskBrushEnabled", fixed = TRUE)
   expect_match(html, "paintAnnotationMaskStroke", fixed = TRUE)
+  expect_match(html, "activeEditableAnnotationMaskSource", fixed = TRUE)
+  expect_match(html, "annotationMaskEraseLayerForSource", fixed = TRUE)
+  expect_match(html, "annotationMaskFlush", fixed = TRUE)
+  expect_match(html, "paintAnnotationMaskGroups", fixed = TRUE)
   expect_match(html, "drawAnnotationMasks", fixed = TRUE)
   expect_match(html, "annotationMaskPayload", fixed = TRUE)
   expect_match(html, "annotation_mask_updated", fixed = TRUE)
@@ -3457,13 +3478,15 @@ test_that("native CZI scene previews read the requested scene", {
   expect_match(scene_preview_code, "scene = scene_index", fixed = TRUE)
 })
 
-test_that("live CZI project opening keeps section previews lazy by default", {
+test_that("live CZI project opening prepares the first scene by default", {
   live_formals <- formals(wsiTools:::wsi_viewer_czi_project_live)
   expect_true("czi_preview" %in% names(live_formals))
-  expect_equal(eval(live_formals$czi_preview), c("lazy", "all"))
+  expect_equal(eval(live_formals$czi_preview), c("first", "lazy", "all"))
 
   live_item_code <- paste(deparse(wsiTools:::wsi_czi_live_project_item), collapse = "\n")
   expect_match(live_item_code, "preview <- match.arg(preview)", fixed = TRUE)
+  expect_match(live_item_code, "identical(preview, \"first\")", fixed = TRUE)
+  expect_match(live_item_code, "first scene did not produce a display-ready preview", fixed = TRUE)
   expect_match(live_item_code, "if (identical(preview, \"all\"))", fixed = TRUE)
   expect_match(live_item_code, "Section previews are lazy so the viewer opens quickly", fixed = TRUE)
 
@@ -3532,7 +3555,7 @@ test_that("desktop launcher routes CZI files to the CZI live project viewer", {
   expect_match(launcher, "desktop_is_czi_path", fixed = TRUE)
   expect_match(launcher, "desktop_open_czi_project", fixed = TRUE)
   expect_match(launcher, "wsi_viewer_czi_project_live", fixed = TRUE)
-  expect_match(launcher, "czi_preview = \"lazy\"", fixed = TRUE)
+  expect_match(launcher, "czi_preview = \"first\"", fixed = TRUE)
   expect_match(launcher, "all(czi_paths)", fixed = TRUE)
 })
 
@@ -3561,12 +3584,56 @@ test_that("desktop launcher isolates static viewer assets from live R work", {
   )
 })
 
+test_that("desktop launcher waits for and displays the initial tissue preview", {
+  launcher_path <- test_path("../../tools/wsiToolsDesktop/src-tauri/resources/launch-viewer.R")
+  skip_if_not(file.exists(launcher_path), "Desktop launcher resources are not included in source-package checks.")
+  launcher <- paste(readLines(launcher_path, warn = FALSE), collapse = "\n")
+
+  expect_match(launcher, "progressive_preview = TRUE", fixed = TRUE)
+  expect_false(grepl("single_args\\$progressive_preview <- FALSE", launcher))
+  expect_lt(
+    regexpr("viewer <- if \\(identical\\(mode, \\\"new-project\\\"\\)\\)", launcher)[[1L]],
+    regexpr("desktop_emit\\(\\\"VIEWER_URL\\\"", launcher)[[1L]]
+  )
+  session_code <- paste(deparse(wsiTools::wsi_viewer_live), collapse = "\n")
+  expect_match(session_code, "wsi_navigator_preview_wait", fixed = TRUE)
+  expect_match(session_code, "no display-ready image could be prepared", fixed = TRUE)
+})
+
+test_that("desktop UI opens its viewer only after R reports image readiness", {
+  desktop_path <- test_path("../../tools/wsiToolsDesktop/src/main.js")
+  skip_if_not(file.exists(desktop_path), "Desktop UI sources are not included in source-package checks.")
+  desktop_js <- paste(readLines(desktop_path, warn = FALSE), collapse = "\n")
+
+  expect_match(
+    desktop_js,
+    "Preparing the first image before opening the viewer window.",
+    fixed = TRUE
+  )
+  expect_false(grepl("invoke\\(\"open_viewer_loading_window\"", desktop_js))
+  launch_position <- regexpr("const launch = await launcher\\(\\)", desktop_js)[[1L]]
+  open_position <- regexpr("await openViewerWindow\\(launch\\.viewer_url\\)", desktop_js)[[1L]]
+  expect_gt(launch_position, 0L)
+  expect_gt(open_position, launch_position)
+})
+
+test_that("desktop annotation cache is consumed without an intermediate RDS copy", {
+  launcher_path <- test_path("../../tools/wsiToolsDesktop/src-tauri/resources/launch-viewer.R")
+  skip_if_not(file.exists(launcher_path), "Desktop launcher resources are not included in source-package checks.")
+  launcher <- paste(readLines(launcher_path, warn = FALSE), collapse = "\n")
+
+  expect_match(launcher, "return(list(path = persistent_cache_file, cache_hit = TRUE))", fixed = TRUE)
+  expect_match(launcher, "item$cache_file <- job_result$path", fixed = TRUE)
+  expect_false(grepl("saveRDS(cached, cache_file)", launcher, fixed = TRUE))
+})
+
 test_that("dense tissue annotations keep full boundaries and coalesce viewport work", {
   html_code <- paste(deparse(wsiTools:::wsi_viewer_geometry_js), collapse = "\n")
   session_code <- paste(deparse(wsiTools:::wsi_start_viewer_state_server), collapse = "\n")
 
   expect_match(html_code, "denseGeojsonStaticLayer", fixed = TRUE)
   expect_match(html_code, "denseGeojsonStaticLoaded", fixed = TRUE)
+  expect_match(html_code, "denseGeojsonStaticLoading.size", fixed = TRUE)
   expect_match(html_code, "denseGeojsonInflight", fixed = TRUE)
   expect_match(html_code, "denseGeojsonQueued", fixed = TRUE)
   expect_match(html_code, "scheduleDenseGeojsonViewportLoad", fixed = TRUE)
@@ -3580,6 +3647,74 @@ test_that("dense tissue annotations keep full boundaries and coalesce viewport w
   expect_match(session_code, "full_resolution_zoom", fixed = TRUE)
   expect_match(session_code, "tissue_source", fixed = TRUE)
   expect_match(session_code, "bounds_only <- !tissue_source", fixed = TRUE)
+})
+
+test_that("initial dense GeoJSON manifests are embedded without an R discovery round trip", {
+  slide <- wsiTools:::wsi_mock_slide(width = 800, height = 400, levels = c(1, 4))
+  output <- tempfile(fileext = ".html")
+  manifest <- list(list(
+    source_id = "tissue-source-1",
+    static_url = "dense_geojson_sources/tissue.geojson",
+    name = "Tissue annotation",
+    source_type = "tissue_annotation"
+  ))
+
+  wsi_viewer(
+    slide,
+    output = output,
+    open = FALSE,
+    dense_geojson_sources = manifest
+  )
+
+  html <- paste(readLines(output, warn = FALSE), collapse = "\n")
+  expect_match(html, '"dense_geojson_sources":[{', fixed = TRUE)
+  expect_match(html, '"source_id":"tissue-source-1"', fixed = TRUE)
+  expect_match(html, "denseGeojsonLoadInitialSources", fixed = TRUE)
+  expect_match(
+    html,
+    "Array.isArray(first.sources)?first.sources:(first.sources?[first.sources]:[])",
+    fixed = TRUE
+  )
+})
+
+test_that("dense GeoJSON discovery preserves singleton sources as JSON arrays", {
+  session_code <- paste(deparse(wsiTools:::wsi_start_viewer_state_server), collapse = "\n")
+  expect_match(session_code, "sources = I(unname(source_names))", fixed = TRUE)
+})
+
+test_that("navigator cache keys include preview size and source fingerprint", {
+  path <- tempfile(fileext = ".tif")
+  writeBin(as.raw(1:8), path)
+  slide <- wsiTools:::wsi_mock_slide(width = 800, height = 400, levels = c(1, 4))
+  slide$path <- path
+  slide$backend <- "vips"
+
+  key_512 <- wsiTools:::wsi_navigator_cache_key(slide, width = 512L)
+  key_256 <- wsiTools:::wsi_navigator_cache_key(slide, width = 256L)
+  writeBin(as.raw(1:16), path)
+  key_changed <- wsiTools:::wsi_navigator_cache_key(slide, width = 512L)
+
+  expect_false(identical(key_512, key_256))
+  expect_false(identical(key_512, key_changed))
+})
+
+test_that("navigator preview skips in-memory slides without a source path", {
+  slide <- wsiTools:::wsi_mock_slide(width = 800, height = 400, levels = c(1, 4))
+  slide$path <- NA_character_
+  preview <- wsiTools:::wsi_navigator_preview_start(
+    slide,
+    tempfile(fileext = ".html"),
+    width = 512L
+  )
+
+  expect_identical(preview$source, "")
+  expect_null(preview$process)
+})
+
+test_that("live tiled sessions wait for a display-ready image before opening", {
+  session_code <- paste(deparse(wsiTools::wsi_viewer_session), collapse = "\n")
+  expect_match(session_code, "wsi_navigator_preview_wait", fixed = TRUE)
+  expect_match(session_code, "no display-ready image could be prepared", fixed = TRUE)
 })
 
 test_that("live state service exposes a compact native renderer manifest", {
@@ -3631,7 +3766,7 @@ test_that("navigator thumbnail is independent from progressive background previe
   viewer_code <- paste(deparse(wsiTools::wsi_viewer), collapse = "\n")
   expect_match(
     viewer_code,
-    "navigator_image_data_uri = wsi_viewer_navigator_data_uri\\(slide,\\s+width = 512\\)"
+    "navigator_image_data_uri = navigator_image_source %\\|\\|%.*wsi_viewer_navigator_data_uri\\(slide,\\s+width = 512\\)"
   )
 })
 
@@ -3784,7 +3919,7 @@ test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
   expect_match(html, "viewerPerformanceAdvice", fixed = TRUE)
   expect_match(html, "denseGeojsonInflight", fixed = TRUE)
   expect_match(html, "panByKeyboard(e.key,e.shiftKey)", fixed = TRUE)
-  expect_match(html, "highlighted=typeof roiClassHighlighted==='function'&&roiClassHighlighted(roi)", fixed = TRUE)
+  expect_match(html, "highlighted = roiClassHighlighted(roi)", fixed = TRUE)
   expect_match(html, "multiViewOsdOptions", fixed = TRUE)
   expect_match(html, "gestureSettingsMouse:{clickToZoom:false,dblClickToZoom:false,scrollToZoom:true,dragToPan:false}", fixed = TRUE)
   expect_match(html, "multiViewProjectEntries", fixed = TRUE)
@@ -3824,7 +3959,7 @@ test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
   expect_match(html, "multiViewControlPaneIndex=multiViewActiveIndex", fixed = TRUE)
   expect_match(html, "setMultiViewActive(index,true)", fixed = TRUE)
   expect_match(html, "if(typeof syncMiniNavigatorToActiveView==='function')syncMiniNavigatorToActiveView()", fixed = TRUE)
-  expect_match(html, "if(typeof drawMiniNavigator==='function')drawMiniNavigator()", fixed = TRUE)
+  expect_match(html, "targets.has(multiViewPanes[multiViewActiveIndex])) drawMiniNavigator()", fixed = TRUE)
   expect_false(grepl("setMultiViewActive(index,false)", html, fixed = TRUE))
   expect_match(html, "clamp(px,0,w)", fixed = TRUE)
   expect_match(html, "column_fractions", fixed = TRUE)
@@ -3962,6 +4097,7 @@ test_that("tiled viewer HTML writes mIHC channel overlay controls", {
   expect_match(html, "display_min_zoom", fixed = TRUE)
   expect_match(html, "drawFilteredMaskChannels", fixed = TRUE)
   expect_match(html, "multiViewDrawFilteredMaskChannels", fixed = TRUE)
+  expect_match(html, "annotationMaskCompositeTile", fixed = TRUE)
   expect_match(html, "channelLegendTools", fixed = TRUE)
   expect_match(html, "selected_values", fixed = TRUE)
   expect_match(html, "Mask legend", fixed = TRUE)

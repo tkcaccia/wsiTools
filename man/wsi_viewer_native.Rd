@@ -15,7 +15,9 @@ wsi_viewer_native(
 )
 }
 \arguments{
-\item{input}{An image path or existing \code{wsi_slide} object.}
+\item{input}{An image path, a vector of image paths, or an existing
+\code{wsi_slide} object. Multiple inputs become independently navigable native
+project sources.}
 
 \item{...}{Additional arguments passed to \code{\link[=wsi_viewer_live]{wsi_viewer_live()}}.}
 
