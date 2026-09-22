@@ -50,7 +50,9 @@ Suggests:
 SystemRequirements: None required for installation. Optional runtime tools:
     OpenSlide command-line tools; libvips command-line tools; Bio-Formats
     command-line tools; optional ZEISS libCZI for native CZI builds; optional
-    local web services for interactive workflows.
+    local web services for interactive workflows; optional WebKitGTK 4.1 for
+    the Linux Tauri desktop starter; optional Chrome or Chromium for the Linux
+    WebGPU viewer route.
 Config/testthat/edition: 3
 VignetteBuilder: knitr
 Config/roxygen2/version: 8.1.0

@@ -55,10 +55,23 @@ wsi_diagnose(live_test = FALSE)
 | StarDist / Mesmer | optional cell segmentation workflows |
 
 On Linux, install Google Chrome or Chromium to let the desktop launcher use
-the browser WebGPU API through Vulkan. If neither is installed, the desktop
-viewer remains functional through WebKitGTK and OpenSeadragon WebGL. The GPU
-does not replace libvips/OpenSlide/native CZI: those backends still read and
-serve bounded image tiles from R.
+the browser WebGPU API through Vulkan. WebKitGTK 4.1 is still required for the
+Tauri starter window. The `.deb` installer declares the WebKitGTK dependency,
+so `apt` installs it automatically. Portable AppImage users should check the
+runtime first:
+
+```r
+library(wsiTools)
+wsi_install_desktop_dependencies(install = FALSE)
+
+# Ubuntu/Debian only, after reviewing the printed command
+wsi_install_desktop_dependencies(install = TRUE, allow_sudo = TRUE)
+```
+
+If Chrome/Chromium is not installed or cannot create a WebGPU device, the
+viewer remains functional through WebKitGTK and OpenSeadragon WebGL/Canvas.
+WebGPU does not replace libvips/OpenSlide/native CZI: those backends still read
+and serve bounded image tiles from R.
 
 See the [backend setup guide](backends.md) for installation commands and
 platform-specific notes.

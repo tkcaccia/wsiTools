@@ -124,7 +124,11 @@ viewer more stable for real pathology workflows:
 - **Tauri desktop launcher.** The optional desktop app provides a file-picker
   workflow for users who do not want to type R commands. It detects R from the
   system `PATH`, opens saved projects, and supports a guided new-project flow
-  for associating images with annotations and spatial omics objects.
+  for associating images with annotations and spatial omics objects. On Linux,
+  WebKitGTK 4.1 provides the starter window; when Chrome or Chromium is
+  available, the same localhost viewer is opened in an application window with
+  Vulkan/WebGPU enabled, with WebKitGTK/OpenSeadragon WebGL retained as the
+  fallback.
 
 ## Format support
 
@@ -492,6 +496,9 @@ wsi_setup()
 
 # Show the install plan without running it
 wsi_install_backends(install = FALSE)
+
+# Linux desktop shell: inspect WebKitGTK and optional WebGPU browser setup
+wsi_install_desktop_dependencies(install = FALSE)
 ```
 
 ### Automatic optional backend installer
@@ -501,6 +508,31 @@ install optional R packages such as `magick`, `httpuv`, and `callr`, and it can
 run supported system package managers for tools such as libvips, OpenSlide, and
 ImageMagick. These tools are optional runtime backends: wsiTools never installs
 them silently during `install.packages()` or `remotes::install_github()`.
+
+WebKitGTK is different: it is the Linux system webview used by the optional
+Tauri desktop starter, not an image backend. The Debian installer declares the
+runtime dependency automatically. AppImage users and source builders can
+inspect or install it explicitly:
+
+```r
+# Runtime needed by the Linux Tauri starter
+wsi_install_desktop_dependencies(install = FALSE)
+wsi_install_desktop_dependencies(
+  install = TRUE,
+  allow_sudo = TRUE
+)
+
+# Include headers and compilers for building the desktop app from source
+wsi_install_desktop_dependencies(
+  build = TRUE,
+  install = TRUE,
+  allow_sudo = TRUE
+)
+```
+
+Chrome or Chromium is optional but recommended on Linux for WebGPU. If it is
+absent or cannot create a WebGPU device, the complete viewer continues through
+WebKitGTK and OpenSeadragon WebGL/Canvas.
 
 ```r
 library(wsiTools)

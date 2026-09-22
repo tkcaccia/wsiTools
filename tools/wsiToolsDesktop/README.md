@@ -70,6 +70,19 @@ install.packages(c("httpuv", "magick"))
   - OpenSlide for many pathology WSI formats.
   - native CZI or Bio-Formats for CZI files.
 
+- Linux desktop runtime:
+  - WebKitGTK 4.1 is required for the Tauri starter window.
+  - Current Google Chrome or Chromium is optional but recommended for the
+    WebGPU viewer route. If unavailable, the same viewer uses
+    WebKitGTK/OpenSeadragon WebGL or Canvas.
+
+Review or install the Linux desktop prerequisites from R:
+
+```r
+wsi_install_desktop_dependencies(install = FALSE)
+wsi_install_desktop_dependencies(install = TRUE, allow_sudo = TRUE)
+```
+
 Check from R:
 
 ```r

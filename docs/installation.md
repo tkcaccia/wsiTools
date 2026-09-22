@@ -6,7 +6,9 @@ installed without OpenSlide, libvips, Bio-Formats, StarDist, Mesmer, Python, or
 large model files. Those tools are detected at runtime with `wsi_backends()`.
 
 If you prefer a desktop application, first install R and wsiTools, then download
-the optional launcher from [Desktop Downloads](downloads.md).
+the optional launcher from [Desktop Downloads](downloads.md). On Linux, the
+Tauri starter requires WebKitGTK 4.1. This desktop-shell dependency is separate
+from optional WSI image backends.
 
 For a plain-language explanation of what each optional backend does, see the
 [backend setup guide](backends.md). After installation, the fastest test is the
@@ -164,6 +166,33 @@ wsi_setup_report()
 On remote desktops or servers, live viewing needs the browser to reach the
 `http://127.0.0.1:<port>` URL printed by `wsi_viewer_live()`. If you connect
 through SSH, use port forwarding.
+
+For the optional desktop launcher, inspect the Linux GUI requirements:
+
+```r
+wsi_install_desktop_dependencies(install = FALSE)
+```
+
+The prebuilt `.deb` declares WebKitGTK automatically. For the portable
+AppImage, install the runtime when the plan reports it missing:
+
+```r
+wsi_install_desktop_dependencies(install = TRUE, allow_sudo = TRUE)
+```
+
+When compiling the Tauri application from source, include development headers:
+
+```r
+wsi_install_desktop_dependencies(
+  build = TRUE,
+  install = TRUE,
+  allow_sudo = TRUE
+)
+```
+
+Chrome or Chromium is optional but recommended for the Linux WebGPU route.
+WebKitGTK remains required for the starter and provides the supported
+OpenSeadragon WebGL/Canvas fallback.
 
 ## Optional Backend Installation
 

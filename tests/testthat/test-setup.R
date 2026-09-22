@@ -179,17 +179,25 @@ test_that("diagnose report includes remote-debugging sections", {
     report,
     c(
       "os", "r", "package_version", "backends", "helpers", "executables",
-      "environment", "live_viewer", "setup_plan", "suggested_fixes"
+      "environment", "desktop_runtime", "live_viewer", "setup_plan",
+      "suggested_fixes"
     )
   )
   expect_s3_class(report$backends, "data.frame")
   expect_s3_class(report$executables, "data.frame")
   expect_s3_class(report$environment, "data.frame")
+  expect_s3_class(report$desktop_runtime, "data.frame")
   expect_s3_class(report$live_viewer, "data.frame")
   expect_s3_class(report$suggested_fixes, "data.frame")
   expect_true("vips" %in% report$executables$command)
   expect_true("PATH" %in% report$environment$variable)
+  expect_true(all(c("tool", "purpose", "installed") %in% names(report$desktop_runtime)))
   expect_true("browser_sync_self_test" %in% report$live_viewer$check)
+  expect_false(any(grepl(
+    "Live viewer service could not start",
+    report$suggested_fixes$suggestion,
+    fixed = TRUE
+  )))
   expect_true(any(grepl("<wsi_diagnose>", diagnose_output, fixed = TRUE)))
 })
 
@@ -224,6 +232,66 @@ test_that("backend installer can return a setup plan without running commands", 
   expect_equal(plan$system_tools$tool, "libvips")
   expect_equal(plan$system_tools$method, "manual")
   expect_length(plan$command_output, 0)
+})
+
+test_that("desktop dependency plan separates WebKitGTK from image backends", {
+  plan <- wsi_desktop_dependency_plan(
+    build = TRUE,
+    include_webgpu_browser = TRUE,
+    platform = "linux",
+    method = "apt"
+  )
+
+  expect_s3_class(plan, "data.frame")
+  expect_named(plan, c(
+    "tool", "purpose", "required", "installed", "method", "command",
+    "command_line", "notes", "args"
+  ))
+  expect_true(all(c(
+    "webkitgtk_4_1", "tauri_linux_build", "chrome_or_chromium"
+  ) %in% plan$tool))
+  expect_true(plan$required[plan$tool == "webkitgtk_4_1"])
+  expect_false(plan$required[plan$tool == "chrome_or_chromium"])
+  expect_match(
+    plan$command_line[plan$tool == "webkitgtk_4_1"],
+    "libwebkit2gtk-4.1-0",
+    fixed = TRUE
+  )
+  expect_match(
+    plan$command_line[plan$tool == "tauri_linux_build"],
+    "libwebkit2gtk-4.1-dev",
+    fixed = TRUE
+  )
+  expect_match(
+    plan$notes[plan$tool == "chrome_or_chromium"],
+    "WebGPU",
+    fixed = TRUE
+  )
+})
+
+test_that("desktop dependency installer is read-only by default", {
+  output <- capture.output(
+    plan <- wsi_install_desktop_dependencies(
+      platform = "linux",
+      method = "manual",
+      install = FALSE
+    )
+  )
+
+  expect_s3_class(plan, "wsi_desktop_dependency_plan")
+  expect_true(any(grepl("wsi_desktop_dependency_plan", output, fixed = TRUE)))
+  expect_true(all(is.na(plan$command_line)))
+})
+
+test_that("non-Linux desktop plans use the operating system webview", {
+  mac <- wsi_desktop_dependency_plan(platform = "macos", method = "manual")
+  windows <- wsi_desktop_dependency_plan(platform = "windows", method = "manual")
+
+  expect_equal(mac$tool, "wkwebview")
+  expect_equal(windows$tool, "webview2")
+  expect_true(mac$installed)
+  expect_true(windows$installed)
+  expect_match(mac$notes, "WebKitGTK is not used", fixed = TRUE)
 })
 
 test_that("setup rejects unknown tool names", {

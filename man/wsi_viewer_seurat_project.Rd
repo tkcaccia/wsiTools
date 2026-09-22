@@ -168,6 +168,10 @@ included by the viewer's \strong{History > Copy inputs} diagnostic action.}
 manifests passed to the live viewer so image display and R-side annotation
 indexing can proceed independently.}
 
+\item{annotation_masks}{Optional TIFF or OME-TIFF tissue-annotation mask
+paths, or annotation-mask source objects, displayed and edited in the live
+viewer. Mask editing requires \code{live = TRUE}.}
+
 \item{roi_class_presets}{ROI classes used by the annotation UI.}
 }
 \value{

@@ -13,12 +13,19 @@ fails, the starter reports the backend error instead of opening a blank viewer.
 
 ### Linux GPU viewer
 
-WebKitGTK currently provides accelerated WebGL compositing but may not expose
-the browser WebGPU API even when the machine has a supported GPU. On Linux,
-wsiTools Desktop 0.1.7 therefore looks for Google Chrome or Chromium and opens
-the live viewer in a dedicated app window with Vulkan/WebGPU enabled. This is
-still the same browser interface, live R process, WebSocket connection and
-full-resolution tile server used by the embedded viewer.
+The Linux desktop has two browser-runtime roles. WebKitGTK 4.1 is required by
+Tauri for the starter window, file-selection workflow and R process controls.
+WebKitGTK provides accelerated WebGL compositing but may not expose the WebGPU
+API even when the machine has a supported GPU. wsiTools Desktop therefore
+looks for Google Chrome or Chromium when the final viewer URL is ready and, if
+found, opens that same localhost application in a dedicated Chrome application
+window with Vulkan/WebGPU enabled.
+
+The handoff changes only the browser runtime. It does not create a second
+viewer implementation: the HTML/JavaScript UI, OpenSeadragon viewport, live R
+process, WebSocket connection, tile endpoints and project state are identical.
+WebGPU is attempted for tile composition, while OpenSeadragon remains the
+pyramid and navigation controller.
 
 Install one of these browsers when `webgpu_status` reports that WebGPU is
 unavailable. wsiTools falls back automatically to the embedded WebKitGTK
@@ -26,144 +33,35 @@ viewer and OpenSeadragon WebGL if neither executable is present. The viewer's
 History report records the active tile compositor and the reason for any
 fallback.
 
+Check and install the Linux starter runtime from R:
+
+```r
+wsi_install_desktop_dependencies(install = FALSE)
+wsi_install_desktop_dependencies(install = TRUE, allow_sudo = TRUE)
+```
+
+Use `build = TRUE` only when compiling the Tauri application from source. The
+prebuilt `.deb` already declares WebKitGTK; the portable AppImage relies on the
+host system to provide it.
+
 ## Viewer Engine
 
-Before a new project starts, the desktop starter lets the user select one of
-two front ends for the same live R session:
+The desktop app has one supported viewer implementation: the complete browser
+application controlled by OpenSeadragon and synchronized with R. Depending on
+the platform and capabilities, it runs in WKWebView, WebView2, WebKitGTK or a
+Chrome/Chromium application window. There is no separate native Rust/WGPU
+viewer to select.
 
-| Choice | Use |
-| --- | --- |
-| Browser viewer | The full OpenSeadragon viewer, including all established tools. |
-| Native Rust/WGPU | Experimental native GPU window. It receives only visible tiles and state snapshots from R; it does not load the whole slide or expression matrix. |
+OpenSeadragon always owns pyramid geometry, visible-tile selection, pan, zoom,
+navigator state and coordinate conversion. Its WebGL drawer is the normal GPU
+path, with Canvas as a CPU-compatible fallback. When `navigator.gpu` and a GPU
+device are available, the optional WebGPU compositor can draw visible base and
+channel tiles. WebAssembly is independent: it accelerates CPU-side viewport
+culling for large static annotation collections.
 
-The native renderer is a staged replacement and does not yet provide every
-OpenSeadragon workflow. Select **Browser viewer** for any tool that is not yet
-available natively. Restart the desktop app after an update if the engine
-selector is not shown.
-
-Current native controls include independent slide/pane navigation, linked or
-unlinked multi-view navigation, editable polygon and brush ROIs, trajectories,
-distance measurements, GeoJSON import/export, project saving, visible-tile
-channel layers, and GPU brightfield display modes (**Original H&E**,
-**Hematoxylin**, **Eosin**, and **Residual**). The stain modes run per visible
-tile on the GPU; no whole-slide image is copied into R or GPU memory.
-
-The native **Stains** menu also provides browser-equivalent base-image controls:
-show or hide the H&E/base image and set opacity from fully transparent to fully
-opaque. These values are synchronized to the live R state and preserved by a
-saved project.
-
-Native **View -> Multi-view** supports the same 1--12 pane range as the browser
-viewer. New panes are intentionally blank: select a pane, then select a slide
-from **Project**. This avoids silently duplicating a tissue in two panes.
-Spatial coordinate colours can be restored after gene/cluster colouring, and
-**Spatial -> Coordinate size** changes the displayed radius without changing
-the R-side coordinates.
-
-The native **Project** menu can save or restore a `.wsiproject` directory.
-Restoring delegates to R's existing project-state reader, preserving the same
-annotations, trajectories, measurements, layers, stain/channel settings, and
-source-scoped native state as the browser viewer. The current live session must
-still be able to access the original slide files referenced by that project.
-
-Use **View -> Save screenshot...** in the native window to export a PNG of the
-current tissue view, including visible image channels and scientific overlays
-but excluding temporary application panels and menus.
-
-Use **View -> Export full-resolution viewport...** or **Export selected ROI
-image...** when the output must contain original level-0 pixels rather than a
-screen capture. The native window opens the normal save dialog and sends the
-chosen TIFF, PNG, or JPEG path plus the bounded source region to R. R reads and
-writes only that region through the configured image backend; the full slide
-is never transferred to the desktop process.
-
-The native window can also be launched directly from R:
-
-```r
-library(wsiTools)
-wsi_viewer_native("/path/to/slide.svs", dynamic_tiles = TRUE)
-```
-
-### Native Cells Workflow
-
-Start the native session with the optional selected-ROI segmentation bridge:
-
-```r
-wsi_viewer_native(
-  "/path/to/slide.svs",
-  dynamic_tiles = TRUE,
-  stardist = TRUE
-)
-```
-
-The native **Cells** menu then appears when the live R endpoint is available.
-Select an existing ROI, choose **StarDist H&E**, **StarDist IHC**, or **Mesmer
-DAPI**, and run that ROI. R executes the configured backend; the native viewer
-receives only the resulting geometry and renders it as a read-only cell overlay.
-
-Use **Cells -> Import cell segmentation...** to load a precomputed GeoJSON,
-CSV/TSV centroid table, or image mask. The native app sends only the selected
-file path to the local R bridge. R detects the format and keeps a large
-segmentation indexed server-side, returning only geometry intersecting the
-visible viewport.
-
-### Native Spatial Analysis
-
-For live Seurat, Giotto, SpatialExperiment, or CellPhenotyper projects, the
-native window exposes the same R-owned analytical endpoints as the browser
-viewer:
-
-- **Annotations -> Associate spatial points/cells** assigns the current
-  points or cells to tissue ROIs in R.
-- **Analysis -> Proximity analysis** measures nearest-neighbour
-  distances between selected ROI categories or individual ROIs.
-- **Analysis -> Proximity analysis -> Run statistics** bins those distances and asks R
-  to correlate an eligible expression feature, PCA/reduction component, or
-  prediction value with distance. The native table accepts both conventional
-  row tables and R data frames serialized as named columns; select a feature
-  in the table to colour the visible spatial circles from the live R session.
-- **Analysis -> Trajectory -> Run profile** profiles a selected
-  point/cell source across a selected trajectory. Choose a numeric field,
-  categorical field, or `count`, then choose the width and number of bins. R
-  evaluates the complete source layer after any active spatial registration.
-  In a live spatial viewer, the same action retrieves expression in R and opens
-  a ranked table of Spearman or Pearson correlations between every eligible
-  gene and normalized position along the trajectory. The binned profile is
-  available through `viewer$get_trajectory_profile()` and the complete gene
-  table through `viewer$get_trajectory_correlations()`.
-- **Prediction** runs PLS-LDA through optional `fastPLS`; selected annotations
-  provide training labels and all non-training points are predicted. The
-  native renderer then refreshes only visible coordinate circles with the R
-  prediction colours.
-- **Spatial registration** provides global move, independent X/Y scale,
-  rotation, and horizontal/vertical flip controls. R applies the compact
-  transform before viewport clipping, so the native GPU receives only the
-  registered points currently needed on screen.
-
-Native annotations support polygon drawing, paint-brush ROIs, selection, class
-and colour changes, deletion, GeoJSON import/export, and direct boundary
-editing. Double-click an ROI, choose **Annotations -> Edit selected ROI**,
-then drag a visible polygon vertex. The edited feature is sent back to R as one
-validated `roi_updated` event on mouse release. Large GeoJSON files are kept as
-indexed vector geometry in R and fetched only for the visible viewport; small
-imports remain editable ROI objects.
-
-For a CellPhenotyper project that contains GrandQC outputs, the native window
-also shows **Artifacts**. Choose one GrandQC file or **Load all GrandQC files**.
-The selected paths, rather than their potentially large GeoJSON payloads, are
-sent to R; R tags the imported ROIs as `GrandQC` and the native renderer then
-uses its usual editable-ROI or viewport-only rendering path. **Clear GrandQC
-annotations** removes only those tagged artifact objects and leaves user ROIs
-unchanged.
-
-No expression matrix, whole-slide image, or arbitrary R command is sent to
-the desktop process. These menus appear only when the live R session
-advertises an eligible analysis context.
-The result remains in the live R session and is included in saved projects.
-
-This starts the same local `httpuv` session and opens the installed desktop
-renderer. Set `WSITOOLS_DESKTOP_APP` or pass `app_path` to use a non-default
-desktop executable.
+No expression matrix, complete whole-slide bitmap or arbitrary R command is
+sent to the desktop process. Image decoding and analyses remain in R and its
+runtime backends; the viewer receives viewport tiles and typed state updates.
 
 ## Download
 
@@ -244,15 +142,25 @@ If the app cannot find R, set `WSITOOLS_RSCRIPT` to the full path of
 ## Architecture
 
 ```mermaid
-flowchart LR
+flowchart TD
   User["User selects image"] --> Tauri["Tauri desktop app"]
   Tauri --> Rscript["Rscript child process"]
   Rscript --> R["wsiTools live viewer"]
   R --> Bridge["httpuv sync + dynamic tiles"]
-  Tauri --> Frame["Embedded viewer frame"]
-  Frame --> Bridge
+  Tauri --> Platform{"Viewer runtime"}
+  Platform --> MacWin["WKWebView / WebView2"]
+  Platform --> WebKit["Linux WebKitGTK 4.1<br/>OpenSeadragon WebGL/Canvas"]
+  Platform --> Chrome["Linux Chrome/Chromium<br/>optional WebGPU compositor"]
+  MacWin --> Browser["Shared browser UI + OpenSeadragon"]
+  WebKit --> Browser
+  Chrome --> Browser
+  Browser <--> Bridge
+  Browser --> Tiles["Visible JPEG/PNG tiles"]
+  Bridge --> Backends["OpenSlide / libvips / native CZI / Bio-Formats"]
 ```
 
 The desktop app is an optional wrapper. It does not replace the R package API,
-and it does not make OpenSlide, libvips, CZI, Bio-Formats, StarDist, or Mesmer
-mandatory package dependencies.
+and it does not make OpenSlide, libvips, CZI or Bio-Formats mandatory package
+dependencies. WebKitGTK is required only by the Linux Tauri shell. Chrome or
+Chromium is optional and changes the browser runtime, not the R/tile
+architecture.

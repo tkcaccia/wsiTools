@@ -5,6 +5,11 @@ do not yet have whole-slide image libraries or model tools. Backends are
 optional runtime capabilities: they are checked when you open, convert, tile,
 or segment an image. They are not mandatory R package dependencies.
 
+WebKitGTK is not an image backend. It is the Linux system webview required by
+the optional Tauri desktop starter. Use `wsi_install_desktop_dependencies()`
+for that setup; continue to use `wsi_install_backends()` for image readers and
+converters.
+
 Start every setup check with:
 
 ```r

@@ -211,6 +211,11 @@ Typical outputs include `.msi` and `.exe` installers.
 
 These commands are for Ubuntu/Debian. Tauri v2 uses WebKitGTK 4.1 on Linux.
 
+WebKitGTK is required for the Tauri starter even when wsiTools subsequently
+opens the final viewer in Chrome/Chromium to obtain WebGPU. The components are
+complementary: WebKitGTK hosts the launcher; Chrome/Chromium is an optional
+runtime for the same localhost viewer.
+
 ### 1. Install system packages
 
 ```sh
@@ -244,6 +249,17 @@ npm --version
 cargo --version
 rustc --version
 pkg-config --modversion webkit2gtk-4.1
+```
+
+The same prerequisite plan can be produced from R:
+
+```r
+wsi_install_desktop_dependencies(build = TRUE, install = FALSE)
+wsi_install_desktop_dependencies(
+  build = TRUE,
+  install = TRUE,
+  allow_sudo = TRUE
+)
 ```
 
 ### 2. Build the app

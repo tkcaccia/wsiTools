@@ -627,6 +627,9 @@ wsi_viewer_spatialexperiment <- function(spe, image, linked = NULL,
 #' @param dense_geojson_sources Optional browser-readable dense-annotation
 #'   manifests passed to the live viewer so image display and R-side annotation
 #'   indexing can proceed independently.
+#' @param annotation_masks Optional TIFF or OME-TIFF tissue-annotation mask
+#'   paths, or annotation-mask source objects, displayed and edited in the live
+#'   viewer. Mask editing requires `live = TRUE`.
 #' @inheritParams wsi_link_spatialexperiment_image
 #' @inheritParams wsi_viewer_seurat_project
 #'

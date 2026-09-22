@@ -38,8 +38,9 @@ Invisibly returns a \code{wsi_diagnose} list.
 \code{wsi_diagnose()} prints a read-only support report intended for GitHub
 issues, remote desktops, and difficult installation sessions. It reports the
 operating system, R version, package version, backend table, executable
-paths, relevant environment variables, live viewer startup status, a local
-browser/R synchronization self-test when possible, and suggested fixes.
+paths, relevant environment variables, desktop webview status, live viewer
+startup status, a local browser/R synchronization self-test when possible,
+and suggested fixes.
 }
 \details{
 The live synchronization self-test starts a temporary local \code{httpuv} endpoint

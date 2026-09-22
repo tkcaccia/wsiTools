@@ -10,6 +10,10 @@
   browser viewer and R/WebSocket session while avoiding WebKitGTK builds that
   do not expose `navigator.gpu`; WebKitGTK/OpenSeadragon WebGL remains the
   automatic fallback when Chrome is unavailable.
+- Added `wsi_desktop_dependency_plan()`,
+  `wsi_install_desktop_dependencies()` and `wsi_has_webkitgtk()` so Linux users
+  can distinguish the required Tauri WebKitGTK 4.1 starter runtime from
+  optional image backends and the optional Chrome/Chromium WebGPU route.
 - The optional WebGPU base compositor now consumes OpenSeadragon
   `tile-loaded` image data and initializes before the tiled viewer. It no
   longer depends on the unsupported WebGL `tile-drawn` event, so loaded tiles

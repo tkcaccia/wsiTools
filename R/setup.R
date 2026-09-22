@@ -206,6 +206,270 @@ wsi_setup_command_line <- function(command, args) {
   paste(c(command, shQuote(args, type = quote_type)), collapse = " ")
 }
 
+wsi_desktop_platform <- function(platform = c("auto", "linux", "macos", "windows")) {
+  platform <- match.arg(platform)
+  if (!identical(platform, "auto")) {
+    return(platform)
+  }
+  if (.Platform$OS.type == "windows") {
+    return("windows")
+  }
+  if (identical(Sys.info()[["sysname"]], "Darwin")) {
+    return("macos")
+  }
+  "linux"
+}
+
+wsi_desktop_method <- function(method = c("auto", "apt", "dnf", "pacman", "manual")) {
+  method <- match.arg(method)
+  if (!identical(method, "auto")) {
+    return(method)
+  }
+  if (wsi_command_exists("apt-get")) {
+    return("apt")
+  }
+  if (wsi_command_exists("dnf")) {
+    return("dnf")
+  }
+  if (wsi_command_exists("pacman")) {
+    return("pacman")
+  }
+  "manual"
+}
+
+#' Check whether the Linux WebKitGTK 4.1 runtime is available
+#'
+#' WebKitGTK is the system webview used by the Tauri starter window on Linux.
+#' It is separate from image-reading backends and from the optional
+#' Chrome/Chromium WebGPU viewer route. On macOS and Windows this function
+#' returns `FALSE` because those systems use WKWebView and WebView2 instead.
+#'
+#' @return A single logical value.
+#' @export
+wsi_has_webkitgtk <- function() {
+  if (!identical(Sys.info()[["sysname"]], "Linux")) {
+    return(FALSE)
+  }
+  if (wsi_command_exists("pkg-config")) {
+    status <- suppressWarnings(system2(
+      "pkg-config",
+      args = c("--exists", "webkit2gtk-4.1"),
+      stdout = FALSE,
+      stderr = FALSE
+    ))
+    if (identical(as.integer(status %||% 0L), 0L)) {
+      return(TRUE)
+    }
+  }
+  libraries <- unique(c(
+    Sys.glob("/usr/lib*/libwebkit2gtk-4.1.so*"),
+    Sys.glob("/usr/lib/*/libwebkit2gtk-4.1.so*")
+  ))
+  length(libraries) > 0L
+}
+
+wsi_has_desktop_webgpu_browser <- function() {
+  any(nzchar(Sys.which(c(
+    "google-chrome",
+    "google-chrome-stable",
+    "chromium",
+    "chromium-browser"
+  ))))
+}
+
+wsi_desktop_install_command <- function(method, packages) {
+  if (!length(packages)) {
+    return(list(command = NA_character_, args = character()))
+  }
+  switch(
+    method,
+    apt = list(command = "sudo", args = c("apt-get", "install", "-y", packages)),
+    dnf = list(command = "sudo", args = c("dnf", "install", "-y", packages)),
+    pacman = list(command = "sudo", args = c("pacman", "-S", "--needed", packages)),
+    list(command = NA_character_, args = character())
+  )
+}
+
+#' Plan Linux desktop runtime and build dependencies
+#'
+#' The wsiTools Desktop starter uses the operating system webview. Linux builds
+#' require WebKitGTK 4.1 even when the final live viewer is opened in
+#' Chrome/Chromium for WebGPU. The prebuilt Debian package declares its
+#' WebKitGTK dependency automatically; portable AppImage users may need to
+#' install the runtime explicitly.
+#'
+#' This helper does not treat WebKitGTK as an image backend. It reports the
+#' desktop shell separately from OpenSlide, libvips, Bio-Formats and native CZI.
+#'
+#' @param build Whether to include packages needed to compile the Tauri app.
+#' @param include_webgpu_browser Whether to report the optional
+#'   Chrome/Chromium WebGPU route.
+#' @param platform Target platform. `"auto"` detects the current system.
+#' @param method Linux package manager. `"auto"` detects apt, dnf or pacman.
+#'
+#' @return A data frame with dependency status and copyable installation
+#'   commands.
+#' @export
+wsi_desktop_dependency_plan <- function(build = FALSE,
+                                        include_webgpu_browser = TRUE,
+                                        platform = c("auto", "linux", "macos", "windows"),
+                                        method = c("auto", "apt", "dnf", "pacman", "manual")) {
+  platform <- wsi_desktop_platform(platform)
+  method <- wsi_desktop_method(method)
+
+  if (!identical(platform, "linux")) {
+    webview <- if (identical(platform, "macos")) "WKWebView" else "WebView2"
+    out <- data.frame(
+      tool = tolower(webview),
+      purpose = "Tauri starter webview",
+      required = TRUE,
+      installed = TRUE,
+      method = "system",
+      command = NA_character_,
+      command_line = NA_character_,
+      notes = sprintf("%s is supplied by the operating system; WebKitGTK is not used on this platform.", webview),
+      stringsAsFactors = FALSE
+    )
+    out$args <- I(list(character()))
+    return(out)
+  }
+
+  runtime_packages <- switch(
+    method,
+    apt = "libwebkit2gtk-4.1-0",
+    dnf = "webkit2gtk4.1",
+    pacman = "webkit2gtk-4.1",
+    character()
+  )
+  runtime_command <- wsi_desktop_install_command(method, runtime_packages)
+  rows <- list(list(
+    tool = "webkitgtk_4_1",
+    purpose = "Tauri starter webview",
+    required = TRUE,
+    installed = wsi_has_webkitgtk(),
+    method = method,
+    command = runtime_command$command,
+    args = runtime_command$args,
+    notes = paste(
+      "Required to run the Linux Tauri starter.",
+      "The .deb package declares this dependency; AppImage users may need to install it explicitly.",
+      "WebKitGTK WebGL is the supported fallback when browser WebGPU is unavailable."
+    )
+  ))
+
+  if (isTRUE(build)) {
+    build_packages <- switch(
+      method,
+      apt = c(
+        "libwebkit2gtk-4.1-dev", "build-essential", "curl", "wget", "file",
+        "libxdo-dev", "libssl-dev", "libayatana-appindicator3-dev", "librsvg2-dev"
+      ),
+      dnf = c(
+        "webkit2gtk4.1-devel", "openssl-devel", "curl", "wget", "file",
+        "libappindicator-gtk3-devel", "librsvg2-devel", "libxdo-devel",
+        "gcc", "gcc-c++", "make"
+      ),
+      pacman = c(
+        "webkit2gtk-4.1", "base-devel", "curl", "wget", "file", "openssl",
+        "appmenu-gtk-module", "libappindicator-gtk3", "librsvg", "xdotool"
+      ),
+      character()
+    )
+    build_command <- wsi_desktop_install_command(method, build_packages)
+    rows[[length(rows) + 1L]] <- list(
+      tool = "tauri_linux_build",
+      purpose = "Compile wsiTools Desktop",
+      required = FALSE,
+      installed = wsi_has_webkitgtk() && wsi_command_exists("cargo") && wsi_command_exists("npm"),
+      method = method,
+      command = build_command$command,
+      args = build_command$args,
+      notes = "Development headers and compiler tools are needed only when building the Tauri application from source."
+    )
+  }
+
+  if (isTRUE(include_webgpu_browser)) {
+    rows[[length(rows) + 1L]] <- list(
+      tool = "chrome_or_chromium",
+      purpose = "Optional Linux WebGPU viewer",
+      required = FALSE,
+      installed = wsi_has_desktop_webgpu_browser(),
+      method = "manual",
+      command = NA_character_,
+      args = character(),
+      notes = paste(
+        "Optional but recommended for WebGPU on Linux.",
+        "wsiTools Desktop opens the same localhost viewer in a Chrome/Chromium app window when WebKitGTK does not expose navigator.gpu.",
+        "Install a current Google Chrome or Chromium build and enable hardware acceleration."
+      )
+    )
+  }
+
+  out <- do.call(rbind, lapply(rows, function(row) {
+    data.frame(
+      tool = row$tool,
+      purpose = row$purpose,
+      required = row$required,
+      installed = row$installed,
+      method = row$method,
+      command = row$command,
+      command_line = wsi_setup_command_line(row$command, row$args),
+      notes = row$notes,
+      stringsAsFactors = FALSE
+    )
+  }))
+  out$args <- I(lapply(rows, `[[`, "args"))
+  out
+}
+
+#' Install Linux dependencies for wsiTools Desktop
+#'
+#' By default this function only prints a plan. Set `install = TRUE` and
+#' `allow_sudo = TRUE` after reviewing it. On macOS and Windows the operating
+#' system supplies the webview, so no WebKitGTK package is installed.
+#'
+#' @inheritParams wsi_desktop_dependency_plan
+#' @param install Whether to run supported package-manager commands.
+#' @param allow_sudo Whether commands using `sudo` may run.
+#' @param ask Whether to ask before running installation commands.
+#'
+#' @return A desktop dependency plan, invisibly.
+#' @export
+wsi_install_desktop_dependencies <- function(build = FALSE,
+                                             include_webgpu_browser = TRUE,
+                                             platform = c("auto", "linux", "macos", "windows"),
+                                             method = c("auto", "apt", "dnf", "pacman", "manual"),
+                                             install = FALSE,
+                                             allow_sudo = FALSE,
+                                             ask = interactive()) {
+  plan <- wsi_desktop_dependency_plan(
+    build = build,
+    include_webgpu_browser = include_webgpu_browser,
+    platform = platform,
+    method = method
+  )
+  if (isTRUE(install)) {
+    runnable <- plan[!plan$installed & !is.na(plan$command), , drop = FALSE]
+    if (nrow(runnable)) {
+      wrapper <- list(system_tools = runnable)
+      wsi_setup_run_system_commands(wrapper, allow_sudo = allow_sudo, ask = ask)
+    }
+  }
+  class(plan) <- c("wsi_desktop_dependency_plan", class(plan))
+  print(plan)
+  invisible(plan)
+}
+
+#' @export
+print.wsi_desktop_dependency_plan <- function(x, ...) {
+  cat("<wsi_desktop_dependency_plan>\n")
+  display <- x[, c(
+    "tool", "purpose", "required", "installed", "method", "command_line", "notes"
+  ), drop = FALSE]
+  print.data.frame(display, row.names = FALSE, ...)
+  invisible(x)
+}
+
 wsi_stardist_setup_method <- function(method = c("auto", "conda", "pip", "manual")) {
   method <- match.arg(method)
   if (!identical(method, "auto")) {
@@ -1340,7 +1604,8 @@ wsi_diagnose_live_bridge <- function(host = "127.0.0.1",
   checks
 }
 
-wsi_diagnose_suggest_fixes <- function(backends, helpers, live_viewer) {
+wsi_diagnose_suggest_fixes <- function(backends, helpers, live_viewer,
+                                       desktop_runtime = NULL) {
   fix <- character()
   helper_value <- function(name) {
     value <- helpers$value[helpers$check == name]
@@ -1348,7 +1613,7 @@ wsi_diagnose_suggest_fixes <- function(backends, helpers, live_viewer) {
   }
   live_value <- function(name) {
     value <- live_viewer$value[live_viewer$check == name]
-    if (length(value)) isTRUE(value[[1L]]) else FALSE
+    if (length(value)) value[[1L]] else NA
   }
   if (!helper_value("wsi_has_vips()")) {
     fix <- c(fix, "Install libvips (`vips` and `vipsheader`) for conversion, pyramids, thumbnails, and fast tile generation.")
@@ -1365,12 +1630,24 @@ wsi_diagnose_suggest_fixes <- function(backends, helpers, live_viewer) {
   if (!helper_value("wsi_has_mesmer()")) {
     fix <- c(fix, "For Mesmer/DAPI mIHC segmentation, install/configure an external command and set `WSITOOLS_MESMER_COMMAND`.")
   }
-  if (!live_value("httpuv_installed")) {
+  if (identical(live_value("httpuv_installed"), FALSE)) {
     fix <- c(fix, "Install optional R package `httpuv` to use `wsi_viewer_live()`.")
-  } else if (!live_value("live_viewer_can_start")) {
+  } else if (identical(live_value("live_viewer_can_start"), FALSE)) {
     fix <- c(fix, "Live viewer service could not start; check firewall/port conflicts or try a different `port` in `wsi_viewer_live()`.")
-  } else if (!live_value("browser_sync_self_test")) {
+  } else if (identical(live_value("browser_sync_self_test"), FALSE)) {
     fix <- c(fix, "If live sync fails, open the printed `http://127.0.0.1:<port>` viewer URL, not a `file://` page or `/viewer-state`.")
+  }
+  if (!is.null(desktop_runtime) && nrow(desktop_runtime)) {
+    missing_required <- desktop_runtime$required & !desktop_runtime$installed
+    if (any(missing_required)) {
+      fix <- c(
+        fix,
+        paste0(
+          "The Linux desktop starter is missing WebKitGTK 4.1. Review and install it with ",
+          "`wsi_install_desktop_dependencies(install = TRUE, allow_sudo = TRUE)`."
+        )
+      )
+    }
   }
   if (!length(fix)) {
     fix <- "No immediate setup fixes detected. If an image still fails, include the image format and exact error with this report."
@@ -1387,8 +1664,9 @@ wsi_diagnose_suggest_fixes <- function(backends, helpers, live_viewer) {
 #' `wsi_diagnose()` prints a read-only support report intended for GitHub
 #' issues, remote desktops, and difficult installation sessions. It reports the
 #' operating system, R version, package version, backend table, executable
-#' paths, relevant environment variables, live viewer startup status, a local
-#' browser/R synchronization self-test when possible, and suggested fixes.
+#' paths, relevant environment variables, desktop webview status, live viewer
+#' startup status, a local browser/R synchronization self-test when possible,
+#' and suggested fixes.
 #'
 #' The live synchronization self-test starts a temporary local `httpuv` endpoint
 #' and, when the optional `callr` package is available, asks a child R process
@@ -1469,6 +1747,10 @@ wsi_diagnose <- function(method = c("auto", "homebrew", "apt", "dnf", "winget", 
     machine = Sys.info()[["machine"]] %||% NA_character_,
     stringsAsFactors = FALSE
   )
+  desktop_runtime <- wsi_desktop_dependency_plan(
+    build = FALSE,
+    include_webgpu_browser = TRUE
+  )
   out <- list(
     os = os,
     r = list(
@@ -1481,9 +1763,15 @@ wsi_diagnose <- function(method = c("auto", "homebrew", "apt", "dnf", "winget", 
     helpers = helpers,
     executables = wsi_diagnose_executables(),
     environment = wsi_diagnose_environment(),
+    desktop_runtime = desktop_runtime,
     live_viewer = live_viewer,
     setup_plan = setup$system_tools,
-    suggested_fixes = wsi_diagnose_suggest_fixes(setup$backends, helpers, live_viewer)
+    suggested_fixes = wsi_diagnose_suggest_fixes(
+      setup$backends,
+      helpers,
+      live_viewer,
+      desktop_runtime = desktop_runtime
+    )
   )
   class(out) <- "wsi_diagnose"
   print(out)
@@ -1602,6 +1890,12 @@ print.wsi_diagnose <- function(x, ...) {
   env <- x$environment
   env$value[!nzchar(env$value)] <- "<unset>"
   print(env, row.names = FALSE)
+
+  cat("\nDesktop runtime:\n")
+  display <- x$desktop_runtime[, c(
+    "tool", "purpose", "required", "installed", "method", "command_line", "notes"
+  ), drop = FALSE]
+  print(display, row.names = FALSE)
 
   cat("\nLive viewer / browser sync:\n")
   print(x$live_viewer, row.names = FALSE)
