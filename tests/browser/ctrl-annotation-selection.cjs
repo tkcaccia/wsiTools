@@ -23,6 +23,32 @@ let browser;
     startBrush=(...args)=>{testBrushCalls++;return brush(...args);};
     window.testGeometry=()=>JSON.stringify(rois.map(r=>({id:r.id,geometry:wsiRoiCoordinates(r)})));
   });
+  // Choosing a category in the New ROI editor must release the previously
+  // selected annotation, preserve the current tool and create a separate ROI.
+  await page.locator('#toolBrush').click();
+  await page.evaluate(()=>selectAnnotation(1,true));
+  const originalTwo=await page.evaluate(()=>JSON.stringify(rois.slice(0,2).map(r=>wsiRoiCoordinates(r))));
+  await page.selectOption('#panelRoiClassSelect','stroma');
+  assert.equal(await page.evaluate(()=>selectedRoi),-1,'New ROI category deselects the current annotation');
+  assert.equal(await page.evaluate(()=>mode),'brush','New ROI category preserves Brush');
+  assert.equal(await page.evaluate(()=>currentRoiClass()),'stroma');
+  // Use an empty central-bottom area that is not covered by a side panel or
+  // toolbar in the 1600 x 1100 test viewport.
+  const newPoint=await page.evaluate(()=>slideToCanvas({x:400,y:540}));
+  await page.mouse.move(newPoint.x,newPoint.y); await page.mouse.down();
+  await page.mouse.move(newPoint.x+28,newPoint.y+12,{steps:6}); await page.mouse.up();
+  await page.waitForFunction(()=>rois.length===3&&selectedRoi===2&&!brushing&&!wsiEditPromise,{}, {timeout:30000}).catch(async error=>{
+    console.error('New ROI commit state:',await page.evaluate(()=>({mode,selectedRoi,roiCount:rois.length,brushing,editPending:!!wsiEditPromise,brushOperation,brushTargetRoi,brushPoints:brushPoints.length,logs:viewerLogPayload().slice(-5)})));
+    throw error;
+  });
+  assert.equal(await page.evaluate(()=>rois.length),3,'Brush creates a separate annotation');
+  assert.equal(await page.evaluate(()=>rois[2].class),'stroma');
+  assert.equal(await page.evaluate(()=>JSON.stringify(rois.slice(0,2).map(r=>wsiRoiCoordinates(r)))),originalTwo,'Existing annotations are unchanged');
+  for (const tool of ['draw','wand']) {
+    await page.evaluate(tool=>{selectAnnotation(0,true);setMode(tool);armNewAnnotation('tumour');},tool);
+    assert.deepEqual(await page.evaluate(()=>({selected:selectedRoi,mode})),{selected:-1,mode:tool},'New ROI preserves '+tool);
+  }
+  await page.evaluate(()=>{testWandCalls=0;testBrushCalls=0;});
   const point=await page.evaluate(()=>slideToCanvas({x:550,y:300}));
   for (const tool of ['Brush','Wand']) {
     await page.locator('#tool'+tool).click();

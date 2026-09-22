@@ -1,5 +1,19 @@
 # wsiTools 0.1.24
 
+- Fixed the New ROI category control so selecting a category deselects the
+  current annotation and arms a separate Brush, Draw, or Magic Wand ROI while
+  preserving the active tool.
+- Linux select controls now keep dark option and selected-option backgrounds,
+  avoiding unreadable white text on a light native dropdown.
+- wsiTools Desktop 0.1.7 opens Linux live viewers in an installed Chrome or
+  Chromium app window with Vulkan/WebGPU enabled. This preserves the complete
+  browser viewer and R/WebSocket session while avoiding WebKitGTK builds that
+  do not expose `navigator.gpu`; WebKitGTK/OpenSeadragon WebGL remains the
+  automatic fallback when Chrome is unavailable.
+- The optional WebGPU base compositor now consumes OpenSeadragon
+  `tile-loaded` image data and initializes before the tiled viewer. It no
+  longer depends on the unsupported WebGL `tile-drawn` event, so loaded tiles
+  can actually reach the GPU compositor.
 - Magic Wand edits are now confined to an adjustable local screen-space reach
   (256 px by default) around the click. Wand contours are simplified to at most
   768 vertices, Boolean edits run in the geometry worker, and undo retains at

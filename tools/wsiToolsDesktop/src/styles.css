@@ -550,6 +550,23 @@ select {
     box-shadow 140ms ease, transform 140ms ease;
 }
 
+select {
+  color-scheme: dark;
+  background-color: #1f2937;
+  color: #f8fafc;
+}
+
+select option,
+select optgroup {
+  background-color: #1f2937;
+  color: #f8fafc;
+}
+
+select option:checked {
+  background: #0f766e linear-gradient(0deg, #0f766e 0%, #0f766e 100%);
+  color: #ffffff;
+}
+
 button:focus-visible,
 select:focus-visible {
   outline: 3px solid rgba(45, 212, 191, 0.38);

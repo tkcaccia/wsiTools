@@ -12,15 +12,15 @@ synchronization, dynamic tiles, annotations, and analysis.
 
 Prebuilt desktop installers are attached to the GitHub release:
 
-[Download wsiTools Desktop 0.1.6](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.6)
+[Download wsiTools Desktop 0.1.7](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.7)
 
 | Platform | Asset | Notes |
 | --- | --- | --- |
-| macOS Apple Silicon | `wsiTools-Desktop_0.1.6_macos_ARM64.dmg` | For Apple Silicon Macs. Unsigned builds may need right-click -> Open. |
-| Windows x64 | `wsiTools-Desktop_0.1.6_windows_x64-setup.exe` | NSIS installer for Windows 10/11 x64. |
-| Ubuntu/Debian x64 | `wsiTools-Desktop_0.1.6_linux_amd64.deb` | Install with `sudo apt install ./file.deb`. |
-| Fedora/RHEL-style x86_64 | `wsiTools-Desktop_0.1.6_linux_x86_64.rpm` | Install with your RPM package manager. |
-| Linux x86_64 portable | `wsiTools-Desktop_0.1.6_linux_x86_64.AppImage` | Make executable and run without installing a package. |
+| macOS Apple Silicon | `wsiTools-Desktop_0.1.7_macos_ARM64.dmg` | For Apple Silicon Macs. Unsigned builds may need right-click -> Open. |
+| Windows x64 | `wsiTools-Desktop_0.1.7_windows_x64-setup.exe` | NSIS installer for Windows 10/11 x64. |
+| Ubuntu/Debian x64 | `wsiTools-Desktop_0.1.7_linux_amd64.deb` | Install with `sudo apt install ./file.deb`. |
+| Fedora/RHEL-style x86_64 | `wsiTools-Desktop_0.1.7_linux_x86_64.rpm` | Install with your RPM package manager. |
+| Linux x86_64 portable | `wsiTools-Desktop_0.1.7_linux_x86_64.AppImage` | Make executable and run without installing a package. |
 | All platforms | `SHA256SUMS.txt` | Optional checksum verification. |
 
 ## Required Runtime Dependencies
@@ -53,6 +53,12 @@ wsi_diagnose(live_test = FALSE)
 | native CZI / Bio-Formats | CZI and broad microscopy format support |
 | ImageMagick | fallback previews for ordinary image formats |
 | StarDist / Mesmer | optional cell segmentation workflows |
+
+On Linux, install Google Chrome or Chromium to let the desktop launcher use
+the browser WebGPU API through Vulkan. If neither is installed, the desktop
+viewer remains functional through WebKitGTK and OpenSeadragon WebGL. The GPU
+does not replace libvips/OpenSlide/native CZI: those backends still read and
+serve bounded image tiles from R.
 
 See the [backend setup guide](backends.md) for installation commands and
 platform-specific notes.

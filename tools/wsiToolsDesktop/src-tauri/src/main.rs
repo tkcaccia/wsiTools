@@ -1654,13 +1654,68 @@ fn close_viewer_window(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn open_viewer_window(app: AppHandle, url: String) -> Result<(), String> {
+fn open_viewer_window(
+    app: AppHandle,
+    url: String,
+    _state: State<'_, Arc<RViewerState>>,
+) -> Result<(), String> {
     if url.trim().is_empty() {
         return Err("Viewer URL was empty.".to_string());
     }
     let parsed = url
         .parse()
         .map_err(|err| format!("Viewer URL is not valid: {err}"))?;
+
+    #[cfg(all(target_family = "unix", not(target_os = "macos")))]
+    {
+        let chrome = [
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .find(|candidate| candidate.is_file());
+        if let Some(chrome) = chrome {
+            let profile = session_dir(&app)?.join("chromium-webgpu-profile");
+            fs::create_dir_all(&profile).map_err(|error| {
+                format!("Could not create the Linux WebGPU browser profile: {error}")
+            })?;
+            stop_existing_native_child(&_state);
+            if let Some(window) = app.get_webview_window(VIEWER_WINDOW_LABEL) {
+                let _ = window.close();
+            }
+            let child = Command::new(&chrome)
+                .arg(format!("--app={url}"))
+                .arg(format!("--user-data-dir={}", profile.display()))
+                .args([
+                    "--new-window",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--enable-unsafe-webgpu",
+                    "--ignore-gpu-blocklist",
+                    "--enable-features=Vulkan",
+                    "--use-angle=vulkan",
+                ])
+                .spawn()
+                .map_err(|error| format!("Could not start the Linux WebGPU viewer in Chrome: {error}"))?;
+            *_state.native_child.lock().unwrap() = Some(child);
+            push_log(
+                &_state.logs,
+                format!(
+                    "Linux viewer opened in {} with Vulkan/WebGPU enabled; WebKitGTK remains the fallback runtime.",
+                    chrome.display()
+                ),
+            );
+            return Ok(());
+        }
+        push_log(
+            &_state.logs,
+            "Chrome/Chromium was not found; using the WebKitGTK viewer with OpenSeadragon WebGL acceleration.",
+        );
+    }
+
     if let Some(window) = app.get_webview_window(VIEWER_WINDOW_LABEL) {
         window
             .navigate(parsed)

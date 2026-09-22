@@ -11,6 +11,21 @@ Image preparation progress remains in the starter window. The separate tissue
 viewer opens only after R has decoded a display-ready first image; if decoding
 fails, the starter reports the backend error instead of opening a blank viewer.
 
+### Linux GPU viewer
+
+WebKitGTK currently provides accelerated WebGL compositing but may not expose
+the browser WebGPU API even when the machine has a supported GPU. On Linux,
+wsiTools Desktop 0.1.7 therefore looks for Google Chrome or Chromium and opens
+the live viewer in a dedicated app window with Vulkan/WebGPU enabled. This is
+still the same browser interface, live R process, WebSocket connection and
+full-resolution tile server used by the embedded viewer.
+
+Install one of these browsers when `webgpu_status` reports that WebGPU is
+unavailable. wsiTools falls back automatically to the embedded WebKitGTK
+viewer and OpenSeadragon WebGL if neither executable is present. The viewer's
+History report records the active tile compositor and the reason for any
+fallback.
+
 ## Viewer Engine
 
 Before a new project starts, the desktop starter lets the user select one of
@@ -154,7 +169,7 @@ desktop executable.
 
 Prebuilt desktop installers are available from the GitHub release:
 
-[Download wsiTools Desktop 0.1.6](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.6)
+[Download wsiTools Desktop 0.1.7](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.7)
 
 See [Desktop Downloads](downloads.md) for platform-specific installers,
 required R setup, and optional backend notes.
