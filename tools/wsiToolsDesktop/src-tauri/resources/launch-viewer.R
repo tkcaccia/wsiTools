@@ -1244,7 +1244,11 @@ desktop_register_dense_geojson_source <- function(viewer, item, log_file = NULL)
     line_width = if (is_tissue) 2.2 else 1.8,
     max_points_per_roi = if (is_tissue) Inf else 700L,
     full_resolution_zoom = if (is_tissue) 0 else Inf,
-    min_zoom = if (is_tissue) 0 else 5,
+    # Dense annotations remain discoverable at every magnification. The live
+    # endpoint already returns a bounded spatial sample (and bounding boxes at
+    # the widest overview), so hiding the source below 5x is unnecessary and
+    # makes an otherwise loaded annotation appear to have disappeared.
+    min_zoom = 0,
     bbox_index = bbox_index
   )
   viewer$dense_geojson_context$sources <- sources

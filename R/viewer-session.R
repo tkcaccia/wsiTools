@@ -6104,6 +6104,9 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
         item
       })
     }
+    # At overview magnification, keep dense annotations visible without
+    # transferring every polygon vertex. The complete geometry remains in R;
+    # the browser receives sampled bounds until a closer view requests detail.
     bounds_only <- !tissue_source && (!is.finite(zoom) || zoom < 1.05) && nrow(subset) > 0L
     clip_pad <- max(viewport_width, viewport_height) * 0.08
     if (!is.finite(clip_pad) || clip_pad < 0) {
@@ -6147,7 +6150,8 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
         viewport_count = viewport_count,
         spatial_indexed = spatial_indexed,
         source_path = as.character(source$path %||% ""),
-        geometry_lod = if (isTRUE(bounds_only)) "bounds" else "detail",
+        geometry_lod = if (isTRUE(bounds_only)) "overview_bounds" else "detail",
+        visible_at_all_zooms = source_min_zoom <= 0,
         max_points_per_roi = if (is.finite(max_points_per_roi)) max_points_per_roi else "full",
         full_resolution_zoom = if (is.finite(full_resolution_zoom)) full_resolution_zoom else NA_real_,
         zoom = zoom

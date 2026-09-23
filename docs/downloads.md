@@ -12,15 +12,15 @@ synchronization, dynamic tiles, annotations, and analysis.
 
 Prebuilt desktop installers are attached to the GitHub release:
 
-[Download wsiTools Desktop 0.1.8](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.8)
+[Download wsiTools Desktop 0.1.9](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.9)
 
 | Platform | Asset | Notes |
 | --- | --- | --- |
-| macOS Apple Silicon | `wsiTools-Desktop_0.1.8_macos_ARM64.dmg` | For Apple Silicon Macs. Unsigned builds may need right-click -> Open. |
-| Windows x64 | `wsiTools-Desktop_0.1.8_windows_x64-setup.exe` | NSIS installer for Windows 10/11 x64. |
-| Ubuntu/Debian x64 | `wsiTools-Desktop_0.1.8_linux_amd64.deb` | Recommended on Ubuntu; install with `sudo apt install ./file.deb`. |
-| Fedora/RHEL-style x86_64 | `wsiTools-Desktop_0.1.8_linux_x86_64.rpm` | Install with your RPM package manager. |
-| Linux x86_64 portable | `wsiTools-Desktop_0.1.8_linux_x86_64.AppImage` | Portable; host WebKitGTK/GTK modules are still required. |
+| macOS Apple Silicon | `wsiTools-Desktop_0.1.9_macos_ARM64.dmg` | For Apple Silicon Macs. Unsigned builds may need right-click -> Open. |
+| Windows x64 | `wsiTools-Desktop_0.1.9_windows_x64-setup.exe` | NSIS installer for Windows 10/11 x64. |
+| Ubuntu/Debian x64 | `wsiTools-Desktop_0.1.9_linux_amd64.deb` | Recommended on Ubuntu; install with `sudo apt install ./file.deb`. |
+| Fedora/RHEL-style x86_64 | `wsiTools-Desktop_0.1.9_linux_x86_64.rpm` | Install with your RPM package manager. |
+| Linux x86_64 portable | `wsiTools-Desktop_0.1.9_linux_x86_64.AppImage` | Portable; host WebKitGTK/GTK modules are still required. |
 | All platforms | `SHA256SUMS.txt` | Optional checksum verification. |
 
 ## Required Runtime Dependencies

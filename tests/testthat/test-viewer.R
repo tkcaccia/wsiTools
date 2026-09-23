@@ -3654,6 +3654,18 @@ test_that("dense tissue annotations keep full boundaries and coalesce viewport w
   expect_match(session_code, "bounds_only <- !tissue_source", fixed = TRUE)
 })
 
+test_that("desktop dense annotations remain visible at overview zoom", {
+  launcher_path <- test_path("../../tools/wsiToolsDesktop/src-tauri/resources/launch-viewer.R")
+  skip_if_not(file.exists(launcher_path), "Desktop launcher resources are not included in source-package checks.")
+  launcher <- paste(readLines(launcher_path, warn = FALSE), collapse = "\n")
+  session_code <- paste(deparse(wsiTools:::wsi_start_viewer_state_server), collapse = "\n")
+
+  expect_match(launcher, "min_zoom = 0", fixed = TRUE)
+  expect_false(grepl("min_zoom = if (is_tissue) 0 else 5", launcher, fixed = TRUE))
+  expect_match(session_code, 'geometry_lod = if (isTRUE(bounds_only)) "overview_bounds" else "detail"', fixed = TRUE)
+  expect_match(session_code, "visible_at_all_zooms = source_min_zoom <= 0", fixed = TRUE)
+})
+
 test_that("initial dense GeoJSON manifests are embedded without an R discovery round trip", {
   slide <- wsiTools:::wsi_mock_slide(width = 800, height = 400, levels = c(1, 4))
   output <- tempfile(fileext = ".html")

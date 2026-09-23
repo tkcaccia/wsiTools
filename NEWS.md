@@ -1,5 +1,11 @@
 # wsiTools 0.1.24
 
+- Dense vector annotations now remain visible at every zoom. Distant views use
+  a bounded spatial sample with lightweight bounds, while closer views request
+  progressively detailed local polygons without changing the stored geometry.
+- wsiTools Desktop 0.1.9 includes the all-zoom dense-annotation overview in
+  both browser- and Tauri-launched live viewers.
+
 - Fixed the New ROI category control so selecting a category deselects the
   current annotation and arms a separate Brush, Draw, or Magic Wand ROI while
   preserving the active tool.
