@@ -539,6 +539,91 @@ viewer$open()
 
 Keep the R session running while using the viewer.
 
+## Linux Desktop Warns About Unsafe WebGPU
+
+Problem:
+
+Chrome reports that `--enable-unsafe-webgpu` is unsupported and may reduce
+stability or security.
+
+Meaning:
+
+An older wsiTools Desktop build is still installed. Current releases do not
+pass unsafe WebGPU, forced Vulkan, or GPU-blocklist override flags.
+
+Fix:
+
+Install wsiTools Desktop 0.1.8 or newer. OpenSeadragon WebGL is the stable,
+GPU-backed renderer. Leave `WSITOOLS_TILE_COMPOSITOR` unset unless you are
+deliberately testing the experimental WebGPU compositor.
+
+## Linux Image Appears And Then Turns Black
+
+Problem:
+
+The slide appears briefly, then the viewer becomes black, or the browser exits.
+
+Meaning:
+
+An experimental compositor or failed browser process replaced the working
+OpenSeadragon frame. Older desktop builds closed the loading window before
+checking whether Chrome remained alive.
+
+Fix:
+
+Upgrade both the R package and desktop app. Current builds use OpenSeadragon
+WebGL by default, keep the working image visible during any experimental
+composition, verify Chrome startup, and fall back to WebKitGTK after an early
+browser exit. To force the stable compositor for a diagnostic run:
+
+```bash
+unset WSITOOLS_TILE_COMPOSITOR
+```
+
+## WebKitWebProcess Stopped Unexpectedly
+
+Problem:
+
+Ubuntu reports that `WebKitWebProcess` stopped unexpectedly.
+
+Meaning:
+
+The Linux Tauri starter uses WebKitGTK. The complete viewer may exceed a buggy
+or resource-constrained WebKit process even though the R tile server remains
+healthy.
+
+Fix:
+
+Prefer the `.deb` installer and install a current Chrome or Chromium build. The
+desktop app will use Chrome for the final localhost viewer and WebKitGTK only
+for the starter. Check the runtime with:
+
+```r
+wsi_install_desktop_dependencies(install = FALSE)
+```
+
+## Failed To Load canberra-gtk-module
+
+Problem:
+
+Ubuntu prints `Failed to load module "canberra-gtk-module"`.
+
+Meaning:
+
+The optional GTK sound-event module is missing or is not visible inside the
+portable AppImage environment. It does not decode images and is not the cause
+of a failed tile.
+
+Fix:
+
+```bash
+sudo apt update
+sudo apt install -y libcanberra-gtk-module libcanberra-gtk3-module
+```
+
+The `.deb` installation is preferred over AppImage on Ubuntu because `apt`
+resolves desktop runtime dependencies.
+
 ## What To Paste In A GitHub Issue
 
 When reporting a problem, paste:

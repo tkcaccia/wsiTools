@@ -212,9 +212,9 @@ Typical outputs include `.msi` and `.exe` installers.
 These commands are for Ubuntu/Debian. Tauri v2 uses WebKitGTK 4.1 on Linux.
 
 WebKitGTK is required for the Tauri starter even when wsiTools subsequently
-opens the final viewer in Chrome/Chromium to obtain WebGPU. The components are
-complementary: WebKitGTK hosts the launcher; Chrome/Chromium is an optional
-runtime for the same localhost viewer.
+opens the final viewer in Chrome/Chromium. The components are complementary:
+WebKitGTK hosts the launcher; Chrome/Chromium is an optional runtime for the
+same localhost viewer. OpenSeadragon WebGL is the stable accelerated renderer.
 
 ### 1. Install system packages
 
@@ -222,6 +222,8 @@ runtime for the same localhost viewer.
 sudo apt update
 sudo apt install -y \
   libwebkit2gtk-4.1-dev \
+  libcanberra-gtk-module \
+  libcanberra-gtk3-module \
   build-essential \
   curl \
   wget \

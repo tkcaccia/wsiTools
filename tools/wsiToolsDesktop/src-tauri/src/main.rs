@@ -484,9 +484,27 @@ fn viewer_renderer_env() -> String {
 
 fn viewer_tile_compositor_env(selected_engine: &str) -> String {
     let _ = selected_engine;
-    // The browser viewer owns the complete UI. It may use WebGPU when available,
-    // and remains fully functional through the OpenSeadragon fallback otherwise.
-    "auto".to_string()
+    match env::var("WSITOOLS_TILE_COMPOSITOR")
+        .unwrap_or_else(|_| "openseadragon".to_string())
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "webgpu" => "webgpu".to_string(),
+        "auto" => "auto".to_string(),
+        _ => "openseadragon".to_string(),
+    }
+}
+
+#[cfg(all(target_family = "unix", not(target_os = "macos")))]
+fn linux_chrome_args(url: &str, profile: &Path) -> Vec<String> {
+    vec![
+        format!("--app={url}"),
+        format!("--user-data-dir={}", profile.display()),
+        "--new-window".to_string(),
+        "--no-first-run".to_string(),
+        "--no-default-browser-check".to_string(),
+    ]
 }
 
 fn viewer_engine(value: &str) -> String {
@@ -1678,37 +1696,64 @@ fn open_viewer_window(
         .map(PathBuf::from)
         .find(|candidate| candidate.is_file());
         if let Some(chrome) = chrome {
-            let profile = session_dir(&app)?.join("chromium-webgpu-profile");
+            let profile = session_dir(&app)?.join(format!(
+                "chromium-viewer-profile-v2-{}",
+                std::process::id()
+            ));
             fs::create_dir_all(&profile).map_err(|error| {
-                format!("Could not create the Linux WebGPU browser profile: {error}")
+                format!("Could not create the Linux browser profile: {error}")
             })?;
             stop_existing_native_child(&_state);
-            if let Some(window) = app.get_webview_window(VIEWER_WINDOW_LABEL) {
-                let _ = window.close();
-            }
-            let child = Command::new(&chrome)
-                .arg(format!("--app={url}"))
-                .arg(format!("--user-data-dir={}", profile.display()))
-                .args([
-                    "--new-window",
-                    "--no-first-run",
-                    "--no-default-browser-check",
-                    "--enable-unsafe-webgpu",
-                    "--ignore-gpu-blocklist",
-                    "--enable-features=Vulkan",
-                    "--use-angle=vulkan",
-                ])
+            let mut child = Command::new(&chrome)
+                .args(linux_chrome_args(&url, &profile))
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
                 .spawn()
-                .map_err(|error| format!("Could not start the Linux WebGPU viewer in Chrome: {error}"))?;
-            *_state.native_child.lock().unwrap() = Some(child);
-            push_log(
-                &_state.logs,
-                format!(
-                    "Linux viewer opened in {} with Vulkan/WebGPU enabled; WebKitGTK remains the fallback runtime.",
-                    chrome.display()
-                ),
-            );
-            return Ok(());
+                .map_err(|error| format!("Could not start the Linux viewer in Chrome: {error}"))?;
+            thread::sleep(Duration::from_millis(700));
+            match child.try_wait() {
+                Ok(None) => {
+                    if let Some(stderr) = child.stderr.take() {
+                        let logs = _state.logs.clone();
+                        thread::spawn(move || {
+                            let reader = BufReader::new(stderr);
+                            for line in reader.lines().map_while(Result::ok) {
+                                push_log(&logs, format!("[Linux Chrome] {line}"));
+                            }
+                        });
+                    }
+                    if let Some(window) = app.get_webview_window(VIEWER_WINDOW_LABEL) {
+                        let _ = window.close();
+                    }
+                    *_state.native_child.lock().unwrap() = Some(child);
+                    push_log(
+                        &_state.logs,
+                        format!(
+                            "Linux viewer opened in {} with its supported hardware-acceleration defaults. OpenSeadragon WebGL is the stable tile renderer.",
+                            chrome.display()
+                        ),
+                    );
+                    return Ok(());
+                }
+                Ok(Some(status)) => {
+                    push_log(
+                        &_state.logs,
+                        format!(
+                            "Chrome exited during viewer startup ({status}). Falling back to WebKitGTK."
+                        ),
+                    );
+                }
+                Err(error) => {
+                    push_log(
+                        &_state.logs,
+                        format!(
+                            "Could not verify the Chrome viewer process ({error}). Falling back to WebKitGTK."
+                        ),
+                    );
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+            }
         }
         push_log(
             &_state.logs,
@@ -1839,5 +1884,29 @@ mod tests {
             ..browser_only
         };
         assert!(viewer_launch_ready(&native_ready, true));
+    }
+
+    #[test]
+    fn desktop_tile_compositor_is_stable_by_default() {
+        let previous = env::var_os("WSITOOLS_TILE_COMPOSITOR");
+        env::remove_var("WSITOOLS_TILE_COMPOSITOR");
+        assert_eq!(viewer_tile_compositor_env("browser"), "openseadragon");
+        env::set_var("WSITOOLS_TILE_COMPOSITOR", "webgpu");
+        assert_eq!(viewer_tile_compositor_env("browser"), "webgpu");
+        if let Some(value) = previous {
+            env::set_var("WSITOOLS_TILE_COMPOSITOR", value);
+        } else {
+            env::remove_var("WSITOOLS_TILE_COMPOSITOR");
+        }
+    }
+
+    #[cfg(all(target_family = "unix", not(target_os = "macos")))]
+    #[test]
+    fn linux_chrome_launch_avoids_unsafe_gpu_flags() {
+        let args = linux_chrome_args("http://127.0.0.1:8900", Path::new("/tmp/wsitools"));
+        assert!(args.iter().any(|value| value == "--new-window"));
+        assert!(!args.iter().any(|value| value.contains("unsafe-webgpu")));
+        assert!(!args.iter().any(|value| value.contains("use-angle")));
+        assert!(!args.iter().any(|value| value.contains("Vulkan")));
     }
 }

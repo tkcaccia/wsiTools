@@ -12,15 +12,15 @@ synchronization, dynamic tiles, annotations, and analysis.
 
 Prebuilt desktop installers are attached to the GitHub release:
 
-[Download wsiTools Desktop 0.1.7](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.7)
+[Download wsiTools Desktop 0.1.8](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.8)
 
 | Platform | Asset | Notes |
 | --- | --- | --- |
-| macOS Apple Silicon | `wsiTools-Desktop_0.1.7_macos_ARM64.dmg` | For Apple Silicon Macs. Unsigned builds may need right-click -> Open. |
-| Windows x64 | `wsiTools-Desktop_0.1.7_windows_x64-setup.exe` | NSIS installer for Windows 10/11 x64. |
-| Ubuntu/Debian x64 | `wsiTools-Desktop_0.1.7_linux_amd64.deb` | Install with `sudo apt install ./file.deb`. |
-| Fedora/RHEL-style x86_64 | `wsiTools-Desktop_0.1.7_linux_x86_64.rpm` | Install with your RPM package manager. |
-| Linux x86_64 portable | `wsiTools-Desktop_0.1.7_linux_x86_64.AppImage` | Make executable and run without installing a package. |
+| macOS Apple Silicon | `wsiTools-Desktop_0.1.8_macos_ARM64.dmg` | For Apple Silicon Macs. Unsigned builds may need right-click -> Open. |
+| Windows x64 | `wsiTools-Desktop_0.1.8_windows_x64-setup.exe` | NSIS installer for Windows 10/11 x64. |
+| Ubuntu/Debian x64 | `wsiTools-Desktop_0.1.8_linux_amd64.deb` | Recommended on Ubuntu; install with `sudo apt install ./file.deb`. |
+| Fedora/RHEL-style x86_64 | `wsiTools-Desktop_0.1.8_linux_x86_64.rpm` | Install with your RPM package manager. |
+| Linux x86_64 portable | `wsiTools-Desktop_0.1.8_linux_x86_64.AppImage` | Portable; host WebKitGTK/GTK modules are still required. |
 | All platforms | `SHA256SUMS.txt` | Optional checksum verification. |
 
 ## Required Runtime Dependencies
@@ -54,11 +54,12 @@ wsi_diagnose(live_test = FALSE)
 | ImageMagick | fallback previews for ordinary image formats |
 | StarDist / Mesmer | optional cell segmentation workflows |
 
-On Linux, install Google Chrome or Chromium to let the desktop launcher use
-the browser WebGPU API through Vulkan. WebKitGTK 4.1 is still required for the
-Tauri starter window. The `.deb` installer declares the WebKitGTK dependency,
-so `apt` installs it automatically. Portable AppImage users should check the
-runtime first:
+On Linux, Google Chrome or Chromium is recommended for the final viewer window.
+The launcher uses normal browser hardware acceleration and OpenSeadragon WebGL;
+it does not enable unsafe WebGPU or force Vulkan. WebKitGTK 4.1 is still
+required for the Tauri starter window. The `.deb` installer is preferred
+because `apt` resolves its dependencies. Portable AppImage users should check
+the runtime first:
 
 ```r
 library(wsiTools)
@@ -68,8 +69,10 @@ wsi_install_desktop_dependencies(install = FALSE)
 wsi_install_desktop_dependencies(install = TRUE, allow_sudo = TRUE)
 ```
 
-If Chrome/Chromium is not installed or cannot create a WebGPU device, the
-viewer remains functional through WebKitGTK and OpenSeadragon WebGL/Canvas.
+If Chrome/Chromium is not installed or exits during startup, the viewer remains
+functional through WebKitGTK and OpenSeadragon WebGL/Canvas. On Ubuntu,
+`libcanberra-gtk-module` and `libcanberra-gtk3-module` remove GTK sound-module
+warnings seen with some AppImage sessions.
 WebGPU does not replace libvips/OpenSlide/native CZI: those backends still read
 and serve bounded image tiles from R.
 

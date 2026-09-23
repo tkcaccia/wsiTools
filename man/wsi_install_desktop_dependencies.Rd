@@ -17,8 +17,8 @@ wsi_install_desktop_dependencies(
 \arguments{
 \item{build}{Whether to include packages needed to compile the Tauri app.}
 
-\item{include_webgpu_browser}{Whether to report the optional
-Chrome/Chromium WebGPU route.}
+\item{include_webgpu_browser}{Whether to report the optional accelerated
+Chrome/Chromium viewer route.}
 
 \item{platform}{Target platform. \code{"auto"} detects the current system.}
 

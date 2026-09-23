@@ -44,9 +44,10 @@ requests the source's maximum Deep Zoom level, corresponding to level-0 pixels.
 
 The Desktop app always starts the browser viewer, which is the complete and
 supported wsiTools interface. It uses OpenSeadragon for tiled navigation and
-can use browser GPU acceleration where available. If WebGPU is unavailable,
-the viewer remains fully functional through the OpenSeadragon fallback; no
-separate native renderer needs to be installed or selected.
+uses WebGL GPU acceleration where available. Experimental WebGPU composition is
+opt-in; the launcher does not use unsafe WebGPU or forced Vulkan flags. If a
+browser process exits during startup, the loading window falls back to the
+embedded system webview.
 
 ## Requirements
 
@@ -72,8 +73,10 @@ install.packages(c("httpuv", "magick"))
 
 - Linux desktop runtime:
   - WebKitGTK 4.1 is required for the Tauri starter window.
+  - On Ubuntu, install `libcanberra-gtk-module` and
+    `libcanberra-gtk3-module` to avoid optional GTK module warnings.
   - Current Google Chrome or Chromium is optional but recommended for the
-    WebGPU viewer route. If unavailable, the same viewer uses
+    final viewer window. If unavailable, the same viewer uses
     WebKitGTK/OpenSeadragon WebGL or Canvas.
 
 Review or install the Linux desktop prerequisites from R:

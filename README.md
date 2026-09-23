@@ -126,9 +126,10 @@ viewer more stable for real pathology workflows:
   system `PATH`, opens saved projects, and supports a guided new-project flow
   for associating images with annotations and spatial omics objects. On Linux,
   WebKitGTK 4.1 provides the starter window; when Chrome or Chromium is
-  available, the same localhost viewer is opened in an application window with
-  Vulkan/WebGPU enabled, with WebKitGTK/OpenSeadragon WebGL retained as the
-  fallback.
+  available, the same localhost viewer is opened in an application window
+  using the browser's supported hardware-acceleration defaults. OpenSeadragon
+  WebGL is the stable GPU-backed tile renderer. Experimental WebGPU composition
+  is opt-in and is never enabled with unsafe browser flags.
 
 ## Format support
 
@@ -364,6 +365,20 @@ ROI drawing and R round trip:
 
 ## Installation
 
+Choose the installation that matches how you want to work:
+
+| Installation | Best for | Requirements |
+| --- | --- | --- |
+| R package only | Scripts, servers, reproducible analysis, and launching the browser viewer from R | R plus format-specific optional backends |
+| Desktop `.dmg` / Windows installer | Guided project creation without typing R commands | R and the wsiTools R package |
+| Ubuntu/Debian `.deb` | Recommended Linux desktop installation | R; `apt` resolves WebKitGTK dependencies |
+| Portable Linux AppImage | Running without system installation | Host WebKitGTK and GTK modules must already be installed |
+| Source build | Development and custom packaging | Node.js, Rust, platform webview development libraries |
+
+See [Desktop downloads](docs/downloads.md), the detailed
+[installation guide](docs/installation.md), and the
+[source-build guide](docs/tauri-build.md).
+
 ### Quick install from GitHub
 
 Start with the lightweight R package. This installs the core package only;
@@ -497,7 +512,7 @@ wsi_setup()
 # Show the install plan without running it
 wsi_install_backends(install = FALSE)
 
-# Linux desktop shell: inspect WebKitGTK and optional WebGPU browser setup
+# Linux desktop shell: inspect WebKitGTK, GTK modules, and browser setup
 wsi_install_desktop_dependencies(install = FALSE)
 ```
 
@@ -530,9 +545,11 @@ wsi_install_desktop_dependencies(
 )
 ```
 
-Chrome or Chromium is optional but recommended on Linux for WebGPU. If it is
-absent or cannot create a WebGPU device, the complete viewer continues through
-WebKitGTK and OpenSeadragon WebGL/Canvas.
+Chrome or Chromium is optional but recommended on Linux for a stable,
+accelerated application window. It is launched without
+`--enable-unsafe-webgpu`, forced Vulkan, or GPU-blocklist overrides. If it is
+absent or exits during startup, the loading window remains available and the
+viewer falls back to WebKitGTK with OpenSeadragon WebGL/Canvas.
 
 ```r
 library(wsiTools)

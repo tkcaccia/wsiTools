@@ -14,8 +14,8 @@ wsi_desktop_dependency_plan(
 \arguments{
 \item{build}{Whether to include packages needed to compile the Tauri app.}
 
-\item{include_webgpu_browser}{Whether to report the optional
-Chrome/Chromium WebGPU route.}
+\item{include_webgpu_browser}{Whether to report the optional accelerated
+Chrome/Chromium viewer route.}
 
 \item{platform}{Target platform. \code{"auto"} detects the current system.}
 
@@ -28,7 +28,7 @@ commands.
 \description{
 The wsiTools Desktop starter uses the operating system webview. Linux builds
 require WebKitGTK 4.1 even when the final live viewer is opened in
-Chrome/Chromium for WebGPU. The prebuilt Debian package declares its
+Chrome/Chromium. The prebuilt Debian package declares its
 WebKitGTK dependency automatically; portable AppImage users may need to
 install the runtime explicitly.
 }

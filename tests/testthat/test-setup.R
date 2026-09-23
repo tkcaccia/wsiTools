@@ -258,13 +258,18 @@ test_that("desktop dependency plan separates WebKitGTK from image backends", {
     fixed = TRUE
   )
   expect_match(
+    plan$command_line[plan$tool == "webkitgtk_4_1"],
+    "libcanberra-gtk-module",
+    fixed = TRUE
+  )
+  expect_match(
     plan$command_line[plan$tool == "tauri_linux_build"],
     "libwebkit2gtk-4.1-dev",
     fixed = TRUE
   )
   expect_match(
     plan$notes[plan$tool == "chrome_or_chromium"],
-    "WebGPU",
+    "OpenSeadragon WebGL",
     fixed = TRUE
   )
 })

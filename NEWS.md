@@ -5,11 +5,15 @@
   preserving the active tool.
 - Linux select controls now keep dark option and selected-option backgrounds,
   avoiding unreadable white text on a light native dropdown.
-- wsiTools Desktop 0.1.7 opens Linux live viewers in an installed Chrome or
-  Chromium app window with Vulkan/WebGPU enabled. This preserves the complete
-  browser viewer and R/WebSocket session while avoiding WebKitGTK builds that
-  do not expose `navigator.gpu`; WebKitGTK/OpenSeadragon WebGL remains the
-  automatic fallback when Chrome is unavailable.
+- wsiTools Desktop 0.1.8 opens Linux live viewers in an installed Chrome or
+  Chromium app window using supported browser hardware acceleration. It no
+  longer passes unsafe WebGPU, forced Vulkan, or GPU-blocklist override flags,
+  and it verifies that Chrome remains alive before closing the WebKitGTK
+  loading window. OpenSeadragon WebGL is the stable GPU-backed default;
+  experimental WebGPU composition is opt-in.
+- The Linux dependency plan now includes Ubuntu canberra GTK modules, documents
+  `.deb`, AppImage, source, R-only, macOS and Windows installation routes, and
+  explains WebKitGTK crash, black-screen and GTK-module diagnostics.
 - Added `wsi_desktop_dependency_plan()`,
   `wsi_install_desktop_dependencies()` and `wsi_has_webkitgtk()` so Linux users
   can distinguish the required Tauri WebKitGTK 4.1 starter runtime from

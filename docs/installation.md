@@ -173,8 +173,9 @@ For the optional desktop launcher, inspect the Linux GUI requirements:
 wsi_install_desktop_dependencies(install = FALSE)
 ```
 
-The prebuilt `.deb` declares WebKitGTK automatically. For the portable
-AppImage, install the runtime when the plan reports it missing:
+The prebuilt `.deb` is the recommended Ubuntu installation because `apt`
+resolves its desktop runtime dependencies. For the portable AppImage, install
+WebKitGTK and the GTK sound modules when the plan reports them missing:
 
 ```r
 wsi_install_desktop_dependencies(install = TRUE, allow_sudo = TRUE)
@@ -190,9 +191,17 @@ wsi_install_desktop_dependencies(
 )
 ```
 
-Chrome or Chromium is optional but recommended for the Linux WebGPU route.
-WebKitGTK remains required for the starter and provides the supported
-OpenSeadragon WebGL/Canvas fallback.
+The corresponding Ubuntu command is:
+
+```bash
+sudo apt install -y libwebkit2gtk-4.1-0 \
+  libcanberra-gtk-module libcanberra-gtk3-module
+```
+
+Chrome or Chromium is optional but recommended for the final viewer window.
+wsiTools uses normal browser hardware acceleration and OpenSeadragon WebGL; it
+does not force unsafe WebGPU or Vulkan flags. WebKitGTK remains required for
+the starter and provides the supported fallback.
 
 ## Optional Backend Installation
 

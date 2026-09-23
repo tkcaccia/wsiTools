@@ -121,14 +121,14 @@ browser/OpenSeadragon application used by direct R launches; Tauri does not
 contain a second image viewer or statistical engine.
 
 The starter uses the operating-system webview: WKWebView on macOS, WebView2 on
-Windows and WebKitGTK 4.1 on Linux. Linux WebKitGTK may expose WebGL without
-exposing `navigator.gpu`. Therefore, when Chrome or Chromium is installed, the
-desktop process closes the temporary WebKitGTK viewer frame and opens the same
-localhost URL in a dedicated Chrome/Chromium application window with the
-Vulkan/WebGPU feature path enabled. If the browser is absent or WebGPU device
-creation fails, the viewer remains in WebKitGTK and uses OpenSeadragon WebGL or
-Canvas. WebKitGTK is thus a required Linux starter dependency, while
-Chrome/Chromium and WebGPU are optional acceleration capabilities.
+Windows and WebKitGTK 4.1 on Linux. When Chrome or Chromium is installed, the
+desktop process opens the same localhost URL in a dedicated application window
+using supported browser defaults. It closes the temporary WebKitGTK frame only
+after verifying that the browser process stayed alive. If the browser is absent
+or exits during startup, the viewer remains in WebKitGTK and uses OpenSeadragon
+WebGL or Canvas. No unsafe WebGPU, forced Vulkan, or GPU-blocklist override is
+used. WebKitGTK is a required Linux starter dependency; Chrome/Chromium is an
+optional viewer runtime and WebGPU composition is explicitly experimental.
 
 WebGPU does not replace OpenSeadragon. OpenSeadragon continues to own pyramid
 geometry, visible-tile selection, navigation and slide-to-viewport transforms.

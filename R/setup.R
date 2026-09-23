@@ -294,7 +294,7 @@ wsi_desktop_install_command <- function(method, packages) {
 #'
 #' The wsiTools Desktop starter uses the operating system webview. Linux builds
 #' require WebKitGTK 4.1 even when the final live viewer is opened in
-#' Chrome/Chromium for WebGPU. The prebuilt Debian package declares its
+#' Chrome/Chromium. The prebuilt Debian package declares its
 #' WebKitGTK dependency automatically; portable AppImage users may need to
 #' install the runtime explicitly.
 #'
@@ -302,8 +302,8 @@ wsi_desktop_install_command <- function(method, packages) {
 #' desktop shell separately from OpenSlide, libvips, Bio-Formats and native CZI.
 #'
 #' @param build Whether to include packages needed to compile the Tauri app.
-#' @param include_webgpu_browser Whether to report the optional
-#'   Chrome/Chromium WebGPU route.
+#' @param include_webgpu_browser Whether to report the optional accelerated
+#'   Chrome/Chromium viewer route.
 #' @param platform Target platform. `"auto"` detects the current system.
 #' @param method Linux package manager. `"auto"` detects apt, dnf or pacman.
 #'
@@ -336,7 +336,10 @@ wsi_desktop_dependency_plan <- function(build = FALSE,
 
   runtime_packages <- switch(
     method,
-    apt = "libwebkit2gtk-4.1-0",
+    apt = c(
+      "libwebkit2gtk-4.1-0", "libcanberra-gtk-module",
+      "libcanberra-gtk3-module"
+    ),
     dnf = "webkit2gtk4.1",
     pacman = "webkit2gtk-4.1",
     character()
@@ -353,7 +356,8 @@ wsi_desktop_dependency_plan <- function(build = FALSE,
     notes = paste(
       "Required to run the Linux Tauri starter.",
       "The .deb package declares this dependency; AppImage users may need to install it explicitly.",
-      "WebKitGTK WebGL is the supported fallback when browser WebGPU is unavailable."
+      "The canberra GTK modules prevent non-fatal desktop sound-module warnings on Ubuntu.",
+      "OpenSeadragon WebGL is the stable GPU-backed renderer; WebGPU is experimental and opt-in."
     )
   ))
 
@@ -391,16 +395,16 @@ wsi_desktop_dependency_plan <- function(build = FALSE,
   if (isTRUE(include_webgpu_browser)) {
     rows[[length(rows) + 1L]] <- list(
       tool = "chrome_or_chromium",
-      purpose = "Optional Linux WebGPU viewer",
+      purpose = "Optional Linux browser viewer",
       required = FALSE,
       installed = wsi_has_desktop_webgpu_browser(),
       method = "manual",
       command = NA_character_,
       args = character(),
       notes = paste(
-        "Optional but recommended for WebGPU on Linux.",
-        "wsiTools Desktop opens the same localhost viewer in a Chrome/Chromium app window when WebKitGTK does not expose navigator.gpu.",
-        "Install a current Google Chrome or Chromium build and enable hardware acceleration."
+        "Optional but recommended for a stable accelerated viewer on Linux.",
+        "wsiTools Desktop opens the same localhost viewer in a Chrome/Chromium app window using supported browser defaults.",
+        "OpenSeadragon WebGL uses hardware acceleration without unsafe WebGPU or forced Vulkan flags."
       )
     )
   }

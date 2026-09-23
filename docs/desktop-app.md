@@ -19,19 +19,21 @@ WebKitGTK provides accelerated WebGL compositing but may not expose the WebGPU
 API even when the machine has a supported GPU. wsiTools Desktop therefore
 looks for Google Chrome or Chromium when the final viewer URL is ready and, if
 found, opens that same localhost application in a dedicated Chrome application
-window with Vulkan/WebGPU enabled.
+window using the browser's supported hardware-acceleration defaults.
 
 The handoff changes only the browser runtime. It does not create a second
 viewer implementation: the HTML/JavaScript UI, OpenSeadragon viewport, live R
 process, WebSocket connection, tile endpoints and project state are identical.
-WebGPU is attempted for tile composition, while OpenSeadragon remains the
-pyramid and navigation controller.
+OpenSeadragon WebGL is the stable default tile renderer and remains the pyramid
+and navigation controller. WebGPU composition is experimental and is used only
+when the user explicitly sets `WSITOOLS_TILE_COMPOSITOR=webgpu` or `auto`.
+wsiTools never launches Chrome with `--enable-unsafe-webgpu`, forced Vulkan, or
+GPU-blocklist overrides.
 
-Install one of these browsers when `webgpu_status` reports that WebGPU is
-unavailable. wsiTools falls back automatically to the embedded WebKitGTK
-viewer and OpenSeadragon WebGL if neither executable is present. The viewer's
-History report records the active tile compositor and the reason for any
-fallback.
+Install one of these browsers for the most predictable Linux viewer window.
+wsiTools verifies that the browser process remains alive before closing the
+temporary loading window; an early browser exit falls back automatically to
+WebKitGTK. The viewer's History report records the active renderer.
 
 Check and install the Linux starter runtime from R:
 
@@ -41,8 +43,10 @@ wsi_install_desktop_dependencies(install = TRUE, allow_sudo = TRUE)
 ```
 
 Use `build = TRUE` only when compiling the Tauri application from source. The
-prebuilt `.deb` already declares WebKitGTK; the portable AppImage relies on the
-host system to provide it.
+prebuilt `.deb` already declares WebKitGTK. Portable AppImage users should
+install `libwebkit2gtk-4.1-0`, `libcanberra-gtk-module`, and
+`libcanberra-gtk3-module` on Ubuntu. A missing canberra module affects desktop
+sound integration, not image decoding, but installing it removes the warning.
 
 ## Viewer Engine
 
@@ -67,7 +71,7 @@ runtime backends; the viewer receives viewport tiles and typed state updates.
 
 Prebuilt desktop installers are available from the GitHub release:
 
-[Download wsiTools Desktop 0.1.7](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.7)
+[Download wsiTools Desktop 0.1.8](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.8)
 
 See [Desktop Downloads](downloads.md) for platform-specific installers,
 required R setup, and optional backend notes.
