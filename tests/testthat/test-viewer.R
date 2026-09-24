@@ -3664,6 +3664,8 @@ test_that("wand smooths boundaries and fills only new tiny artifacts", {
   expect_match(worker, "geometryCleanWandHoles", fixed = TRUE)
   expect_match(worker, "geometryHoleExisted", fixed = TRUE)
   expect_match(worker, "filled_artifact_holes", fixed = TRUE)
+  expect_match(worker, "task.operation === 'subtract'", fixed = TRUE)
+  expect_match(worker, "const cleaned = geometryCleanWandHoles(result, target.geometry, task.hole_area_threshold);", fixed = TRUE)
 })
 
 test_that("desktop dense annotations remain visible at overview zoom", {

@@ -75,9 +75,9 @@ function geometryHoleExisted(hole, originalHoles) {
     (geometryRingContains(original, sample) || geometryRingContains(hole, original[0])));
 }
 
-// Wand unions can close a one-pixel channel and leave a tiny artificial hole.
+// Wand edits can leave tiny artificial holes along pixel-derived boundaries.
 // Preserve every hole already present in the target, and remove only new holes
-// below a display-derived area threshold.
+// below a display-derived area threshold for both addition and subtraction.
 function geometryCleanWandHoles(polygons, original, threshold) {
   threshold = Number(threshold);
   if (!Number.isFinite(threshold) || threshold <= 0 || !polygons.length) {
@@ -206,8 +206,11 @@ function geometryWandEdit(task) {
   let selection = task.geometry || [];
   if (!target || !selection.length) return { geometry: [], removed, updates, empty: true, duration_ms: performance.now() - started };
   if (task.operation === 'subtract') {
-    const result = geometryLocalClip('ctDifference', target.geometry, selection);
-    return { geometry: result, removed, updates, empty: !result.length, duration_ms: performance.now() - started };
+    let result = geometryLocalClip('ctDifference', target.geometry, selection);
+    const cleaned = geometryCleanWandHoles(result, target.geometry, task.hole_area_threshold);
+    result = cleaned.geometry;
+    return { geometry: result, removed, updates, filled_artifact_holes: cleaned.filled,
+      empty: !result.length, duration_ms: performance.now() - started };
   }
   const selectionBounds = geometryBounds(selection), protection = (task.protection || []).slice();
   for (const source of sources) {

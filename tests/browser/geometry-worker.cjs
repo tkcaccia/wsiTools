@@ -97,10 +97,16 @@ const smoothWand = await run({type:'wand_edit',project_key:'wand-clean-holes',op
 assert.equal(smoothWand.filled_artifact_holes,1,'Wand fills a newly created tiny enclosed artifact');
 assert.equal(smoothWand.geometry.reduce((n,p)=>n+p.length-1,0),1,
   'Wand preserves the pre-existing hole while removing only its new tiny artifact');
-const subtractKeepsHole = await run({type:'wand_edit',project_key:'wand-subtract-hole',operation:'subtract',target_id:'a',class_key:'tumour',
+const subtractCleansTinyHole = await run({type:'wand_edit',project_key:'wand-subtract-hole',operation:'subtract',target_id:'a',class_key:'tumour',
   geometry:box(40,40,5,5),hole_area_threshold:3000,active_ids:['a'],sources:[
     {id:'a',class_key:'tumour',geometry:original,locked:false}]});
-assert.equal(subtractKeepsHole.geometry[0].length,2,'Alt + Wand keeps an intentional small subtraction hole');
+assert.equal(subtractCleansTinyHole.geometry[0].length,1,'Wand subtraction removes a newly created tiny hole automatically');
+assert.equal(subtractCleansTinyHole.filled_artifact_holes,1,'Wand subtraction reports its removed tiny-hole artifact');
+const subtractKeepsLargeHole = await run({type:'wand_edit',project_key:'wand-subtract-large-hole',operation:'subtract',target_id:'a',class_key:'tumour',
+  geometry:box(30,30,60,60),hole_area_threshold:3000,active_ids:['a'],sources:[
+    {id:'a',class_key:'tumour',geometry:original,locked:false}]});
+assert.equal(subtractKeepsLargeHole.geometry[0].length,2,'Wand subtraction preserves a newly created medium or large hole');
+assert.equal(subtractKeepsLargeHole.filled_artifact_holes,0,'A meaningful subtraction hole is not reported as an artifact');
 const nested = [box(0,0,100,100)[0].concat(box(20,20,60,60)[0]), box(40,40,20,20)[0]];
 const topology = await run({type:'claim',target_id:'nested',geometry:box(95,0,10,10), sources:[{id:'nested',geometry:nested}],active_ids:['nested']});
 assert.equal(topology.geometry.length,2,'Island inside a hole retains separate polygon identity');
