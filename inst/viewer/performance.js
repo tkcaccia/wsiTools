@@ -549,7 +549,7 @@ function wsiCommitPriorityNeighbors(result, target, recordsById = null) {
   return { trimmed, removed };
 }
 
-async function wsiApplyPriorityClaim(groups, index = selectedRoi, operation = 'wand') {
+async function wsiApplyPriorityClaim(groups, index = selectedRoi, operation = 'wand', options = {}) {
   const target = rois[index], key = wsiProjectKey(), generation = wsiEditGeneration;
   if (!target || lockedRoi(target) || !editableRoi(target)) return null;
   const claimBounds = boundsFromRings((groups || []).flat()), records = wsiAnnotationRecords(claimBounds, target, true);
@@ -560,7 +560,8 @@ async function wsiApplyPriorityClaim(groups, index = selectedRoi, operation = 'w
     if (!wsiSameSignature(wsiWorkerSourceVersions.get(record.id), signature)) sources.push(wsiWorkerAnnotationSource(record.item, record.id));
   }
   const task = { type: 'claim', target_id: wsiRoiId(target), geometry: (groups || []).map(group =>
-    group.map(ring => ring.map(p => [Number(p.x), Number(p.y)]))), sources, active_ids: records.map(record => record.id), protection: [] };
+    group.map(ring => ring.map(p => [Number(p.x), Number(p.y)]))), sources, active_ids: records.map(record => record.id), protection: [],
+    wand_cleanup: operation === 'wand', hole_area_threshold: Number(options.hole_area_threshold) || 0 };
   const result = await wsiWorkerRequest(task);
   const unchanged = wsiRecordsUnchanged(records, sourceVersions, key);
   if (generation !== wsiEditGeneration) throw new Error('The priority edit was cancelled.');
@@ -578,6 +579,7 @@ async function wsiApplyPriorityClaim(groups, index = selectedRoi, operation = 'w
   const editDelta = wsiCompleteEditTransaction(transaction, target, historyEvent);
   wsiRefreshEditedAnnotations(editDelta); updateButtons();
   const detail = { id: target.id, operation, project_key: key, priority_claim: true,
+    filled_artifact_holes: Number(result.filled_artifact_holes) || 0,
     trimmed_ids: changed.trimmed, removed_ids: changed.removed, geometry_worker: true, edit_delta: editDelta };
   recordAnnotationHistory(historyEvent, detail); scheduleViewerStateSync('roi_brush_edited', detail);
   markAnnotationsDirty('roi_brush_edited'); wsiRequestDraw();
@@ -588,7 +590,7 @@ async function wsiApplyPriorityClaim(groups, index = selectedRoi, operation = 'w
   return target;
 }
 
-async function wsiApplyWandEdit(groups, index = selectedRoi, operation = 'extend') {
+async function wsiApplyWandEdit(groups, index = selectedRoi, operation = 'extend', options = {}) {
   const target = rois[index], key = wsiProjectKey(), generation = wsiEditGeneration;
   if (!target || lockedRoi(target) || !editableRoi(target)) return null;
   const editBounds = boundsFromRings((groups || []).flat()), records = wsiAnnotationRecords(editBounds, target, false);
@@ -599,7 +601,8 @@ async function wsiApplyWandEdit(groups, index = selectedRoi, operation = 'extend
   }
   const task = { type: 'wand_edit', operation, target_id: wsiRoiId(target), class_key: classPresetKey(roiClassName(target)),
     geometry: (groups || []).map(group => group.map(ring => ring.map(p => [Number(p.x), Number(p.y)]))),
-    sources, active_ids: records.map(record => record.id), protection: [] };
+    sources, active_ids: records.map(record => record.id), protection: [],
+    hole_area_threshold: Number(options.hole_area_threshold) || 0 };
   const result = await wsiWorkerRequest(task), unchanged = wsiRecordsUnchanged(records, sourceVersions, key);
   if (generation !== wsiEditGeneration) throw new Error('The Wand edit was cancelled.');
   if (key !== wsiProjectKey() || !unchanged || !rois.includes(target)) throw new Error('The tissue or annotations changed before the Wand edit finished.');
@@ -613,6 +616,7 @@ async function wsiApplyWandEdit(groups, index = selectedRoi, operation = 'extend
   const editDelta = wsiCompleteEditTransaction(transaction, target, eventName);
   wsiRefreshEditedAnnotations(editDelta); updateButtons();
   const detail = { id: target.id, operation, project_key: key, removed_ids: changed.removed,
+    filled_artifact_holes: Number(result.filled_artifact_holes) || 0,
     geometry_worker: true, edit_delta: editDelta };
   recordAnnotationHistory(eventName, detail); scheduleViewerStateSync('roi_brush_edited', detail);
   markAnnotationsDirty('roi_brush_edited'); wsiRequestDraw();

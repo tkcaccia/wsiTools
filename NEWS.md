@@ -1,5 +1,9 @@
 # wsiTools 0.1.24
 
+- Smoothed magic-wand boundaries and removed newly created tiny interior-hole
+  artifacts while retaining holes that were already present in the annotation;
+  intentional Alt/Command + Wand subtraction holes remain unchanged.
+
 - Dense vector annotations now remain visible at every zoom. Distant views use
   a bounded spatial sample with lightweight bounds, while closer views request
   progressively detailed local polygons without changing the stored geometry.

@@ -60,6 +60,44 @@ function geometryUnion(polygons) {
   return batch[0] || [];
 }
 
+function geometryRingArea(ring) {
+  let area = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    area += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
+  }
+  return Math.abs(area) / 2;
+}
+
+function geometryHoleExisted(hole, originalHoles) {
+  if (!hole.length) return false;
+  const sample = hole[0];
+  return originalHoles.some(original => original.length &&
+    (geometryRingContains(original, sample) || geometryRingContains(hole, original[0])));
+}
+
+// Wand unions can close a one-pixel channel and leave a tiny artificial hole.
+// Preserve every hole already present in the target, and remove only new holes
+// below a display-derived area threshold.
+function geometryCleanWandHoles(polygons, original, threshold) {
+  threshold = Number(threshold);
+  if (!Number.isFinite(threshold) || threshold <= 0 || !polygons.length) {
+    return { geometry: polygons, filled: 0 };
+  }
+  const originalHoles = (original || []).flatMap(polygon => polygon.slice(1));
+  let filled = 0;
+  const geometry = polygons.map(polygon => {
+    if (polygon.length < 2) return polygon;
+    const holes = polygon.slice(1).filter(hole => {
+      const artifact = geometryRingArea(hole) <= threshold &&
+        !geometryHoleExisted(hole, originalHoles);
+      if (artifact) filled++;
+      return !artifact;
+    });
+    return [polygon[0], ...holes];
+  });
+  return { geometry, filled };
+}
+
 function geometryStroke(points, radius, zoom) {
   const tolerance = Math.min(radius * .05, .35 / Math.max(.0001, zoom));
   const steps = Math.max(24, Math.min(192, Math.ceil(Math.PI / Math.acos(1 - tolerance / radius))));
@@ -144,7 +182,7 @@ function geometryClaim(task) {
   for (const source of sources) if (source.id !== task.target_id && source.locked) immutable.push(source.geometry);
   if (immutable.length) claim = polygonClipping.difference(claim, ...immutable.map(g => geometryLocalCandidates(g, geometryBounds(claim))));
   if (!claim.length) return { geometry: [], removed, updates, empty: true, duration_ms: performance.now() - started };
-  const result = target ? geometryLocalClip('ctUnion', target.geometry, claim) : claim;
+  let result = target ? geometryLocalClip('ctUnion', target.geometry, claim) : claim;
   const claimBounds = geometryBounds(claim);
   for (const source of sources) {
     if (source.id === task.target_id || source.locked || !geometryOverlaps(geometryBounds(source.geometry), claimBounds)) continue;
@@ -153,7 +191,12 @@ function geometryClaim(task) {
     if (reduced.length) updates.push({ id: source.id, geometry: reduced });
     else removed.push(source.id);
   }
-  return { geometry: result, removed, updates, empty: false, duration_ms: performance.now() - started };
+  const cleaned = task.wand_cleanup && target
+    ? geometryCleanWandHoles(result, target.geometry, task.hole_area_threshold)
+    : { geometry: result, filled: 0 };
+  result = cleaned.geometry;
+  return { geometry: result, removed, updates, filled_artifact_holes: cleaned.filled,
+    empty: false, duration_ms: performance.now() - started };
 }
 
 function geometryWandEdit(task) {
@@ -187,7 +230,10 @@ function geometryWandEdit(task) {
       }
     }
   }
-  return { geometry: result, removed, updates, empty: !result.length, duration_ms: performance.now() - started };
+  const cleaned = geometryCleanWandHoles(result, target.geometry, task.hole_area_threshold);
+  result = cleaned.geometry;
+  return { geometry: result, removed, updates, filled_artifact_holes: cleaned.filled,
+    empty: !result.length, duration_ms: performance.now() - started };
 }
 
 function geometryStore(source) {

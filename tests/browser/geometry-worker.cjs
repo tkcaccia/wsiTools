@@ -89,6 +89,18 @@ const wandMerge = await run({type:'wand_edit',project_key:'wand-merge',operation
     {id:'b',class_key:'tumour',geometry:box(125,40,30,30),locked:false}],protection:[]});
 assert.deepEqual(wandMerge.removed,['b'],'Wand merges a touched annotation of the same class');
 assert.ok(area(wandMerge.geometry)>area(original));
+const uShape = [[[[0,0],[100,0],[100,100],[70,100],[70,30],[30,30],[30,100],[0,100],[0,0]]],
+  box(200,0,100,100)[0].concat(box(220,20,20,20)[0])];
+const smoothWand = await run({type:'wand_edit',project_key:'wand-clean-holes',operation:'extend',target_id:'u',class_key:'tumour',
+  geometry:box(25,75,50,15),hole_area_threshold:3000,active_ids:['u'],sources:[
+    {id:'u',class_key:'tumour',geometry:uShape,locked:false}],protection:[]});
+assert.equal(smoothWand.filled_artifact_holes,1,'Wand fills a newly created tiny enclosed artifact');
+assert.equal(smoothWand.geometry.reduce((n,p)=>n+p.length-1,0),1,
+  'Wand preserves the pre-existing hole while removing only its new tiny artifact');
+const subtractKeepsHole = await run({type:'wand_edit',project_key:'wand-subtract-hole',operation:'subtract',target_id:'a',class_key:'tumour',
+  geometry:box(40,40,5,5),hole_area_threshold:3000,active_ids:['a'],sources:[
+    {id:'a',class_key:'tumour',geometry:original,locked:false}]});
+assert.equal(subtractKeepsHole.geometry[0].length,2,'Alt + Wand keeps an intentional small subtraction hole');
 const nested = [box(0,0,100,100)[0].concat(box(20,20,60,60)[0]), box(40,40,20,20)[0]];
 const topology = await run({type:'claim',target_id:'nested',geometry:box(95,0,10,10), sources:[{id:'nested',geometry:nested}],active_ids:['nested']});
 assert.equal(topology.geometry.length,2,'Island inside a hole retains separate polygon identity');

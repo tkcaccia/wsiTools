@@ -3654,6 +3654,18 @@ test_that("dense tissue annotations keep full boundaries and coalesce viewport w
   expect_match(session_code, "bounds_only <- !tissue_source", fixed = TRUE)
 })
 
+test_that("wand smooths boundaries and fills only new tiny artifacts", {
+  wand_code <- paste(deparse(wsiTools:::wsi_viewer_wand_js), collapse = "\n")
+  worker <- paste(readLines(test_path("../../inst/viewer/geometry-worker.js"), warn = FALSE), collapse = "\n")
+
+  expect_match(wand_code, "wandSmoothBinarySelection", fixed = TRUE)
+  expect_match(wand_code, "wandSmoothClosedPoints", fixed = TRUE)
+  expect_match(wand_code, "hole_area_threshold", fixed = TRUE)
+  expect_match(worker, "geometryCleanWandHoles", fixed = TRUE)
+  expect_match(worker, "geometryHoleExisted", fixed = TRUE)
+  expect_match(worker, "filled_artifact_holes", fixed = TRUE)
+})
+
 test_that("desktop dense annotations remain visible at overview zoom", {
   launcher_path <- test_path("../../tools/wsiToolsDesktop/src-tauri/resources/launch-viewer.R")
   skip_if_not(file.exists(launcher_path), "Desktop launcher resources are not included in source-package checks.")
