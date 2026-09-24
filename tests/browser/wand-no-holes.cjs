@@ -29,11 +29,20 @@ let browser;
       result.local_seed=localPixels[(45*120+60)*4+3]===255;
       result.local_far=localPixels[(45*120+10)*4+3]===0;
       result.local_count=local.count;
+      const noisy=new Uint8Array(40*40);
+      for(let y=8;y<=31;y++)for(let x=8;x<=31;x++)noisy[y*40+x]=1;
+      for(let x=32;x<=38;x++)noisy[20*40+x]=1;
+      noisy[2*40+2]=1;
+      const despeckled=wandSmoothBinarySelection(noisy,40,40,20,20).selected;
+      result.body_retained=despeckled[20*40+20]===1;
+      result.sharp_spur_removed=despeckled[20*40+38]===0;
+      result.isolated_pixel_removed=despeckled[2*40+2]===0;
       cx.clearRect(0,0,120,90); result.empty=wandGroupsFromMask(mask).length; return result;
     } finally { wandMappedRing=map; }
   });
-  assert.deepEqual(unit,{parts:2,rings:[1,1],area:5500,hole_filled:true,notch_open:true,island_present:true,
-    local_seed:true,local_far:true,local_count:1257,empty:0});
+  assert.deepEqual({...unit,local_count:undefined},{parts:2,rings:[1,1],area:5500,hole_filled:true,notch_open:true,island_present:true,
+    local_seed:true,local_far:true,local_count:undefined,body_retained:true,sharp_spur_removed:true,isolated_pixel_removed:true,empty:0});
+  assert.ok(unit.local_count>=1240&&unit.local_count<=1260,'Wand smoothing removes pixel-scale spurs without materially shrinking the selection');
   const seed=await page.evaluate(()=>slideToCanvas({x:550,y:300}));
   await page.locator('#wandReach').evaluate(input=>{input.value='512';input.dispatchEvent(new Event('input',{bubbles:true}));});
   await page.locator('#toolWand').click();
@@ -45,7 +54,7 @@ let browser;
     notch_open:!roiContainsPoint(rois[0],{x:505,y:150}),wand:rois[0].wand,reach:wandReach()}));
   assert.deepEqual(selected.rings,[1]); assert.equal(selected.seed_included,true);
   assert.equal(selected.distant_connected_area_excluded,true); assert.equal(selected.notch_open,true);
-  assert.equal(selected.wand,true); assert.equal(selected.reach,512); assert.ok(selected.point_count<=768);
+  assert.equal(selected.wand,true); assert.equal(selected.reach,512); assert.ok(selected.point_count<=384);
   await page.screenshot({path:path.join(output,'filled-selection.png')});
   await page.keyboard.press('Control+z');
   assert.equal(await page.evaluate(()=>rois.length),0,'Creation undo removes only the new Wand ROI');
