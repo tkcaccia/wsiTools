@@ -10,7 +10,14 @@ use std::{
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tauri::{path::BaseDirectory, AppHandle, Emitter, Manager, State};
+use tauri::{
+    path::BaseDirectory,
+    webview::PageLoadEvent,
+    AppHandle,
+    Emitter,
+    Manager,
+    State,
+};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 #[cfg(feature = "native-wgpu")]
@@ -197,6 +204,32 @@ fn emit_viewer_progress(app: &AppHandle, value: &str) {
 
 fn r_string(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+fn encode_query_component(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.as_bytes() {
+        if matches!(
+            byte,
+            b'A'..=b'Z'
+                | b'a'..=b'z'
+                | b'0'..=b'9'
+                | b'-'
+                | b'.'
+                | b'_'
+                | b'~'
+        ) {
+            encoded.push(*byte as char);
+        } else {
+            encoded.push('%');
+            encoded.push_str(&format!("{byte:02X}"));
+        }
+    }
+    encoded
+}
+
+fn viewer_host_path(url: &str) -> String {
+    format!("viewer-host.html?url={}", encode_query_component(url))
 }
 
 fn stop_existing_child(state: &RViewerState) {
@@ -958,15 +991,14 @@ fn viewer_url_ready(url: &str) -> bool {
     if stream.write_all(request.as_bytes()).is_err() {
         return false;
     }
-    let mut buf = [0_u8; 256];
+    let mut buf = [0_u8; 4096];
     let Ok(n) = stream.read(&mut buf) else {
         return false;
     };
     let head = String::from_utf8_lossy(&buf[..n]);
-    head.starts_with("HTTP/1.1 2")
-        || head.starts_with("HTTP/1.1 3")
-        || head.starts_with("HTTP/1.0 2")
-        || head.starts_with("HTTP/1.0 3")
+    let status_ok = head.starts_with("HTTP/1.1 200") || head.starts_with("HTTP/1.0 200");
+    let html_ok = head.contains("text/html") || head.contains("<!doctype") || head.contains("<html");
+    status_ok && html_ok
 }
 
 fn wait_for_viewer_http_ready(url: &str, logs: &Arc<Mutex<Vec<String>>>) -> Result<(), String> {
@@ -1675,14 +1707,21 @@ fn close_viewer_window(app: AppHandle) -> Result<(), String> {
 fn open_viewer_window(
     app: AppHandle,
     url: String,
-    _state: State<'_, Arc<RViewerState>>,
+    state: State<'_, Arc<RViewerState>>,
 ) -> Result<(), String> {
     if url.trim().is_empty() {
         return Err("Viewer URL was empty.".to_string());
     }
-    let parsed = url
-        .parse()
-        .map_err(|err| format!("Viewer URL is not valid: {err}"))?;
+    if parse_http_local_url(&url).is_none() {
+        return Err(format!(
+            "Viewer URL is not a supported localhost HTTP URL: {url}"
+        ));
+    }
+    let host_path = viewer_host_path(&url);
+    push_log(
+        &state.logs,
+        format!("Opening browser viewer through the Tauri host page: {url}"),
+    );
 
     #[cfg(all(target_family = "unix", not(target_os = "macos")))]
     {
@@ -1762,25 +1801,39 @@ fn open_viewer_window(
     }
 
     if let Some(window) = app.get_webview_window(VIEWER_WINDOW_LABEL) {
-        window
-            .navigate(parsed)
-            .map_err(|err| format!("Could not navigate viewer window: {err}"))?;
-        let _ = window.show();
-        let _ = window.set_focus();
-        return Ok(());
+        let _ = window.close();
+        for _ in 0..20 {
+            if app.get_webview_window(VIEWER_WINDOW_LABEL).is_none() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
     }
 
-    tauri::WebviewWindowBuilder::new(
+    let logs = state.logs.clone();
+    let window = tauri::WebviewWindowBuilder::new(
         &app,
         VIEWER_WINDOW_LABEL,
-        tauri::WebviewUrl::External(parsed),
+        tauri::WebviewUrl::App(host_path.into()),
     )
     .title("wsiTools Viewer")
     .inner_size(1500.0, 950.0)
     .min_inner_size(960.0, 700.0)
     .resizable(true)
+    .on_page_load(move |_window, payload| {
+        let event = match payload.event() {
+            PageLoadEvent::Started => "started",
+            PageLoadEvent::Finished => "finished",
+        };
+        push_log(
+            &logs,
+            format!("Tauri viewer host page load {event}: {}", payload.url()),
+        );
+    })
     .build()
     .map_err(|err| format!("Could not open viewer window: {err}"))?;
+    let _ = window.show();
+    let _ = window.set_focus();
     Ok(())
 }
 

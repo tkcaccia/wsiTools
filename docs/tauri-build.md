@@ -355,6 +355,14 @@ cargo clean
 
 ### The app opens but the viewer is white
 
+The desktop viewer opens the localhost R page through a small bundled Tauri
+host page. If that page remains visible, it means the R viewer URL did not
+finish loading inside the Windows WebView. Leave the window open and inspect
+the launcher log: it records the exact URL, the HTTP readiness check, and the
+Tauri page-load events. On Windows, also verify that the Microsoft Edge
+WebView2 Runtime is installed and that security software permits
+`127.0.0.1` connections.
+
 Check the app log and confirm that R can open a live viewer outside Tauri:
 
 ```r
