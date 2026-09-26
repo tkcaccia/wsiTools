@@ -1,0 +1,25 @@
+.wsitools-hero {
+  margin: 0 0 1.5rem;
+  padding: 1.5rem;
+  border: 0.05rem solid var(--md-default-fg-color--lightest);
+  border-radius: 0.45rem;
+  background: linear-gradient(
+    135deg,
+    rgba(63, 81, 181, 0.14),
+    rgba(3, 169, 244, 0.08)
+  );
+}
+
+.wsitools-hero > p:first-of-type {
+  margin-top: 0;
+  font-size: 1.15rem;
+}
+
+.wsitools-hero .md-button {
+  margin-top: 0.35rem;
+  margin-right: 0.4rem;
+}
+
+.md-typeset .grid.cards > ul > li {
+  border-radius: 0.35rem;
+}
