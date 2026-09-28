@@ -411,6 +411,16 @@ fn command_works(path: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn rscript_command(path: &str) -> Command {
+    let mut command = Command::new(path);
+    #[cfg(target_os = "linux")]
+    if env::var_os("APPIMAGE").is_some() {
+        // AppImage's bundled Python environment breaks the system pyvips fallback.
+        command.env_remove("PYTHONHOME").env_remove("PYTHONPATH");
+    }
+    command
+}
+
 fn executable_names() -> Vec<&'static str> {
     #[cfg(target_family = "windows")]
     {
@@ -1145,7 +1155,7 @@ emit("OBJECT_TYPE", object_type)
 emit("MESSAGE", sprintf("Detected %s in %s", object_type, basename(path)))
 if (!tissues_emitted) emit_tissues(tissues)
 "#;
-    let output = Command::new(&rscript)
+    let output = rscript_command(&rscript)
         .arg("--vanilla")
         .arg("-e")
         .arg(inspector)
@@ -1372,7 +1382,7 @@ fn launch_r_new_project_target(
         }
     }
 
-    let mut child = Command::new(&rscript)
+    let mut child = rscript_command(&rscript)
         .args(args)
         .env("PATH", augmented_path_env())
         .env("WSITOOLS_VIEWER_RENDERER", &renderer)
@@ -1546,7 +1556,7 @@ fn launch_r_target(
         );
     }
 
-    let mut child = Command::new(&rscript)
+    let mut child = rscript_command(&rscript)
         .arg(&script)
         .arg("--mode")
         .arg(mode)
