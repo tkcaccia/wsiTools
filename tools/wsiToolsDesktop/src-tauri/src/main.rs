@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -12,7 +14,6 @@ use std::{
 };
 use tauri::{
     path::BaseDirectory,
-    webview::PageLoadEvent,
     AppHandle,
     Emitter,
     Manager,
@@ -206,32 +207,6 @@ fn r_string(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-fn encode_query_component(value: &str) -> String {
-    let mut encoded = String::with_capacity(value.len());
-    for byte in value.as_bytes() {
-        if matches!(
-            byte,
-            b'A'..=b'Z'
-                | b'a'..=b'z'
-                | b'0'..=b'9'
-                | b'-'
-                | b'.'
-                | b'_'
-                | b'~'
-        ) {
-            encoded.push(*byte as char);
-        } else {
-            encoded.push('%');
-            encoded.push_str(&format!("{byte:02X}"));
-        }
-    }
-    encoded
-}
-
-fn viewer_host_path(url: &str) -> String {
-    format!("viewer-host.html?url={}", encode_query_component(url))
-}
-
 fn stop_existing_child(state: &RViewerState) {
     if let Some(mut child) = state.child.lock().unwrap().take() {
         let _ = child.kill();
@@ -318,8 +293,33 @@ fn remove_pid_file(session_dir: &PathBuf) {
     let _ = fs::remove_file(pid_file(session_dir));
 }
 
-fn write_pid_file(session_dir: &PathBuf, pid: u32) {
-    let _ = fs::write(pid_file(session_dir), pid.to_string());
+fn write_pid_file(session_dir: &PathBuf, pid: u32, script: &std::path::Path) {
+    let _ = fs::write(
+        pid_file(session_dir),
+        format!("{}\n{}\n", pid, script.to_string_lossy()),
+    );
+}
+
+fn process_command_line(pid: u32) -> Option<String> {
+    #[cfg(target_family = "unix")]
+    let output = Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "command="])
+        .output().ok()?;
+    #[cfg(target_family = "windows")]
+    let output = Command::new("powershell.exe")
+        .args([
+            "-NoProfile", "-NonInteractive", "-Command",
+            &format!("(Get-CimInstance Win32_Process -Filter 'ProcessId = {pid}').CommandLine"),
+        ])
+        .output().ok()?;
+    if !output.status.success() { return None; }
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn is_wsi_rscript_command(command: &str, script: &str) -> bool {
+    !script.is_empty()
+        && command.to_ascii_lowercase().contains("rscript")
+        && command.contains(script)
 }
 
 fn kill_process_id(pid: u32) -> bool {
@@ -354,10 +354,17 @@ fn stop_previous_session_pid(session_dir: &PathBuf, logs: &Arc<Mutex<Vec<String>
     let Ok(text) = fs::read_to_string(&path) else {
         return;
     };
-    let Ok(pid) = text.trim().parse::<u32>() else {
+    let mut lines = text.lines();
+    let Ok(pid) = lines.next().unwrap_or("").parse::<u32>() else {
         remove_pid_file(session_dir);
         return;
     };
+    let script = lines.next().unwrap_or("");
+    if !process_command_line(pid).is_some_and(|cmd| is_wsi_rscript_command(&cmd, script)) {
+        push_log(logs, format!("Skipped previous R viewer pid {pid}: process identity could not be verified."));
+        remove_pid_file(session_dir);
+        return;
+    }
     if kill_process_id(pid) {
         push_log(
             logs,
@@ -1378,7 +1385,7 @@ fn launch_r_new_project_target(
         .map_err(|err| format!("Could not start Rscript: {err}"))?;
 
     let pid = child.id();
-    write_pid_file(&session_dir, pid);
+    write_pid_file(&session_dir, pid, &script);
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     *state.child.lock().unwrap() = Some(child);
@@ -1540,7 +1547,7 @@ fn launch_r_target(
     }
 
     let mut child = Command::new(&rscript)
-        .arg(script)
+        .arg(&script)
         .arg("--mode")
         .arg(mode)
         .arg(target)
@@ -1555,7 +1562,7 @@ fn launch_r_target(
         .map_err(|err| format!("Could not start Rscript: {err}"))?;
 
     let pid = child.id();
-    write_pid_file(&session_dir, pid);
+    write_pid_file(&session_dir, pid, &script);
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     *state.child.lock().unwrap() = Some(child);
@@ -1704,7 +1711,7 @@ fn close_viewer_window(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn open_viewer_window(
+async fn open_viewer_window(
     app: AppHandle,
     url: String,
     state: State<'_, Arc<RViewerState>>,
@@ -1717,10 +1724,12 @@ fn open_viewer_window(
             "Viewer URL is not a supported localhost HTTP URL: {url}"
         ));
     }
-    let host_path = viewer_host_path(&url);
+    let viewer_url: tauri::Url = url
+        .parse()
+        .map_err(|error| format!("Viewer URL could not be parsed: {error}"))?;
     push_log(
         &state.logs,
-        format!("Opening browser viewer through the Tauri host page: {url}"),
+        format!("Opening verified local viewer URL in Tauri: {url}"),
     );
 
     #[cfg(all(target_family = "unix", not(target_os = "macos")))]
@@ -1742,7 +1751,7 @@ fn open_viewer_window(
             fs::create_dir_all(&profile).map_err(|error| {
                 format!("Could not create the Linux browser profile: {error}")
             })?;
-            stop_existing_native_child(&_state);
+            stop_existing_native_child(&state);
             let mut child = Command::new(&chrome)
                 .args(linux_chrome_args(&url, &profile))
                 .stdout(Stdio::null())
@@ -1753,7 +1762,7 @@ fn open_viewer_window(
             match child.try_wait() {
                 Ok(None) => {
                     if let Some(stderr) = child.stderr.take() {
-                        let logs = _state.logs.clone();
+                        let logs = state.logs.clone();
                         thread::spawn(move || {
                             let reader = BufReader::new(stderr);
                             for line in reader.lines().map_while(Result::ok) {
@@ -1764,9 +1773,9 @@ fn open_viewer_window(
                     if let Some(window) = app.get_webview_window(VIEWER_WINDOW_LABEL) {
                         let _ = window.close();
                     }
-                    *_state.native_child.lock().unwrap() = Some(child);
+                    *state.native_child.lock().unwrap() = Some(child);
                     push_log(
-                        &_state.logs,
+                        &state.logs,
                         format!(
                             "Linux viewer opened in {} with its supported hardware-acceleration defaults. OpenSeadragon WebGL is the stable tile renderer.",
                             chrome.display()
@@ -1776,7 +1785,7 @@ fn open_viewer_window(
                 }
                 Ok(Some(status)) => {
                     push_log(
-                        &_state.logs,
+                        &state.logs,
                         format!(
                             "Chrome exited during viewer startup ({status}). Falling back to WebKitGTK."
                         ),
@@ -1784,7 +1793,7 @@ fn open_viewer_window(
                 }
                 Err(error) => {
                     push_log(
-                        &_state.logs,
+                        &state.logs,
                         format!(
                             "Could not verify the Chrome viewer process ({error}). Falling back to WebKitGTK."
                         ),
@@ -1795,43 +1804,33 @@ fn open_viewer_window(
             }
         }
         push_log(
-            &_state.logs,
+            &state.logs,
             "Chrome/Chromium was not found; using the WebKitGTK viewer with OpenSeadragon WebGL acceleration.",
         );
     }
 
-    if let Some(window) = app.get_webview_window(VIEWER_WINDOW_LABEL) {
-        let _ = window.close();
-        for _ in 0..20 {
-            if app.get_webview_window(VIEWER_WINDOW_LABEL).is_none() {
-                break;
-            }
-            thread::sleep(Duration::from_millis(25));
-        }
-    }
-
-    let logs = state.logs.clone();
-    let window = tauri::WebviewWindowBuilder::new(
-        &app,
-        VIEWER_WINDOW_LABEL,
-        tauri::WebviewUrl::App(host_path.into()),
-    )
-    .title("wsiTools Viewer")
-    .inner_size(1500.0, 950.0)
-    .min_inner_size(960.0, 700.0)
-    .resizable(true)
-    .on_page_load(move |_window, payload| {
-        let event = match payload.event() {
-            PageLoadEvent::Started => "started",
-            PageLoadEvent::Finished => "finished",
-        };
-        push_log(
-            &logs,
-            format!("Tauri viewer host page load {event}: {}", payload.url()),
-        );
-    })
-    .build()
-    .map_err(|err| format!("Could not open viewer window: {err}"))?;
+    let window = match app.get_webview_window(VIEWER_WINDOW_LABEL) {
+        Some(window) => window,
+        None => tauri::WebviewWindowBuilder::new(
+            &app,
+            VIEWER_WINDOW_LABEL,
+            tauri::WebviewUrl::App("viewer-loading.html".into()),
+        )
+        .title("wsiTools Viewer")
+        .inner_size(1500.0, 950.0)
+        .min_inner_size(960.0, 700.0)
+        .resizable(true)
+        .visible(false)
+        .build()
+        .map_err(|err| format!("Could not create viewer window: {err}"))?,
+    };
+    window
+        .navigate(viewer_url)
+        .map_err(|err| format!("Could not navigate viewer window to {url}: {err}"))?;
+    push_log(
+        &state.logs,
+        format!("Viewer WebView navigation started: {url}"),
+    );
     let _ = window.show();
     let _ = window.set_focus();
     Ok(())
@@ -1922,6 +1921,18 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stale_pid_cleanup_requires_the_recorded_r_launcher() {
+        let script = "/tmp/wsiTools/resources/launch-viewer.R";
+        assert!(is_wsi_rscript_command(
+            "/usr/bin/Rscript /tmp/wsiTools/resources/launch-viewer.R --image sample.svs",
+            script
+        ));
+        assert!(!is_wsi_rscript_command("/usr/bin/other-process --pid 12", script));
+        assert!(!is_wsi_rscript_command("/usr/bin/Rscript /tmp/other.R", script));
+        assert!(!is_wsi_rscript_command("/usr/bin/Rscript /tmp/other.R", ""));
+    }
 
     #[test]
     fn native_launch_waits_for_the_live_sync_url() {

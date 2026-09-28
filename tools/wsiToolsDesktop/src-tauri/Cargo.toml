@@ -1,12 +1,13 @@
 [package]
 name = "wsitools-desktop"
-version = "0.1.9"
+version = "0.1.10"
 description = "Desktop launcher for the wsiTools live viewer"
 authors = ["wsiTools contributors"]
 edition = "2021"
 
 [features]
-default = []
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
 # Kept as a developer-only feature while the browser/OpenSeadragon viewer
 # remains the single supported Desktop interface.
 native-wgpu = ["dep:wgpu", "dep:pollster", "dep:ureq", "dep:winit", "dep:image", "dep:bytemuck", "dep:egui", "dep:egui-wgpu", "dep:egui-winit", "dep:earcutr", "dep:rfd", "dep:geo"]
