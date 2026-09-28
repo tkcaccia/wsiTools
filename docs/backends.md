@@ -122,6 +122,14 @@ sudo apt install -y openslide-tools
 OpenSlide support is backend-dependent. Do not assume every SVS, NDPI, SCN, or
 MRXS variant will open on every machine.
 
+Some large TIFF/OME-TIFF files open with OpenSlide but have JPEG tiles that the
+local libvips TIFF decoder cannot preview. In this case wsiTools can use the
+optional Python `pyvips` module with OpenSlide support to generate a small
+preview and shared low-resolution tiles; close zoom still reads slide regions
+through OpenSlide. Install `pyvips` in the Python environment used by the
+desktop app, or set `WSITOOLS_PYTHON` to that environment's Python executable.
+This is a runtime fallback, not an R package installation requirement.
+
 ## Native CZI
 
 The native CZI backend is intended for faster CZI first visualization without

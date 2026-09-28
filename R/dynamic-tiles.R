@@ -1063,9 +1063,14 @@ wsi_dynamic_level_cache_max_pixels <- function() {
 }
 
 wsi_dynamic_can_cache_vips_level <- function(source, level, region) {
+  backend <- source$slide$backend %||% ""
+  openslide_overview <- identical(backend, "openslide") &&
+    nrow(source$slide$levels %||% data.frame()) == 1L &&
+    region$deepzoom_downsample >= 8 &&
+    wsi_openslide_pyvips_available()
   identical(source$kind %||% "slide", "slide") &&
     isTRUE(wsi_has_vips()) &&
-    identical(source$slide$backend %||% "", "vips") &&
+    (identical(backend, "vips") || openslide_overview) &&
     is.character(source$slide$path) &&
     length(source$slide$path) == 1L &&
     nzchar(source$slide$path) &&
@@ -1113,18 +1118,22 @@ wsi_dynamic_vips_overview_file <- function(source, level_dir) {
   }
   tmp <- tempfile(fileext = ".tif", tmpdir = level_dir)
   on.exit(unlink(tmp, force = TRUE), add = TRUE)
-  wsi_run_command(
-    "vips",
-    args = c(
-      "thumbnail",
-      source$slide$path,
-      tmp,
-      as.character(width),
-      "--size",
-      "down"
-    ),
-    error_message = "libvips failed to create the shared low-resolution slide overview."
-  )
+  if (identical(source$slide$backend, "openslide")) {
+    wsi_openslide_thumbnail_file(source$slide$path, tmp, width = width)
+  } else {
+    wsi_run_command(
+      "vips",
+      args = c(
+        "thumbnail",
+        source$slide$path,
+        tmp,
+        as.character(width),
+        "--size",
+        "down"
+      ),
+      error_message = "libvips failed to create the shared low-resolution slide overview."
+    )
+  }
   if (!file.rename(tmp, overview) &&
       !wsi_dynamic_tile_cache_hit(overview) &&
       !file.copy(tmp, overview, overwrite = FALSE)) {
@@ -1668,7 +1677,8 @@ wsi_dynamic_tile_generate <- function(source, level, region, output, format,
     level = region$level,
     downsample = region$downsample
   )
-  if (wsi_has_vips() && wsi_dynamic_tile_region_is_native(region)) {
+  if (identical(source$slide$backend, "vips") && wsi_has_vips() &&
+      wsi_dynamic_tile_region_is_native(region)) {
     wsi_region_to_file(source$slide, read_region, output, backend = "vips")
     wsi_dynamic_ensure_rgb_tile(output, format)
     return(output)

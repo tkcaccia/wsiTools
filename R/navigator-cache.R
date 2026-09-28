@@ -104,7 +104,8 @@ wsi_navigator_preview_start <- function(slide, output, width = 512L) {
     ),
     supervise = FALSE
   )
-  list(source = source, process = process, cached = FALSE, target = target)
+  list(source = source, process = process, cached = FALSE, target = target,
+       cache_file = cache_file, slide = slide, width = as.integer(width))
 }
 
 wsi_navigator_preview_wait <- function(preview, timeout = 60) {
@@ -128,6 +129,19 @@ wsi_navigator_preview_wait <- function(preview, timeout = 60) {
   if (!isTRUE(ready) &&
       isTRUE(tryCatch(process$is_alive(), error = function(err) FALSE))) {
     try(process$kill(), silent = TRUE)
+  }
+  if (!isTRUE(ready) && identical(preview$slide$backend %||% "", "openslide") &&
+      wsi_openslide_pyvips_available()) {
+    cache_file <- preview$cache_file
+    tmp <- tempfile("navigator-openslide-", tmpdir = dirname(cache_file), fileext = ".jpg")
+    on.exit(unlink(tmp), add = TRUE)
+    ready <- isTRUE(tryCatch({
+      wsi_openslide_thumbnail_file(preview$slide$path, tmp, width = preview$width)
+      if (!file.exists(cache_file) && !file.rename(tmp, cache_file)) {
+        file.copy(tmp, cache_file, overwrite = FALSE)
+      }
+      wsi_navigator_materialize(cache_file, preview$target)
+    }, error = function(err) FALSE))
   }
   isTRUE(ready)
 }

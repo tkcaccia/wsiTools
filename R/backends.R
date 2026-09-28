@@ -334,11 +334,11 @@ wsi_choose_region_backend <- function(slide, backend = c("auto", "vips", "opensl
   if (identical(slide$backend, "native_czi")) {
     return("native_czi")
   }
-  if (wsi_has_vips()) {
-    return("vips")
-  }
   if (identical(slide$backend, "openslide") && wsi_command_exists("openslide-write-png")) {
     return("openslide")
+  }
+  if (wsi_has_vips()) {
+    return("vips")
   }
   if (identical(slide$backend, "bioformats")) {
     return("bioformats")

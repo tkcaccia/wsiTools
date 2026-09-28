@@ -4,7 +4,58 @@ wsi_openslide_properties <- function(path) {
     args = path,
     error_message = sprintf("OpenSlide could not read metadata from `%s`.", path)
   )
-  wsi_parse_key_value(out)
+  properties <- wsi_parse_key_value(out)
+  lapply(properties, function(value) {
+    if (length(value) == 1L && grepl("^'.*'$", value)) {
+      return(substr(value, 2L, nchar(value) - 1L))
+    }
+    value
+  })
+}
+
+wsi_openslide_python <- function() {
+  configured <- Sys.getenv("WSITOOLS_PYTHON", unset = "")
+  if (nzchar(configured)) return(unname(Sys.which(configured)))
+  candidates <- unname(Sys.which(c("python3", "python")))
+  candidates <- candidates[nzchar(candidates)]
+  if (length(candidates)) candidates[[1L]] else ""
+}
+
+wsi_openslide_pyvips_available <- local({
+  cache <- new.env(parent = emptyenv())
+  function() {
+    python <- wsi_openslide_python()
+    if (!nzchar(python)) return(FALSE)
+    if (exists(python, envir = cache, inherits = FALSE)) return(cache[[python]])
+    result <- tryCatch(suppressWarnings(system2(
+      python, args = wsi_system2_args(c("-c", "import pyvips")),
+      stdout = TRUE, stderr = TRUE
+    )), error = function(err) structure(character(), status = 1L))
+    available <- identical(as.integer(attr(result, "status", exact = TRUE) %||% 0L), 0L)
+    cache[[python]] <- available
+    available
+  }
+})
+
+wsi_openslide_thumbnail_file <- function(path, output, width = 512L) {
+  if (!wsi_openslide_pyvips_available()) {
+    wsi_abort("An OpenSlide preview for this TIFF requires Python pyvips (`python3 -m pip install pyvips`).")
+  }
+  script <- paste(
+    "import pyvips, sys",
+    "image = pyvips.Image.openslideload(sys.argv[1])",
+    "image.thumbnail_image(int(sys.argv[3])).write_to_file(sys.argv[2])",
+    sep = "; "
+  )
+  wsi_run_command(
+    wsi_openslide_python(),
+    args = c("-c", script, path, output, as.character(as.integer(width))),
+    error_message = "OpenSlide could not create a low-memory preview with pyvips."
+  )
+  if (!file.exists(output) || file.info(output)$size <= 0) {
+    wsi_abort("OpenSlide did not create the requested preview image.")
+  }
+  invisible(output)
 }
 
 wsi_properties_to_levels <- function(properties) {
@@ -94,12 +145,12 @@ wsi_openslide_read_region_file <- function(slide, region, output) {
   }
   args <- c(
     slide$path,
-    output,
     as.character(region$x),
     as.character(region$y),
     as.character(region$level),
     as.character(region$width),
-    as.character(region$height)
+    as.character(region$height),
+    output
   )
   wsi_run_command(
     "openslide-write-png",

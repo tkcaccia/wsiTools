@@ -100,6 +100,15 @@ wsi_viewer_navigator_data_uri <- function(slide, width = 512) {
   )
   status <- attr(output, "status", exact = TRUE) %||% 0L
   if (!identical(as.integer(status), 0L) || !file.exists(tmp)) {
+    if (identical(slide$backend, "openslide") && wsi_openslide_pyvips_available()) {
+      preview <- tryCatch(
+        wsi_openslide_thumbnail_file(slide$path, tmp, width = width),
+        error = function(err) NULL
+      )
+      if (!is.null(preview)) {
+        return(wsi_image_data_uri(tmp, mime = "image/png"))
+      }
+    }
     wsi_warn(
       sprintf(
         "Skipping navigator preview because libvips did not create it within %s second%s. Full-resolution tiled viewing is still available.",
