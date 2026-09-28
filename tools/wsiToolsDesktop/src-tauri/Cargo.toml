@@ -19,8 +19,8 @@ tauri-build = { version = "2", features = [] }
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri = { version = "2", features = [] }
-tauri-plugin-dialog = "2"
+tauri = { version = "=2.12.0", features = [] }
+tauri-plugin-dialog = "=2.8.0"
 pollster = { version = "0.4", optional = true }
 # The native renderer only connects to the local httpuv `http://127.0.0.1`
 # service. Disabling TLS avoids pulling a platform-specific crypto toolchain
