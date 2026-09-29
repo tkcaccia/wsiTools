@@ -1933,10 +1933,13 @@ desktop_create_dynamic_project_source <- function(slide, index, log_file,
                                                   active = FALSE,
                                                   tile_format = "jpg") {
   source_id <- desktop_project_source_id(slide$path %||% sprintf("image_%d", index), index)
+  levels <- slide$levels
+  tile_size <- if (identical(slide$backend, "vips") && is.data.frame(levels) &&
+                   "subifd" %in% names(levels) && any(is.finite(levels$subifd))) 1024L else 512L
   source <- wsiTools::wsi_dynamic_tile_source(
     slide,
     slide_id = source_id,
-    tile_size = 512,
+    tile_size = tile_size,
     tile_overlap = 1,
     format = tile_format,
     persistent_cache = TRUE
@@ -1957,7 +1960,7 @@ desktop_create_dynamic_project_source <- function(slide, index, log_file,
   desktop_log(
     "Using live dynamic tiles for ",
     label,
-    ".",
+    " (", source$tile_size, " px).",
     log_file = log_file
   )
   source

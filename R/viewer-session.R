@@ -7250,6 +7250,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   dynamic_project_sources <- wsi_dynamic_channel_sources(project_tile_sources)
   dynamic_source <- NULL
   if (isTRUE(dynamic_tiles)) {
+    dynamic_tile_size <- dots$tile_size %||% wsi_dynamic_preferred_tile_size(slide)
     dots$tile_image_loader_limit <- dots$tile_image_loader_limit %||% 4L
     dots$tile_prefetch_margin <- dots$tile_prefetch_margin %||% 0L
     dots$tile_prefetch_cache_count <- dots$tile_prefetch_cache_count %||% 0L
@@ -7257,11 +7258,15 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
     dynamic_source <- wsi_dynamic_tile_source(
       slide,
       slide_id = wsi_safe_id(name, "slide"),
+      tile_size = dynamic_tile_size,
       format = dynamic_tile_format,
       cache_dir = dynamic_tile_cache_dir,
       route = dynamic_tile_path,
       persistent_cache = dynamic_tile_persistent_cache
     )
+    if (is.null(dots$tile_cache_count) && dynamic_source$tile_size > 512L) {
+      dots$tile_cache_count <- max(64L, as.integer(floor(768 * (512 / dynamic_source$tile_size)^2)))
+    }
   }
   requested_stain <- dots$stain %||% "none"
   dynamic_stain_sources <- NULL

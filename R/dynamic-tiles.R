@@ -302,6 +302,15 @@ wsi_dynamic_tile_route <- function(route = "/tiles") {
   sub("/+$", "", route)
 }
 
+wsi_dynamic_preferred_tile_size <- function(slide) {
+  levels <- slide$levels
+  if (identical(slide$backend, "vips") && is.data.frame(levels) &&
+      "subifd" %in% names(levels) && any(is.finite(levels$subifd))) {
+    return(1024L)
+  }
+  512L
+}
+
 #' Create metadata for live on-demand viewer tiles
 #'
 #' `wsi_dynamic_tile_source()` describes an RGB OpenSeadragon tile endpoint used
