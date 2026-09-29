@@ -79,6 +79,18 @@ jobs:
           extra-packages: any::rcmdcheck
           needs: check
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Check browser geometry and synchronization contracts
+        shell: bash
+        run: |
+          node tests/browser/geometry-worker.cjs
+          node tests/browser/component-cache.cjs
+          node tests/browser/edit-transactions.cjs
+          node tests/browser/sync-patches.cjs
+
       - name: Report optional runtime tools
         shell: Rscript {0}
         run: |

@@ -382,10 +382,14 @@ wsi_static_channel_sources <- function(channel_sources = NULL) {
 }
 
 wsi_live_channel_sources <- function(channel_sources = NULL, base_url = NULL,
-                                     output = NULL) {
+                                     output = NULL, auth_token = NULL) {
+  dynamic <- lapply(wsi_dynamic_channel_sources(channel_sources), function(source) {
+    source$access_token <- auth_token
+    source
+  })
   sources <- c(
     wsi_static_channel_sources(channel_sources),
-    lapply(wsi_dynamic_channel_sources(channel_sources), wsi_channel_source_from_dynamic, base_url = base_url)
+    lapply(dynamic, wsi_channel_source_from_dynamic, base_url = base_url)
   )
   wsi_rebase_static_channel_sources(sources, output = output)
 }

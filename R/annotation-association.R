@@ -33,6 +33,8 @@ wsi_associate_annotations <- function(points, rois, ids = NULL, include_all = TR
   }
   points <- wsi_annotation_points(points)
   indices <- wsi_prediction_selected_roi_indices(rois, ids, include_all = include_all)
+  indices <- indices[tolower(as.character(rois$geometry_type[indices])) %in%
+                       c("polygon", "multipolygon")]
   assigned <- rep(NA_integer_, nrow(points))
   if (length(indices) && nrow(points)) {
     assigned <- wsi_annotation_assign_indices(points, rois, indices, engine = engine)
@@ -164,9 +166,11 @@ wsi_annotate_seurat <- function(seurat, annotations, output = NULL,
     y = NA_real_,
     annotation_id = NA_character_,
     annotation_name = NA_character_,
-    annotation_class = unassigned,
+    annotation_class = meta$wsi_annotation %||% rep(unassigned, nrow(meta)),
     stringsAsFactors = FALSE
   )
+  full$annotation_id <- meta$wsi_annotation_id %||% full$annotation_id
+  full$annotation_name <- meta$wsi_annotation_name %||% full$annotation_name
   destination <- match(association$point_id, cell_ids)
   keep <- !is.na(destination)
   destination <- destination[keep]
@@ -188,7 +192,10 @@ wsi_annotate_seurat <- function(seurat, annotations, output = NULL,
   meta$wsi_annotation_name <- full$annotation_name
   seurat <- wsi_spatial_object_set_slot(seurat, "meta.data", meta)
 
-  assigned <- !is.na(full$annotation_id)
+  current <- full[matched_coordinates, , drop = FALSE]
+  current$image_name <- rep(as.character(attr(coordinates, "image_name", exact = TRUE) %||%
+                                          image_name %||% ""), nrow(current))
+  assigned <- !is.na(current$annotation_id) & nzchar(current$annotation_id)
   misc <- tryCatch(wsi_seurat_slot(seurat, "misc"), error = function(err) NULL)
   if (is.null(misc) || !is.list(misc)) {
     misc <- list()
@@ -200,7 +207,8 @@ wsi_annotate_seurat <- function(seurat, annotations, output = NULL,
     image_name = attr(coordinates, "image_name", exact = TRUE) %||% image_name,
     coordinate_source = attr(coordinates, "coordinate_source", exact = TRUE),
     assigned_at = Sys.time(),
-    cells = nrow(full),
+    cells = nrow(current),
+    object_cells = nrow(full),
     assigned = sum(assigned),
     unassigned = sum(!assigned),
     area_annotations = nrow(annotations),
@@ -213,7 +221,7 @@ wsi_annotate_seurat <- function(seurat, annotations, output = NULL,
     if (!grepl("\\.csv$", association_csv, ignore.case = TRUE)) {
       wsi_abort("`association_csv` must end in `.csv`.")
     }
-    wsi_write_annotation_associations(full, association_csv)
+    wsi_write_annotation_associations(current, association_csv)
   }
   if (!is.null(output)) {
     output <- wsi_validate_output_path(output, overwrite = overwrite)
@@ -227,7 +235,7 @@ wsi_annotate_seurat <- function(seurat, annotations, output = NULL,
       "v" = sprintf(
         "Associated %s of %s cells with %s area annotations; %s cells are `%s`.",
         format(sum(assigned), big.mark = ","),
-        format(nrow(full), big.mark = ","),
+        format(nrow(current), big.mark = ","),
         format(nrow(annotations), big.mark = ","),
         format(sum(!assigned), big.mark = ","),
         unassigned

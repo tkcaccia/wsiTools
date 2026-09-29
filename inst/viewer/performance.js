@@ -1,6 +1,7 @@
 const wsiGeometryCache = new WeakMap();
 const wsiReusableGeometryParts = new WeakMap();
 const wsiSnapshotCache = new WeakMap();
+const wsiRoiViewportIndexes = new WeakMap();
 const wsiWorkerSourceVersions = new Map();
 const wsiGeometryJobs = new Map();
 let wsiGeometryWorker = null, wsiGeometryJobId = 0, wsiEditPromise = null;
@@ -8,6 +9,8 @@ let wsiBrushPriorityClaim = false, wsiBrushPriorityDown = false;
 let wsiEditGeneration = 0;
 let wsiInteractionCanvas = null, wsiInteractionQueued = false, wsiRoiSequence = 0;
 let wsiAnnotationEpoch = 0;
+let wsiGeometryChangeSequence = 0;
+const wsiGeometryChanges = [];
 let wsiDirtyPanes = new Set(), wsiAllPanesDirty = false;
 const wsiRuntimeMetrics = { cursor_frames: 0, cursor_max_ms: 0, geometry_jobs: 0,
   geometry_worker_ms: 0, geometry_commit_ms: 0, path_builds: 0, pane_draws: 0,
@@ -42,7 +45,8 @@ function wsiInvalidateGeometry(roi) {
     writable: true, configurable: true, enumerable: false });
   wsiGeometryCache.delete(roi);
   wsiReusableGeometryParts.delete(roi);
-  wsiAnnotationEpoch++;
+  wsiGeometryChanges.push({ sequence: ++wsiGeometryChangeSequence, roi });
+  if (wsiGeometryChanges.length > 64) wsiGeometryChanges.shift();
 }
 
 function wsiGeometrySignature(roi) {
@@ -99,6 +103,98 @@ function wsiCanvasTransform(project) {
   return [x.x - p.x, x.y - p.y, y.x - p.x, y.y - p.y, p.x, p.y];
 }
 
+function wsiIndexPlaceEntry(index, entry) {
+  entry.cellKeys = [];
+  if (!entry.bounds || !index.extent) return;
+  const { extent, columns, rows, cells, broad } = index;
+  const width = Math.max(1, extent.xmax - extent.xmin);
+  const height = Math.max(1, extent.ymax - extent.ymin);
+  const column = x => Math.max(0, Math.min(columns - 1, Math.floor((x - extent.xmin) / width * columns)));
+  const row = y => Math.max(0, Math.min(rows - 1, Math.floor((y - extent.ymin) / height * rows)));
+  const c0 = column(entry.bounds.xmin), c1 = column(entry.bounds.xmax);
+  const r0 = row(entry.bounds.ymin), r1 = row(entry.bounds.ymax);
+  if ((c1 - c0 + 1) * (r1 - r0 + 1) > 256) {
+    broad.push(entry);
+    entry.broad = true;
+    return;
+  }
+  entry.broad = false;
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+    const key = r * columns + c;
+    if (!cells.has(key)) cells.set(key, []);
+    cells.get(key).push(entry);
+    entry.cellKeys.push(key);
+  }
+}
+
+function wsiIndexRemoveEntry(index, entry) {
+  if (entry.broad) {
+    const position = index.broad.indexOf(entry);
+    if (position >= 0) index.broad.splice(position, 1);
+  }
+  for (const key of entry.cellKeys || []) {
+    const cell = index.cells.get(key);
+    if (!cell) continue;
+    const position = cell.indexOf(entry);
+    if (position >= 0) cell.splice(position, 1);
+    if (!cell.length) index.cells.delete(key);
+  }
+  entry.cellKeys = [];
+}
+
+function wsiVisibleRoiEntries(list, view) {
+  if (!Array.isArray(list) || list.length < 200 || !view) {
+    return (list || []).map((roi, index) => ({ roi, index })).filter(entry => {
+      const bounds = roiBounds(entry.roi);
+      return bounds && (!view || boundsOverlap(bounds, view));
+    });
+  }
+  let index = wsiRoiViewportIndexes.get(list);
+  if (!index || index.epoch !== wsiAnnotationEpoch ||
+      index.sequence < wsiGeometryChangeSequence - wsiGeometryChanges.length ||
+      index.length !== list.length ||
+      index.first !== list[0] || index.last !== list[list.length - 1]) {
+    const entries = list.map((roi, position) => ({ roi, index: position, bounds: roiBounds(roi) }));
+    let extent = null;
+    entries.forEach(entry => { if (entry.bounds) extent = unionBounds(extent, entry.bounds); });
+    index = { epoch: wsiAnnotationEpoch, sequence: wsiGeometryChangeSequence,
+      length: list.length, first: list[0], last: list[list.length - 1],
+      extent, columns: 32, rows: 32, cells: new Map(), broad: [],
+      byRoi: new Map() };
+    entries.forEach(entry => {
+      if (!index.byRoi.has(entry.roi)) index.byRoi.set(entry.roi, []);
+      index.byRoi.get(entry.roi).push(entry);
+      wsiIndexPlaceEntry(index, entry);
+    });
+    wsiRoiViewportIndexes.set(list, index);
+  } else if (index.sequence !== wsiGeometryChangeSequence) {
+    for (const change of wsiGeometryChanges) {
+      if (change.sequence <= index.sequence) continue;
+      for (const entry of index.byRoi.get(change.roi) || []) {
+        wsiIndexRemoveEntry(index, entry);
+        entry.bounds = roiBounds(entry.roi);
+        if (!index.extent && entry.bounds) {
+          wsiRoiViewportIndexes.delete(list);
+          return wsiVisibleRoiEntries(list, view);
+        }
+        wsiIndexPlaceEntry(index, entry);
+      }
+    }
+    index.sequence = wsiGeometryChangeSequence;
+  }
+  if (!index.extent) return [];
+  const { extent, columns, rows, cells, broad } = index;
+  const col = x => Math.max(0, Math.min(columns - 1, Math.floor((x - extent.xmin) / Math.max(1, extent.xmax - extent.xmin) * columns)));
+  const row = y => Math.max(0, Math.min(rows - 1, Math.floor((y - extent.ymin) / Math.max(1, extent.ymax - extent.ymin) * rows)));
+  const found = new Map();
+  broad.forEach(entry => found.set(entry.index, entry));
+  for (let r = row(view.ymin); r <= row(view.ymax); r++) for (let c = col(view.xmin); c <= col(view.xmax); c++) {
+    (cells.get(r * columns + c) || []).forEach(entry => found.set(entry.index, entry));
+  }
+  return [...found.values()].filter(entry => entry.roi === list[entry.index] &&
+    boundsOverlap(entry.bounds, view)).sort((a, b) => a.index - b.index);
+}
+
 function wsiPaintRoi(cx, roi, index, project, viewBounds, selected, highlighted, dimmed) {
   const transform = wsiCanvasTransform(project), unit = Math.max(1e-9, Math.hypot(transform[0], transform[1]));
   const parts = wsiCachedGeometry(roi).parts.filter(part => !viewBounds || boundsOverlap(part.bounds, viewBounds));
@@ -124,7 +220,7 @@ function wsiDrawRois() {
   if (!screenshotIncludeComponent('annotations') || !showRois || !rois.length) return;
   const viewBounds = roiVisibleSlideBounds(.10), labels = [], highlightActive = annotationHighlightActive();
   ctx.save(); ctx.font = '600 12px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif'; ctx.textBaseline = 'top';
-  rois.forEach((roi, index) => {
+  wsiVisibleRoiEntries(rois, viewBounds).forEach(({ roi, index }) => {
     if (!visibleRoi(roi) || !isDrawable(roi) || !denseGeometryVisible(roi) || !overlayFocusRoiAllowed(roi)) return;
     const bounds = roiBounds(roi);
     if (!bounds || !boundsOverlap(bounds, viewBounds)) return;
@@ -165,9 +261,15 @@ function wsiDrawPaneRois(cx, pane, state, rect) {
   if (!screenshotIncludeComponent('annotations') || !showRois) return;
   const list = state.rois || [], bounds = multiViewVisibleSlideBounds(pane), labels = [];
   const highlightActive = annotationHighlightActive();
+  const viewport = pane && pane.viewer && pane.viewer.viewport;
+  const paneZoom = viewport && typeof viewport.getHomeZoom === 'function'
+    ? viewport.getZoom(true) / Math.max(viewport.getHomeZoom(), 1e-9) : Infinity;
   cx.save(); cx.font = '600 12px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif'; cx.textBaseline = 'top';
-  list.forEach((roi, index) => {
+  wsiVisibleRoiEntries(list, bounds).forEach(({ roi, index }) => {
     if (!visibleRoi(roi) || !isDrawable(roi) || !overlayFocusRoiAllowed(roi)) return;
+    if (!tissueAnnotationRoi(roi) && denseGeometryRoi(roi) &&
+        index !== Number(state.selectedRoi) && !roiClassHighlighted(roi) &&
+        paneZoom < denseGeometryMinZoom()) return;
     if (!boundsOverlap(roiBounds(roi), bounds)) return;
     const selected = index === Number(state.selectedRoi), highlighted = roiClassHighlighted(roi), dimmed = highlightActive && !highlighted;
     wsiPaintRoi(cx, roi, index, p => multiViewSlideToCanvas(p, pane), bounds, selected, highlighted, dimmed);

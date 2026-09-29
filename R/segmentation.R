@@ -1186,12 +1186,38 @@ wsi_http_json_response <- function(status = 200L, body = list(), content_type = 
   )
 }
 
+wsi_max_request_bytes <- function() {
+  max_bytes <- getOption("wsiTools.max_request_bytes", 512 * 1024^2)
+  if (!is.numeric(max_bytes) || length(max_bytes) != 1L || !is.finite(max_bytes) || max_bytes < 1) {
+    wsi_abort("`wsiTools.max_request_bytes` must be a positive finite number.")
+  }
+  max_bytes
+}
+
+wsi_check_request_body_size <- function(body) {
+  if (!is.character(body) || length(body) != 1L || is.na(body) ||
+      nchar(body, type = "bytes") > wsi_max_request_bytes()) {
+    wsi_abort("Viewer request exceeds the configured maximum body size.")
+  }
+  body
+}
+
 wsi_http_request_body <- function(req) {
   input <- req$rook.input
   if (is.null(input) || !is.function(input$read)) {
     return("")
   }
-  body <- input$read()
+  max_bytes <- wsi_max_request_bytes()
+  declared <- suppressWarnings(as.numeric(req$CONTENT_LENGTH %||% NA_real_))
+  if (length(declared) == 1L && is.finite(declared) && declared > max_bytes) {
+    wsi_abort("Viewer request exceeds the configured maximum body size.")
+  }
+  body <- input$read(as.integer(min(max_bytes + 1, .Machine$integer.max)))
+  body_bytes <- if (is.raw(body)) length(body) else
+    sum(nchar(as.character(body), type = "bytes"), na.rm = TRUE)
+  if (body_bytes > max_bytes) {
+    wsi_abort("Viewer request exceeds the configured maximum body size.")
+  }
   if (is.raw(body)) {
     return(rawToChar(body))
   }
@@ -1202,6 +1228,7 @@ wsi_http_query_params <- function(query = NULL) {
   if (is.null(query) || !nzchar(query)) {
     return(list())
   }
+  query <- sub("^\\?", "", query)
   parts <- strsplit(query, "&", fixed = TRUE)[[1L]]
   values <- list()
   for (part in parts) {
@@ -1216,6 +1243,43 @@ wsi_http_query_params <- function(query = NULL) {
     }
   }
   values
+}
+
+wsi_viewer_session_token <- function() {
+  bytes <- if (requireNamespace("openssl", quietly = TRUE)) {
+    openssl::rand_bytes(32L)
+  } else if (.Platform$OS.type != "windows" && file.exists("/dev/urandom")) {
+    con <- file("/dev/urandom", "rb")
+    on.exit(close(con), add = TRUE)
+    readBin(con, "raw", n = 32L)
+  } else {
+    command <- paste0(
+      "$b=New-Object byte[] 32;",
+      "[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b);",
+      "[System.BitConverter]::ToString($b).Replace('-','').ToLowerInvariant()"
+    )
+    result <- tryCatch(
+      suppressWarnings(system2("powershell.exe", c("-NoProfile", "-NonInteractive", "-Command", shQuote(command)), stdout = TRUE, stderr = FALSE)),
+      error = function(err) character()
+    )
+    hex <- trimws(paste(result, collapse = ""))
+    if (!grepl("^[0-9a-f]{64}$", hex)) {
+      wsi_abort("Could not generate a secure viewer token on Windows. Install the R `openssl` package or enable PowerShell.")
+    }
+    return(hex)
+  }
+  paste(sprintf("%02x", as.integer(bytes)), collapse = "")
+}
+
+wsi_viewer_auth_url <- function(url, token) {
+  if (is.null(url) || is.null(token)) return(url)
+  paste0(url, if (grepl("?", url, fixed = TRUE)) "&" else "?", "wsitools_token=", token)
+}
+
+wsi_viewer_request_authorized <- function(req, token) {
+  if (is.null(token)) return(TRUE)
+  query <- wsi_http_query_params(req$QUERY_STRING %||% "")
+  identical(query$wsitools_token %||% NULL, token)
 }
 
 #' Start a local ROI cell-segmentation endpoint
@@ -1251,6 +1315,7 @@ wsi_http_query_params <- function(query = NULL) {
 #' @param state Optional live viewer state. When supplied, the endpoint records
 #'   the selected ROI and imported segmentation directly in the R session before
 #'   returning the overlay to the browser.
+#' @param auth_token Optional session token shared with a live viewer.
 #' @param wait If `TRUE`, run the httpuv event loop until interrupted.
 #'
 #' @return A `wsi_stardist_server` object with the service URL.
@@ -1302,6 +1367,7 @@ wsi_stardist_server <- function(image,
                                 backend = c("auto", "vips", "openslide"),
                                 cell_radius = 8,
                                 state = NULL,
+                                auth_token = NULL,
                                 wait = FALSE) {
   if (!requireNamespace("httpuv", quietly = TRUE)) {
     wsi_abort(
@@ -1337,6 +1403,7 @@ wsi_stardist_server <- function(image,
   if (!is.null(state) && !inherits(state, "wsi_viewer_state")) {
     wsi_abort("`state` must be `NULL` or a live `wsi_viewer_state` object.")
   }
+  auth_token <- auth_token %||% wsi_viewer_session_token()
 
   app <- list(
     call = function(req) {
@@ -1347,6 +1414,9 @@ wsi_stardist_server <- function(image,
       }
       if (!identical(request_path, path)) {
         return(wsi_http_json_response(status = 404L, body = list(error = "Not found.")))
+      }
+      if (!wsi_viewer_request_authorized(req, auth_token)) {
+        return(wsi_http_json_response(status = 403L, body = list(error = "Viewer session token is missing or invalid.")))
       }
       if (!identical(method, "POST")) {
         return(wsi_http_json_response(status = 405L, body = list(error = "Use POST with selected ROI GeoJSON.")))
@@ -1457,7 +1527,7 @@ wsi_stardist_server <- function(image,
       last_error %||% "unknown error"
     ))
   }
-  url <- sprintf("http://%s:%d%s", host, used_port, path)
+  url <- wsi_viewer_auth_url(sprintf("http://%s:%d%s", host, used_port, path), auth_token)
   out <- structure(
     list(
       server = server,
@@ -1471,8 +1541,8 @@ wsi_stardist_server <- function(image,
     ),
     class = "wsi_stardist_server"
   )
-  message("wsiTools cell segmentation endpoint listening at ", url)
-  message("Create the viewer with `segmentation_run_url = \"", url, "\"`.")
+  message("wsiTools cell segmentation endpoint listening at ", sub("\\?.*$", "", url), " (session-authenticated)")
+  message("Create the viewer with `segmentation_run_url = server$url`.")
   if (isTRUE(wait)) {
     message("Press Ctrl+C or Esc to stop the cell segmentation endpoint.")
     on.exit(httpuv::stopServer(server), add = TRUE)

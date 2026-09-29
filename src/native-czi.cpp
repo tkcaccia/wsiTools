@@ -4,11 +4,14 @@
 #include <R_ext/Rdynload.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #ifdef _WIN32
@@ -932,12 +935,83 @@ extern "C" SEXP wsi_assign_points_to_polygons_cpp(SEXP x_, SEXP y_, SEXP polygon
   }
   SEXP out = PROTECT(Rf_allocVector(INTSXP, n_points));
   int* assigned = INTEGER(out);
+  std::unordered_map<uint64_t, std::vector<int>> cells;
+  std::vector<int> broad;
+  double origin_x = 0.0, origin_y = 0.0, cell_width = 1.0, cell_height = 1.0;
+  int cols = 1, rows = 1;
+  const bool indexed = bbox != nullptr && n_rois >= 24 && n_points >= 128;
+  if (indexed) {
+    double min_x = std::numeric_limits<double>::infinity();
+    double min_y = min_x;
+    double max_x = -min_x, max_y = -min_x;
+    for (R_xlen_t r = 0; r < n_rois; ++r) {
+      double x0 = bbox[r], y0 = bbox[r + bbox_rows];
+      double x1 = bbox[r + 2 * bbox_rows], y1 = bbox[r + 3 * bbox_rows];
+      if (!R_finite(x0) || !R_finite(y0) || !R_finite(x1) || !R_finite(y1)) {
+        broad.push_back(static_cast<int>(r));
+        continue;
+      }
+      min_x = std::min(min_x, x0); min_y = std::min(min_y, y0);
+      max_x = std::max(max_x, x1); max_y = std::max(max_y, y1);
+    }
+    if (R_finite(min_x)) {
+      const double width = std::max(1.0, max_x - min_x);
+      const double height = std::max(1.0, max_y - min_y);
+      const double target = std::sqrt(std::max(1.0, static_cast<double>(n_rois) / 24.0));
+      cols = std::max(1, std::min(512, static_cast<int>(std::round(target * std::sqrt(width / height)))));
+      rows = std::max(1, std::min(512, static_cast<int>(std::round(target * std::sqrt(height / width)))));
+      origin_x = min_x; origin_y = min_y;
+      cell_width = width / cols; cell_height = height / rows;
+      const auto cell = [](double v, double origin, double size, int count) {
+        const double raw = std::floor((v - origin) / size);
+        if (raw <= 0) return 0;
+        if (raw >= count - 1) return count - 1;
+        return static_cast<int>(raw);
+      };
+      for (R_xlen_t r = 0; r < n_rois; ++r) {
+        double x0 = bbox[r], y0 = bbox[r + bbox_rows];
+        double x1 = bbox[r + 2 * bbox_rows], y1 = bbox[r + 3 * bbox_rows];
+        if (!R_finite(x0) || !R_finite(y0) || !R_finite(x1) || !R_finite(y1)) continue;
+        const int c0 = cell(x0, min_x, cell_width, cols), c1 = cell(x1, min_x, cell_width, cols);
+        const int r0 = cell(y0, min_y, cell_height, rows), r1 = cell(y1, min_y, cell_height, rows);
+        if ((c1 - c0 + 1) * (r1 - r0 + 1) > 256) {
+          broad.push_back(static_cast<int>(r));
+          continue;
+        }
+        for (int row = r0; row <= r1; ++row) {
+          for (int col = c0; col <= c1; ++col) {
+            const uint64_t key = (static_cast<uint64_t>(row) << 32U) | static_cast<uint32_t>(col);
+            cells[key].push_back(static_cast<int>(r));
+          }
+        }
+      }
+    }
+  }
   for (R_xlen_t p = 0; p < n_points; ++p) {
     assigned[p] = NA_INTEGER;
     if (!R_finite(x[p]) || !R_finite(y[p])) {
       continue;
     }
-    for (R_xlen_t r = 0; r < n_rois; ++r) {
+    std::vector<int> candidates;
+    if (indexed && R_finite(origin_x)) {
+      candidates = broad;
+      const auto cell = [](double v, double origin, double size, int count) {
+        const double raw = std::floor((v - origin) / size);
+        if (raw <= 0) return 0;
+        if (raw >= count - 1) return count - 1;
+        return static_cast<int>(raw);
+      };
+      const int col = cell(x[p], origin_x, cell_width, cols);
+      const int row = cell(y[p], origin_y, cell_height, rows);
+      const uint64_t key = (static_cast<uint64_t>(row) << 32U) | static_cast<uint32_t>(col);
+      const auto found = cells.find(key);
+      if (found != cells.end()) candidates.insert(candidates.end(), found->second.begin(), found->second.end());
+      std::sort(candidates.begin(), candidates.end());
+      candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
+    }
+    const R_xlen_t count = indexed ? static_cast<R_xlen_t>(candidates.size()) : n_rois;
+    for (R_xlen_t i = 0; i < count; ++i) {
+      const R_xlen_t r = indexed ? candidates[i] : i;
       if (bbox != nullptr) {
         double xmin = bbox[r];
         double ymin = bbox[r + bbox_rows];
@@ -971,6 +1045,7 @@ extern "C" SEXP wsi_assign_points_to_polygons_cpp(SEXP x_, SEXP y_, SEXP polygon
 extern "C" SEXP wsi_bbox_index_build_cpp(SEXP bbox_);
 extern "C" SEXP wsi_bbox_index_query_cpp(SEXP pointer_, SEXP xmin_, SEXP ymin_,
                                            SEXP xmax_, SEXP ymax_);
+extern "C" SEXP wsi_atomic_replace_file(SEXP staged_, SEXP output_);
 
 static const R_CallMethodDef CallEntries[] = {
   {"wsi_native_czi_available", reinterpret_cast<DL_FUNC>(&wsi_native_czi_available), 0},
@@ -983,6 +1058,7 @@ static const R_CallMethodDef CallEntries[] = {
   {"wsi_assign_points_to_polygons_cpp", reinterpret_cast<DL_FUNC>(&wsi_assign_points_to_polygons_cpp), 4},
   {"wsi_bbox_index_build_cpp", reinterpret_cast<DL_FUNC>(&wsi_bbox_index_build_cpp), 1},
   {"wsi_bbox_index_query_cpp", reinterpret_cast<DL_FUNC>(&wsi_bbox_index_query_cpp), 5},
+  {"wsi_atomic_replace_file", reinterpret_cast<DL_FUNC>(&wsi_atomic_replace_file), 2},
   {NULL, NULL, 0}
 };
 

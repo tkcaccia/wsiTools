@@ -35,6 +35,7 @@ wsi_stardist_server(
   backend = c("auto", "vips", "openslide"),
   cell_radius = 8,
   state = NULL,
+  auth_token = NULL,
   wait = FALSE
 )
 }
@@ -72,6 +73,8 @@ GeoJSON overlays.}
 \item{state}{Optional live viewer state. When supplied, the endpoint records
 the selected ROI and imported segmentation directly in the R session before
 returning the overlay to the browser.}
+
+\item{auth_token}{Optional session token shared with a live viewer.}
 
 \item{wait}{If \code{TRUE}, run the httpuv event loop until interrupted.}
 }

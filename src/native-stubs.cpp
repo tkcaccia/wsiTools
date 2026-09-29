@@ -158,6 +158,7 @@ extern "C" SEXP wsi_assign_points_to_polygons_cpp(SEXP x_, SEXP y_, SEXP polygon
 extern "C" SEXP wsi_bbox_index_build_cpp(SEXP bbox_);
 extern "C" SEXP wsi_bbox_index_query_cpp(SEXP pointer_, SEXP xmin_, SEXP ymin_,
                                            SEXP xmax_, SEXP ymax_);
+extern "C" SEXP wsi_atomic_replace_file(SEXP staged_, SEXP output_);
 
 static const R_CallMethodDef CallEntries[] = {
   {"wsi_native_czi_available", reinterpret_cast<DL_FUNC>(&wsi_native_czi_available), 0},
@@ -170,6 +171,7 @@ static const R_CallMethodDef CallEntries[] = {
   {"wsi_assign_points_to_polygons_cpp", reinterpret_cast<DL_FUNC>(&wsi_assign_points_to_polygons_cpp), 4},
   {"wsi_bbox_index_build_cpp", reinterpret_cast<DL_FUNC>(&wsi_bbox_index_build_cpp), 1},
   {"wsi_bbox_index_query_cpp", reinterpret_cast<DL_FUNC>(&wsi_bbox_index_query_cpp), 5},
+  {"wsi_atomic_replace_file", reinterpret_cast<DL_FUNC>(&wsi_atomic_replace_file), 2},
   {NULL, NULL, 0}
 };
 

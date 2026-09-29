@@ -7,11 +7,13 @@
   the retained contour uses a lower vertex budget without losing slide-space
   alignment.
 
-- Dense vector annotations now remain visible at every zoom. Distant views use
-  a bounded spatial sample with lightweight bounds, while closer views request
-  progressively detailed local polygons without changing the stored geometry.
-- wsiTools Desktop 0.1.9 includes the all-zoom dense-annotation overview in
-  both browser- and Tauri-launched live viewers.
+- Dense vector annotations now remain visible at overview zoom. Distant views
+  use a bounded spatial sample with lightweight bounds, while views at 2.5x
+  and above use the stored polygon boundary without changing the source
+  geometry.
+- wsiTools Desktop 0.1.10 carries the same annotation metadata and overview
+  LOD behavior in both browser- and Tauri-launched live viewers on Windows,
+  Linux and macOS.
 
 - Fixed the New ROI category control so selecting a category deselects the
   current annotation and arms a separate Brush, Draw, or Magic Wand ROI while
@@ -182,3 +184,6 @@
 - Improved multi-view drag/drop so project images with sections resolve to a displayable section and browser-readable files dropped directly onto a pane are added to the project and opened in that pane.
 - Fixed viewer screenshot export to composite the OpenSeadragon tissue canvas/tiles before drawing visible ROIs, trajectories, annotations, and overlays, with a preview fallback instead of silently saving a white image.
 - Reorganized the Help dialog so Keyboard Shortcuts and Full Guide open as separate help pages instead of appearing together in one long panel.
+- wsiTools Desktop 0.1.10 preserves tissue-annotation metadata in the desktop
+  R-to-browser bridge, so GeoJSON tissue boundaries remain visible at overview
+  zoom on Linux, Windows, and macOS.

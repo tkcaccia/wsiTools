@@ -802,6 +802,12 @@ wsi_dynamic_tile_metadata <- function(source, base_url = NULL) {
     template <- templates[[1L]]
     tile_path <- tile_paths[[1L]]
   }
+  if (!is.null(source$access_token)) {
+    template <- wsi_viewer_auth_url(template, source$access_token)
+    if (!is.null(templates)) {
+      templates <- vapply(templates, wsi_viewer_auth_url, character(1), token = source$access_token)
+    }
+  }
   list(
     id = source$id,
     type = "dynamic",
@@ -1614,7 +1620,7 @@ wsi_dynamic_tile_cache_touch <- function(path, min_age = 3600) {
   invisible(path)
 }
 
-wsi_dynamic_tile_lock <- function(output, wait_seconds = 5, stale_seconds = 180) {
+wsi_dynamic_tile_lock <- function(output, wait_seconds = 25, stale_seconds = 180) {
   lock <- paste0(output, ".lock")
   deadline <- Sys.time() + wait_seconds
   repeat {
@@ -1632,7 +1638,7 @@ wsi_dynamic_tile_lock <- function(output, wait_seconds = 5, stale_seconds = 180)
       next
     }
     if (Sys.time() >= deadline) {
-      return(list(path = lock, acquired = FALSE))
+      return(list(path = lock, acquired = FALSE, busy = TRUE))
     }
     Sys.sleep(0.05)
   }
@@ -1715,6 +1721,8 @@ wsi_dynamic_tile_file <- function(source, level, col, row, format = NULL,
   } else if (wsi_dynamic_tile_cache_hit(output)) {
     wsi_dynamic_tile_cache_touch(output)
     return(output)
+  } else {
+    wsi_abort("Tile generation is still in progress; retry this tile shortly.", class = "wsi_tile_busy")
   }
 
   region <- wsi_dynamic_tile_region(source, level, col, row)

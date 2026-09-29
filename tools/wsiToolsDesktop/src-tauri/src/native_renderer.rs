@@ -306,6 +306,7 @@ where
 #[derive(Clone, Debug)]
 pub struct NativeTileEndpoint {
     base_url: String,
+    auth_query: String,
     tile_route: String,
     state_route: String,
     state_snapshot_route: String,
@@ -339,6 +340,7 @@ impl NativeTileEndpoint {
         }
         Ok(Self {
             base_url: format!("{}://{authority}", &trimmed[..scheme_end]),
+            auth_query: native_viewer_auth_query(trimmed),
             tile_route: route.to_string(),
             state_route: manifest.state_route.trim_matches('/').to_string(),
             state_snapshot_route: manifest.state_snapshot_route.trim_matches('/').to_string(),
@@ -354,14 +356,15 @@ impl NativeTileEndpoint {
 
     pub fn url(&self, source: &NativeTileSource, key: TileKey) -> String {
         format!(
-            "{}/{}/{}/{}/{}/{}.{}",
+            "{}/{}/{}/{}/{}/{}.{}{}",
             self.base_url,
             self.tile_route,
             source.id,
             key.level,
             key.column,
             key.row,
-            source.tile_format
+            source.tile_format,
+            self.auth_query
         )
     }
 
@@ -369,7 +372,7 @@ impl NativeTileEndpoint {
         if self.state_route.is_empty() {
             return Err("Native renderer manifest did not provide a state route.".to_string());
         }
-        Ok(format!("{}/{}", self.base_url, self.state_route))
+        Ok(format!("{}/{}{}", self.base_url, self.state_route, self.auth_query))
     }
 
     pub fn state_snapshot_url(&self) -> Result<String, String> {
@@ -378,7 +381,7 @@ impl NativeTileEndpoint {
                 "Native renderer manifest did not provide a state snapshot route.".to_string(),
             );
         }
-        Ok(format!("{}/{}", self.base_url, self.state_snapshot_route))
+        Ok(format!("{}/{}{}", self.base_url, self.state_snapshot_route, self.auth_query))
     }
 
     pub fn dense_geojson_url(&self) -> Result<String, String> {
@@ -387,7 +390,7 @@ impl NativeTileEndpoint {
                 "Native renderer manifest did not provide a dense GeoJSON route.".to_string(),
             );
         }
-        Ok(format!("{}/{}", self.base_url, self.dense_geojson_route))
+        Ok(format!("{}/{}{}", self.base_url, self.dense_geojson_route, self.auth_query))
     }
 
     pub fn native_points_url(&self) -> Result<String, String> {
@@ -396,35 +399,35 @@ impl NativeTileEndpoint {
                 "Native renderer manifest did not provide a viewport-point route.".to_string(),
             );
         }
-        Ok(format!("{}/{}", self.base_url, self.native_points_route))
+        Ok(format!("{}/{}{}", self.base_url, self.native_points_route, self.auth_query))
     }
 
     pub fn spatial_gene_url(&self) -> Result<String, String> {
         if self.spatial_gene_route.is_empty() {
             return Err("This live R session did not expose a spatial gene route.".to_string());
         }
-        Ok(format!("{}/{}", self.base_url, self.spatial_gene_route))
+        Ok(format!("{}/{}{}", self.base_url, self.spatial_gene_route, self.auth_query))
     }
 
     pub fn prediction_url(&self) -> Result<String, String> {
         if self.prediction_route.is_empty() {
             return Err("This live R session did not expose a prediction route.".to_string());
         }
-        Ok(format!("{}/{}", self.base_url, self.prediction_route))
+        Ok(format!("{}/{}{}", self.base_url, self.prediction_route, self.auth_query))
     }
 
     pub fn proximity_url(&self) -> Result<String, String> {
         if self.proximity_route.is_empty() {
             return Err("This live R session did not expose a proximity route.".to_string());
         }
-        Ok(format!("{}/{}", self.base_url, self.proximity_route))
+        Ok(format!("{}/{}{}", self.base_url, self.proximity_route, self.auth_query))
     }
 
     pub fn image_export_url(&self) -> Result<String, String> {
         if self.image_export_route.is_empty() {
             return Err("This live R session did not expose an image-export route.".to_string());
         }
-        Ok(format!("{}/{}", self.base_url, self.image_export_route))
+        Ok(format!("{}/{}{}", self.base_url, self.image_export_route, self.auth_query))
     }
 }
 
@@ -564,6 +567,18 @@ impl NativeRendererManifest {
     }
 }
 
+fn native_viewer_auth_query(viewer_url: &str) -> String {
+    viewer_url
+        .split_once('?')
+        .and_then(|(_, query)| {
+            query.split('&').find(|part| {
+                part.starts_with("wsitools_token=") && part.len() > "wsitools_token=".len()
+            })
+        })
+        .map(|part| format!("?{part}"))
+        .unwrap_or_default()
+}
+
 pub fn native_manifest_url(viewer_url: &str) -> Result<String, String> {
     let trimmed = viewer_url.trim();
     let scheme_end = trimmed.find("://").ok_or_else(|| {
@@ -576,8 +591,9 @@ pub fn native_manifest_url(viewer_url: &str) -> Result<String, String> {
         return Err("Native rendering requires a localhost viewer URL.".to_string());
     }
     Ok(format!(
-        "{}://{authority}/native-renderer",
-        &trimmed[..scheme_end]
+        "{}://{authority}/native-renderer{}",
+        &trimmed[..scheme_end],
+        native_viewer_auth_query(trimmed)
     ))
 }
 
@@ -2353,6 +2369,7 @@ pub fn tile_url(
 ) -> String {
     NativeTileEndpoint {
         base_url: base_url.trim_end_matches('/').to_string(),
+        auth_query: String::new(),
         tile_route: manifest.tile_route.trim_matches('/').to_string(),
         state_route: manifest.state_route.trim_matches('/').to_string(),
         state_snapshot_route: manifest.state_snapshot_route.trim_matches('/').to_string(),
@@ -11073,6 +11090,10 @@ mod tests {
             native_manifest_url("http://127.0.0.1:8788/viewer-state").unwrap(),
             "http://127.0.0.1:8788/native-renderer"
         );
+        assert_eq!(
+            native_manifest_url("http://127.0.0.1:8788/viewer-state?wsitools_token=abc123").unwrap(),
+            "http://127.0.0.1:8788/native-renderer?wsitools_token=abc123"
+        );
     }
 
     #[test]
@@ -11198,6 +11219,19 @@ mod tests {
         assert_eq!(
             endpoint.native_points_url().unwrap(),
             "http://127.0.0.1:8788/native-points"
+        );
+        let signed = NativeTileEndpoint::from_live_viewer(
+            "http://127.0.0.1:8788/viewer-state?wsitools_token=abc123",
+            &manifest,
+        )
+        .unwrap();
+        assert_eq!(
+            signed.url(&manifest.sources[0], key),
+            "http://127.0.0.1:8788/tiles/slide/9/3/7.jpg?wsitools_token=abc123"
+        );
+        assert_eq!(
+            signed.state_url().unwrap(),
+            "http://127.0.0.1:8788/viewer-state?wsitools_token=abc123"
         );
     }
 

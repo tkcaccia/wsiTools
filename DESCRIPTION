@@ -36,6 +36,7 @@ Suggests:
     knitr,
     magick,
     Matrix,
+    openssl,
     pkgdown,
     RANN,
     Rnanoflann,

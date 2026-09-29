@@ -35,6 +35,9 @@ viewer$get_performance()
 
 Keep the R session alive while the browser is open. If R stops, the browser may
 still show the last static page, but live synchronization stops.
+The live bridge, tile URLs, and optional segmentation endpoint carry a private
+per-session token. Do not publish the generated HTML or share its live URLs;
+stop the R viewer session when finished.
 
 For a diagram of the R session, `httpuv` bridge, browser viewer,
 OpenSeadragon tiles, and runtime image backends, see

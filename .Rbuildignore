@@ -19,6 +19,7 @@
 ^_site$
 ^_site/
 ^\.DS_Store$
+^\.local-library($|/)
 ^.*\.Rcheck$
 ^\.\.Rcheck$
 ^.*\.tar\.gz$

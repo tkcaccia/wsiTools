@@ -545,7 +545,7 @@ wsi_link_spatialexperiment_image <- function(spe, image, image_name = NULL,
   } else {
     structure(list(object = spe_subset, assay_name = assay_name), class = "wsi_spatialexperiment_expression_source")
   }
-  wsi_link_spatial_table_image(
+  linked <- wsi_link_spatial_table_image(
     object = expression_object,
     image = image,
     source_name = "SpatialExperiment",
@@ -566,6 +566,8 @@ wsi_link_spatialexperiment_image <- function(spe, image, image_name = NULL,
     max_points = max_points,
     colour_by = colour_by
   )
+  linked$expression_source$save_object <- spe
+  linked
 }
 
 #' Open a SpatialExperiment object in the wsiTools viewer

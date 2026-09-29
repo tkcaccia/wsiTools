@@ -627,6 +627,8 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "annotationsDirty", fixed = TRUE)
   expect_match(html, "markAnnotationsDirty", fixed = TRUE)
   expect_match(html, "markAnnotationsSaved", fixed = TRUE)
+  expect_match(html, "projectSave=/^(project_saved|project_file_saved|project_restored|project_opened)$/", fixed = TRUE)
+  expect_match(html, "setProjectDirty(false,reason)", fixed = TRUE)
   expect_match(html, "updateAnnotationDirtyIndicator", fixed = TRUE)
   expect_match(html, "saveFromUnsavedIndicator", fixed = TRUE)
   expect_match(html, "bindUnsavedIndicator", fixed = TRUE)
@@ -655,6 +657,7 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "drawTileGrid", fixed = TRUE)
   expect_match(html, "tile_grid_toggled", fixed = TRUE)
   expect_match(html, "project_save_requested", fixed = TRUE)
+  expect_match(html, "reason:annotationDirtyReason||projectDirtyReason||'unsaved_changes'", fixed = TRUE)
   expect_match(html, "Multi-view tissue display", fixed = TRUE)
   expect_match(html, "multiViewGrid", fixed = TRUE)
   expect_match(html, "multiView2", fixed = TRUE)
@@ -3632,7 +3635,7 @@ test_that("desktop annotation cache is consumed without an intermediate RDS copy
   expect_false(grepl("saveRDS(cached, cache_file)", launcher, fixed = TRUE))
 })
 
-test_that("dense tissue annotations keep full boundaries and coalesce viewport work", {
+test_that("dense tissue annotations keep overview LOD and close boundaries", {
   html_code <- paste(deparse(wsiTools:::wsi_viewer_geometry_js), collapse = "\n")
   session_code <- paste(deparse(wsiTools:::wsi_start_viewer_state_server), collapse = "\n")
 
@@ -3643,10 +3646,10 @@ test_that("dense tissue annotations keep full boundaries and coalesce viewport w
   expect_match(html_code, "denseGeojsonQueued", fixed = TRUE)
   expect_match(html_code, "scheduleDenseGeojsonViewportLoad", fixed = TRUE)
   expect_match(html_code, "denseStaticUsesFullResolution", fixed = TRUE)
+  expect_match(html_code, "denseStaticFullResolutionZoom", fixed = TRUE)
   expect_match(html_code, "_dense_full_groups", fixed = TRUE)
-  expect_match(html_code, "item&&item.tissue_annotation===true", fixed = TRUE)
   expect_match(html_code, "tissueAnnotationRoi(roi)", fixed = TRUE)
-  expect_match(html_code, "Tissue annotation loaded with full boundary resolution at every zoom", fixed = TRUE)
+  expect_match(html_code, "Tissue annotation loaded with overview LOD and full boundary resolution at close zoom", fixed = TRUE)
   expect_match(session_code, "static_url", fixed = TRUE)
   expect_match(session_code, "static_source", fixed = TRUE)
   expect_match(session_code, "full_resolution_zoom", fixed = TRUE)
@@ -3656,7 +3659,9 @@ test_that("dense tissue annotations keep full boundaries and coalesce viewport w
 
 test_that("wand smooths boundaries and fills only new tiny artifacts", {
   wand_code <- paste(deparse(wsiTools:::wsi_viewer_wand_js), collapse = "\n")
-  worker <- paste(readLines(test_path("../../inst/viewer/geometry-worker.js"), warn = FALSE), collapse = "\n")
+  worker_path <- system.file("viewer", "geometry-worker.js", package = "wsiTools")
+  expect_true(nzchar(worker_path))
+  worker <- paste(readLines(worker_path, warn = FALSE), collapse = "\n")
 
   expect_match(wand_code, "wandSmoothBinarySelection", fixed = TRUE)
   expect_match(wand_code, "wandMorphBinary", fixed = TRUE)
@@ -3681,6 +3686,39 @@ test_that("desktop dense annotations remain visible at overview zoom", {
   expect_false(grepl("min_zoom = if (is_tissue) 0 else 5", launcher, fixed = TRUE))
   expect_match(session_code, 'geometry_lod = if (isTRUE(bounds_only)) "overview_bounds" else "detail"', fixed = TRUE)
   expect_match(session_code, "visible_at_all_zooms = source_min_zoom <= 0", fixed = TRUE)
+  expect_match(launcher, "desktop_tag_tissue_rois", fixed = TRUE)
+})
+
+test_that("tissue ROI metadata survives browser feature serialization", {
+  slide <- wsiTools:::wsi_mock_slide(width = 800, height = 400, levels = c(1, 4))
+  roi <- wsiTools:::wsi_roi_from_geojson(list(
+    type = "FeatureCollection",
+    features = list(list(
+      type = "Feature",
+      properties = list(class = "stroma"),
+      geometry = list(
+        type = "Polygon",
+        coordinates = list(list(
+          c(10, 10), c(300, 10), c(300, 200), c(10, 200), c(10, 10)
+        ))
+      )
+    ))
+  ))
+  roi$source_type <- "annotation"
+  roi$kind <- "tissue"
+  roi$tissue_annotation <- TRUE
+  output <- tempfile(fileext = ".html")
+  wsi_viewer(
+    slide,
+    roi = roi,
+    output = output,
+    open = FALSE,
+    overwrite = TRUE
+  )
+  html <- paste(readLines(output, warn = FALSE), collapse = "\n")
+  expect_match(html, '"source_type":"annotation"', fixed = TRUE)
+  expect_match(html, '"kind":"tissue"', fixed = TRUE)
+  expect_match(html, '"tissue_annotation":true', fixed = TRUE)
 })
 
 test_that("initial dense GeoJSON manifests are embedded without an R discovery round trip", {
@@ -3767,6 +3805,9 @@ test_that("live state service exposes a compact native renderer manifest", {
   expect_match(session_code, "dynamic_channel_layers", fixed = TRUE)
   expect_match(session_code, "native_points_path", fixed = TRUE)
   expect_match(session_code, "native_points_response", fixed = TRUE)
+  expect_match(session_code, "r_autosave", fixed = TRUE)
+  expect_match(session_code, "project_save_requested", fixed = TRUE)
+  expect_match(session_code, "wsi_viewer_queue_command", fixed = TRUE)
   expect_match(session_code, "spatial_transform", fixed = TRUE)
   expect_match(session_code, "point_sources = native_point_sources", fixed = TRUE)
   expect_match(session_code, "viewport_points", fixed = TRUE)
@@ -4054,6 +4095,9 @@ test_that("tiled viewer HTML uses OpenSeadragon with an overlay canvas", {
   expect_match(html, "openMultiViewPanePreviewFallback", fixed = TRUE)
   expect_match(html, "Multi-view tile failed to load", fixed = TRUE)
   expect_match(html, "Multi-view pane switched to preview fallback", fixed = TRUE)
+  expect_match(html, "tileRetryMax:3,tileRetryDelay:1500", fixed = TRUE)
+  expect_false(grepl("setTimeout(()=>openMultiViewPanePreviewFallback(paneObj,paneObj.entry,'tile failed to load')",
+                     html, fixed = TRUE))
   expect_match(html, "multi_view_pane_replaced", fixed = TRUE)
   expect_match(html, "layoutCustom", fixed = TRUE)
   expect_match(html, "projectEntryDragPayload", fixed = TRUE)

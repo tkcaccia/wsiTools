@@ -25,7 +25,10 @@ function wsiSyncCapture(event, detail) {
   const selectionOnly = /^(roi_selected|roi_deselected|roi_export_selection_updated|brush_selection_updated)$/.test(event);
   const annotation = /^(roi_|rois_|brush_committed|geojson_imported|annotations_|annotation_(history_|undo|redo))/.test(event);
   const logsOnly = /^viewer_log_/.test(event);
-  const forceFull = !wsiSyncDocument || wsiSyncDocument.key !== key || !(viewOnly || selectionOnly || annotation || logsOnly);
+  const compact = /^(layer_|stain_updated|image_transform_updated|trajectory_|trajectories_|measurement_|measurements_|channel_|tile_grid_|multi_view_)/.test(event);
+  const forceFull = !wsiSyncDocument || wsiSyncDocument.key !== key ||
+    /^(viewer_loaded|viewer_state|project_opened|r_restore_project_state)$/.test(event) ||
+    !(viewOnly || selectionOnly || annotation || logsOnly || compact);
   let changes, explicitPatch = null;
   const baseRois = wsiSyncDocument && wsiSyncDocument.document.rois;
   if (forceFull) changes = wsiFullViewerStatePayload(event, detail);
@@ -59,6 +62,17 @@ function wsiSyncCapture(event, detail) {
       changes.trajectories = trajectoryPayload(); changes.measurements = measures.slice();
     }
     if (logsOnly) changes.logs = viewerLogPayload();
+    if (compact) {
+      changes.selected_object = selectedObjectPayload();
+      if (/^(trajectory_|trajectories_)/.test(event)) changes.trajectories = trajectoryPayload();
+      if (/^(measurement_|measurements_)/.test(event)) changes.measurements = measures.slice();
+      if (/^layer_/.test(event)) changes.layers = layerStatePayload();
+      if (/^(stain_updated|channel_)/.test(event)) {
+        changes.stain = currentStainPayload();
+        changes.channel_sources = channelSources;
+        changes.channel_settings = currentChannelSettingsPayload();
+      }
+    }
   }
   const selectedIds = roiExportIndices().map(i => wsiRoiId(rois[i]));
   const selectedId = selectedRoi >= 0 && rois[selectedRoi] ? wsiRoiId(rois[selectedRoi]) : null;

@@ -74,6 +74,12 @@ wsi_dynamic_tile_worker_start <- function(sources, host = "127.0.0.1",
               body = NULL
             ))
           }
+          if (!wsiTools:::wsi_viewer_request_authorized(req, sources[[1L]]$access_token)) {
+            return(wsiTools:::wsi_http_json_response(
+              status = 403L,
+              body = list(error = "Viewer session token is missing or invalid.")
+            ))
+          }
           request <- wsiTools:::wsi_dynamic_tile_parse(req$PATH_INFO, route = tile_route)
           if (!identical(method, "GET") || is.null(request)) {
             return(wsiTools:::wsi_http_json_response(
@@ -99,7 +105,7 @@ wsi_dynamic_tile_worker_start <- function(sources, host = "127.0.0.1",
               request_etag = req$HTTP_IF_NONE_MATCH
             ),
             error = function(err) wsiTools:::wsi_http_json_response(
-              status = if (inherits(err, "wsi_region_out_of_bounds")) 404L else 500L,
+              status = if (inherits(err, "wsi_region_out_of_bounds")) 404L else if (inherits(err, "wsi_tile_busy")) 503L else 500L,
               body = list(error = conditionMessage(err))
             )
           )

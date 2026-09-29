@@ -34,6 +34,43 @@ test_that("Giotto-like objects can be linked with explicit coordinates", {
   expect_true(linked$gene_expression$enabled)
 })
 
+test_that("registration preserves Visium array indices and matches stable IDs", {
+  coordinates <- data.frame(
+    row = c(1L, 2L), col = c(3L, 4L),
+    imagerow = c(100, 200), imagecol = c(300, 400),
+    row.names = c("slide1_cellA", "slide1_cellB")
+  )
+  registration <- data.frame(
+    id = c("slide1_cellA", "slide1_cellB"),
+    x = c(500, 600), y = c(700, 800)
+  )
+  updated <- wsiTools:::wsi_spatial_object_update_coordinate_frame(coordinates, registration)
+  expect_equal(updated$coordinates$row, c(1L, 2L))
+  expect_equal(updated$coordinates$col, c(3L, 4L))
+  expect_equal(updated$coordinates$imagecol, c(500, 600))
+  expect_equal(updated$coordinates$imagerow, c(700, 800))
+  expect_equal(updated$matched, 2L)
+
+  unmatched <- registration
+  unmatched$id <- c("other_A", "other_B")
+  unchanged <- wsiTools:::wsi_spatial_object_update_coordinate_frame(coordinates, unmatched)
+  expect_equal(unchanged$matched, 0L)
+  expect_identical(unchanged$coordinates, coordinates)
+})
+
+test_that("registration does not confuse repeated barcodes across slides", {
+  metadata <- data.frame(
+    barcode = c("AAAC", "AAAC"), value = c(1, 2),
+    row.names = c("slide1_AAAC", "slide2_AAAC")
+  )
+  registration <- data.frame(id = "slide2_AAAC", x = 42, y = 84)
+  expect_equal(wsiTools:::wsi_spatial_object_registration_index(metadata, registration), c(NA_integer_, 1L))
+  expect_error(
+    wsiTools:::wsi_spatial_object_registration_index(metadata, registration[c(1, 1), ]),
+    "duplicate"
+  )
+})
+
 test_that("Giotto and SpatialExperiment cluster metadata can be inspected", {
   slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 800)
   ids <- paste0("spot", 1:4)
@@ -385,6 +422,123 @@ test_that("spatial object save response writes CSV and full R object", {
   association <- utils::read.csv(association_result$file, stringsAsFactors = FALSE)
   expect_equal(association$point_id, c("spot_1", "spot_2"))
   expect_equal(association$annotation_class, c("tumour", "Unassigned"))
+})
+
+test_that("saving one spatial section preserves another section's registration and labels", {
+  object <- list(meta.data = data.frame(
+    registered_x = c(10, 20), registered_y = c(11, 21),
+    wsi_registered_x = c(10, 20), wsi_registered_y = c(11, 21),
+    wsi_registration_changed = c(TRUE, TRUE),
+    wsi_registration_source = c("first", "second"),
+    wsi_annotation = c("tumour", "stroma"),
+    wsi_annotation_id = c("a", "b"),
+    wsi_annotation_name = c("Tumour", "Stroma"),
+    wsi_annotation_index = c(1L, 2L),
+    row.names = c("cell_a", "cell_b")
+  ))
+  registration <- data.frame(
+    id = "cell_b", x = 25, y = 26, changed = TRUE, source = "second",
+    stringsAsFactors = FALSE
+  )
+  updated <- wsiTools:::wsi_spatial_object_with_registration(object, registration)$object
+  expect_equal(updated$meta.data$registered_x, c(10, 25))
+  expect_equal(updated$meta.data$wsi_registration_source, c("first", "second"))
+  association <- data.frame(point_id = "cell_b", annotation_class = "other",
+                            annotation_id = "c", annotation_name = "Other",
+                            annotation_index = 3L)
+  rois <- wsiTools:::wsi_empty_roi()
+  annotated <- wsiTools:::wsi_spatial_object_with_annotations(updated, association, rois)$object
+  expect_equal(annotated$meta.data$wsi_annotation, c("tumour", "other"))
+  expect_equal(annotated$meta.data$wsi_annotation_id, c("a", "c"))
+})
+
+test_that("failed spatial output generation leaves existing file intact", {
+  output <- tempfile(fileext = ".rds")
+  saveRDS(list(original = TRUE), output)
+  expect_error(wsiTools:::wsi_spatial_object_write_atomic(
+    output, function(path) { saveRDS(list(new = TRUE), path); stop("write failed") }, TRUE
+  ), "write failed")
+  expect_true(readRDS(output)$original)
+})
+
+test_that("interrupted spatial replacement restores a recoverable backup", {
+  output <- tempfile(fileext = ".rds")
+  backup <- paste0(output, ".wsi-backup")
+  saveRDS(list(original = TRUE), backup)
+  expect_error(wsiTools:::wsi_spatial_object_write_atomic(
+    output, function(path) saveRDS(list(new = TRUE), path), overwrite = FALSE
+  ), "already exists")
+  expect_true(readRDS(output)$original)
+  expect_false(file.exists(backup))
+})
+
+test_that("failed spatial exports do not change live registration state", {
+  state <- wsiTools:::wsi_new_viewer_state(name = "failed_save_state", envir = new.env(parent = emptyenv()))
+  payload <- list(
+    format = "annotation_csv", output = tempfile(fileext = ".csv"),
+    spatial_registration = list(coordinates = list(list(
+      source = "Seurat", layer_id = "spots", layer_name = "spots",
+      item_index = 0L, id = "cell1", label = "cell1", x = 1, y = 2,
+      original_x = 1, original_y = 2, changed = FALSE
+    )))
+  )
+  expect_error(wsiTools:::wsi_spatial_object_save_response(list(), payload, state = state),
+               "at least one area annotation")
+  expect_equal(nrow(state$spatial_registration), 0L)
+  expect_equal(nrow(state$annotation_spots), 0L)
+})
+
+test_that("SpatialExperiment saves registration and labels in the full multi-sample object", {
+  skip_if_not_installed("SpatialExperiment")
+  skip_if_not_installed("SummarizedExperiment")
+  counts <- matrix(1, nrow = 1, ncol = 2,
+                   dimnames = list("gene", c("cell1", "cell2")))
+  coords <- matrix(c(1, 2, 10, 20), ncol = 2,
+                   dimnames = list(c("cell1", "cell2"), c("x", "y")))
+  full <- SpatialExperiment::SpatialExperiment(
+    assays = list(counts = counts), spatialCoords = coords,
+    colData = S4Vectors::DataFrame(sample_id = c("one", "two"))
+  )
+  source <- list(expression_source = list(object = full[, 1, drop = FALSE], save_object = full))
+  registration <- data.frame(id = "cell1", x = 7, y = 8, changed = TRUE,
+                             source = "SpatialExperiment")
+  updated <- wsiTools:::wsi_spatial_object_with_registration(source, registration)$object
+  expect_equal(unname(SpatialExperiment::spatialCoords(updated)[, "x"]), c(7, 2))
+  expect_equal(unname(SpatialExperiment::spatialCoords(updated)[, "y"]), c(8, 20))
+  expect_equal(ncol(updated), 2L)
+  expect_equal(as.data.frame(SummarizedExperiment::colData(updated))$registered_x[1], 7)
+  association <- data.frame(point_id = "cell1", annotation_class = "tumour",
+                            annotation_id = "roi1", annotation_name = "Tumour",
+                            annotation_index = 1L)
+  annotated <- wsiTools:::wsi_spatial_object_with_annotations(
+    updated, association, wsiTools:::wsi_empty_roi()
+  )$object
+  expect_equal(as.data.frame(SummarizedExperiment::colData(annotated))$wsi_annotation[1], "tumour")
+  expect_equal(as.data.frame(SummarizedExperiment::colData(annotated))$sample_id[2], "two")
+})
+
+test_that("Giotto saves registration through its spatial-location API", {
+  skip_if_not_installed("Giotto")
+  create <- getExportedValue("Giotto", "createGiottoObject")
+  get_locations <- getExportedValue("Giotto", "getSpatialLocations")
+  get_metadata <- getExportedValue("Giotto", "getCellMetadata")
+  object <- suppressWarnings(create(
+    expression = matrix(c(1, 2), nrow = 1,
+                        dimnames = list("gene", c("cell1", "cell2"))),
+    spatial_locs = data.frame(cell_ID = c("cell1", "cell2"),
+                              sdimx = c(1, 2), sdimy = c(3, 4)),
+    cores = 2, verbose = FALSE
+  ))
+  registration <- data.frame(id = "cell1", x = 7, y = 8, changed = TRUE,
+                             source = "Giotto")
+  saved <- wsiTools:::wsi_spatial_object_with_registration(
+    list(expression_source = list(object = object)), registration
+  )$object
+  locations <- as.data.frame(get_locations(saved, output = "data.table", verbose = FALSE))
+  metadata <- as.data.frame(get_metadata(saved, output = "data.table"))
+  expect_equal(locations$sdimx, c(7, 2))
+  expect_equal(locations$sdimy, c(8, 4))
+  expect_equal(metadata$registered_x[metadata$cell_ID == "cell1"], 7)
 })
 
 test_that("SpatialExperiment-like objects can be linked with explicit coordinates", {

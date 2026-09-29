@@ -645,7 +645,7 @@ desktop_initial_tissue_rois <- function(items, log_file = NULL) {
     )
     return(NULL)
   }
-  rois <- wsiTools::read_geojson(tissue_annotation)
+  rois <- desktop_tag_tissue_rois(wsiTools::read_geojson(tissue_annotation))
   desktop_log(
     "Embedding initial tissue annotation in viewer HTML: ",
     tissue_annotation,
@@ -654,6 +654,28 @@ desktop_initial_tissue_rois <- function(items, log_file = NULL) {
     "). Non-polygon geometries are listed but excluded from area/proximity summaries.",
     log_file = log_file
   )
+  rois
+}
+
+desktop_tag_tissue_rois <- function(rois) {
+  if (!inherits(rois, "wsi_roi") || !nrow(rois)) {
+    return(rois)
+  }
+  rois$source_type <- rep("annotation", nrow(rois))
+  rois$kind <- rep("tissue", nrow(rois))
+  rois$tissue_annotation <- rep(TRUE, nrow(rois))
+  if (!"properties" %in% names(rois)) {
+    rois$properties <- I(rep(list(list()), nrow(rois)))
+  }
+  rois$properties <- I(lapply(rois$properties, function(properties) {
+    if (!is.list(properties)) {
+      properties <- list()
+    }
+    properties$source_type <- "annotation"
+    properties$kind <- "tissue"
+    properties$tissue_annotation <- TRUE
+    properties
+  }))
   rois
 }
 
@@ -800,7 +822,7 @@ desktop_initial_tissue_manifest <- function(items, output) {
       colour = "#22C55E",
       fill_alpha = 0.16,
       line_width = 2.2,
-      full_resolution_zoom = 0
+      full_resolution_zoom = 2.5
     )
   ))
 }
@@ -1243,7 +1265,7 @@ desktop_register_dense_geojson_source <- function(viewer, item, log_file = NULL)
     fill_alpha = if (is_tissue) 0.16 else 0.22,
     line_width = if (is_tissue) 2.2 else 1.8,
     max_points_per_roi = if (is_tissue) Inf else 700L,
-    full_resolution_zoom = if (is_tissue) 0 else Inf,
+    full_resolution_zoom = if (is_tissue) 2.5 else Inf,
     # Dense annotations remain discoverable at every magnification. The live
     # endpoint already returns a bounded spatial sample (and bounding boxes at
     # the widest overview), so hiding the source below 5x is unnecessary and
@@ -1360,6 +1382,9 @@ desktop_poll_pending_imports <- function(viewer, pending, log_file = NULL) {
         next
       }
       item$rois <- desktop_apply_geojson_class_colours(imported$rois)
+      if (identical(item$kind, "tissue")) {
+        item$rois <- desktop_tag_tissue_rois(item$rois)
+      }
       item$loaded <- TRUE
       item$offset <- 0L
       desktop_log(
@@ -1504,7 +1529,7 @@ desktop_add_annotation_files <- function(viewer, cell_annotation = NULL,
         NULL
       }
       if (is.null(deferred)) {
-        rois <- wsiTools::read_geojson(tissue_annotation)
+        rois <- desktop_tag_tissue_rois(wsiTools::read_geojson(tissue_annotation))
         desktop_register_tissue_analysis(viewer, rois, path = tissue_annotation, log_file = log_file)
         viewer$add_rois(rois, name = "Tissue annotation", service = FALSE)
         desktop_log(

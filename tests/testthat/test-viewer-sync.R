@@ -25,6 +25,23 @@ test_that("no-content responses have no body for httpuv to compress", {
   expect_null(response$body)
 })
 
+test_that("live request bodies are capped before parsing", {
+  old_options <- options(wsiTools.max_request_bytes = 4)
+  on.exit(options(old_options), add = TRUE)
+  called <- FALSE
+  input <- list(read = function(n) { called <<- TRUE; charToRaw("abcde") })
+  expect_error(wsiTools:::wsi_http_request_body(list(rook.input = input, CONTENT_LENGTH = "5")),
+               "maximum body size")
+  expect_false(called)
+  expect_error(wsiTools:::wsi_http_request_body(list(rook.input = input)),
+               "maximum body size")
+  expect_true(called)
+  input$read <- function(n) charToRaw("abcd")
+  expect_identical(wsiTools:::wsi_http_request_body(list(rook.input = input)), "abcd")
+  expect_identical(wsiTools:::wsi_check_request_body_size("abcd"), "abcd")
+  expect_error(wsiTools:::wsi_check_request_body_size("abcde"), "maximum body size")
+})
+
 test_that("zero-time viewer polling does not enter the httpuv service loop", {
   skip_if_not_installed("httpuv")
   calls <- list()
@@ -36,6 +53,47 @@ test_that("zero-time viewer polling does not enter the httpuv service loop", {
   wsi_viewer_service(session, timeout = 0L)
   wsi_viewer_service(session, timeout = 20L)
   expect_identical(calls, list(NA_integer_, NA_integer_, 20L))
+})
+
+test_that("live endpoints require their session token", {
+  token <- wsiTools:::wsi_viewer_session_token()
+  expect_match(token, "^[0-9a-f]{64}$")
+  url <- wsiTools:::wsi_viewer_auth_url("http://127.0.0.1:8788/viewer-state", token)
+  expect_true(grepl(paste0("?wsitools_token=", token), url, fixed = TRUE))
+  expect_false(wsiTools:::wsi_viewer_request_authorized(list(QUERY_STRING = ""), token))
+  expect_false(wsiTools:::wsi_viewer_request_authorized(
+    list(QUERY_STRING = "wsitools_token=wrong"), token))
+  expect_true(wsiTools:::wsi_viewer_request_authorized(
+    list(QUERY_STRING = paste0("wsitools_token=", token)), token))
+  expect_true(wsiTools:::wsi_viewer_request_authorized(
+    list(QUERY_STRING = paste0("?wsitools_token=", token, "&v=1")), token))
+  source <- structure(list(
+    id = "slide", route = "/tiles", width = 100, height = 100,
+    tile_size = 512L, tile_format = "jpg", tile_overlap = 1L,
+    min_level = 0L, max_level = 7L, cache_dir = tempdir(),
+    access_token = token
+  ), class = "wsi_dynamic_tile_source")
+  metadata <- wsiTools:::wsi_dynamic_tile_metadata(source, base_url = "http://127.0.0.1:8788")
+  expect_true(grepl(paste0("?wsitools_token=", token), metadata$tile_url_template, fixed = TRUE))
+})
+
+test_that("a busy tile lock never starts a duplicate tile read", {
+  tile <- tempfile()
+  dir.create(paste0(tile, ".lock"))
+  on.exit(unlink(paste0(tile, ".lock"), recursive = TRUE))
+  lock <- wsiTools:::wsi_dynamic_tile_lock(tile, wait_seconds = 0)
+  expect_false(lock$acquired)
+  expect_true(lock$busy)
+
+  slide <- wsiTools:::wsi_mock_slide(width = 128, height = 128, levels = c(1))
+  source <- wsi_dynamic_tile_source(slide, cache_dir = tempfile("busy_tiles_"))
+  on.exit(unlink(source$cache_dir, recursive = TRUE), add = TRUE)
+  testthat::local_mocked_bindings(
+    wsi_dynamic_tile_lock = function(...) list(acquired = FALSE, busy = TRUE),
+    .package = "wsiTools"
+  )
+  expect_error(wsiTools:::wsi_dynamic_tile_file(source, 7L, 0L, 0L),
+               "still in progress", class = "wsi_tile_busy")
 })
 
 test_that("annotation deltas preserve unchanged ROIs and level-zero coordinates", {

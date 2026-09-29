@@ -1760,8 +1760,13 @@ wsi_spatial_object_payload_source <- function(spatial) {
 
 wsi_spatial_object_from_source <- function(spatial) {
   source <- wsi_spatial_object_payload_source(spatial)
+  if (is.list(source) && !is.null(source$expression_source$save_object)) {
+    return(source$expression_source$save_object)
+  }
   if (is.list(source) && !is.null(source$expression_source$object)) {
-    return(source$expression_source$object)
+    object <- source$expression_source$object
+    if (inherits(object, "wsi_spatialexperiment_expression_source")) return(object$object)
+    return(object)
   }
   if (is.list(source) && !is.null(source$object)) {
     return(source$object)
@@ -1769,7 +1774,38 @@ wsi_spatial_object_from_source <- function(spatial) {
   source
 }
 
+wsi_giotto_export <- function(name) {
+  tryCatch(getExportedValue("Giotto", name), error = function(err) {
+    wsi_abort(sprintf("Saving this Giotto object requires the optional Giotto package: %s",
+                      conditionMessage(err)))
+  })
+}
+
 wsi_spatial_object_set_slot <- function(object, slot_name, value) {
+  if (inherits(object, "giotto") && identical(slot_name, "meta.data")) {
+    original <- wsi_giotto_export("getCellMetadata")(object, output = "cellMetaObj")
+    replacement <- wsi_giotto_export("createCellMetaObj")(
+      metadata = value,
+      spat_unit = methods::slot(original, "spat_unit"),
+      feat_type = methods::slot(original, "feat_type"),
+      provenance = methods::slot(original, "provenance"), verbose = FALSE
+    )
+    return(wsi_giotto_export("setCellMetadata")(object, x = replacement,
+                                   spat_unit = methods::slot(original, "spat_unit"),
+                                   feat_type = methods::slot(original, "feat_type"), verbose = FALSE))
+  }
+  if (inherits(object, "SpatialExperiment")) {
+    if (identical(slot_name, "meta.data")) {
+      SummarizedExperiment::colData(object) <- S4Vectors::DataFrame(value)
+      return(object)
+    }
+    if (identical(slot_name, "misc")) {
+      metadata <- S4Vectors::metadata(object)
+      metadata$wsiTools <- value$wsiTools
+      S4Vectors::metadata(object) <- metadata
+      return(object)
+    }
+  }
   if (isS4(object) && slot_name %in% methods::slotNames(object)) {
     methods::slot(object, slot_name) <- value
     return(object)
@@ -1783,6 +1819,13 @@ wsi_spatial_object_set_slot <- function(object, slot_name, value) {
 }
 
 wsi_spatial_object_metadata <- function(object) {
+  if (inherits(object, "giotto")) {
+    return(as.data.frame(wsi_giotto_export("getCellMetadata")(object, output = "data.table"),
+                         stringsAsFactors = FALSE))
+  }
+  if (inherits(object, "SpatialExperiment")) {
+    return(as.data.frame(SummarizedExperiment::colData(object), stringsAsFactors = FALSE))
+  }
   meta <- tryCatch(wsi_seurat_slot(object, "meta.data"), error = function(err) NULL)
   if (is.null(meta) && is.list(object)) {
     meta <- object$meta.data %||% object$meta_data %||% object$metadata %||% NULL
@@ -1793,27 +1836,36 @@ wsi_spatial_object_metadata <- function(object) {
   as.data.frame(meta, stringsAsFactors = FALSE)
 }
 
-wsi_spatial_object_table_ids <- function(tab) {
+wsi_spatial_object_misc <- function(object) {
+  if (inherits(object, "SpatialExperiment")) {
+    return(list(wsiTools = S4Vectors::metadata(object)$wsiTools %||% list()))
+  }
+  wsi_seurat_slot(object, "misc")
+}
+
+wsi_spatial_object_table_ids <- function(tab, source_ids = NULL) {
   candidates <- c(
-    "barcode", "barcodes", "cell", "cells", "cell_id", "cellid",
+    "barcode", "barcodes", "cell", "cells", "cell_id", "cell_ID", "cellid",
     "spot", "spot_id", "feature_id", "id"
   )
-  ids <- rownames(tab) %||% as.character(seq_len(nrow(tab)))
-  for (candidate in candidates) {
-    if (candidate %in% names(tab)) {
-      ids <- as.character(tab[[candidate]])
-      break
-    }
+  choices <- c(list(rownames(tab) %||% as.character(seq_len(nrow(tab)))),
+               lapply(intersect(candidates, names(tab)), function(name) as.character(tab[[name]])))
+  choices <- Filter(function(ids) length(ids) == nrow(tab) && !anyNA(ids) &&
+                      !anyDuplicated(ids), choices)
+  if (!length(choices)) {
+    wsi_abort("Spatial object has no unique cell/spot identifier column.")
   }
-  ids
+  if (is.null(source_ids)) return(choices[[1L]])
+  source_ids <- as.character(source_ids)
+  choices[[which.max(vapply(choices, function(ids) sum(ids %in% source_ids), integer(1)))]]
 }
 
 wsi_spatial_object_registration_index <- function(tab, registration) {
-  ids <- wsi_spatial_object_table_ids(tab)
-  idx <- match(ids, as.character(registration$id))
-  if (!any(!is.na(idx)) && nrow(tab) == nrow(registration)) {
-    idx <- seq_len(nrow(tab))
+  if (anyDuplicated(registration$id)) {
+    wsi_abort("Spatial registration contains duplicate cell/spot IDs.")
   }
+  ids <- wsi_spatial_object_table_ids(tab, registration$id)
+  idx <- match(ids, as.character(registration$id))
   idx
 }
 
@@ -1831,8 +1883,8 @@ wsi_spatial_object_update_coordinate_frame <- function(coords, registration) {
   }
   x_values <- registration$x[idx[hit]]
   y_values <- registration$y[idx[hit]]
-  x_columns <- intersect(c("x", "image_x", "imagecol", "col", "pxl_col_in_fullres", "slide_x"), names(out))
-  y_columns <- intersect(c("y", "image_y", "imagerow", "row", "pxl_row_in_fullres", "slide_y"), names(out))
+  x_columns <- intersect(c("x", "image_x", "imagecol", "pxl_col_in_fullres", "slide_x"), names(out))
+  y_columns <- intersect(c("y", "image_y", "imagerow", "pxl_row_in_fullres", "slide_y"), names(out))
   if (!length(x_columns)) {
     out$x <- NA_real_
     x_columns <- "x"
@@ -1858,6 +1910,58 @@ wsi_spatial_object_update_coordinate_frame <- function(coords, registration) {
 }
 
 wsi_spatial_object_update_image_coordinates <- function(object, spatial, registration) {
+  if (inherits(object, "SpatialExperiment")) {
+    coords <- SpatialExperiment::spatialCoords(object)
+    ids <- colnames(object)
+    if (is.null(ids) || anyDuplicated(ids)) {
+      wsi_abort("SpatialExperiment columns need unique spot/cell IDs to save registration.")
+    }
+    idx <- match(ids, as.character(registration$id))
+    hit <- !is.na(idx)
+    if (!any(hit)) return(list(object = object, matched = 0L, images = character()))
+    columns <- colnames(coords)
+    x_column <- match(TRUE, tolower(columns) %in% c("x", "image_x", "imagecol", "pxl_col_in_fullres", "slide_x"))
+    y_column <- match(TRUE, tolower(columns) %in% c("y", "image_y", "imagerow", "pxl_row_in_fullres", "slide_y"))
+    if (is.na(x_column) || is.na(y_column)) {
+      wsi_abort("SpatialExperiment spatialCoords need named x/y columns to save registration.")
+    }
+    coords[hit, x_column] <- registration$x[idx[hit]]
+    coords[hit, y_column] <- registration$y[idx[hit]]
+    SpatialExperiment::spatialCoords(object) <- coords
+    return(list(object = object, matched = sum(hit), images = character()))
+  }
+  if (inherits(object, "giotto")) {
+    locations <- wsi_giotto_export("getSpatialLocations")(object, output = "spatLocsObj",
+                                              simplify = FALSE, verbose = FALSE)
+    if (inherits(locations, "spatLocsObj")) locations <- list(locations)
+    matched <- 0L
+    updated_names <- character()
+    for (location in locations) {
+      coords <- as.data.frame(methods::slot(location, "coordinates"), stringsAsFactors = FALSE)
+      idx <- wsi_spatial_object_registration_index(coords, registration)
+      hit <- !is.na(idx)
+      if (!any(hit)) next
+      x_column <- intersect(c("sdimx", "x", "image_x"), names(coords))
+      y_column <- intersect(c("sdimy", "y", "image_y"), names(coords))
+      if (!length(x_column) || !length(y_column)) {
+        wsi_abort("Giotto spatial locations need x/y coordinates to save registration.")
+      }
+      coords[[x_column[[1L]]]][hit] <- registration$x[idx[hit]]
+      coords[[y_column[[1L]]]][hit] <- registration$y[idx[hit]]
+      name <- methods::slot(location, "name")
+      unit <- methods::slot(location, "spat_unit")
+      replacement <- wsi_giotto_export("createSpatLocsObj")(
+        coordinates = coords, name = name, spat_unit = unit,
+        provenance = methods::slot(location, "provenance"),
+        misc = methods::slot(location, "misc"), verbose = FALSE
+      )
+      object <- wsi_giotto_export("setSpatialLocations")(object, x = replacement,
+                                            spat_unit = unit, name = name, verbose = FALSE)
+      matched <- matched + sum(hit)
+      updated_names <- c(updated_names, name)
+    }
+    return(list(object = object, matched = matched, images = unique(updated_names)))
+  }
   images <- tryCatch(wsi_seurat_slot(object, "images"), error = function(err) NULL)
   if (is.null(images) || !is.list(images) || !length(images)) {
     return(list(object = object, matched = 0L, images = character()))
@@ -1865,7 +1969,10 @@ wsi_spatial_object_update_image_coordinates <- function(object, spatial, registr
   source <- wsi_spatial_object_payload_source(spatial)
   image_name <- if (is.list(source)) as.character(source$image_name %||% "") else ""
   image_names <- names(images)
-  targets <- if (nzchar(image_name) && image_name %in% image_names) image_name else image_names
+  if (nzchar(image_name) && !image_name %in% image_names) {
+    wsi_abort(sprintf("Spatial image `%s` was not found in the object.", image_name))
+  }
+  targets <- if (nzchar(image_name)) image_name else image_names
   matched <- 0L
   updated_names <- character()
   for (name in targets) {
@@ -1902,12 +2009,11 @@ wsi_spatial_object_with_registration <- function(spatial, registration) {
   if (!is.null(meta) && nrow(meta) && nrow(registration)) {
     idx <- wsi_spatial_object_registration_index(meta, registration)
     matched <- sum(!is.na(idx))
-    meta$registered_x <- NA_real_
-    meta$registered_y <- NA_real_
-    meta$wsi_registered_x <- NA_real_
-    meta$wsi_registered_y <- NA_real_
-    meta$wsi_registration_changed <- FALSE
-    meta$wsi_registration_source <- NA_character_
+    for (column in c("registered_x", "registered_y", "wsi_registered_x", "wsi_registered_y")) {
+      if (is.null(meta[[column]])) meta[[column]] <- NA_real_
+    }
+    if (is.null(meta$wsi_registration_changed)) meta$wsi_registration_changed <- FALSE
+    if (is.null(meta$wsi_registration_source)) meta$wsi_registration_source <- NA_character_
     if (matched > 0L) {
       hit <- !is.na(idx)
       meta$registered_x[hit] <- registration$x[idx[hit]]
@@ -1921,14 +2027,27 @@ wsi_spatial_object_with_registration <- function(spatial, registration) {
   }
   image_update <- wsi_spatial_object_update_image_coordinates(updated, spatial, registration)
   updated <- image_update$object
-  misc <- tryCatch(wsi_seurat_slot(updated, "misc"), error = function(err) NULL)
+  if (nrow(registration) && matched == 0L && image_update$matched == 0L) {
+    wsi_abort("No spatial registration IDs match the spatial object; coordinates were not saved.")
+  }
+  misc <- tryCatch(wsi_spatial_object_misc(updated), error = function(err) NULL)
   if (is.null(misc) || !is.list(misc)) {
     misc <- list()
   }
   misc$wsiTools <- misc$wsiTools %||% list()
+  previous <- misc$wsiTools$spatial_registration
+  if (is.data.frame(previous) && "id" %in% names(previous) &&
+      identical(names(previous), names(registration))) {
+    registration <- rbind(previous[!as.character(previous$id) %in% as.character(registration$id), , drop = FALSE],
+                          registration)
+    row.names(registration) <- NULL
+    class(registration) <- c("wsi_spatial_registration", setdiff(class(registration), "wsi_spatial_registration"))
+  }
   misc$wsiTools$spatial_registration <- registration
   misc$wsiTools$spatial_registration_saved_at <- Sys.time()
-  misc$wsiTools$spatial_registration_image_coordinates <- image_update$images
+  misc$wsiTools$spatial_registration_image_coordinates <- unique(c(
+    misc$wsiTools$spatial_registration_image_coordinates %||% character(), image_update$images
+  ))
   updated <- wsi_spatial_object_set_slot(updated, "misc", misc)
   attr(updated, "wsi_spatial_registration") <- registration
   list(object = updated, matched = matched, image_coordinate_matched = image_update$matched)
@@ -2006,16 +2125,18 @@ wsi_spatial_object_with_annotations <- function(object, association, rois,
   if (is.null(meta) || !nrow(meta)) {
     wsi_abort("Could not add annotation assignments because the spatial object has no cell metadata table.")
   }
-  idx <- match(wsi_spatial_object_table_ids(meta), as.character(association$point_id))
-  hit <- !is.na(idx)
-  if (!any(hit) && nrow(meta) == nrow(association)) {
-    idx <- seq_len(nrow(meta))
-    hit <- rep(TRUE, nrow(meta))
+  if (anyDuplicated(association$point_id)) {
+    wsi_abort("Annotation association contains duplicate cell/spot IDs.")
   }
-  annotation <- rep(NA_character_, nrow(meta))
-  annotation_id <- rep(NA_character_, nrow(meta))
-  annotation_name <- rep(NA_character_, nrow(meta))
-  annotation_index <- rep(NA_integer_, nrow(meta))
+  idx <- match(wsi_spatial_object_table_ids(meta, association$point_id), as.character(association$point_id))
+  hit <- !is.na(idx)
+  if (!any(hit)) {
+    wsi_abort("No annotation association IDs match the spatial object metadata.")
+  }
+  annotation <- meta$wsi_annotation %||% rep(NA_character_, nrow(meta))
+  annotation_id <- meta$wsi_annotation_id %||% rep(NA_character_, nrow(meta))
+  annotation_name <- meta$wsi_annotation_name %||% rep(NA_character_, nrow(meta))
+  annotation_index <- meta$wsi_annotation_index %||% rep(NA_integer_, nrow(meta))
   if (any(hit)) {
     source_index <- idx[hit]
     annotation[hit] <- as.character(association$annotation_class[source_index])
@@ -2030,7 +2151,7 @@ wsi_spatial_object_with_annotations <- function(object, association, rois,
   object <- wsi_spatial_object_set_slot(object, "meta.data", meta)
 
   assigned <- hit & !is.na(annotation_id) & nzchar(annotation_id)
-  misc <- tryCatch(wsi_seurat_slot(object, "misc"), error = function(err) NULL)
+  misc <- tryCatch(wsi_spatial_object_misc(object), error = function(err) NULL)
   if (is.null(misc) || !is.list(misc)) {
     misc <- list()
   }
@@ -2146,6 +2267,31 @@ wsi_native_spatial_registration_from_state <- function(state, payload) {
   out
 }
 
+wsi_spatial_object_write_atomic <- function(output, write, overwrite = FALSE) {
+  backup <- paste0(output, ".wsi-backup")
+  if (file.exists(backup)) {
+    if (!file.exists(output) && !file.rename(backup, output)) {
+      wsi_abort(sprintf("An interrupted save left the original file at %s; restore it before saving.", backup))
+    }
+    if (file.exists(backup) && unlink(backup) != 0L) {
+      wsi_abort(sprintf("Could not remove an old spatial save backup: %s", backup))
+    }
+  }
+  if (file.exists(output) && !overwrite) {
+    wsi_abort(sprintf("The output file already exists: %s", output))
+  }
+  staged <- tempfile(".wsi-save-", tmpdir = dirname(output), fileext = paste0(".", tools::file_ext(output)))
+  on.exit(unlink(staged), add = TRUE)
+  write(staged)
+  if (!file.exists(staged) || is.na(file.info(staged)$size) || file.info(staged)$size == 0) {
+    wsi_abort("The spatial output could not be written; the previous file was left unchanged.")
+  }
+  if (!isTRUE(.Call("wsi_atomic_replace_file", staged, output, PACKAGE = "wsiTools"))) {
+    wsi_abort("Could not atomically replace the spatial output; the previous file was left unchanged.")
+  }
+  invisible(output)
+}
+
 wsi_spatial_object_save_response <- function(spatial, payload, state = NULL) {
   if (!is.list(payload)) {
     wsi_abort("Spatial object save request must be a JSON object.")
@@ -2185,9 +2331,6 @@ wsi_spatial_object_save_response <- function(spatial, payload, state = NULL) {
   if (!nrow(registration)) {
     wsi_abort("No registered spatial coordinates were supplied by the viewer.")
   }
-  if (!is.null(state) && inherits(state, "wsi_viewer_state")) {
-    state$spatial_registration <- registration
-  }
   rois <- wsi_spatial_object_annotation_rois(payload, state = state)
   association <- if (nrow(rois)) {
     wsi_spatial_object_annotation_association(registration, rois)
@@ -2201,18 +2344,15 @@ wsi_spatial_object_save_response <- function(spatial, payload, state = NULL) {
   } else {
     sum(!is.na(association_export$annotation_id) & nzchar(association_export$annotation_id))
   }
-  if (!is.null(state) && inherits(state, "wsi_viewer_state")) {
-    state$annotation_spots <- wsi_spatial_object_annotation_spots(association, registration)
-  }
   image_coordinate_matched <- NA_integer_
   if (identical(format, "csv")) {
-    utils::write.csv(registration, output, row.names = FALSE)
+    wsi_spatial_object_write_atomic(output, function(path) utils::write.csv(registration, path, row.names = FALSE), overwrite)
     matched <- NA_integer_
   } else if (identical(format, "annotation_csv")) {
     if (is.null(association_export) || !nrow(rois)) {
       wsi_abort("Draw or import at least one area annotation before exporting coordinate-to-annotation assignments.")
     }
-    utils::write.csv(association_export, output, row.names = FALSE)
+    wsi_spatial_object_write_atomic(output, function(path) utils::write.csv(association_export, path, row.names = FALSE), overwrite)
     matched <- association_count
   } else {
     updated <- wsi_spatial_object_with_registration(spatial, registration)
@@ -2222,11 +2362,13 @@ wsi_spatial_object_save_response <- function(spatial, payload, state = NULL) {
       association_count <- annotated$matched
       assigned_count <- annotated$assigned
     }
-    saveRDS(updated$object, output)
+    wsi_spatial_object_write_atomic(output, function(path) saveRDS(updated$object, path), overwrite)
     matched <- updated$matched
     image_coordinate_matched <- updated$image_coordinate_matched
   }
   if (!is.null(state) && inherits(state, "wsi_viewer_state")) {
+    state$spatial_registration <- registration
+    state$annotation_spots <- wsi_spatial_object_annotation_spots(association, registration)
     wsi_viewer_state_record_event(
       state,
       "spatial_object_save_requested",
@@ -2749,7 +2891,7 @@ wsi_viewer_state_apply <- function(state, payload) {
   if (startsWith(state$last_event, "segmentation")) {
     state$last_segmentation <- payload[["detail", exact = TRUE]] %||% list()
   }
-  state$last_payload <- payload
+  state$last_payload <- payload[intersect(names(payload), c("event", "time", "detail", "sync"))]
   state$last_sync <- Sys.time()
   if (isTRUE(native_overlay_changed)) {
     state$native_renderer_revision <- as.integer(state$native_renderer_revision %||% 0L) + 1L
@@ -2811,7 +2953,7 @@ wsi_viewer_state_record_event <- function(state, event, detail = list()) {
     detail = detail %||% list()
   )
   state$last_event <- event
-  state$last_payload <- payload
+  state$last_payload <- payload[c("event", "time", "detail")]
   state$last_sync <- now
   wsi_viewer_update_measurement_tables(state)
   entry <- list(
@@ -4935,7 +5077,8 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
                                           proximity_path = "/proximity",
                                           native_renderer_path = "/native-renderer",
                                           native_state_path = "/native-renderer-state",
-                                          native_points_path = "/native-points") {
+                                          native_points_path = "/native-points",
+                                          auth_token = NULL) {
   if (!requireNamespace("httpuv", quietly = TRUE)) {
     wsi_abort(
       "Live viewer state sync requires the optional package `httpuv`.",
@@ -4944,6 +5087,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
   }
   port <- as.integer(wsi_check_scalar_number(port, "port", allow_zero = FALSE))
   max_tries <- as.integer(wsi_check_scalar_number(max_tries, "max_tries", allow_zero = TRUE))
+  auth_token <- auth_token %||% wsi_viewer_session_token()
   if (!startsWith(path, "/")) {
     path <- paste0("/", path)
   }
@@ -4988,6 +5132,10 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
     wsi_abort("`tile_sources` must be a list of dynamic tile sources.")
   }
   if (length(tile_sources)) {
+    tile_sources <- lapply(tile_sources, function(source) {
+      source$access_token <- auth_token
+      source
+    })
     names(tile_sources) <- vapply(tile_sources, function(source) {
       if (!inherits(source, "wsi_dynamic_tile_source")) {
         wsi_abort("`tile_sources` entries must be `wsi_dynamic_tile_source` objects.")
@@ -5013,6 +5161,47 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
       native_segmentation_path <- state$last_payload$detail$native_wgpu_segmentation_path %||% NULL
       native_grandqc_items <- state$last_payload$detail$native_wgpu_grandqc_items %||% NULL
       native_kodama_items <- state$last_payload$detail$native_wgpu_kodama_items %||% NULL
+      native_project_path_available <- is.character(native_project_path) &&
+        length(native_project_path) == 1L &&
+        !is.na(native_project_path) &&
+        nzchar(native_project_path)
+      # A click on the browser's Unsaved indicator is a save request, not just
+      # another state update.  When the live session has an autosave target,
+      # persist the current snapshot immediately and acknowledge it explicitly
+      # so the browser can clear its dirty indicator without waiting for the
+      # next autosave tick.
+      if (identical(state$last_event, "project_save_requested") &&
+          !native_project_path_available &&
+          isTRUE((state$autosave %||% list())$enabled)) {
+        saved_project <- wsi_viewer_autosave_save(
+          state,
+          slide = slide,
+          force = TRUE,
+          reason = "project_save_requested"
+        )
+        if (inherits(saved_project, "wsi_project")) {
+          state$annotations <- list(dirty = FALSE, dirty_reason = "project_saved")
+          wsi_viewer_state_record_event(
+            state,
+            "project_saved",
+            list(
+              renderer = "r_autosave",
+              path = saved_project$path %||% state$autosave$path,
+              ok = TRUE,
+              reason = "project_save_requested"
+            )
+          )
+          wsi_viewer_queue_command(
+            state,
+            "annotations_saved",
+            list(
+              reason = "project_saved",
+              path = saved_project$path %||% state$autosave$path,
+              source = "r_autosave"
+            )
+          )
+        }
+      }
       native_grandqc_property <- function(roi) {
         props <- roi$properties[[1L]] %||% list()
         identical(as.character(props$source_menu %||% ""), "GrandQC")
@@ -5358,6 +5547,15 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
           state,
           "project_saved",
           list(renderer = "native_wgpu", path = saved_project$path, ok = TRUE)
+        )
+        wsi_viewer_queue_command(
+          state,
+          "annotations_saved",
+          list(
+            reason = "project_saved",
+            path = saved_project$path,
+            source = "native_wgpu"
+          )
         )
       }
     }
@@ -5943,7 +6141,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
           fill_alpha = suppressWarnings(as.numeric(source$fill_alpha %||% 0.16)),
           line_width = suppressWarnings(as.numeric(source$line_width %||% 2.2)),
           full_resolution_zoom = if (identical(as.character(source$kind %||% ""), "tissue") ||
-            identical(as.character(source$source_type %||% ""), "annotation")) 0 else
+            identical(as.character(source$source_type %||% ""), "annotation")) 2.5 else
             suppressWarnings(as.numeric(source$full_resolution_zoom %||% 3)),
           total_count = suppressWarnings(as.integer(source$total_count %||% NA_integer_))
         )
@@ -6063,7 +6261,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
     if (is.na(source_cap) || source_cap <= 0) {
       source_cap <- 1200L
     }
-    full_resolution_zoom <- if (tissue_source) 0 else
+    full_resolution_zoom <- if (tissue_source) 2.5 else
       suppressWarnings(as.numeric(source$full_resolution_zoom %||% Inf))
     if (is.na(full_resolution_zoom) || full_resolution_zoom < 0) {
       full_resolution_zoom <- Inf
@@ -6459,6 +6657,9 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
       if (identical(method, "OPTIONS")) {
         return(wsi_http_json_response(status = 204L, body = ""))
       }
+      if (!wsi_viewer_request_authorized(req, auth_token)) {
+        return(wsi_http_json_response(status = 403L, body = list(error = "Viewer session token is missing or invalid.")))
+      }
 	      if (identical(request_path, seurat_gene_path)) {
 	        return(seurat_gene_response(req))
 	      }
@@ -6519,7 +6720,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
             request_etag = req$HTTP_IF_NONE_MATCH %||% NULL
           ),
           error = function(err) {
-            status <- if (inherits(err, "wsi_region_out_of_bounds")) 404L else 500L
+            status <- if (inherits(err, "wsi_region_out_of_bounds")) 404L else if (inherits(err, "wsi_tile_busy")) 503L else 500L
             wsi_http_json_response(status = status, body = list(error = conditionMessage(err)))
           }
         ))
@@ -6543,7 +6744,8 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
     },
     onWSOpen = function(ws) {
       request_path <- tryCatch(ws$request$PATH_INFO %||% "/", error = function(err) "/")
-      if (!identical(request_path, path)) {
+      if (!identical(request_path, path) ||
+          !wsi_viewer_request_authorized(ws$request, auth_token)) {
         try(ws$close(), silent = TRUE)
         return(invisible(NULL))
       }
@@ -6560,7 +6762,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
           if (isTRUE(binary)) {
             wsi_abort("Binary WebSocket messages are not supported by the viewer state bridge.")
           }
-          viewer_state_response(message)
+          viewer_state_response(wsi_check_request_body_size(message))
         }, error = function(err) {
           list(ok = FALSE, error = conditionMessage(err), transport = "websocket")
         })
@@ -6578,8 +6780,12 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
   for (candidate in seq.int(port, port + max_tries)) {
     server <- try(httpuv::startServer(host, candidate, app), silent = TRUE)
     if (!inherits(server, "try-error")) {
-      url <- sprintf("http://%s:%d%s", host, candidate, path)
-      ws_url <- sprintf("ws://%s:%d%s", host, candidate, path)
+      auth_url <- function(route, websocket = FALSE) {
+        scheme <- if (websocket) "ws" else "http"
+        wsi_viewer_auth_url(sprintf("%s://%s:%d%s", scheme, host, candidate, route), auth_token)
+      }
+      url <- auth_url(path)
+      ws_url <- auth_url(path, websocket = TRUE)
       return(list(
         server = server,
         host = host,
@@ -6601,20 +6807,21 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	        native_points_path = native_points_path,
 	        seurat_gene_url = if (wsi_seurat_live_gene_available(seurat) ||
             wsi_prediction_context_enabled(proximity_context %||% prediction_context %||% list(spatial = seurat))) {
-            sprintf("http://%s:%d%s", host, candidate, seurat_gene_path)
+            auth_url(seurat_gene_path)
           } else {
             NULL
           },
-	        spatial_tile_export_url = sprintf("http://%s:%d%s", host, candidate, spatial_tile_path),
-	        spatial_object_save_url = if (!is.null(seurat)) sprintf("http://%s:%d%s", host, candidate, spatial_object_save_path) else NULL,
-	        image_export_url = if (!is.null(slide)) sprintf("http://%s:%d%s", host, candidate, image_export_path) else NULL,
-	        geojson_mask_url = if (!is.null(slide)) sprintf("http://%s:%d%s", host, candidate, geojson_mask_path) else NULL,
-	        dense_geojson_url = sprintf("http://%s:%d%s", host, candidate, dense_geojson_path),
-	        prediction_url = if (wsi_prediction_context_enabled(prediction_context %||% list(spatial = seurat))) sprintf("http://%s:%d%s", host, candidate, prediction_path) else NULL,
-	        proximity_url = if (wsi_prediction_context_enabled(proximity_context %||% prediction_context %||% list(spatial = seurat))) sprintf("http://%s:%d%s", host, candidate, proximity_path) else NULL,
-	        native_renderer_url = sprintf("http://%s:%d%s", host, candidate, native_renderer_path),
-	        native_state_url = sprintf("http://%s:%d%s", host, candidate, native_state_path),
-	        native_points_url = sprintf("http://%s:%d%s", host, candidate, native_points_path),
+	        spatial_tile_export_url = auth_url(spatial_tile_path),
+	        spatial_object_save_url = if (!is.null(seurat)) auth_url(spatial_object_save_path) else NULL,
+	        image_export_url = if (!is.null(slide)) auth_url(image_export_path) else NULL,
+	        geojson_mask_url = if (!is.null(slide)) auth_url(geojson_mask_path) else NULL,
+	        dense_geojson_url = auth_url(dense_geojson_path),
+	        prediction_url = if (wsi_prediction_context_enabled(prediction_context %||% list(spatial = seurat))) auth_url(prediction_path) else NULL,
+	        proximity_url = if (wsi_prediction_context_enabled(proximity_context %||% prediction_context %||% list(spatial = seurat))) auth_url(proximity_path) else NULL,
+	        native_renderer_url = auth_url(native_renderer_path),
+	        native_state_url = auth_url(native_state_path),
+	        native_points_url = auth_url(native_points_path),
+	        auth_token = auth_token,
 	        tile_sources = tile_sources
 	      ))
     }
@@ -6972,6 +7179,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
     wsi_abort("`stardist` must be `TRUE` or `FALSE`.")
   }
   transport <- match.arg(transport)
+  session_token <- wsi_viewer_session_token()
   if (!is.logical(dynamic_tiles) || length(dynamic_tiles) != 1L || is.na(dynamic_tiles)) {
     wsi_abort("`dynamic_tiles` must be `TRUE` or `FALSE`.")
   }
@@ -7087,7 +7295,14 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
       )
     }
   }
-  dynamic_channel_sources <- wsi_dynamic_channel_sources(requested_channel_sources)
+	  dynamic_channel_sources <- wsi_dynamic_channel_sources(requested_channel_sources)
+	  protect_source <- function(source) {
+	    source$access_token <- session_token
+	    source
+	  }
+	  if (!is.null(dynamic_source)) dynamic_source <- protect_source(dynamic_source)
+	  dynamic_channel_sources <- lapply(dynamic_channel_sources, protect_source)
+	  dynamic_project_sources <- lapply(dynamic_project_sources, protect_source)
 	  all_dynamic_sources <- c(
     if (is.null(dynamic_source)) list() else list(dynamic_source),
     dynamic_channel_sources,
@@ -7148,7 +7363,8 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
 	    prediction_context = live_prediction_context,
 	    prediction_path = prediction_path,
 	    proximity_context = live_proximity_context,
-	    proximity_path = proximity_path
+	    proximity_path = proximity_path,
+	    auth_token = session_token
 	  )
 	  base_url <- if (!is.null(tile_worker_pool) && length(tile_worker_pool$urls)) {
 	    tile_worker_pool$urls
@@ -7191,7 +7407,8 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
     dots$channel_sources <- wsi_live_channel_sources(
       requested_channel_sources,
       base_url = base_url,
-      output = dots$output
+      output = dots$output,
+      auth_token = session_token
     )
   }
   if (isTRUE(stardist)) {
@@ -7226,6 +7443,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
       backend = stardist_backend,
       cell_radius = stardist_cell_radius,
       state = state,
+      auth_token = session_token,
       wait = FALSE
     )
     dots$segmentation_run_url <- stardist_bridge$url
@@ -7310,11 +7528,12 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   if (!isTRUE(open)) {
     message("Open the viewer manually from Rscript/batch sessions: ", wsi_file_url(html))
   }
-  message("wsiTools live viewer sync listening at ", bridge$url)
+  public_url <- function(url) sub("\\?.*$", "", url)
+  message("wsiTools live viewer sync listening at ", public_url(bridge$url), " (session-authenticated)")
   if (identical(transport, "polling")) {
     message("WebSocket sync disabled; HTTP polling is active.")
   } else {
-    message("WebSocket sync available at ", bridge$ws_url, " with HTTP polling fallback.")
+    message("WebSocket sync available at ", public_url(bridge$ws_url), " with HTTP polling fallback.")
   }
   if (!is.null(dynamic_source)) {
     message("Dynamic tile server active at ", wsi_dynamic_tile_metadata(dynamic_source, base_url = sprintf("http://%s:%d", bridge$host, bridge$port))$tile_url_base)
@@ -7327,10 +7546,10 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   }
   if (!is.null(bridge$seurat_gene_url)) {
     source_name <- as.character((live_seurat %||% list())$source_name %||% "spatial")
-    message("Live ", source_name, " gene lookup active at ", bridge$seurat_gene_url)
+    message("Live ", source_name, " gene lookup active at ", public_url(bridge$seurat_gene_url))
   }
   if (!is.null(bridge$image_export_url)) {
-    message("Live viewport/ROI image export active at ", bridge$image_export_url)
+    message("Live viewport/ROI image export active at ", public_url(bridge$image_export_url))
   }
   message("Browser edits update `", name, "` and companion objects in the chosen R environment.")
   if (isTRUE(wait)) {
