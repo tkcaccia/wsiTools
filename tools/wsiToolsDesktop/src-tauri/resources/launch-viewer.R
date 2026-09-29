@@ -413,6 +413,44 @@ load_wsitools <- function() {
   )
 }
 
+desktop_compatible_live_args <- function(args, live_fun = wsiTools::wsi_viewer_live,
+                                         viewer_fun = wsiTools::wsi_viewer, log_file = NULL) {
+  live_names <- names(formals(live_fun))
+  viewer_names <- names(formals(viewer_fun))
+  optional <- c("dynamic_tile_persistent_cache", "session_inputs",
+                "dense_geojson_sources", "annotation_masks")
+  for (name in intersect(optional, names(args))) {
+    supported <- if (identical(name, "session_inputs")) {
+      name %in% live_names || ("..." %in% live_names && name %in% viewer_names)
+    } else if (identical(name, "dense_geojson_sources")) {
+      name %in% live_names && name %in% viewer_names
+    } else {
+      name %in% live_names
+    }
+    if (supported) next
+    value <- args[[name]]
+    if (name %in% c("dense_geojson_sources", "annotation_masks") && length(value)) {
+      stop(
+        "The installed wsiTools package cannot display the selected annotation data (missing `",
+        name, "` support). Update the R package with ",
+        "`remotes::install_github(\"tkcaccia/wsiTools\", upgrade = \"never\", force = TRUE)` ",
+        "and restart wsiTools Desktop.",
+        call. = FALSE
+      )
+    }
+    args[[name]] <- NULL
+    desktop_log("Installed wsiTools does not support optional `", name,
+                "`; continuing without it. Update the R package for full desktop features.",
+                log_file = log_file)
+  }
+  args
+}
+
+desktop_live_viewer <- function(slide, ..., log_file = NULL) {
+  args <- desktop_compatible_live_args(list(...), log_file = log_file)
+  do.call(wsiTools::wsi_viewer_live, c(list(slide), args))
+}
+
 desktop_log_runtime_diagnostics <- function(log_file = NULL) {
   desktop_log(
     "R runtime: ",
@@ -430,6 +468,9 @@ desktop_log_runtime_diagnostics <- function(log_file = NULL) {
     }
   )
   desktop_log("wsiTools version: ", wsitools_version, log_file = log_file)
+  desktop_log("wsiTools library: ",
+              normalizePath(system.file(package = "wsiTools"), winslash = "/", mustWork = FALSE),
+              log_file = log_file)
   commands <- c(
     "Rscript",
     "vips",
@@ -1946,8 +1987,9 @@ desktop_open_live_slide_prebuilt <- function(slide, output, log_file,
       },
       log_file = log_file
     )
-    return(wsiTools::wsi_viewer_live(
+    return(desktop_live_viewer(
       slide,
+      log_file = log_file,
       mode = "tiles",
       dynamic_tiles = TRUE,
       dynamic_tile_format = "jpg",
@@ -1976,8 +2018,9 @@ desktop_open_live_slide_prebuilt <- function(slide, output, log_file,
         basename(slide$path %||% base_id),
         log_file = log_file
       )
-      wsiTools::wsi_viewer_live(
+      desktop_live_viewer(
         slide,
+        log_file = log_file,
         mode = "tiles",
         dynamic_tiles = FALSE,
         tile_dir = base_tile_dir,
