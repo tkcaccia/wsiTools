@@ -54,6 +54,7 @@ const launcherWindowSizes = {
 let launcherResizeTimer = null;
 let launchElapsedTimer = null;
 let launchCancelled = false;
+let launchBusy = false;
 
 function timestamp() {
   return new Date().toLocaleTimeString();
@@ -174,6 +175,7 @@ function scheduleLauncherWindowFit(layout = activeLauncherLayout(), center = fal
 }
 
 function setBusy(isBusy) {
+  launchBusy = isBusy;
   openProjectHome.disabled = isBusy || !rAvailable;
   createProjectHome.disabled = isBusy || !rAvailable;
   backHome.disabled = isBusy;
@@ -302,8 +304,8 @@ function basename(path) {
   return String(path || "").split(/[\\/]/).filter(Boolean).pop() || String(path || "");
 }
 
-function itemId(path) {
-  return `${Date.now()}_${Math.random().toString(36).slice(2)}_${basename(path)}`;
+function itemId() {
+  return `${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 
 function resetProjectInputs() {
@@ -322,7 +324,7 @@ function addProjectImages(paths) {
   for (const path of paths) {
     if (known.has(path)) continue;
     projectImages.push({
-      id: itemId(path),
+      id: itemId(),
       image: path,
       cellAnnotation: "",
       tissueAnnotation: "",
@@ -424,8 +426,8 @@ function setAssociationFileRow(card, field, label, value, clearAction, id) {
 }
 
 function renderProjectImages(message = null) {
-  nextAssociations.disabled = projectImages.length === 0;
-  runR.disabled = !rAvailable || projectImages.length === 0;
+  nextAssociations.disabled = launchBusy || projectImages.length === 0;
+  runR.disabled = launchBusy || !rAvailable || projectImages.length === 0;
   if (message) {
     imageList.textContent = message;
     scheduleLauncherWindowFit(activeLauncherLayout());
@@ -441,7 +443,8 @@ function renderProjectImages(message = null) {
     row.className = "imageRow";
     const text = document.createElement("div");
     text.className = "imageRowText";
-    text.innerHTML = `<strong>${index + 1}. ${basename(item.image)}</strong><code></code>`;
+    text.innerHTML = "<strong></strong><code></code>";
+    text.querySelector("strong").textContent = `${index + 1}. ${basename(item.image)}`;
     text.querySelector("code").textContent = item.image;
     const remove = document.createElement("button");
     remove.type = "button";
@@ -455,7 +458,7 @@ function renderProjectImages(message = null) {
 }
 
 function renderAssociations() {
-  runR.disabled = projectImages.length === 0;
+  runR.disabled = launchBusy || !rAvailable || projectImages.length === 0;
   if (!projectImages.length) {
     associationList.textContent = "No images selected.";
     scheduleLauncherWindowFit(activeLauncherLayout());
@@ -468,7 +471,7 @@ function renderAssociations() {
     card.innerHTML = `
       <div class="associationHeader">
         <div>
-          <strong>${index + 1}. ${basename(item.image)}</strong>
+          <strong></strong>
           <code></code>
         </div>
         <button type="button" data-action="remove-image" data-id="${item.id}">Remove image</button>
@@ -484,6 +487,7 @@ function renderAssociations() {
         <div data-row="spatial"><dt>Spatial</dt><dd data-field="spatial"></dd></div>
       </dl>
     `;
+    card.querySelector(".associationHeader strong").textContent = `${index + 1}. ${basename(item.image)}`;
     card.querySelector(".associationHeader code").textContent = item.image;
     setAssociationFileRow(card, "cell", "cell annotation", item.cellAnnotation, "clear-cell", item.id);
     setAssociationFileRow(card, "tissue", "tissue annotation", item.tissueAnnotation, "clear-tissue", item.id);
@@ -522,6 +526,9 @@ function renderAssociations() {
       mapping.textContent = inspection.message;
       card.append(mapping);
     }
+    if (launchBusy) {
+      card.querySelectorAll("button, select").forEach((control) => { control.disabled = true; });
+    }
     return card;
   }));
   scheduleLauncherWindowFit(activeLauncherLayout());
@@ -550,7 +557,7 @@ function rNewProjectLaunchCode() {
     "  project_images$image,",
     '  live = "yes",',
     '  tiled = "yes",',
-    "  dynamic_tiles = FALSE,",
+    '  dynamic_tiles = "auto",',
     "  open = FALSE,",
     "  wait = FALSE",
     ")"
@@ -566,7 +573,7 @@ function rProjectLaunchCode(projectPath) {
     "  project$slide_path,",
     '  live = "yes",',
     '  tiled = "yes",',
-    "  dynamic_tiles = FALSE,",
+    '  dynamic_tiles = "auto",',
     "  open = FALSE,",
     "  wait = FALSE",
     ")",
@@ -626,9 +633,41 @@ async function chooseFile(options, label) {
 }
 
 async function openViewerWindow(url) {
-  await invoke("open_viewer_window", { url });
-  viewerWindowOpen = true;
-  stopViewer.disabled = false;
+  const target = new URL(url);
+  let markLoaded;
+  const loaded = new Promise((resolve) => { markLoaded = resolve; });
+  const unlisten = await listen("viewer-page-load", (event) => {
+    const payload = event.payload || {};
+    if (payload.event !== "finished") return;
+    try {
+      const page = new URL(payload.url);
+      if (page.origin === target.origin && page.pathname === target.pathname &&
+          page.searchParams.get("session") === target.searchParams.get("session")) {
+        markLoaded();
+      }
+    } catch (_) {
+      // Ignore an unrelated loading page or malformed navigation event.
+    }
+  });
+  let timeoutId;
+  try {
+    const mode = await invoke("open_viewer_window", { url });
+    if (mode === "webview") {
+      await Promise.race([
+        loaded,
+        new Promise((_, reject) => {
+          timeoutId = window.setTimeout(() => reject(new Error(
+            "The viewer server answered, but its desktop window did not finish loading within 60 seconds. Open the R / viewer log for WebView page-load events."
+          )), 60000);
+        })
+      ]);
+    }
+    viewerWindowOpen = true;
+    stopViewer.disabled = false;
+  } finally {
+    window.clearTimeout(timeoutId);
+    unlisten();
+  }
 }
 
 async function handleLaunch(launcher, codeLog, successPrefix) {
@@ -681,11 +720,11 @@ async function handleLaunch(launcher, codeLog, successPrefix) {
       showLaunchError(error);
     }
     try {
-      await invoke("close_viewer_window");
+      await invoke("stop_r_viewer");
       viewerWindowOpen = false;
       stopViewer.disabled = true;
     } catch (closeError) {
-      appendLog(`Could not close failed viewer window: ${closeError}`);
+      appendLog(`Could not stop failed viewer session: ${closeError}`);
     }
     stopLogPolling();
   } finally {

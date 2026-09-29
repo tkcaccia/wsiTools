@@ -203,12 +203,32 @@ fn emit_viewer_progress(app: &AppHandle, value: &str) {
     let _ = app.emit("viewer-progress", value.to_string());
 }
 
+fn report_viewer_page_load(
+    window: tauri::WebviewWindow,
+    payload: tauri::webview::PageLoadPayload<'_>,
+) {
+    let event = match payload.event() {
+        tauri::webview::PageLoadEvent::Started => "started",
+        tauri::webview::PageLoadEvent::Finished => "finished",
+    };
+    let url = payload.url().to_string();
+    let app = window.app_handle();
+    let state = app.state::<Arc<RViewerState>>();
+    push_log(&state.logs, format!("Viewer WebView page load {event}: {url}"));
+    let _ = app.emit("viewer-page-load", serde_json::json!({ "event": event, "url": url }));
+}
+
 fn r_string(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 fn stop_existing_child(state: &RViewerState) {
     if let Some(mut child) = state.child.lock().unwrap().take() {
+        #[cfg(target_family = "windows")]
+        if child.try_wait().ok().flatten().is_none() {
+            // R can leave its callr HTML server behind unless the process tree is stopped.
+            let _ = kill_process_id(child.id());
+        }
         let _ = child.kill();
         let _ = child.wait();
     }
@@ -944,7 +964,6 @@ fn wait_for_viewer_url(
                 }
                 if start.elapsed() > Duration::from_secs(600) {
                     let tail = recent_log_tail(&state.logs);
-                    stop_existing_child(state);
                     return Err(format!(
                         "R did not return the live viewer URL within 10 minutes. Open the R / viewer log to see the last loading stage.{}{}",
                         if tail.is_empty() { "" } else { "\n\nRecent R output:\n" },
@@ -1443,11 +1462,16 @@ fn launch_r_new_project_target(
     }
 
     let require_live_sync_url = selected_engine == "native";
-    wait_for_viewer_url(&rx, &launch, &state, require_live_sync_url)?;
+    if let Err(error) = wait_for_viewer_url(&rx, &launch, &state, require_live_sync_url) {
+        stop_existing_child(&state);
+        remove_pid_file(&session_dir);
+        return Err(error);
+    }
 
     let result = launch.lock().unwrap().clone();
     if result.viewer_url.is_empty() {
         stop_existing_child(&state);
+        remove_pid_file(&session_dir);
         return Err("R started but did not return a viewer URL.".to_string());
     }
     let ready_url = if require_live_sync_url {
@@ -1458,6 +1482,7 @@ fn launch_r_new_project_target(
     emit_viewer_progress(&app, "verifying\tChecking the local viewer server");
     if let Err(error) = wait_for_viewer_http_ready(ready_url, &state.logs) {
         stop_existing_child(&state);
+        remove_pid_file(&session_dir);
         return Err(error);
     }
     Ok(result)
@@ -1624,11 +1649,16 @@ fn launch_r_target(
     }
 
     let require_live_sync_url = selected_engine == "native";
-    wait_for_viewer_url(&rx, &launch, &state, require_live_sync_url)?;
+    if let Err(error) = wait_for_viewer_url(&rx, &launch, &state, require_live_sync_url) {
+        stop_existing_child(&state);
+        remove_pid_file(&session_dir);
+        return Err(error);
+    }
 
     let result = launch.lock().unwrap().clone();
     if result.viewer_url.is_empty() {
         stop_existing_child(&state);
+        remove_pid_file(&session_dir);
         return Err("R started but did not return a viewer URL.".to_string());
     }
     let ready_url = if require_live_sync_url {
@@ -1639,6 +1669,7 @@ fn launch_r_target(
     emit_viewer_progress(&app, "verifying\tChecking the local viewer server");
     if let Err(error) = wait_for_viewer_http_ready(ready_url, &state.logs) {
         stop_existing_child(&state);
+        remove_pid_file(&session_dir);
         return Err(error);
     }
     Ok(result)
@@ -1710,6 +1741,7 @@ fn open_viewer_loading_window(app: AppHandle) -> Result<(), String> {
     .inner_size(1500.0, 950.0)
     .min_inner_size(960.0, 700.0)
     .resizable(true)
+    .on_page_load(report_viewer_page_load)
     .build()
     .map_err(|err| format!("Could not open viewer loading window: {err}"))?;
     Ok(())
@@ -1730,7 +1762,7 @@ async fn open_viewer_window(
     app: AppHandle,
     url: String,
     state: State<'_, Arc<RViewerState>>,
-) -> Result<(), String> {
+) -> Result<&'static str, String> {
     if url.trim().is_empty() {
         return Err("Viewer URL was empty.".to_string());
     }
@@ -1796,7 +1828,7 @@ async fn open_viewer_window(
                             chrome.display()
                         ),
                     );
-                    return Ok(());
+                    return Ok("external");
                 }
                 Ok(Some(status)) => {
                     push_log(
@@ -1836,6 +1868,7 @@ async fn open_viewer_window(
         .min_inner_size(960.0, 700.0)
         .resizable(true)
         .visible(false)
+        .on_page_load(report_viewer_page_load)
         .build()
         .map_err(|err| format!("Could not create viewer window: {err}"))?,
     };
@@ -1848,7 +1881,7 @@ async fn open_viewer_window(
     );
     let _ = window.show();
     let _ = window.set_focus();
-    Ok(())
+    Ok("webview")
 }
 
 #[tauri::command]
