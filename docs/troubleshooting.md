@@ -268,6 +268,15 @@ For repeated viewing, prefer prebuilt static Deep Zoom tiles when possible. Use
 dynamic tiles mainly when prebuilt tiles are unavailable or for live channel
 overlays.
 
+A pyramidal OME-TIFF can already contain TIFF tiles and reduced-resolution
+SubIFDs. Check with `wsi_levels(slide)`; more than one row means wsiTools found
+the embedded pyramid. The desktop message "No valid prebuilt Deep Zoom tile
+cache" refers to a separate browser-ready cache, not to the TIFF pyramid.
+With libvips available, dynamic viewing reads regions from the appropriate
+embedded level and caches only the requested browser tiles. Close zoom still
+reads level 0. The source image is not loaded whole into R memory or converted
+into a new pyramid on every open.
+
 ## Black Tiles Or Tile Gaps
 
 Problem:

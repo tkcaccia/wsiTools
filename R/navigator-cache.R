@@ -97,7 +97,7 @@ wsi_navigator_preview_start <- function(slide, output, width = 512L) {
     },
     args = list(
       vips = vips,
-      input = normalizePath(source_path, winslash = "/", mustWork = TRUE),
+      input = wsi_vips_thumbnail_input(slide, width = width),
       cache_file = cache_file,
       target = target,
       width = as.integer(width)

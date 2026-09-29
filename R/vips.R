@@ -57,6 +57,10 @@ wsi_vips_open <- function(path) {
   properties <- wsi_vips_properties(path)
   properties <- wsi_vips_add_ome_physical_size(path, properties)
   levels <- wsi_properties_to_levels(properties)
+  subifds <- suppressWarnings(as.integer(properties[["n-subifds"]] %||% 0L))
+  if (nrow(levels) == 1L && is.finite(subifds) && subifds > 0L) {
+    levels <- wsi_dynamic_image_levels(path)
+  }
   if (nrow(levels) == 0L || is.na(levels$width[[1L]]) || is.na(levels$height[[1L]])) {
     levels <- data.frame(level = 0L, width = width, height = height, downsample = 1, stringsAsFactors = FALSE)
   }
@@ -101,6 +105,23 @@ wsi_vips_input_for_level <- function(path, level) {
   paste0(path, "[level=", level, "]")
 }
 
+wsi_vips_thumbnail_input <- function(slide, width) {
+  path <- slide$path
+  levels <- slide$levels
+  if (!is.data.frame(levels) || !"subifd" %in% names(levels)) {
+    return(path)
+  }
+  candidates <- which(
+    is.finite(levels$subifd) & is.finite(levels$width) &
+      levels$width >= as.numeric(width)
+  )
+  if (!length(candidates)) {
+    return(path)
+  }
+  chosen <- candidates[[which.min(levels$width[candidates])]]
+  wsi_vips_image_input(path, subifd = levels$subifd[[chosen]])
+}
+
 wsi_vips_read_region_file <- function(slide, region, output) {
   if (!wsi_has_vips()) {
     wsi_abort(
@@ -112,7 +133,17 @@ wsi_vips_read_region_file <- function(slide, region, output) {
     )
   }
 
-  input <- wsi_vips_input_for_level(slide$path, region$level)
+  level_row <- match(as.integer(region$level), slide$levels$level)
+  subifd <- if (!is.na(level_row) && "subifd" %in% names(slide$levels)) {
+    slide$levels$subifd[[level_row]]
+  } else {
+    NA_integer_
+  }
+  input <- if (is.finite(subifd)) {
+    wsi_vips_image_input(slide$path, subifd = subifd)
+  } else {
+    wsi_vips_input_for_level(slide$path, region$level)
+  }
   crop_x <- as.integer(floor(region$x / region$downsample))
   crop_y <- as.integer(floor(region$y / region$downsample))
   args <- c(

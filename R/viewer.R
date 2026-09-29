@@ -59,7 +59,7 @@ wsi_viewer_thumbnail_data_uri <- function(slide, width, height = NULL) {
 
   tmp <- tempfile(fileext = ".png")
   on.exit(unlink(tmp), add = TRUE)
-  args <- c("thumbnail", slide$path, tmp, as.character(width))
+  args <- c("thumbnail", wsi_vips_thumbnail_input(slide, width), tmp, as.character(width))
   if (!is.null(height)) {
     args <- c(args, "--height", as.character(height))
   }

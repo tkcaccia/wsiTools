@@ -876,7 +876,8 @@ wsi_dynamic_native_level <- function(slide, downsample) {
   }
   ds <- suppressWarnings(as.numeric(levels$downsample))
   ds[!is.finite(ds) | ds <= 0] <- 1
-  idx <- which.min(abs(log(ds / max(downsample, 1e-9))))
+  eligible <- which(ds <= max(downsample, 1e-9) * 1.001)
+  idx <- if (length(eligible)) eligible[[which.max(ds[eligible])]] else which.min(ds)
   list(level = as.integer(levels$level[[idx]]), downsample = ds[[idx]])
 }
 
@@ -993,7 +994,7 @@ wsi_dynamic_tile_region_is_native <- function(region) {
       is.finite(region$downsample) &&
       is.finite(region$deepzoom_downsample) &&
       abs(region$downsample - region$deepzoom_downsample) <=
-        max(1e-6, region$deepzoom_downsample * 1e-6) &&
+        max(1e-6, region$deepzoom_downsample * 1e-3) &&
       as.integer(region$width) == as.integer(region$desired_width) &&
       as.integer(region$height) == as.integer(region$desired_height)
   )
@@ -1077,6 +1078,7 @@ wsi_dynamic_can_cache_vips_level <- function(source, level, region) {
   identical(source$kind %||% "slide", "slide") &&
     isTRUE(wsi_has_vips()) &&
     (identical(backend, "vips") || openslide_overview) &&
+    !(identical(backend, "vips") && nrow(source$slide$levels %||% data.frame()) > 1L) &&
     is.character(source$slide$path) &&
     length(source$slide$path) == 1L &&
     nzchar(source$slide$path) &&
