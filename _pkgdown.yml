@@ -177,8 +177,10 @@ reference:
       - wsi_setup_report
       - wsi_diagnose
       - wsi_dependency_plan
+      - wsi_desktop_dependency_plan
       - wsi_install_backends
       - wsi_install_deps
+      - wsi_install_desktop_dependencies
       - wsi_install_native_czi
       - wsi_install_stardist
       - wsi_first_run_example
@@ -214,6 +216,7 @@ reference:
     contents:
       - wsi_viewer
       - wsi_viewer_live
+      - wsi_viewer_native
       - wsi_viewer_session
       - wsi_viewer_state
       - wsi_viewer_service
@@ -248,6 +251,7 @@ reference:
       - wsi_write_geojson
       - wsi_geojson_to_mask_tiff
       - wsi_geojson_mask_channel_source
+      - wsi_annotation_mask_source
       - read_geojson
       - write_geojson
       - viewer_add_rois
