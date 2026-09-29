@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 
 const homeScreen = document.getElementById("homeScreen");
 const appShell = document.getElementById("appShell");
@@ -20,6 +21,11 @@ const imageList = document.getElementById("imageList");
 const associationList = document.getElementById("associationList");
 const runtimePanel = document.getElementById("runtimePanel");
 const launchError = document.getElementById("launchError");
+const launchProgress = document.getElementById("launchProgress");
+const launchStage = document.getElementById("launchStage");
+const launchElapsed = document.getElementById("launchElapsed");
+const showLaunchLog = document.getElementById("showLaunchLog");
+const cancelLaunch = document.getElementById("cancelLaunch");
 const logOutput = document.getElementById("logOutput");
 const rStatus = document.getElementById("rStatus");
 const homeRStatus = document.getElementById("homeRStatus");
@@ -46,6 +52,8 @@ const launcherWindowSizes = {
   runtime: { width: 860, height: 1320, minWidth: 700, minHeight: 620, maxHeight: 1600 }
 };
 let launcherResizeTimer = null;
+let launchElapsedTimer = null;
+let launchCancelled = false;
 
 function timestamp() {
   return new Date().toLocaleTimeString();
@@ -107,8 +115,8 @@ function shortErrorStatus(prefix, error) {
 
 function activeLauncherLayout() {
   if (!homeScreen.hidden) return "home";
-  if (!runtimePanel.hidden) return "runtime";
   if (!associationStep.hidden) return "associations";
+  if (!runtimePanel.hidden) return "runtime";
   return "images";
 }
 
@@ -187,8 +195,54 @@ function clearLaunchError() {
 
 function showLaunchError(error) {
   if (!launchError) return;
-  launchError.textContent = String(error || "Viewer launch failed.");
+  const message = document.createElement("div");
+  message.textContent = errorMessage(error, "Viewer launch failed.");
+  const openLog = document.createElement("button");
+  openLog.type = "button";
+  openLog.textContent = "Open R / viewer log";
+  openLog.addEventListener("click", openRuntimeLogs);
+  launchError.replaceChildren(message, openLog);
   launchError.hidden = false;
+  scheduleLauncherWindowFit();
+}
+
+function openRuntimeLogs() {
+  runtimePanel.hidden = false;
+  runtimePanel.querySelector("details")?.setAttribute("open", "");
+  refreshLogs();
+  scheduleLauncherWindowFit();
+  runtimePanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function updateLaunchStage(payload) {
+  const [stage, ...message] = String(payload || "").split("\t");
+  launchStage.textContent = message.join(" ").trim() || stage || "Preparing the viewer";
+  appendLog(`Loading stage: ${launchStage.textContent}`);
+}
+
+function startLaunchProgress() {
+  launchCancelled = false;
+  launchProgress.hidden = false;
+  cancelLaunch.disabled = false;
+  launchStage.textContent = "Starting R and checking wsiTools";
+  const started = Date.now();
+  launchElapsed.textContent = "0:00";
+  window.clearInterval(launchElapsedTimer);
+  launchElapsedTimer = window.setInterval(() => {
+    const seconds = Math.floor((Date.now() - started) / 1000);
+    launchElapsed.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+    if (seconds === 120) {
+      appendLog("Viewer startup is taking longer than usual; the R / viewer log remains available and you can cancel.");
+    }
+  }, 1000);
+  scheduleLauncherWindowFit();
+}
+
+function stopLaunchProgress() {
+  window.clearInterval(launchElapsedTimer);
+  launchElapsedTimer = null;
+  launchProgress.hidden = true;
+  scheduleLauncherWindowFit();
 }
 
 function showHome() {
@@ -587,22 +641,45 @@ async function handleLaunch(launcher, codeLog, successPrefix) {
     return;
   }
   setBusy(true);
+  startLaunchProgress();
   setStatus("sending code to R", "info");
   appendLog("R code sent to R:");
   appendLog(codeLog);
   startLogPolling();
   appendLog("Preparing the first image before opening the viewer window.");
+  let stopListening = null;
   try {
+    stopListening = await listen("viewer-progress", (event) => updateLaunchStage(event.payload));
     const launch = await launcher();
+    if (launchCancelled) {
+      await invoke("stop_r_viewer");
+      setStatus("launch cancelled", "info");
+      stopLogPolling();
+      return;
+    }
     appendLog(`${successPrefix}: ${launch.viewer_url}`);
     if (launch.sync_url) appendLog(`Live sync endpoint: ${launch.sync_url}`);
+    launchStage.textContent = "Opening the viewer window";
     await openViewerWindow(launch.viewer_url);
+    if (launchCancelled) {
+      await invoke("close_viewer_window");
+      viewerWindowOpen = false;
+      stopLogPolling();
+      setStatus("launch cancelled", "info");
+      return;
+    }
     setStatus("viewer window open", "ok");
     await refreshLogs();
   } catch (error) {
-    setStatus("viewer failed", "error");
-    appendLog(`Viewer launch failed: ${error}`);
-    showLaunchError(error);
+    if (launchCancelled) {
+      setStatus("launch cancelled", "info");
+      appendLog("Viewer launch cancelled.");
+    } else {
+      setStatus("viewer failed", "error");
+      appendLog(`Viewer launch failed: ${errorMessage(error)}`);
+      await refreshLogs();
+      showLaunchError(error);
+    }
     try {
       await invoke("close_viewer_window");
       viewerWindowOpen = false;
@@ -612,9 +689,26 @@ async function handleLaunch(launcher, codeLog, successPrefix) {
     }
     stopLogPolling();
   } finally {
+    if (stopListening) stopListening();
+    stopLaunchProgress();
     setBusy(false);
   }
 }
+
+showLaunchLog.addEventListener("click", openRuntimeLogs);
+
+cancelLaunch.addEventListener("click", async () => {
+  if (launchProgress.hidden || launchCancelled) return;
+  launchCancelled = true;
+  cancelLaunch.disabled = true;
+  launchStage.textContent = "Stopping R viewer startup";
+  appendLog("Cancel requested during viewer startup.");
+  try {
+    await invoke("stop_r_viewer");
+  } catch (error) {
+    appendLog(`Could not stop viewer startup: ${errorMessage(error)}`);
+  }
+});
 
 async function selectAssociation(id, kind) {
   const item = projectImages.find((entry) => entry.id === id);

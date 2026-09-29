@@ -459,6 +459,72 @@ body[data-layout="associations"] .associationList {
   gap: 10px;
 }
 
+.launchProgress {
+  border: 1px solid rgba(94, 234, 212, 0.45);
+  border-radius: 8px;
+  background: rgba(15, 118, 110, 0.12);
+  padding: 12px;
+}
+
+.launchProgressHeader,
+.launchProgressActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.launchProgressHeader span {
+  color: #99f6e4;
+  font-variant-numeric: tabular-nums;
+}
+
+.launchProgressTrack {
+  height: 5px;
+  overflow: hidden;
+  margin-top: 10px;
+  border-radius: 3px;
+  background: rgba(148, 163, 184, 0.25);
+}
+
+.launchProgressTrack span {
+  display: block;
+  width: 35%;
+  height: 100%;
+  background: #5eead4;
+  animation: launch-sweep 1.6s ease-in-out infinite;
+}
+
+@keyframes launch-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .launchProgressTrack span { animation: none; }
+}
+
+.launchProgress p {
+  margin: 9px 0 12px;
+  color: #cbd5e1;
+  font-size: 13px;
+}
+
+.launchProgressActions button,
+.launchError button {
+  font-size: 12px;
+}
+
+.launchError button {
+  display: block;
+  margin-top: 10px;
+}
+
+.launchError > div {
+  max-height: 120px;
+  overflow: auto;
+}
+
 .launchError {
   border: 1px solid rgba(248, 113, 113, 0.48);
   border-radius: 8px;
@@ -466,8 +532,6 @@ body[data-layout="associations"] .associationList {
   color: #fee2e2;
   font-size: 12px;
   line-height: 1.45;
-  max-height: 180px;
-  overflow: auto;
   padding: 10px 12px;
   white-space: pre-wrap;
 }

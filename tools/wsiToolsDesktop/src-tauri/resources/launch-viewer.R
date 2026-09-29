@@ -2183,6 +2183,7 @@ desktop_open_new_project <- function(items, output, log_file) {
   sample_ids <- if (any(nzchar(sample_ids))) sample_ids else NULL
   spatial_paths <- unique(vapply(items, function(item) item$spatial_data %||% "", character(1)))
   spatial_paths <- spatial_paths[nzchar(spatial_paths)]
+  desktop_stage("annotations", "Indexing associated tissue annotations")
   initial_rois <- desktop_initial_tissue_rois(items, log_file = log_file)
   dense_geojson_sources <- desktop_initial_tissue_manifest(items, output)
   annotation_masks <- desktop_annotation_mask_sources(items, log_file = log_file)
@@ -2201,6 +2202,7 @@ desktop_open_new_project <- function(items, output, log_file) {
     desktop_stage("spatial", "Reading the spatial object and mapping tissues")
     desktop_log("Loading spatial transcriptomics object: ", spatial_paths[[1L]], log_file = log_file)
     spatial_object <- desktop_load_spatial_object(spatial_paths[[1L]])
+    desktop_stage("image", "Preparing microscopy images and live tiles")
     viewer <- tryCatch(
       desktop_open_spatial_target(
         spatial_object,
@@ -2235,6 +2237,7 @@ desktop_open_new_project <- function(items, output, log_file) {
       }
     )
   } else if (length(spatial_paths) > 1L) {
+    desktop_stage("image", "Preparing microscopy images and live tiles")
     desktop_log(
       "Multiple different spatial transcriptomics files were associated. ",
       "Opening the images first; per-image multi-object spatial loading will be handled by a later desktop workflow.",
@@ -2250,6 +2253,7 @@ desktop_open_new_project <- function(items, output, log_file) {
       annotation_masks = annotation_masks
     )
   } else {
+    desktop_stage("image", "Preparing microscopy images and live tiles")
     viewer <- desktop_open_live_image_project(
       image_paths,
       output = output,
@@ -2274,6 +2278,7 @@ desktop_open_new_project <- function(items, output, log_file) {
 }
 
 desktop_open_target <- function(target_path, mode, output, log_file) {
+  desktop_stage("metadata", "Reading image or project metadata")
   project <- NULL
   if (identical(mode, "project")) {
     target_path <- normalizePath(target_path, winslash = "/", mustWork = TRUE)

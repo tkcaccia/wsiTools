@@ -200,7 +200,7 @@ fn push_log(logs: &Arc<Mutex<Vec<String>>>, line: impl Into<String>) {
 }
 
 fn emit_viewer_progress(app: &AppHandle, value: &str) {
-    let _ = app.emit_to(VIEWER_WINDOW_LABEL, "viewer-progress", value.to_string());
+    let _ = app.emit("viewer-progress", value.to_string());
 }
 
 fn r_string(value: &str) -> String {
@@ -914,13 +914,12 @@ fn wait_for_viewer_url(
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 let status = {
                     let mut guard = state.child.lock().unwrap();
-                    let status = if let Some(child) = guard.as_mut() {
-                        child.try_wait().map_err(|err| {
-                            format!("Could not check R viewer process status: {err}")
-                        })?
-                    } else {
-                        None
+                    let Some(child) = guard.as_mut() else {
+                        return Err("Viewer startup was cancelled.".to_string());
                     };
+                    let status = child.try_wait().map_err(|err| {
+                        format!("Could not check R viewer process status: {err}")
+                    })?;
                     if status.is_some() {
                         let _ = guard.take();
                     }
@@ -943,16 +942,14 @@ fn wait_for_viewer_url(
                         tail
                     ));
                 }
-                if start.elapsed() > Duration::from_secs(180) {
+                if start.elapsed() > Duration::from_secs(600) {
+                    let tail = recent_log_tail(&state.logs);
                     stop_existing_child(state);
-                    return Err(
-                        if require_live_sync_url {
-                            "Timed out waiting for R to return the live synchronization URL required by the Native Rust/WGPU viewer. Open the log panel for details."
-                        } else {
-                            "Timed out waiting for R to start the live viewer. Open the log panel for details."
-                        }
-                            .to_string(),
-                    );
+                    return Err(format!(
+                        "R did not return the live viewer URL within 10 minutes. Open the R / viewer log to see the last loading stage.{}{}",
+                        if tail.is_empty() { "" } else { "\n\nRecent R output:\n" },
+                        tail
+                    ));
                 }
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -1458,7 +1455,11 @@ fn launch_r_new_project_target(
     } else {
         &result.viewer_url
     };
-    wait_for_viewer_http_ready(ready_url, &state.logs)?;
+    emit_viewer_progress(&app, "verifying\tChecking the local viewer server");
+    if let Err(error) = wait_for_viewer_http_ready(ready_url, &state.logs) {
+        stop_existing_child(&state);
+        return Err(error);
+    }
     Ok(result)
 }
 
@@ -1635,7 +1636,11 @@ fn launch_r_target(
     } else {
         &result.viewer_url
     };
-    wait_for_viewer_http_ready(ready_url, &state.logs)?;
+    emit_viewer_progress(&app, "verifying\tChecking the local viewer server");
+    if let Err(error) = wait_for_viewer_http_ready(ready_url, &state.logs) {
+        stop_existing_child(&state);
+        return Err(error);
+    }
     Ok(result)
 }
 
@@ -1958,6 +1963,17 @@ mod tests {
             ..browser_only
         };
         assert!(viewer_launch_ready(&native_ready, true));
+    }
+
+    #[test]
+    fn cancelled_launch_does_not_wait_for_the_startup_timeout() {
+        let state = Arc::new(RViewerState::default());
+        let launch = Arc::new(Mutex::new(ViewerLaunch::default()));
+        let (_sender, receiver) = mpsc::channel();
+        let start = Instant::now();
+        let error = wait_for_viewer_url(&receiver, &launch, &state, false).unwrap_err();
+        assert!(error.contains("cancelled"));
+        assert!(start.elapsed() < Duration::from_secs(2));
     }
 
     #[test]

@@ -50,6 +50,21 @@
           <span class="workflowStep">03 <strong>Launch viewer</strong></span>
         </nav>
 
+        <section id="launchProgress" class="launchProgress" aria-live="polite" hidden>
+          <div class="launchProgressHeader">
+            <strong>Opening viewer</strong>
+            <span id="launchElapsed">0:00</span>
+          </div>
+          <div class="launchProgressTrack" aria-hidden="true"><span></span></div>
+          <p id="launchStage">Starting R and checking wsiTools</p>
+          <div class="launchProgressActions">
+            <button id="showLaunchLog" type="button">View R / viewer log</button>
+            <button id="cancelLaunch" type="button">Cancel</button>
+          </div>
+        </section>
+
+        <div id="launchError" class="launchError" hidden></div>
+
         <div id="imageStep" class="wizardStep">
           <div class="projectActions">
             <button id="addImage" type="button">Add new image</button>
@@ -73,8 +88,6 @@
             <div id="associationList" class="associationList">No images selected.</div>
           </div>
         </div>
-
-        <div id="launchError" class="launchError" hidden></div>
 
         <div id="runtimePanel" class="runtimePanel" hidden>
           <button id="stopViewer" type="button" disabled>Stop R</button>
