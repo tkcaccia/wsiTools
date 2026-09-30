@@ -65,14 +65,15 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          brew install gettext
+          brew install gettext udunits
           GETTEXT_PREFIX="$(brew --prefix gettext)"
+          UDUNITS_PREFIX="$(brew --prefix udunits)"
           mkdir -p ~/.R
           {
-            echo "CPPFLAGS += -I${GETTEXT_PREFIX}/include"
-            echo "LDFLAGS += -L${GETTEXT_PREFIX}/lib"
+            echo "CPPFLAGS += -I${GETTEXT_PREFIX}/include -I${UDUNITS_PREFIX}/include"
+            echo "LDFLAGS += -L${GETTEXT_PREFIX}/lib -L${UDUNITS_PREFIX}/lib"
           } >> ~/.R/Makevars
-          echo "PKG_CONFIG_PATH=${GETTEXT_PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=${GETTEXT_PREFIX}/lib/pkgconfig:${UDUNITS_PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
 
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
