@@ -960,6 +960,21 @@ wsi_dynamic_tile_region <- function(source, level, col, row) {
   native <- wsi_dynamic_source_native_level(source, downsample)
   native_width <- max(1L, as.integer(ceiling(coverage_width / native$downsample)))
   native_height <- max(1L, as.integer(ceiling(coverage_height / native$downsample)))
+  levels <- source$levels %||% (source$slide %||% list())$levels
+  if (is.data.frame(levels) && all(c("level", "width", "height") %in% names(levels))) {
+    native_row <- match(native$level, levels$level)
+    if (!is.na(native_row)) {
+      native_x <- as.integer(floor(x / native$downsample))
+      native_y <- as.integer(floor(y / native$downsample))
+      remaining_width <- as.integer(levels$width[[native_row]]) - native_x
+      remaining_height <- as.integer(levels$height[[native_row]]) - native_y
+      if (is.finite(remaining_width) && is.finite(remaining_height) &&
+          remaining_width > 0L && remaining_height > 0L) {
+        native_width <- min(native_width, remaining_width)
+        native_height <- min(native_height, remaining_height)
+      }
+    }
+  }
 
   list(
     x = as.integer(round(x)),

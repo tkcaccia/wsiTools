@@ -48,6 +48,30 @@ test_that("live viewer uses larger tiles for embedded TIFF pyramids", {
   expect_match(html, '"tile_cache_count":192', fixed = TRUE)
 })
 
+test_that("dynamic tiles stay inside odd-sized TIFF pyramid levels", {
+  skip_if_not(wsi_has_vips())
+  input <- tempfile(fileext = ".tif")
+  pyramid <- tempfile(fileext = ".tif")
+  output <- tempfile(fileext = ".jpg")
+  on.exit(unlink(c(input, pyramid, output)), add = TRUE)
+
+  wsi_run_command("vips", c("black", input, "2051", "3077", "--bands", "3"))
+  wsi_run_command("vips", c("tiffsave", input, pyramid, "--tile", "--pyramid", "--subifd"))
+  slide <- wsi_open(pyramid, backend = "vips")
+  source <- wsi_dynamic_tile_source(slide, format = "jpg")
+  on.exit(wsi_dynamic_tile_cleanup(source), add = TRUE)
+
+  for (level in seq.int(source$min_level, source$max_level)) {
+    region <- wsi_dynamic_tile_region(source, level, 0L, 0L)
+    native <- slide$levels[slide$levels$level == region$level, , drop = FALSE]
+    expect_lte(floor(region$x / region$downsample) + region$width, native$width[[1L]])
+    expect_lte(floor(region$y / region$downsample) + region$height, native$height[[1L]])
+    wsi_region_to_file(slide, region, output, backend = "vips")
+    expect_true(file.exists(output))
+    unlink(output)
+  }
+})
+
 test_that("dynamic tiles never upsample a coarser native pyramid level", {
   slide <- structure(list(levels = data.frame(
     level = 0:2, downsample = c(1, 4, 16)
