@@ -4586,8 +4586,36 @@ wsi_viewer_managed_analysis_project <- function(seurat_config, cellphenotyper_co
   isTRUE(has_spatial_object || has_cellphenotyper || has_managed_items)
 }
 
+wsi_viewer_json_config <- function(config) {
+  if (!length(config$rois %||% list())) {
+    return(config)
+  }
+  as_rows <- function(ring) {
+    data.frame(
+      x = vapply(ring, `[[`, numeric(1), "x"),
+      y = vapply(ring, `[[`, numeric(1), "y")
+    )
+  }
+  config$rois <- lapply(config$rois, function(roi) {
+    if (!isTRUE(roi$drawable)) {
+      return(roi)
+    }
+    # Editable rings are authoritative in the browser. The GeoJSON copies
+    # repeat every coordinate and make jsonlite walk each point several times.
+    roi$coordinates <- NULL
+    roi$geometry <- NULL
+    if (is.list(roi$feature)) {
+      roi$feature$geometry <- NULL
+    }
+    roi$rings <- lapply(roi$rings, as_rows)
+    roi$add_groups <- lapply(roi$add_groups, function(group) lapply(group, as_rows))
+    roi
+  })
+  config
+}
+
 wsi_viewer_html <- function(config) {
-  config_json <- jsonlite::toJSON(config, auto_unbox = TRUE, null = "null")
+  config_json <- jsonlite::toJSON(wsi_viewer_json_config(config), auto_unbox = TRUE, null = "null")
   paste0(
     "<!doctype html>\n",
     "<html lang=\"en\">\n",
@@ -4714,7 +4742,7 @@ wsi_viewer_html <- function(config) {
 }
 
 wsi_tiled_viewer_html <- function(config) {
-  config_json <- jsonlite::toJSON(config, auto_unbox = TRUE, null = "null")
+  config_json <- jsonlite::toJSON(wsi_viewer_json_config(config), auto_unbox = TRUE, null = "null")
   loading_message <- if (identical(config$viewer_mode %||% NULL, "project") &&
       is.null(config$tile_url_base) && is.null(config$tile_url_template)) {
     "Loading project previews..."

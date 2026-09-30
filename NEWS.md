@@ -1,3 +1,12 @@
+# wsiTools 0.1.25
+
+- Reduced live-viewer startup time for large editable tissue GeoJSON files by
+  serializing polygon rings in batches and omitting redundant geometry copies
+  from the initial HTML. Full-resolution coordinates and editable browser
+  polygons are preserved.
+- Clamped dynamic libvips tile reads at odd-sized TIFF pyramid edges so a
+  one-pixel overrun cannot leave edge tiles blank.
+
 # wsiTools 0.1.24
 
 - Smoothed magic-wand boundaries and removed newly created tiny interior-hole

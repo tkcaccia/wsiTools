@@ -1519,6 +1519,42 @@ test_that("viewer ROI colours are consistent within label categories", {
   expect_match(colours[[3]], "^#[0-9A-F]{6}$")
 })
 
+test_that("viewer JSON batches editable polygon points without changing browser geometry", {
+  first_ring <- list(
+    list(x = 1.25, y = 2.5),
+    list(x = 10.5, y = 2.5),
+    list(x = 1.25, y = 12.75),
+    list(x = 1.25, y = 2.5)
+  )
+  second_ring <- lapply(first_ring, function(point) list(x = point$x + 20, y = point$y))
+  config <- list(rois = list(
+    list(
+      id = "multi",
+      drawable = TRUE,
+      rings = list(first_ring),
+      add_groups = list(list(second_ring)),
+      coordinates = list(list(c(1.25, 2.5))),
+      geometry = list(type = "MultiPolygon", coordinates = list()),
+      feature = list(type = "Feature", properties = list(class = "Tumour"), geometry = list(type = "MultiPolygon"))
+    ),
+    list(id = "point", drawable = FALSE, coordinates = c(3, 4), geometry = list(type = "Point"))
+  ))
+  packed <- wsiTools:::wsi_viewer_json_config(config)
+  decoded <- jsonlite::fromJSON(
+    jsonlite::toJSON(packed, auto_unbox = TRUE, null = "null"),
+    simplifyVector = FALSE
+  )$rois
+
+  expect_identical(decoded[[1L]]$rings[[1L]], first_ring)
+  expect_identical(decoded[[1L]]$add_groups[[1L]][[1L]], second_ring)
+  expect_null(decoded[[1L]]$coordinates)
+  expect_null(decoded[[1L]]$geometry)
+  expect_null(decoded[[1L]]$feature$geometry)
+  expect_identical(decoded[[1L]]$feature$properties$class, "Tumour")
+  expect_identical(decoded[[2L]]$geometry$type, "Point")
+  expect_identical(config$rois[[1L]]$rings[[1L]], first_ring)
+})
+
 test_that("interactive viewer can be configured with a live R state endpoint", {
   slide <- wsiTools:::wsi_mock_slide(width = 1000, height = 500, levels = c(1, 4))
   output <- tempfile(fileext = ".html")
@@ -3619,7 +3655,7 @@ test_that("desktop UI opens its viewer only after R reports image readiness", {
     fixed = TRUE
   )
   expect_false(grepl("invoke\\(\"open_viewer_loading_window\"", desktop_js))
-  launch_position <- regexpr("const launch = await launcher\\(\\)", desktop_js)[[1L]]
+  launch_position <- regexpr("launch = await launcher\\(\\)", desktop_js)[[1L]]
   open_position <- regexpr("await openViewerWindow\\(launch\\.viewer_url\\)", desktop_js)[[1L]]
   expect_gt(launch_position, 0L)
   expect_gt(open_position, launch_position)
