@@ -18,6 +18,7 @@ commands.allow = [
   "open_r_download_page",
   "open_viewer_loading_window",
   "open_viewer_window",
+  "open_viewer_in_browser",
   "save_launcher_log",
   "start_r_new_project",
   "start_r_project",

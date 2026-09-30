@@ -642,7 +642,8 @@ async function openViewerWindow(url) {
     try {
       const page = new URL(payload.url);
       if (page.origin === target.origin && page.pathname === target.pathname &&
-          page.searchParams.get("session") === target.searchParams.get("session")) {
+          (!page.searchParams.has("session") || !target.searchParams.has("session") ||
+           page.searchParams.get("session") === target.searchParams.get("session"))) {
         markLoaded();
       }
     } catch (_) {
@@ -650,20 +651,37 @@ async function openViewerWindow(url) {
     }
   });
   let timeoutId;
+  let timedOut = false;
   try {
     const mode = await invoke("open_viewer_window", { url });
     if (mode === "webview") {
-      await Promise.race([
-        loaded,
-        new Promise((_, reject) => {
-          timeoutId = window.setTimeout(() => reject(new Error(
-            "The viewer server answered, but its desktop window did not finish loading within 60 seconds. Open the R / viewer log for WebView page-load events."
-          )), 60000);
-        })
-      ]);
+      try {
+        await Promise.race([
+          loaded,
+          new Promise((_, reject) => {
+            timeoutId = window.setTimeout(() => {
+              timedOut = true;
+              reject(new Error("Embedded viewer load timed out."));
+            }, 30000);
+          })
+        ]);
+      } catch (error) {
+        if (!timedOut) throw error;
+        appendLog("Embedded viewer did not finish loading in 30 seconds; opening the same live session in the default browser.");
+        await invoke("open_viewer_in_browser", { url });
+        try {
+          await invoke("close_viewer_window");
+        } catch (closeError) {
+          appendLog(`Could not close the stalled embedded window: ${errorMessage(closeError)}`);
+        }
+        viewerWindowOpen = true;
+        stopViewer.disabled = false;
+        return "browser";
+      }
     }
     viewerWindowOpen = true;
     stopViewer.disabled = false;
+    return mode === "external" ? "browser" : "webview";
   } finally {
     window.clearTimeout(timeoutId);
     unlisten();
@@ -687,9 +705,10 @@ async function handleLaunch(launcher, codeLog, successPrefix) {
   startLogPolling();
   appendLog("Preparing the first image before opening the viewer window.");
   let stopListening = null;
+  let launch = null;
   try {
     stopListening = await listen("viewer-progress", (event) => updateLaunchStage(event.payload));
-    const launch = await launcher();
+    launch = await launcher();
     if (launchCancelled) {
       await invoke("stop_r_viewer");
       setStatus("launch cancelled", "info");
@@ -699,7 +718,7 @@ async function handleLaunch(launcher, codeLog, successPrefix) {
     appendLog(`${successPrefix}: ${launch.viewer_url}`);
     if (launch.sync_url) appendLog(`Live sync endpoint: ${launch.sync_url}`);
     launchStage.textContent = "Opening the viewer window";
-    await openViewerWindow(launch.viewer_url);
+    const openedIn = await openViewerWindow(launch.viewer_url);
     if (launchCancelled) {
       await invoke("close_viewer_window");
       viewerWindowOpen = false;
@@ -707,26 +726,35 @@ async function handleLaunch(launcher, codeLog, successPrefix) {
       setStatus("launch cancelled", "info");
       return;
     }
-    setStatus("viewer window open", "ok");
+    setStatus(openedIn === "browser" ? "viewer open in browser" : "viewer window open", "ok");
     await refreshLogs();
   } catch (error) {
     if (launchCancelled) {
       setStatus("launch cancelled", "info");
       appendLog("Viewer launch cancelled.");
     } else {
-      setStatus("viewer failed", "error");
+      setStatus(launch?.viewer_url ? "viewer window failed; R is still running" : "viewer failed", "error");
       appendLog(`Viewer launch failed: ${errorMessage(error)}`);
       await refreshLogs();
-      showLaunchError(error);
+      if (launch?.viewer_url) {
+        appendLog(`The live R session is still running. Open ${launch.viewer_url} in a browser, or click Stop R.`);
+        showLaunchError(`${errorMessage(error)} The R session is still running at ${launch.viewer_url}.`);
+        viewerWindowOpen = true;
+        stopViewer.disabled = false;
+      } else {
+        showLaunchError(error);
+      }
     }
-    try {
-      await invoke("stop_r_viewer");
-      viewerWindowOpen = false;
-      stopViewer.disabled = true;
-    } catch (closeError) {
-      appendLog(`Could not stop failed viewer session: ${closeError}`);
+    if (!launch?.viewer_url || launchCancelled) {
+      try {
+        await invoke("stop_r_viewer");
+        viewerWindowOpen = false;
+        stopViewer.disabled = true;
+      } catch (closeError) {
+        appendLog(`Could not stop failed viewer session: ${closeError}`);
+      }
+      stopLogPolling();
     }
-    stopLogPolling();
   } finally {
     if (stopListening) stopListening();
     stopLaunchProgress();

@@ -53,6 +53,7 @@ impl Drop for RViewerState {
 #[derive(Clone, Debug, Default, Serialize)]
 struct ViewerLaunch {
     viewer_url: String,
+    viewer_http_url: String,
     html_file: String,
     sync_url: String,
     log_file: String,
@@ -758,6 +759,42 @@ fn open_r_download_page() -> Result<(), String> {
 }
 
 #[tauri::command]
+fn open_viewer_in_browser(
+    url: String,
+    state: State<'_, Arc<RViewerState>>,
+) -> Result<(), String> {
+    if parse_http_local_url(&url).is_none() {
+        return Err("Only localhost HTTP viewer URLs can be opened.".to_string());
+    }
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = Command::new("open");
+        command.arg(&url);
+        command
+    };
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = Command::new("rundll32.exe");
+        command.arg("url.dll,FileProtocolHandler").arg(&url);
+        command
+    };
+    #[cfg(all(target_family = "unix", not(target_os = "macos")))]
+    let mut command = {
+        let mut command = Command::new("xdg-open");
+        command.arg(&url);
+        command
+    };
+    command
+        .spawn()
+        .map_err(|error| format!("Could not open the viewer in the default browser: {error}"))?;
+    push_log(
+        &state.logs,
+        format!("Embedded viewer did not finish loading; opened the live URL in the default browser: {url}"),
+    );
+    Ok(())
+}
+
+#[tauri::command]
 fn viewer_logs(state: State<'_, Arc<RViewerState>>) -> Result<Vec<String>, String> {
     Ok(state.logs.lock().unwrap().clone())
 }
@@ -911,6 +948,24 @@ fn recent_log_tail(logs: &Arc<Mutex<Vec<String>>>) -> String {
 
 fn viewer_launch_ready(launch: &ViewerLaunch, require_live_sync_url: bool) -> bool {
     !launch.viewer_url.is_empty() && (!require_live_sync_url || !launch.sync_url.is_empty())
+}
+
+fn update_viewer_launch_from_output(launch: &mut ViewerLaunch, line: &str) -> bool {
+    if let Some(value) = line.strip_prefix("WSITOOLS_VIEWER_URL=") {
+        launch.viewer_url = value.trim().to_string();
+        return true;
+    }
+    if let Some(value) = line.strip_prefix("WSITOOLS_VIEWER_HTTP_URL=") {
+        launch.viewer_http_url = value.trim().to_string();
+    } else if let Some(value) = line.strip_prefix("WSITOOLS_VIEWER_FILE=") {
+        launch.html_file = value.trim().to_string();
+    } else if let Some(value) = line.strip_prefix("WSITOOLS_SYNC_URL=") {
+        launch.sync_url = value.trim().to_string();
+        return true;
+    } else if let Some(value) = line.strip_prefix("WSITOOLS_LOG_FILE=") {
+        launch.log_file = value.trim().to_string();
+    }
+    false
 }
 
 fn wait_for_viewer_url(
@@ -1431,19 +1486,10 @@ fn launch_r_new_project_target(
         thread::spawn(move || {
             let reader = BufReader::new(stdout);
             for line in reader.lines().map_while(Result::ok) {
-                if let Some(value) = line.strip_prefix("WSITOOLS_VIEWER_URL=") {
-                    launch_state.lock().unwrap().viewer_url = value.trim().to_string();
+                if update_viewer_launch_from_output(&mut launch_state.lock().unwrap(), &line) {
                     let _ = tx.send(());
-                } else if let Some(value) = line.strip_prefix("WSITOOLS_VIEWER_HTTP_URL=") {
-                    launch_state.lock().unwrap().viewer_url = value.trim().to_string();
-                } else if let Some(value) = line.strip_prefix("WSITOOLS_VIEWER_FILE=") {
-                    launch_state.lock().unwrap().html_file = value.trim().to_string();
-                } else if let Some(value) = line.strip_prefix("WSITOOLS_SYNC_URL=") {
-                    launch_state.lock().unwrap().sync_url = value.trim().to_string();
-                    let _ = tx.send(());
-                } else if let Some(value) = line.strip_prefix("WSITOOLS_LOG_FILE=") {
-                    launch_state.lock().unwrap().log_file = value.trim().to_string();
-                } else if let Some(value) = line.strip_prefix("WSITOOLS_STAGE=") {
+                }
+                if let Some(value) = line.strip_prefix("WSITOOLS_STAGE=") {
                     emit_viewer_progress(&progress_app, value.trim());
                 }
                 push_log(&logs, line);
@@ -1476,6 +1522,8 @@ fn launch_r_new_project_target(
     }
     let ready_url = if require_live_sync_url {
         &result.sync_url
+    } else if !result.viewer_http_url.is_empty() {
+        &result.viewer_http_url
     } else {
         &result.viewer_url
     };
@@ -1618,19 +1666,10 @@ fn launch_r_target(
         thread::spawn(move || {
             let reader = BufReader::new(stdout);
             for line in reader.lines().map_while(Result::ok) {
-                if let Some(value) = line.strip_prefix("WSITOOLS_VIEWER_URL=") {
-                    launch_state.lock().unwrap().viewer_url = value.trim().to_string();
+                if update_viewer_launch_from_output(&mut launch_state.lock().unwrap(), &line) {
                     let _ = tx.send(());
-                } else if let Some(value) = line.strip_prefix("WSITOOLS_VIEWER_HTTP_URL=") {
-                    launch_state.lock().unwrap().viewer_url = value.trim().to_string();
-                } else if let Some(value) = line.strip_prefix("WSITOOLS_VIEWER_FILE=") {
-                    launch_state.lock().unwrap().html_file = value.trim().to_string();
-                } else if let Some(value) = line.strip_prefix("WSITOOLS_SYNC_URL=") {
-                    launch_state.lock().unwrap().sync_url = value.trim().to_string();
-                    let _ = tx.send(());
-                } else if let Some(value) = line.strip_prefix("WSITOOLS_LOG_FILE=") {
-                    launch_state.lock().unwrap().log_file = value.trim().to_string();
-                } else if let Some(value) = line.strip_prefix("WSITOOLS_STAGE=") {
+                }
+                if let Some(value) = line.strip_prefix("WSITOOLS_STAGE=") {
                     emit_viewer_progress(&progress_app, value.trim());
                 }
                 push_log(&logs, line);
@@ -1663,6 +1702,8 @@ fn launch_r_target(
     }
     let ready_url = if require_live_sync_url {
         &result.sync_url
+    } else if !result.viewer_http_url.is_empty() {
+        &result.viewer_http_url
     } else {
         &result.viewer_url
     };
@@ -1954,6 +1995,7 @@ fn main() {
             native_renderer_diagnostics,
             open_viewer_loading_window,
             open_viewer_window,
+            open_viewer_in_browser,
             open_native_viewer,
             close_viewer_window,
             stop_r_viewer,
@@ -1996,6 +2038,35 @@ mod tests {
             ..browser_only
         };
         assert!(viewer_launch_ready(&native_ready, true));
+    }
+
+    #[test]
+    fn viewer_launch_keeps_the_session_url_when_the_http_base_arrives_later() {
+        let mut launch = ViewerLaunch::default();
+        assert!(!update_viewer_launch_from_output(
+            &mut launch,
+            "WSITOOLS_VIEWER_HTTP_URL=http://127.0.0.1:8900/"
+        ));
+        assert!(!viewer_launch_ready(&launch, false));
+        assert!(update_viewer_launch_from_output(
+            &mut launch,
+            "WSITOOLS_VIEWER_URL=http://127.0.0.1:8900/?session=abc"
+        ));
+        assert!(!update_viewer_launch_from_output(
+            &mut launch,
+            "WSITOOLS_VIEWER_HTTP_URL=http://127.0.0.1:8900/"
+        ));
+        assert_eq!(launch.viewer_url, "http://127.0.0.1:8900/?session=abc");
+        assert_eq!(launch.viewer_http_url, "http://127.0.0.1:8900/");
+        assert!(viewer_launch_ready(&launch, false));
+    }
+
+    #[test]
+    fn browser_fallback_only_accepts_local_http_urls() {
+        assert!(parse_http_local_url("http://127.0.0.1:8900/?session=abc").is_some());
+        assert!(parse_http_local_url("http://localhost:8900/").is_some());
+        assert!(parse_http_local_url("file:///tmp/viewer.html").is_none());
+        assert!(parse_http_local_url("https://example.com/").is_none());
     }
 
     #[test]

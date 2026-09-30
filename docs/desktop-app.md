@@ -71,7 +71,7 @@ runtime backends; the viewer receives viewport tiles and typed state updates.
 
 Prebuilt desktop installers are available from the GitHub release:
 
-[Download wsiTools Desktop 0.1.14](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.14)
+[Download wsiTools Desktop 0.1.15](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.15)
 
 See [Desktop Downloads](downloads.md) for platform-specific installers,
 required R setup, and optional backend notes.
@@ -96,7 +96,7 @@ The user workflow is:
 The R process must stay open while the viewer is used. It owns the live
 `httpuv` synchronization endpoint and any dynamic tile server.
 
-The desktop installer and the R package are updated separately. Desktop 0.1.14
+The desktop installer and the R package are updated separately. Desktop 0.1.15
 can open an image with an older `wsiTools` package by omitting optional viewer
 arguments that version does not recognize. Persistent tile caching and the
 History input list may then be unavailable. If a selected annotation mask or
@@ -167,6 +167,14 @@ wsi_backends()
 
 If the app cannot find R, set `WSITOOLS_RSCRIPT` to the full path of
 `Rscript`.
+
+If Windows shows a white embedded viewer after the R log reports a live
+`http://127.0.0.1:<port>/` URL, Desktop opens that same session in the default
+browser after 30 seconds. R remains running, and **Stop R** in the launcher
+closes the session. The R / viewer log shows the exact R executable, package
+version and library path. Each R installation has its own package library: if
+the log says an older `wsiTools` version or that optional viewer arguments are
+unsupported, update the package in the R installation named in that log.
 
 ## Architecture
 
