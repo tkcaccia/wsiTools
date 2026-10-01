@@ -25,7 +25,7 @@ function wsiSyncCapture(event, detail) {
   const selectionOnly = /^(roi_selected|roi_deselected|roi_export_selection_updated|brush_selection_updated)$/.test(event);
   const annotation = /^(roi_|rois_|brush_committed|geojson_imported|annotations_|annotation_(history_|undo|redo))/.test(event);
   const logsOnly = /^viewer_log_/.test(event);
-  const compact = /^(layer_|stain_updated|image_transform_updated|trajectory_|trajectories_|measurement_|measurements_|channel_|tile_grid_|multi_view_)/.test(event);
+  const compact = /^(project_save_requested|project_saved|layer_|stain_updated|image_transform_updated|trajectory_|trajectories_|measurement_|measurements_|channel_|tile_grid_|multi_view_)/.test(event);
   const forceFull = !wsiSyncDocument || wsiSyncDocument.key !== key ||
     /^(viewer_loaded|viewer_state|project_opened|r_restore_project_state)$/.test(event) ||
     !(viewOnly || selectionOnly || annotation || logsOnly || compact);
@@ -36,6 +36,11 @@ function wsiSyncCapture(event, detail) {
     changes = { event, detail, time: new Date().toISOString(), sequence: ++stateSyncSeq,
       slide: { title: cfg.title, width: cfg.slide_width, height: cfg.slide_height },
       project: projectStatePayload(), view: wsiSyncView(), performance: viewerPerformancePayload() };
+    if (event === 'project_saved' || event === 'project_save_requested') {
+      changes.annotations = { dirty: !!(annotationsDirty || projectDirty),
+        dirty_reason: annotationDirtyReason || projectDirtyReason,
+        annotation_dirty: annotationsDirty, project_dirty: projectDirty };
+    }
     if (annotation || selectionOnly) {
       changes.selected_index = selectedRoi;
       changes.selected_object = selectedObjectPayload();
@@ -121,12 +126,16 @@ async function wsiSyncTransport(payload) {
   wsiSyncMetrics.messages++; wsiSyncMetrics.bytes += text.length;
   if (stateSocketReady && stateSocket && stateSocket.readyState === WebSocket.OPEN) {
     const body = await new Promise(resolve => {
-      const timer = setTimeout(() => { wsiSyncSocketWait = null; resolve(null); }, 4000);
+      const saveRequest = payload.event === 'project_save_requested';
+      const timer = setTimeout(() => { wsiSyncSocketWait = null; resolve(null); }, saveRequest ? 120000 : 4000);
       wsiSyncSocketWait = { revision: payload.sync.revision, resolve, timer };
       try { stateSocket.send(text); }
       catch (error) { clearTimeout(timer); wsiSyncSocketWait = null; resolve(null); }
     });
     if (body) return body;
+    // A save may still be running in R. Retrying the POST would write the
+    // project twice and can block the tile server for another full save.
+    if (payload.event === 'project_save_requested') throw new Error('Project saving did not finish within two minutes; check the R viewer log.');
   }
   const response = await fetch(cfg.viewer_state_url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: text });
   const body = await response.json();
@@ -147,6 +156,9 @@ async function wsiDrainSyncQueue() {
           payload = wsiSyncMessage(entry.capture, true); body = await wsiSyncTransport(payload);
         }
         if (!body || body.ok === false) throw new Error(body && body.error || 'No response from R');
+        if (payload.event === 'project_save_requested' && body.autosave && body.autosave.last_error) {
+          throw new Error('Project save failed in R: ' + body.autosave.last_error);
+        }
         if (!body.sync_ack || body.sync_ack.client !== wsiSyncClient || body.sync_ack.revision !== payload.sync.revision) {
           throw new Error('R did not acknowledge the annotation revision. Restart the viewer with the updated wsiTools package.');
         }

@@ -690,6 +690,19 @@ select:focus-visible {
   border-color: #2dd4bf;
 }
 
+.projectChoices:not([hidden]) {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.projectChoices button {
+  flex: 1;
+  min-width: 0;
+  padding: 12px;
+  text-align: left;
+}
+
 .appShell {
   align-items: flex-start;
   padding: 24px;

@@ -12,7 +12,7 @@ synchronization, dynamic tiles, annotations, and analysis.
 
 Prebuilt desktop installers are attached to the GitHub release:
 
-[Download wsiTools Desktop 0.1.16](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.16)
+[Download wsiTools Desktop 0.1.17](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.17)
 
 | Platform | Asset | Notes |
 | --- | --- | --- |

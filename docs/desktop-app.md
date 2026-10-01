@@ -71,7 +71,7 @@ runtime backends; the viewer receives viewport tiles and typed state updates.
 
 Prebuilt desktop installers are available from the GitHub release:
 
-[Download wsiTools Desktop 0.1.16](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.16)
+[Download wsiTools Desktop 0.1.17](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.17)
 
 See [Desktop Downloads](downloads.md) for platform-specific installers,
 required R setup, and optional backend notes.

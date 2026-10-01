@@ -213,6 +213,12 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
     regexpr(">Project</summary>", html, fixed = TRUE)[1]
   )
   expect_match(html, "toolWand", fixed = TRUE)
+  expect_match(html, "Brush annotation (Ctrl+B)", fixed = TRUE)
+  expect_match(html, "Magic wand (Ctrl+W)", fixed = TRUE)
+  expect_match(html, "Ctrl+Shift+B", fixed = TRUE)
+  expect_match(html, "Ctrl+Shift+W", fixed = TRUE)
+  expect_match(html, "setMode(key==='b'?'brush':'wand')", fixed = TRUE)
+  expect_match(html, "shortcutTypingTarget(e.target)", fixed = TRUE)
   expect_match(html, "wandTolerance", fixed = TRUE)
   expect_match(html, "wandReach", fixed = TRUE)
   expect_match(html, "runWandAt", fixed = TRUE)
@@ -384,6 +390,11 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "select option:checked", fixed = TRUE)
   expect_match(html, "id=\"selectedAnnotationEditor\" class=\"annotationEditor\" aria-label=\"Selected annotation editor\" hidden", fixed = TRUE)
   expect_match(html, "selectedEditor.hidden=!has", fixed = TRUE)
+  expect_match(html, "id=\"annotationNameInput\" type=\"text\"", fixed = TRUE)
+  expect_match(html, "panelName.value=roi.name||roi.label||roi.id||''", fixed = TRUE)
+  expect_match(html, "applySelectedRoiMetadata(annotationPanelNameValue()", fixed = TRUE)
+  expect_match(html, "manuallyRenamed?requestedName:(classChanged&&roi.automatic_name!==false", fixed = TRUE)
+  expect_match(html, "recordAnnotationHistory(action,detail)", fixed = TRUE)
   expect_match(html, "Selected class <select id=\"annotationClassSelect\"", fixed = TRUE)
   expect_match(html, "focusRoiCategoryEditor", fixed = TRUE)
   expect_match(html, "category.textContent='Category'", fixed = TRUE)
@@ -1272,7 +1283,7 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "roiListEmpty", fixed = TRUE)
   expect_match(html, "area_desc", fixed = TRUE)
   expect_match(html, "selectedRoiAreaValue", fixed = TRUE)
-  expect_false(grepl("annotationNameInput", html, fixed = TRUE))
+  expect_match(html, "annotationNameInput", fixed = TRUE)
   expect_match(html, "annotationClassSelect", fixed = TRUE)
   expect_false(grepl("id=\"selectedRoiClassSelect\"", html, fixed = TRUE))
   expect_false(grepl("id=\"applySelectedRoiLabel\"", html, fixed = TRUE))
@@ -3671,7 +3682,7 @@ test_that("desktop annotation cache is consumed without an intermediate RDS copy
   expect_false(grepl("saveRDS(cached, cache_file)", launcher, fixed = TRUE))
 })
 
-test_that("dense tissue annotations keep overview LOD and close boundaries", {
+test_that("dense tissue annotations keep full boundaries at every zoom", {
   html_code <- paste(deparse(wsiTools:::wsi_viewer_geometry_js), collapse = "\n")
   session_code <- paste(deparse(wsiTools:::wsi_start_viewer_state_server), collapse = "\n")
 
@@ -3682,15 +3693,19 @@ test_that("dense tissue annotations keep overview LOD and close boundaries", {
   expect_match(html_code, "denseGeojsonQueued", fixed = TRUE)
   expect_match(html_code, "scheduleDenseGeojsonViewportLoad", fixed = TRUE)
   expect_match(html_code, "denseStaticUsesFullResolution", fixed = TRUE)
+  expect_match(html_code, "item&&item.tissue_annotation===true)return true", fixed = TRUE)
+  expect_match(html_code, "full_resolution_zoom:tissueAnnotation?0", fixed = TRUE)
+  expect_match(html_code, "adaptive_lod:!tissue", fixed = TRUE)
   expect_match(html_code, "denseStaticFullResolutionZoom", fixed = TRUE)
   expect_match(html_code, "_dense_full_groups", fixed = TRUE)
   expect_match(html_code, "tissueAnnotationRoi(roi)", fixed = TRUE)
-  expect_match(html_code, "Tissue annotation loaded with overview LOD and full boundary resolution at close zoom", fixed = TRUE)
+  expect_match(html_code, "Tissue annotation loaded with full boundary resolution at every zoom", fixed = TRUE)
   expect_match(session_code, "static_url", fixed = TRUE)
   expect_match(session_code, "static_source", fixed = TRUE)
   expect_match(session_code, "full_resolution_zoom", fixed = TRUE)
   expect_match(session_code, "tissue_source", fixed = TRUE)
   expect_match(session_code, "bounds_only <- !tissue_source", fixed = TRUE)
+  expect_match(session_code, "full_resolution_zoom <- if (tissue_source)", fixed = TRUE)
 })
 
 test_that("wand smooths boundaries and fills only new tiny artifacts", {

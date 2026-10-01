@@ -278,6 +278,8 @@ automatically update the R session after the file is opened.
 | `Space` or `P` | Pan/navigation tool |
 | `D` | Draw polygon ROI |
 | `B` | Brush annotation tool |
+| Ctrl + B (or Ctrl + Shift + B) | Brush annotation tool |
+| Ctrl + W (or Ctrl + Shift + W) | Magic wand annotation tool |
 | `E` | Edit selected annotation or trajectory |
 | `M` | Measurement tool |
 | `T` | Trajectory tool |

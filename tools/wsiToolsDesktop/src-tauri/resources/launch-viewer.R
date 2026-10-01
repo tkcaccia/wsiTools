@@ -104,9 +104,12 @@ desktop_content_type <- function(path) {
     js = "application/javascript; charset=utf-8",
     css = "text/css; charset=utf-8",
     json = "application/json; charset=utf-8",
+    geojson = "application/geo+json; charset=utf-8",
     png = "image/png",
     jpg = "image/jpeg",
     jpeg = "image/jpeg",
+    webp = "image/webp",
+    dzi = "application/xml; charset=utf-8",
     svg = "image/svg+xml",
     "application/octet-stream"
   )
@@ -114,6 +117,10 @@ desktop_content_type <- function(path) {
 
 desktop_is_czi_path <- function(path) {
   identical(tolower(tools::file_ext(path)), "czi")
+}
+
+desktop_fresh_project <- function() {
+  identical(Sys.getenv("WSITOOLS_DESKTOP_FRESH_PROJECT", unset = "false"), "true")
 }
 
 desktop_open_czi_project <- function(image_paths, output, log_file, title = "wsiTools desktop CZI viewer") {
@@ -134,7 +141,7 @@ desktop_open_czi_project <- function(image_paths, output, log_file, title = "wsi
     czi_preview = "first",
     sections = TRUE,
     transport = "auto",
-    persistent_cache = TRUE
+    persistent_cache = !desktop_fresh_project()
   )
   if (!inherits(viewer, "wsi_viewer_session")) {
     stop(
@@ -162,7 +169,10 @@ desktop_http_response <- function(status, body = raw(), content_type = "text/pla
   )
 }
 
-desktop_static_cache_control <- function(path) {
+desktop_static_cache_control <- function(path, fresh_project = desktop_fresh_project()) {
+  if (isTRUE(fresh_project)) {
+    return("no-store")
+  }
   ext <- tolower(tools::file_ext(path))
   if (ext %in% c("jpg", "jpeg", "png", "webp", "dzi")) {
     return("public, max-age=31536000, immutable")
@@ -181,18 +191,35 @@ desktop_static_etag <- function(path) {
   sprintf('"%s-%s"', format(info$size[[1L]], scientific = FALSE), as.integer(info$mtime[[1L]]))
 }
 
+desktop_static_url_prefix <- function(value = "") {
+  value <- gsub("^/+|/+$", "", as.character(value %||% ""))
+  if (nzchar(value)) paste0("/", value) else ""
+}
+
 desktop_start_html_server_in_process <- function(html, host = "127.0.0.1", port = 8900L,
-                                                 max_tries = 100L) {
+                                                 max_tries = 100L,
+                                                 fresh_project = desktop_fresh_project(),
+                                                 url_prefix = "") {
   if (!requireNamespace("httpuv", quietly = TRUE)) {
     stop("The desktop HTML bridge requires the optional R package `httpuv`.", call. = FALSE)
   }
   html <- normalizePath(html, winslash = "/", mustWork = TRUE)
   root <- normalizePath(dirname(html), winslash = "/", mustWork = TRUE)
   index <- basename(html)
+  url_prefix <- desktop_static_url_prefix(url_prefix)
   app <- list(
     call = function(req) {
       request_path <- req$PATH_INFO %||% "/"
       request_path <- utils::URLdecode(request_path)
+      if (nzchar(url_prefix)) {
+        if (request_path %in% c(url_prefix, paste0(url_prefix, "/"))) {
+          request_path <- "/"
+        } else if (startsWith(request_path, paste0(url_prefix, "/"))) {
+          request_path <- substring(request_path, nchar(url_prefix) + 1L)
+        } else {
+          return(desktop_http_response(404L, charToRaw("Not found")))
+        }
+      }
       if (identical(request_path, "/") || !nzchar(request_path)) {
         request_path <- paste0("/", index)
       }
@@ -208,12 +235,13 @@ desktop_start_html_server_in_process <- function(html, host = "127.0.0.1", port 
         return(desktop_http_response(404L, charToRaw("Not found")))
       }
       etag <- desktop_static_etag(candidate)
-      if (!is.null(etag) && identical(as.character(req$HTTP_IF_NONE_MATCH %||% ""), etag)) {
+      if (!isTRUE(fresh_project) && !is.null(etag) &&
+          identical(as.character(req$HTTP_IF_NONE_MATCH %||% ""), etag)) {
         return(desktop_http_response(
           304L,
           raw(),
           desktop_content_type(candidate),
-          desktop_static_cache_control(candidate),
+          desktop_static_cache_control(candidate, fresh_project),
           etag
         ))
       }
@@ -223,7 +251,7 @@ desktop_start_html_server_in_process <- function(html, host = "127.0.0.1", port 
           readBin(candidate, what = "raw", n = file.info(candidate)$size)
         },
         desktop_content_type(candidate),
-        desktop_static_cache_control(candidate),
+        desktop_static_cache_control(candidate, fresh_project),
         etag
       )
     }
@@ -234,26 +262,32 @@ desktop_start_html_server_in_process <- function(html, host = "127.0.0.1", port 
       return(list(
         mode = "in_process",
         server = server,
-        url = sprintf("http://%s:%d/", host, candidate)
+        url = sprintf("http://%s:%d%s/", host, candidate, url_prefix)
       ))
     }
   }
   stop("Could not start the desktop HTML server on localhost.", call. = FALSE)
 }
 
-desktop_start_html_server <- function(html, host = "127.0.0.1", port = 8900L, max_tries = 100L) {
+desktop_start_html_server <- function(html, host = "127.0.0.1", port = 8900L,
+                                      max_tries = 100L,
+                                      fresh_project = desktop_fresh_project(),
+                                      url_prefix = "") {
   html <- normalizePath(html, winslash = "/", mustWork = TRUE)
+  url_prefix <- desktop_static_url_prefix(url_prefix)
   if (!requireNamespace("callr", quietly = TRUE) ||
       tolower(Sys.getenv("WSITOOLS_DESKTOP_SEPARATE_STATIC_SERVER", "true")) %in%
         c("0", "false", "no", "off")) {
-    return(desktop_start_html_server_in_process(html, host, port, max_tries))
+    return(desktop_start_html_server_in_process(html, host, port, max_tries,
+                                                fresh_project, url_prefix))
   }
 
   root <- normalizePath(dirname(html), winslash = "/", mustWork = TRUE)
   ready_file <- tempfile("wsitools-static-server-", tmpdir = root, fileext = ".port")
   server_log <- tempfile("wsitools-static-server-", tmpdir = root, fileext = ".log")
   process <- callr::r_bg(
-    func = function(root, index, host, port, max_tries, ready_file) {
+    func = function(root, index, host, port, max_tries, ready_file,
+                    fresh_project, url_prefix) {
       if (!requireNamespace("httpuv", quietly = TRUE)) {
         writeLines("ERROR\thttpuv is unavailable", ready_file, useBytes = TRUE)
         return(invisible(NULL))
@@ -270,6 +304,7 @@ desktop_start_html_server <- function(html, host = "127.0.0.1", port = 8900L, ma
         )
       }
       cache_control <- function(path) {
+        if (isTRUE(fresh_project)) return("no-store")
         ext <- tolower(tools::file_ext(path))
         if (ext %in% c("jpg", "jpeg", "png", "webp", "dzi")) {
           return("public, max-age=31536000, immutable")
@@ -287,6 +322,15 @@ desktop_start_html_server <- function(html, host = "127.0.0.1", port = 8900L, ma
       }
       app <- list(call = function(req) {
         request_path <- utils::URLdecode(req$PATH_INFO %or% "/")
+        if (nzchar(url_prefix)) {
+          if (request_path %in% c(url_prefix, paste0(url_prefix, "/"))) {
+            request_path <- "/"
+          } else if (startsWith(request_path, paste0(url_prefix, "/"))) {
+            request_path <- substring(request_path, nchar(url_prefix) + 1L)
+          } else {
+            return(response(404L, charToRaw("Not found")))
+          }
+        }
         if (identical(request_path, "/") || !nzchar(request_path)) request_path <- paste0("/", index)
         if (identical(request_path, "/favicon.ico")) return(response(204L))
         relative <- sub("^/+", "", request_path)
@@ -301,7 +345,8 @@ desktop_start_html_server <- function(html, host = "127.0.0.1", port = 8900L, ma
         etag <- sprintf('"%s-%s"', format(info$size[[1L]], scientific = FALSE), as.integer(info$mtime[[1L]]))
         type <- content_type(candidate)
         cache <- cache_control(candidate)
-        if (identical(as.character(req$HTTP_IF_NONE_MATCH %or% ""), etag)) {
+        if (!isTRUE(fresh_project) &&
+            identical(as.character(req$HTTP_IF_NONE_MATCH %or% ""), etag)) {
           return(response(304L, raw(), type, cache, etag))
         }
         body <- if (identical(req$REQUEST_METHOD %or% "GET", "HEAD")) raw() else {
@@ -335,7 +380,9 @@ desktop_start_html_server <- function(html, host = "127.0.0.1", port = 8900L, ma
       host = host,
       port = as.integer(port),
       max_tries = as.integer(max_tries),
-      ready_file = ready_file
+      ready_file = ready_file,
+      fresh_project = fresh_project,
+      url_prefix = url_prefix
     ),
     stdout = server_log,
     stderr = server_log,
@@ -353,12 +400,13 @@ desktop_start_html_server <- function(html, host = "127.0.0.1", port = 8900L, ma
       process = process,
       ready_file = ready_file,
       log_file = server_log,
-      url = sprintf("http://%s:%d/", host, as.integer(fields[[2L]]))
+      url = sprintf("http://%s:%d%s/", host, as.integer(fields[[2L]]), url_prefix)
     ))
   }
   try(process$kill(), silent = TRUE)
   unlink(c(ready_file, server_log), force = TRUE)
-  desktop_start_html_server_in_process(html, host, port, max_tries)
+  desktop_start_html_server_in_process(html, host, port, max_tries,
+                                       fresh_project, url_prefix)
 }
 
 desktop_stop_html_server <- function(server) {
@@ -448,6 +496,12 @@ desktop_compatible_live_args <- function(args, live_fun = wsiTools::wsi_viewer_l
 
 desktop_live_viewer <- function(slide, ..., log_file = NULL) {
   args <- desktop_compatible_live_args(list(...), log_file = log_file)
+  if (identical(Sys.info()[["sysname"]], "Linux")) {
+    # WebKitGTK can queue tile image loads while libvips is generating new
+    # regions. Bound concurrent requests and allow the first cache miss time.
+    args$tile_image_loader_limit <- args$tile_image_loader_limit %||% 2L
+    args$tile_timeout_ms <- args$tile_timeout_ms %||% 90000L
+  }
   do.call(wsiTools::wsi_viewer_live, c(list(slide), args))
 }
 
@@ -769,6 +823,12 @@ desktop_dense_geojson_id <- function(path, kind) {
 }
 
 desktop_geojson_cache_root <- function() {
+  if (desktop_fresh_project()) {
+    session_dir <- Sys.getenv("WSITOOLS_DESKTOP_FRESH_SESSION_DIR", "")
+    if (nzchar(session_dir)) {
+      return(file.path(session_dir, "geojson_cache"))
+    }
+  }
   explicit <- Sys.getenv("WSITOOLS_DESKTOP_GEOJSON_CACHE_DIR", "")
   if (nzchar(explicit)) {
     return(explicit)
@@ -863,7 +923,7 @@ desktop_initial_tissue_manifest <- function(items, output) {
       colour = "#22C55E",
       fill_alpha = 0.16,
       line_width = 2.2,
-      full_resolution_zoom = 2.5
+      full_resolution_zoom = 0
     )
   ))
 }
@@ -1306,7 +1366,7 @@ desktop_register_dense_geojson_source <- function(viewer, item, log_file = NULL)
     fill_alpha = if (is_tissue) 0.16 else 0.22,
     line_width = if (is_tissue) 2.2 else 1.8,
     max_points_per_roi = if (is_tissue) Inf else 700L,
-    full_resolution_zoom = if (is_tissue) 2.5 else Inf,
+    full_resolution_zoom = if (is_tissue) 0 else Inf,
     # Dense annotations remain discoverable at every magnification. The live
     # endpoint already returns a bounded spatial sample (and bounding boxes at
     # the widest overview), so hiding the source below 5x is unnecessary and
@@ -1835,6 +1895,9 @@ desktop_build_missing_tiles <- function() {
 }
 
 desktop_use_prebuilt_tiles <- function() {
+  if (desktop_fresh_project()) {
+    return(FALSE)
+  }
   tolower(Sys.getenv("WSITOOLS_DESKTOP_USE_PREBUILT_TILES", "true")) %in%
     c("1", "true", "yes", "on")
 }
@@ -1942,7 +2005,7 @@ desktop_create_dynamic_project_source <- function(slide, index, log_file,
     tile_size = tile_size,
     tile_overlap = 1,
     format = tile_format,
-    persistent_cache = TRUE
+    persistent_cache = !desktop_fresh_project()
   )
   label <- basename(slide$path %||% source_id)
   source$name <- label
@@ -1996,7 +2059,7 @@ desktop_open_live_slide_prebuilt <- function(slide, output, log_file,
       mode = "tiles",
       dynamic_tiles = TRUE,
       dynamic_tile_format = "jpg",
-      dynamic_tile_persistent_cache = TRUE,
+      dynamic_tile_persistent_cache = !desktop_fresh_project(),
       # The desktop window is exposed only after this preview exists. Keep it
       # visible beneath OpenSeadragon until the first tiled image is ready so
       # users never enter an empty viewer.
@@ -2169,7 +2232,7 @@ desktop_annotation_mask_sources <- function(items, log_file = NULL) {
       id = paste0("tissue_annotation_mask_", i),
       name = paste0("Tissue annotation mask: ", basename(item$image)),
       target_path = item$image,
-      persistent_cache = TRUE
+      persistent_cache = !desktop_fresh_project()
     )
     sources[[length(sources) + 1L]] <- source
     desktop_log(
@@ -2323,12 +2386,63 @@ desktop_open_new_project <- function(items, output, log_file) {
   viewer
 }
 
+desktop_viewer_project_items <- function(path) {
+  snapshot <- jsonlite::read_json(path, simplifyVector = FALSE)
+  if (!identical(snapshot$schema, "wsiTools-viewer-project")) {
+    stop("This file is not a wsiTools viewer project (.wsiproject.json).", call. = FALSE)
+  }
+  saved <- snapshot$project$items %||% list()
+  if (!length(saved)) {
+    stop("The saved viewer project contains no images.", call. = FALSE)
+  }
+  inputs <- snapshot$session_inputs %||% list()
+  resolve_association <- function(value) {
+    value <- as.character(value %||% "")
+    if (length(value) != 1L || !nzchar(value)) return("")
+    if (file.exists(value)) return(normalizePath(value, winslash = "/"))
+    candidate <- file.path(dirname(path), basename(value))
+    if (file.exists(candidate)) return(normalizePath(candidate, winslash = "/"))
+    value
+  }
+  items <- lapply(seq_along(saved), function(i) {
+    image <- as.character(saved[[i]]$path %||% saved[[i]]$image_path %||% "")
+    if (length(image) != 1L || !nzchar(image)) {
+      stop(sprintf("Saved image %d has no source path; add it again in a new project.", i), call. = FALSE)
+    }
+    if (!startsWith(image, "/") && !grepl("^[A-Za-z]:", image) &&
+        !startsWith(image, "\\\\")) {
+      image <- file.path(dirname(path), image)
+    }
+    if (!file.exists(image) && file.exists(file.path(dirname(path), basename(image)))) {
+      image <- file.path(dirname(path), basename(image))
+    }
+    if (!file.exists(image)) {
+      stop(sprintf("Saved image is missing: %s", image), call. = FALSE)
+    }
+    input <- if (length(inputs) >= i) inputs[[i]] else list()
+    list(
+      image = normalizePath(image, winslash = "/", mustWork = TRUE),
+      cell_annotation = resolve_association(input$cell_annotation),
+      tissue_annotation = resolve_association(input$tissue_annotation),
+      spatial_data = resolve_association(input$spatial_data),
+      spatial_sample_id = as.character(input$spatial_sample_id %||% "")
+    )
+  })
+  list(snapshot = snapshot, items = items)
+}
+
 desktop_open_target <- function(target_path, mode, output, log_file) {
   desktop_stage("metadata", "Reading image or project metadata")
   project <- NULL
   if (identical(mode, "project")) {
     target_path <- normalizePath(target_path, winslash = "/", mustWork = TRUE)
     desktop_log("Opening project: ", target_path, log_file = log_file)
+    if (file.exists(target_path) && !dir.exists(target_path)) {
+      saved <- desktop_viewer_project_items(target_path)
+      viewer <- desktop_open_new_project(saved$items, output = output, log_file = log_file)
+      attr(viewer, "desktop_restore_viewer_project") <- target_path
+      return(viewer)
+    }
     project <- wsiTools::wsi_read_project(target_path, open_slide = FALSE)
     image_path <- desktop_project_slide_path(project)
   } else {
@@ -2390,7 +2504,19 @@ main <- function() {
   load_wsitools()
   desktop_log_runtime_diagnostics(log_file = log_file)
 
-  output <- file.path(session_dir, "wsiTools_desktop_live_viewer.html")
+  output_dir <- session_dir
+  if (identical(mode, "new-project")) {
+    output_dir <- file.path(tempdir(), paste0("wsiTools_project_", Sys.getpid()))
+    dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+    Sys.setenv(
+      WSITOOLS_DESKTOP_FRESH_PROJECT = "true",
+      WSITOOLS_DESKTOP_FRESH_SESSION_DIR = output_dir
+    )
+    desktop_log("New project uses fresh viewer files and session-only tile/annotation caches.", log_file = log_file)
+  } else {
+    Sys.unsetenv(c("WSITOOLS_DESKTOP_FRESH_PROJECT", "WSITOOLS_DESKTOP_FRESH_SESSION_DIR"))
+  }
+  output <- file.path(output_dir, "wsiTools_desktop_live_viewer.html")
   viewer <- if (identical(mode, "new-project")) {
     desktop_open_new_project(
       parsed$items,
@@ -2423,7 +2549,24 @@ main <- function() {
     )
     desktop_log("Prewarmed ", as.integer(warmed), " dynamic tile cache entries.", log_file = log_file)
   }
-  html_server <- desktop_start_html_server(html)
+  html_prefix <- if (desktop_fresh_project()) {
+    paste0("viewer/", utils::URLencode(basename(tempdir()), reserved = TRUE))
+  } else {
+    ""
+  }
+  html_server <- desktop_start_html_server(html, url_prefix = html_prefix)
+  restored_project_file <- attr(viewer, "desktop_restore_viewer_project")
+  restore_copy <- NULL
+  if (is_live && is.character(restored_project_file) && length(restored_project_file) == 1L &&
+      nzchar(restored_project_file)) {
+    restore_copy <- file.path(dirname(html), paste0("restore_", Sys.getpid(), ".wsiproject.json"))
+    if (!file.copy(restored_project_file, restore_copy, overwrite = TRUE)) {
+      stop("Could not stage the saved viewer project for restoration.", call. = FALSE)
+    }
+    wsiTools:::wsi_viewer_queue_command(
+      viewer$state, "open_browser_project", list(url = basename(restore_copy))
+    )
+  }
   session_token <- paste(Sys.getpid(), format(Sys.time(), "%Y%m%d%H%M%OS3"), sep = "-")
   viewer_url <- paste0(
     html_server$url,
@@ -2441,6 +2584,7 @@ main <- function() {
   desktop_log("Sync endpoint: ", if (is_live) viewer$url %||% "not available" else "not available for static viewer", log_file = log_file)
 
   on.exit({
+    if (!is.null(restore_copy) && file.exists(restore_copy)) unlink(restore_copy)
     desktop_stop_html_server(html_server)
     if (is_live) {
       try(wsiTools::wsi_viewer_stop(viewer), silent = TRUE)

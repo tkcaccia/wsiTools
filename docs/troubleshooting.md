@@ -611,6 +611,40 @@ for the starter. Check the runtime with:
 wsi_install_desktop_dependencies(install = FALSE)
 ```
 
+## Linux Image Load Exceeds Timeout
+
+Problem:
+
+OpenSeadragon reports that a tile image load exceeded its timeout on Linux.
+
+Meaning:
+
+The image tile did not arrive before the browser deadline. A first dynamic
+tile may require a slow source-image read or may be queued behind other tile
+requests; a missing image path or stopped R session can produce the same
+visible error. The desktop launcher now limits concurrent Linux tile requests
+and allows a longer first cache miss, but it cannot repair an unreadable file.
+
+Check:
+
+```r
+wsi_diagnose(live_test = FALSE)
+slide <- wsi_open("/path/to/image.ome.tif")
+wsi_levels(slide)
+```
+
+In the viewer log, copy one failed tile URL and open it directly in the same
+browser. An HTTP error points to the tile server or backend; a long-running
+request points to image reading or storage latency. Keep the R process running
+while using a dynamic-tile viewer.
+
+Fix:
+
+For repeated work on the same image, build and reuse a browser-ready Deep Zoom
+cache with `dynamic_tiles = FALSE`. This is separate from the pyramid embedded
+in an OME-TIFF. If the image is on a network mount, test it from local storage
+to distinguish storage latency from decoding latency.
+
 ## Failed To Load canberra-gtk-module
 
 Problem:

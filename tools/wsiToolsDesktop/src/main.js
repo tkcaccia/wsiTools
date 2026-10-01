@@ -7,6 +7,9 @@ import { listen } from "@tauri-apps/api/event";
 const homeScreen = document.getElementById("homeScreen");
 const appShell = document.getElementById("appShell");
 const openProjectHome = document.getElementById("openProjectHome");
+const openProjectChoices = document.getElementById("openProjectChoices");
+const openProjectFile = document.getElementById("openProjectFile");
+const openProjectFolder = document.getElementById("openProjectFolder");
 const createProjectHome = document.getElementById("createProjectHome");
 const backHome = document.getElementById("backHome");
 const workspaceSubtitle = document.getElementById("workspaceSubtitle");
@@ -177,6 +180,8 @@ function scheduleLauncherWindowFit(layout = activeLauncherLayout(), center = fal
 function setBusy(isBusy) {
   launchBusy = isBusy;
   openProjectHome.disabled = isBusy || !rAvailable;
+  openProjectFile.disabled = isBusy || !rAvailable;
+  openProjectFolder.disabled = isBusy || !rAvailable;
   createProjectHome.disabled = isBusy || !rAvailable;
   backHome.disabled = isBusy;
   addImage.disabled = isBusy;
@@ -566,6 +571,13 @@ function rNewProjectLaunchCode() {
 }
 
 function rProjectLaunchCode(projectPath) {
+  if (/\.wsiproject\.json$/i.test(projectPath)) {
+    return [
+      "library(wsiTools)",
+      `project_snapshot <- jsonlite::read_json(${quoteRString(projectPath)}, simplifyVector = FALSE)`,
+      "# Desktop reopens the listed images with fresh tile URLs, then restores the annotations."
+    ].join("\n");
+  }
   return [
     "library(wsiTools)",
     `project <- wsi_read_project(${quoteRString(projectPath)})`,
@@ -834,24 +846,34 @@ async function selectAssociation(id, kind) {
 }
 
 createProjectHome.addEventListener("click", () => {
+  openProjectChoices.hidden = true;
+  openProjectHome.setAttribute("aria-expanded", "false");
   resetProjectInputs();
   showCreateProject();
   setStatus("add microscopy images", "info");
   appendLog("Create new project selected.");
 });
 
-openProjectHome.addEventListener("click", async () => {
-  appendLog("Open project clicked; opening native project folder picker.");
+openProjectHome.addEventListener("click", () => {
+  openProjectChoices.hidden = !openProjectChoices.hidden;
+  openProjectHome.setAttribute("aria-expanded", String(!openProjectChoices.hidden));
+});
+
+async function chooseSavedProject(directory) {
+  openProjectChoices.hidden = true;
+  openProjectHome.setAttribute("aria-expanded", "false");
+  appendLog(`Open project clicked; opening native project ${directory ? "folder" : "file"} picker.`);
   setStatus("opening project picker", "info");
   try {
     const selected = await open({
       multiple: false,
-      directory: true,
-      title: "Open previously saved wsiTools project"
+      directory,
+      title: directory ? "Open wsiTools R project folder" : "Open wsiTools viewer project file",
+      ...(directory ? {} : { filters: [{ name: "wsiTools viewer project", extensions: ["json"] }] })
     });
     const projectPath = Array.isArray(selected) ? selected[0] : selected;
     if (!projectPath) {
-      appendLog("Project picker returned no folder.");
+      appendLog("Project picker returned no selection.");
       setStatus("no project selected", "info");
       return;
     }
@@ -866,7 +888,10 @@ openProjectHome.addEventListener("click", async () => {
     setStatus("project selection failed", "error");
     appendLog(`Project picker failed: ${error}`);
   }
-});
+}
+
+openProjectFile.addEventListener("click", () => chooseSavedProject(false));
+openProjectFolder.addEventListener("click", () => chooseSavedProject(true));
 
 backHome.addEventListener("click", async () => {
   appendLog("Home clicked.");

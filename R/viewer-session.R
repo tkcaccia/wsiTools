@@ -708,7 +708,7 @@ wsi_viewer_queue_command <- function(state, type, payload = list(), send_ws = TR
     "job_update", "add_rois", "add_segmentation", "add_layer",
     "set_layer_visible", "remove_layer", "annotations_saved",
     "add_channel_source", "remove_channel_source", "set_channel_settings",
-    "colour_spots_by_gene", "restore_project_state"
+    "colour_spots_by_gene", "restore_project_state", "open_browser_project"
   )
   if (!type %in% allowed) {
     wsi_abort(sprintf(
@@ -6141,7 +6141,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
           fill_alpha = suppressWarnings(as.numeric(source$fill_alpha %||% 0.16)),
           line_width = suppressWarnings(as.numeric(source$line_width %||% 2.2)),
           full_resolution_zoom = if (identical(as.character(source$kind %||% ""), "tissue") ||
-            identical(as.character(source$source_type %||% ""), "annotation")) 2.5 else
+            identical(as.character(source$source_type %||% ""), "annotation")) 0 else
             suppressWarnings(as.numeric(source$full_resolution_zoom %||% 3)),
           total_count = suppressWarnings(as.integer(source$total_count %||% NA_integer_))
         )
@@ -6261,7 +6261,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
     if (is.na(source_cap) || source_cap <= 0) {
       source_cap <- 1200L
     }
-    full_resolution_zoom <- if (tissue_source) 2.5 else
+    full_resolution_zoom <- if (tissue_source) 0 else
       suppressWarnings(as.numeric(source$full_resolution_zoom %||% Inf))
     if (is.na(full_resolution_zoom) || full_resolution_zoom < 0) {
       full_resolution_zoom <- Inf
@@ -7251,10 +7251,11 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   dynamic_source <- NULL
   if (isTRUE(dynamic_tiles)) {
     dynamic_tile_size <- dots$tile_size %||% wsi_dynamic_preferred_tile_size(slide)
-    dots$tile_image_loader_limit <- dots$tile_image_loader_limit %||% 4L
+    linux_tiles <- identical(Sys.info()[["sysname"]], "Linux")
+    dots$tile_image_loader_limit <- dots$tile_image_loader_limit %||% if (linux_tiles) 2L else 4L
     dots$tile_prefetch_margin <- dots$tile_prefetch_margin %||% 0L
     dots$tile_prefetch_cache_count <- dots$tile_prefetch_cache_count %||% 0L
-    dots$tile_timeout_ms <- dots$tile_timeout_ms %||% 60000L
+    dots$tile_timeout_ms <- dots$tile_timeout_ms %||% if (linux_tiles) 90000L else 60000L
     dynamic_source <- wsi_dynamic_tile_source(
       slide,
       slide_id = wsi_safe_id(name, "slide"),

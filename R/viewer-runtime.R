@@ -26,6 +26,7 @@ wsi_viewer_runtime_js <- function() {
     wsi_viewer_runtime_asset("geometry-codec.js"), "\n",
     wsi_viewer_runtime_asset("performance.js"), "\n",
     wsi_viewer_runtime_asset("edit-transactions.js"), "\n",
+    wsi_viewer_runtime_asset("annotation-registration.js"), "\n",
     wsi_viewer_runtime_asset("sync.js"), "\n",
     wsi_viewer_runtime_asset("annotation-selection.js"), "\n"
   )
