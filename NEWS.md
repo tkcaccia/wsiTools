@@ -1,5 +1,11 @@
 # wsiTools 0.1.25
 
+- Preserved fractional, out-of-bounds level-0 slide coordinates when importing
+  and exporting GeoJSON annotations; reopening no longer rounds or clips
+  original polygon boundaries.
+- Saved viewer projects now restore annotations against the current live image
+  sources instead of replaying stale tile URLs. The desktop launcher also
+  accepts an R project folder's `project.json` manifest directly.
 - Reduced live-viewer startup time for large editable tissue GeoJSON files by
   serializing polygon rings in batches and omitting redundant geometry copies
   from the initial HTML. Full-resolution coordinates and editable browser

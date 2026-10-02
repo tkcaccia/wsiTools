@@ -29,6 +29,34 @@ test_that("Desktop accepts saved viewer project files and preserves image associ
   expect_error(scope$desktop_viewer_project_items(invalid), "not a wsiTools viewer project")
 })
 
+test_that("Desktop distinguishes viewer projects from R project manifests", {
+  launcher <- test_path("..", "..", "tools", "wsiToolsDesktop", "src-tauri", "resources", "launch-viewer.R")
+  expressions <- parse(launcher)
+  definition <- Filter(function(expr) {
+    is.call(expr) && identical(expr[[1L]], as.name("<-")) &&
+      identical(expr[[2L]], as.name("desktop_project_input"))
+  }, as.list(expressions))
+  expect_length(definition, 1L)
+  scope <- new.env(parent = baseenv())
+  eval(definition[[1L]], envir = scope)
+
+  folder <- tempfile(fileext = ".wsiproject")
+  dir.create(folder)
+  manifest <- file.path(folder, "project.json")
+  jsonlite::write_json(list(schema = "wsiTools-project"), manifest, auto_unbox = TRUE)
+  expect_identical(scope$desktop_project_input(folder)$kind, "r")
+  expect_identical(scope$desktop_project_input(manifest)$path,
+                   normalizePath(folder, winslash = "/"))
+
+  viewer_file <- tempfile(fileext = ".wsiproject.json")
+  jsonlite::write_json(list(schema = "wsiTools-viewer-project"), viewer_file,
+                       auto_unbox = TRUE)
+  expect_identical(scope$desktop_project_input(viewer_file)$kind, "viewer")
+  invalid <- tempfile(fileext = ".json")
+  writeLines("{}", invalid)
+  expect_error(scope$desktop_project_input(invalid), "not a wsiTools viewer project")
+})
+
 test_that("viewer project save omits undo snapshots and R restore uses fresh sources", {
   slide <- wsiTools:::wsi_mock_slide(width = 640, height = 320, levels = c(1, 4))
   path <- tempfile(fileext = ".html")

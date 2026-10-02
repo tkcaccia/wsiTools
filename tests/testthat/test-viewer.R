@@ -1182,7 +1182,7 @@ test_that("interactive viewer writes a self-contained HTML file for mock slides"
   expect_match(html, "normaliseSlideRingCoordinates", fixed = TRUE)
   expect_match(html, "coordinate_space:'level0_slide_pixels'", fixed = TRUE)
   expect_match(html, "display_transform_applied:false", fixed = TRUE)
-  expect_match(html, "geometry=normaliseGeojsonGeometry({type:geometryType(roi),coordinates:roi.coordinates})", fixed = TRUE)
+  expect_match(html, "geometry={type:geometryType(roi),coordinates:clonePlain(roi.coordinates)}", fixed = TRUE)
   expect_match(html, "if(isDrawable(roi)){geometry=roiCompositeGeometry(roi);}", fixed = TRUE)
   expect_false(grepl("roi.edited||roi.drawn||roi.brushed||roi.brush_edited", html, fixed = TRUE))
   expect_false(grepl("id=\"crosshairToggle\"", html, fixed = TRUE))

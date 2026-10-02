@@ -5,6 +5,12 @@ analysis state and lightweight tabular/annotation outputs, but it does not copy
 or embed whole-slide image pixels. Slide images remain external files referenced
 by path.
 
+The viewer's **Save Project** command can also create a single
+`.wsiproject.json` file. In wsiTools Desktop, use **Open project** to select that
+file, or select an R `.wsiproject` directory. Selecting its internal
+`project.json` index works too. Keep the referenced microscopy images in place:
+neither project format contains the whole-slide pixels.
+
 The project format is intended for:
 
 - reopening an analysis session;

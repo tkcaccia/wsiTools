@@ -2431,13 +2431,29 @@ desktop_viewer_project_items <- function(path) {
   list(snapshot = snapshot, items = items)
 }
 
+desktop_project_input <- function(path) {
+  path <- normalizePath(path, winslash = "/", mustWork = TRUE)
+  if (dir.exists(path)) return(list(kind = "r", path = path))
+  schema <- tryCatch(jsonlite::read_json(path, simplifyVector = FALSE)$schema,
+                     error = function(err) NULL)
+  if (identical(schema, "wsiTools-viewer-project")) {
+    return(list(kind = "viewer", path = path))
+  }
+  if (identical(schema, "wsiTools-project")) {
+    return(list(kind = "r", path = dirname(path)))
+  }
+  stop("This file is not a wsiTools viewer project or an R project manifest. ",
+       "Choose a .wsiproject.json file or a .wsiproject folder.", call. = FALSE)
+}
+
 desktop_open_target <- function(target_path, mode, output, log_file) {
   desktop_stage("metadata", "Reading image or project metadata")
   project <- NULL
   if (identical(mode, "project")) {
-    target_path <- normalizePath(target_path, winslash = "/", mustWork = TRUE)
+    input <- desktop_project_input(target_path)
+    target_path <- input$path
     desktop_log("Opening project: ", target_path, log_file = log_file)
-    if (file.exists(target_path) && !dir.exists(target_path)) {
+    if (identical(input$kind, "viewer")) {
       saved <- desktop_viewer_project_items(target_path)
       viewer <- desktop_open_new_project(saved$items, output = output, log_file = log_file)
       attr(viewer, "desktop_restore_viewer_project") <- target_path
