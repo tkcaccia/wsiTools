@@ -1,6 +1,6 @@
 Package: wsiTools
 Title: Tools for Reading, Tiling, Converting and Exporting Whole-Slide Images
-Version: 0.1.25
+Version: 0.1.26
 Authors@R: 
     person(given = "Stefano", family = "Cacciatore",
            role = c("aut", "cre"), email = "tkcaccia@gmail.com")

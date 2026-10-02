@@ -12,15 +12,15 @@ synchronization, dynamic tiles, annotations, and analysis.
 
 Prebuilt desktop installers are attached to the GitHub release:
 
-[Download wsiTools Desktop 0.1.18](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.18)
+[Download wsiTools Desktop 0.1.19](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.19)
 
 | Platform | Asset | Notes |
 | --- | --- | --- |
-| macOS Apple Silicon | `wsiTools-Desktop_0.1.16_macos_ARM64.dmg` | For Apple Silicon Macs. Unsigned builds may need right-click -> Open. |
-| Windows x64 | `wsiTools-Desktop_0.1.16_windows_x64-setup.exe` | NSIS installer for Windows 10/11 x64. |
-| Ubuntu/Debian x64 | `wsiTools-Desktop_0.1.16_linux_amd64.deb` | Recommended on Ubuntu; install with `sudo apt install ./file.deb`. |
-| Fedora/RHEL-style x86_64 | `wsiTools-Desktop_0.1.16_linux_x86_64.rpm` | Install with your RPM package manager. |
-| Linux x86_64 portable | `wsiTools-Desktop_0.1.16_linux_x86_64.AppImage` | Portable; host WebKitGTK/GTK modules are still required. |
+| macOS Apple Silicon | `wsiTools-Desktop_0.1.19_macos_ARM64.dmg` | For Apple Silicon Macs. Unsigned builds may need right-click -> Open. |
+| Windows x64 | `wsiTools-Desktop_0.1.19_windows_x64-setup.exe` | NSIS installer for Windows 10/11 x64. |
+| Ubuntu/Debian x64 | `wsiTools-Desktop_0.1.19_linux_amd64.deb` | Recommended on Ubuntu; install with `sudo apt install ./file.deb`. |
+| Fedora/RHEL-style x86_64 | `wsiTools-Desktop_0.1.19_linux_x86_64.rpm` | Install with your RPM package manager. |
+| Linux x86_64 portable | `wsiTools-Desktop_0.1.19_linux_x86_64.AppImage` | Portable; host WebKitGTK/GTK modules are still required. |
 | All platforms | `SHA256SUMS.txt` | Optional checksum verification. |
 
 During startup, the project window shows the current R loading stage and elapsed time. Use **View R / viewer log** to inspect ongoing work or **Cancel** to stop a stalled launch. If startup fails, the error includes an **Open R / viewer log** button and the log can be copied or saved.
@@ -29,6 +29,9 @@ During startup, the project window shows the current R loading stage and elapsed
 
 The desktop app does not bundle R or the optional WSI backends. Install these
 before using the app:
+
+Update the R package when updating the desktop app. Older R installations can
+still generate viewer code that hides tissue annotations at overview zoom.
 
 1. Install R from CRAN: <https://cran.r-project.org/>
 2. Install the wsiTools R package:

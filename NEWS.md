@@ -1,3 +1,9 @@
+# wsiTools 0.1.26
+
+- Kept dense tissue GeoJSON boundaries visible at every zoom and started
+  loading embedded tissue sources in the non-tiled viewer as well as the tiled
+  viewer. The full slide-pixel polygon coordinates are retained.
+
 # wsiTools 0.1.25
 
 - Preserved fractional, out-of-bounds level-0 slide coordinates when importing

@@ -3700,6 +3700,15 @@ test_that("dense tissue annotations keep full boundaries at every zoom", {
   expect_match(html_code, "_dense_full_groups", fixed = TRUE)
   expect_match(html_code, "tissueAnnotationRoi(roi)", fixed = TRUE)
   expect_match(html_code, "Tissue annotation loaded with full boundary resolution at every zoom", fixed = TRUE)
+  slide <- wsiTools:::wsi_mock_slide(width = 800, height = 400, levels = c(1, 4))
+  output <- tempfile(fileext = ".html")
+  source <- list(source_id = "tissue", static_url = "tissue.geojson",
+                 static_source = list(kind = "tissue", source_type = "annotation"))
+  wsi_viewer(slide, output = output, open = FALSE,
+             dense_geojson_sources = list(source))
+  html <- paste(readLines(output, warn = FALSE), collapse = "\n")
+  expect_match(html, "applyStainToCanvas();scheduleDenseGeojsonViewportLoad();drawLayers()", fixed = TRUE)
+  expect_match(html, '"dense_geojson_sources":[{"source_id":"tissue"', fixed = TRUE)
   expect_match(session_code, "static_url", fixed = TRUE)
   expect_match(session_code, "static_source", fixed = TRUE)
   expect_match(session_code, "full_resolution_zoom", fixed = TRUE)

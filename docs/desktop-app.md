@@ -71,7 +71,7 @@ runtime backends; the viewer receives viewport tiles and typed state updates.
 
 Prebuilt desktop installers are available from the GitHub release:
 
-[Download wsiTools Desktop 0.1.18](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.18)
+[Download wsiTools Desktop 0.1.19](https://github.com/tkcaccia/wsiTools/releases/tag/desktop-v0.1.19)
 
 See [Desktop Downloads](downloads.md) for platform-specific installers,
 required R setup, and optional backend notes.
@@ -96,13 +96,14 @@ The user workflow is:
 The R process must stay open while the viewer is used. It owns the live
 `httpuv` synchronization endpoint and any dynamic tile server.
 
-The desktop installer and the R package are updated separately. Desktop 0.1.16
+The desktop installer and the R package are updated separately. The desktop app
 can open an image with an older `wsiTools` package by omitting optional viewer
 arguments that version does not recognize. Persistent tile caching and the
 History input list may then be unavailable. If a selected annotation mask or
 dense GeoJSON source requires a missing API, the launcher stops with an update
 instruction rather than silently omitting the annotation. To enable every
-desktop feature, update the R package in the R installation used by the app:
+desktop feature, including full tissue boundaries at overview zoom, update the
+R package in the R installation used by the app:
 
 ```r
 remotes::install_github("tkcaccia/wsiTools", upgrade = "never", force = TRUE)
