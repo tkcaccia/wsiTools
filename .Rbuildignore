@@ -4,6 +4,8 @@
 ^\.Rproj\.user$
 ^.*\.Rproj$
 ^_pkgdown\.yml$
+^\.readthedocs\.yaml$
+^mkdocs\.yml$
 ^cran-comments\.md$
 ^docs$
 ^pkgdown$
