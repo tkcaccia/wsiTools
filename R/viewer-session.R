@@ -168,177 +168,11 @@ wsi_native_project_state_activate <- function(state, source_id) {
   TRUE
 }
 
-wsi_viewer_decimate_dense_ring <- function(ring, max_points = 500L) {
-  if (!is.list(ring)) {
-    return(ring)
-  }
-  n <- length(ring)
-  max_points <- suppressWarnings(as.numeric(max_points %||% 500L))
-  if (!is.finite(max_points) || max_points < 8L || n <= max_points) {
-    return(ring)
-  }
-  max_points <- as.integer(max_points)
-  point_xy <- function(point) {
-    c(
-      suppressWarnings(as.numeric(point$x %||% point[[1L]] %||% NA_real_)),
-      suppressWarnings(as.numeric(point$y %||% point[[2L]] %||% NA_real_))
-    )
-  }
-  closed <- n > 2L && isTRUE(all.equal(point_xy(ring[[1L]]), point_xy(ring[[n]]), tolerance = 1e-8))
-  core_n <- if (closed) n - 1L else n
-  target <- if (closed) max_points - 1L else max_points
-  idx <- unique(pmax(1L, pmin(core_n, round(seq(1, core_n, length.out = target)))))
-  out <- ring[idx]
-  if (closed && length(out)) {
-    out[[length(out) + 1L]] <- out[[1L]]
-  }
-  out
-}
-
-wsi_viewer_decimate_dense_ring_groups <- function(ring_groups, max_points_per_roi = 1200L) {
-  if (!length(ring_groups)) {
-    return(ring_groups)
-  }
-  ring_count <- sum(vapply(ring_groups, length, integer(1)))
-  if (!ring_count) {
-    return(ring_groups)
-  }
-  max_points_per_roi <- suppressWarnings(as.numeric(max_points_per_roi %||% 1200L))
-  if (!is.finite(max_points_per_roi) || max_points_per_roi <= 0) {
-    return(ring_groups)
-  }
-  per_ring <- max(16L, floor(as.integer(max_points_per_roi) / ring_count))
-  lapply(ring_groups, function(group) {
-    lapply(group, wsi_viewer_decimate_dense_ring, max_points = per_ring)
-  })
-}
-
-wsi_viewer_dense_point_xy <- function(point) {
-  c(
-    suppressWarnings(as.numeric(point$x %||% point[[1L]] %||% NA_real_)),
-    suppressWarnings(as.numeric(point$y %||% point[[2L]] %||% NA_real_))
-  )
-}
-
-wsi_viewer_dense_point <- function(x, y) {
-  list(x = unname(as.numeric(x)), y = unname(as.numeric(y)))
-}
-
-wsi_viewer_clip_dense_ring_edge <- function(points, edge, value) {
-  if (length(points) < 2L) {
-    return(points)
-  }
-  inside <- function(point) {
-    xy <- wsi_viewer_dense_point_xy(point)
-    if (any(!is.finite(xy))) {
-      return(FALSE)
-    }
-    switch(
-      edge,
-      xmin = xy[[1L]] >= value,
-      xmax = xy[[1L]] <= value,
-      ymin = xy[[2L]] >= value,
-      ymax = xy[[2L]] <= value,
-      FALSE
-    )
-  }
-  intersect_point <- function(start, end) {
-    a <- wsi_viewer_dense_point_xy(start)
-    b <- wsi_viewer_dense_point_xy(end)
-    if (any(!is.finite(c(a, b)))) {
-      return(end)
-    }
-    if (edge %in% c("xmin", "xmax")) {
-      denom <- b[[1L]] - a[[1L]]
-      if (abs(denom) < 1e-12) {
-        return(wsi_viewer_dense_point(value, b[[2L]]))
-      }
-      t <- (value - a[[1L]]) / denom
-      return(wsi_viewer_dense_point(value, a[[2L]] + t * (b[[2L]] - a[[2L]])))
-    }
-    denom <- b[[2L]] - a[[2L]]
-    if (abs(denom) < 1e-12) {
-      return(wsi_viewer_dense_point(b[[1L]], value))
-    }
-    t <- (value - a[[2L]]) / denom
-    wsi_viewer_dense_point(a[[1L]] + t * (b[[1L]] - a[[1L]]), value)
-  }
-  out <- list()
-  previous <- points[[length(points)]]
-  previous_inside <- inside(previous)
-  for (current in points) {
-    current_inside <- inside(current)
-    if (isTRUE(current_inside)) {
-      if (!isTRUE(previous_inside)) {
-        out[[length(out) + 1L]] <- intersect_point(previous, current)
-      }
-      out[[length(out) + 1L]] <- current
-    } else if (isTRUE(previous_inside)) {
-      out[[length(out) + 1L]] <- intersect_point(previous, current)
-    }
-    previous <- current
-    previous_inside <- current_inside
-  }
-  out
-}
-
-wsi_viewer_clip_dense_ring_to_rect <- function(ring, bounds) {
-  if (!is.list(ring) || length(ring) < 4L) {
-    return(list())
-  }
-  bounds <- suppressWarnings(as.numeric(bounds[c("xmin", "ymin", "xmax", "ymax")]))
-  names(bounds) <- c("xmin", "ymin", "xmax", "ymax")
-  if (any(!is.finite(bounds)) || bounds[["xmax"]] <= bounds[["xmin"]] ||
-      bounds[["ymax"]] <= bounds[["ymin"]]) {
-    return(ring)
-  }
-  points <- ring[vapply(ring, function(point) {
-    xy <- wsi_viewer_dense_point_xy(point)
-    all(is.finite(xy))
-  }, logical(1))]
-  if (length(points) < 4L) {
-    return(list())
-  }
-  first <- wsi_viewer_dense_point_xy(points[[1L]])
-  last <- wsi_viewer_dense_point_xy(points[[length(points)]])
-  if (isTRUE(all.equal(first, last, tolerance = 1e-8))) {
-    points <- points[-length(points)]
-  }
-  for (edge in c("xmin", "xmax", "ymin", "ymax")) {
-    points <- wsi_viewer_clip_dense_ring_edge(points, edge, bounds[[edge]])
-    if (length(points) < 3L) {
-      return(list())
-    }
-  }
-  points[[length(points) + 1L]] <- points[[1L]]
-  points
-}
-
-wsi_viewer_clip_dense_ring_groups_to_rect <- function(ring_groups, bounds) {
-  if (!length(ring_groups)) {
-    return(ring_groups)
-  }
-  out <- list()
-  for (group in ring_groups) {
-    if (!length(group)) {
-      next
-    }
-    clipped <- lapply(group, wsi_viewer_clip_dense_ring_to_rect, bounds = bounds)
-    clipped <- clipped[vapply(clipped, length, integer(1)) >= 4L]
-    if (length(clipped)) {
-      out[[length(out) + 1L]] <- clipped
-    }
-  }
-  out
-}
 
 wsi_viewer_dense_roi_features <- function(roi,
                                           fill_alpha = 0.22,
                                           colour = "#F97316",
-                                          source_name = "Cell annotation",
-                                          bounds_only = FALSE,
-                                          max_points_per_roi = 1200L,
-                                          clip_bounds = NULL) {
+                                          source_name = "Cell annotation") {
   if (!inherits(roi, "wsi_roi") || !nrow(roi)) {
     return(list())
   }
@@ -346,33 +180,7 @@ wsi_viewer_dense_roi_features <- function(roi,
   class_colour_lookup <- wsi_viewer_roi_class_colour_lookup(roi)
   for (i in seq_len(nrow(roi))) {
     geometry_type <- as.character(roi$geometry_type[[i]] %||% "Polygon")
-    if (isTRUE(bounds_only)) {
-      xmin <- unname(as.numeric(roi$xmin[[i]]))
-      ymin <- unname(as.numeric(roi$ymin[[i]]))
-      xmax <- unname(as.numeric(roi$xmax[[i]]))
-      ymax <- unname(as.numeric(roi$ymax[[i]]))
-      if (all(is.finite(c(xmin, ymin, xmax, ymax))) && xmax > xmin && ymax > ymin) {
-        geometry_type <- "Polygon"
-        ring_groups <- list(list(list(
-          list(x = xmin, y = ymin),
-          list(x = xmax, y = ymin),
-          list(x = xmax, y = ymax),
-          list(x = xmin, y = ymax),
-          list(x = xmin, y = ymin)
-        )))
-      } else {
-        ring_groups <- list()
-      }
-    } else {
-      ring_groups <- wsi_viewer_roi_ring_groups(geometry_type, roi$coordinates[[i]])
-      if (!is.null(clip_bounds)) {
-        ring_groups <- wsi_viewer_clip_dense_ring_groups_to_rect(ring_groups, clip_bounds)
-      }
-      ring_groups <- wsi_viewer_decimate_dense_ring_groups(
-        ring_groups,
-        max_points_per_roi = max_points_per_roi
-      )
-    }
+    ring_groups <- wsi_viewer_roi_ring_groups(geometry_type, roi$coordinates[[i]])
     rings <- if (length(ring_groups)) ring_groups[[1L]] else list()
     add_groups <- if (length(ring_groups) > 1L) ring_groups[-1L] else list()
     drawable <- length(ring_groups) > 0L
@@ -5396,9 +5204,6 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
               colour = "#F97316",
               fill_alpha = 0.18,
               line_width = 1.8,
-              min_zoom = 1,
-              full_resolution_zoom = 3,
-              max_points_per_roi = 24000L,
               total_count = nrow(imported),
               bbox_index = wsi_bbox_index_create(imported)
             )
@@ -5473,9 +5278,6 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
               colour = "#F97316",
               fill_alpha = 0.18,
               line_width = 1.8,
-              min_zoom = 1,
-              full_resolution_zoom = 3,
-              max_points_per_roi = 24000L,
               total_count = nrow(imported),
               bbox_index = wsi_bbox_index_create(imported)
             )
@@ -6140,9 +5942,6 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
           colour = as.character(source$colour %||% "#22C55E"),
           fill_alpha = suppressWarnings(as.numeric(source$fill_alpha %||% 0.16)),
           line_width = suppressWarnings(as.numeric(source$line_width %||% 2.2)),
-          full_resolution_zoom = if (identical(as.character(source$kind %||% ""), "tissue") ||
-            identical(as.character(source$source_type %||% ""), "annotation")) 0 else
-            suppressWarnings(as.numeric(source$full_resolution_zoom %||% 3)),
           total_count = suppressWarnings(as.integer(source$total_count %||% NA_integer_))
         )
       ))
@@ -6156,53 +5955,6 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
       wsi_abort("Dense GeoJSON viewport request needs finite xmin, ymin, xmax, and ymax.")
     }
     zoom <- suppressWarnings(as.numeric(payload$zoom %||% NA_real_))
-    source_min_zoom <- suppressWarnings(as.numeric(source$min_zoom %||% 0))
-    if (!is.finite(source_min_zoom) || source_min_zoom < 0) {
-      source_min_zoom <- 0
-    }
-    if (is.finite(zoom) && zoom < source_min_zoom) {
-      source_type <- as.character(source$source_type %||% "cell_segmentation")
-      source_id <- as.character(source$id %||% source_id)
-      return(list(
-        ok = TRUE,
-        loaded = TRUE,
-        source_id = source_id,
-        sources = I(unname(source_names)),
-        total_count = nrow(rois),
-        viewport_count = 0L,
-        returned_count = 0L,
-        layer = list(
-          id = source_id,
-          name = as.character(source$name %||% "Cell annotation"),
-          type = "vector",
-          source_type = source_type,
-          visible = isTRUE(source$visible %||% TRUE),
-          opacity = suppressWarnings(as.numeric(source$opacity %||% 0.92)),
-          colour = as.character(source$colour %||% "#F97316"),
-          line_width = suppressWarnings(as.numeric(source$line_width %||% 1.8)),
-          replace = TRUE,
-          count = 0L,
-          total_count = nrow(rois),
-          viewport_count = 0L,
-          items = list(),
-          metadata = list(viewport_only = TRUE, below_min_zoom = TRUE, min_zoom = source_min_zoom, zoom = zoom)
-        )
-      ))
-    }
-    default_limit <- if (is.finite(zoom) && zoom >= 12) {
-      12000L
-    } else if (is.finite(zoom) && zoom >= 8) {
-      8000L
-    } else if (is.finite(zoom) && zoom >= 5) {
-      4000L
-    } else {
-      1500L
-    }
-    limit <- suppressWarnings(as.integer(payload$limit %||% default_limit))
-    if (!is.finite(limit) || limit < 100L) {
-      limit <- default_limit
-    }
-    limit <- min(limit, 15000L)
     bbox_cols <- c("xmin", "ymin", "xmax", "ymax")
     if (!all(bbox_cols %in% names(rois))) {
       wsi_abort("Dense GeoJSON source is missing bounding-box columns.")
@@ -6237,60 +5989,12 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
       )
     }
     viewport_count <- length(idx)
-    sampled <- FALSE
-    if (viewport_count > limit) {
-      sampled <- TRUE
-      hash <- (as.double(idx) * 1103515245 + 12345) %% 2147483647
-      keep <- order(hash, method = "radix")[seq_len(limit)]
-      idx <- idx[sort(keep)]
-    }
     subset <- rois[idx, , drop = FALSE]
-    viewport_width <- bounds[["xmax"]] - bounds[["xmin"]]
-    viewport_height <- bounds[["ymax"]] - bounds[["ymin"]]
-    broad_view <- is.finite(viewport_width) && is.finite(viewport_height) &&
-      max(viewport_width, viewport_height) > 18000
     source_type <- as.character(source$source_type %||% if (identical(source$kind %||% "", "tissue")) {
       "annotation"
     } else {
       "cell_segmentation"
     })
-    tissue_source <- identical(as.character(source$kind %||% ""), "tissue") ||
-      tolower(source_type) %in% c("annotation", "tissue_annotation")
-    source_cap <- if (tissue_source) Inf else
-      suppressWarnings(as.numeric(source$max_points_per_roi %||% 1200L))
-    if (is.na(source_cap) || source_cap <= 0) {
-      source_cap <- 1200L
-    }
-    full_resolution_zoom <- if (tissue_source) 0 else
-      suppressWarnings(as.numeric(source$full_resolution_zoom %||% Inf))
-    if (is.na(full_resolution_zoom) || full_resolution_zoom < 0) {
-      full_resolution_zoom <- Inf
-    }
-    zoom_cap <- if (tissue_source) {
-      Inf
-    } else if (is.finite(zoom) && zoom >= full_resolution_zoom && zoom < 5) {
-      2400L
-    } else if (is.finite(zoom) && zoom >= full_resolution_zoom && zoom < 10) {
-      6000L
-    } else if (is.finite(zoom) && zoom >= full_resolution_zoom && zoom < 16) {
-      12000L
-    } else if (is.finite(zoom) && zoom >= full_resolution_zoom) {
-      24000L
-    } else if (!is.finite(zoom) || zoom < 1.5) {
-      96L
-    } else if (isTRUE(broad_view) || zoom < 5) {
-      320L
-    } else if (zoom < 10) {
-      900L
-    } else if (zoom < 16) {
-      2200L
-    } else {
-      source_cap
-    }
-    max_points_per_roi <- min(source_cap, zoom_cap)
-    if (is.finite(max_points_per_roi)) {
-      max_points_per_roi <- max(32L, as.integer(max_points_per_roi))
-    }
     source_name <- as.character(source$name %||% "Cell annotation")
     source_colour <- as.character(source$colour %||% "#F97316")
     source_fill_alpha <- suppressWarnings(as.numeric(source$fill_alpha %||% 0.22))
@@ -6302,28 +6006,11 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
         item
       })
     }
-    # At overview magnification, keep dense annotations visible without
-    # transferring every polygon vertex. The complete geometry remains in R;
-    # the browser receives sampled bounds until a closer view requests detail.
-    bounds_only <- !tissue_source && (!is.finite(zoom) || zoom < 1.05) && nrow(subset) > 0L
-    clip_pad <- max(viewport_width, viewport_height) * 0.08
-    if (!is.finite(clip_pad) || clip_pad < 0) {
-      clip_pad <- 0
-    }
-    clip_bounds <- c(
-      xmin = bounds[["xmin"]] - clip_pad,
-      ymin = bounds[["ymin"]] - clip_pad,
-      xmax = bounds[["xmax"]] + clip_pad,
-      ymax = bounds[["ymax"]] + clip_pad
-    )
     items <- wsi_viewer_dense_roi_features(
       subset,
       fill_alpha = source_fill_alpha,
       colour = source_colour,
-      source_name = source_name,
-      bounds_only = bounds_only,
-      max_points_per_roi = max_points_per_roi,
-      clip_bounds = if (isTRUE(bounds_only)) NULL else clip_bounds
+      source_name = source_name
     )
     items <- decorate_items(items)
     source_id <- as.character(source$id %||% source_id)
@@ -6343,15 +6030,14 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
       items = items,
       metadata = list(
         viewport_only = TRUE,
-        sampled = sampled,
+        sampled = FALSE,
         displayed_count = length(items),
         viewport_count = viewport_count,
         spatial_indexed = spatial_indexed,
         source_path = as.character(source$path %||% ""),
-        geometry_lod = if (isTRUE(bounds_only)) "overview_bounds" else "detail",
-        visible_at_all_zooms = source_min_zoom <= 0,
-        max_points_per_roi = if (is.finite(max_points_per_roi)) max_points_per_roi else "full",
-        full_resolution_zoom = if (is.finite(full_resolution_zoom)) full_resolution_zoom else NA_real_,
+        geometry_lod = "full",
+        visible_at_all_zooms = TRUE,
+        max_points_per_roi = "full",
         zoom = zoom
       )
     )

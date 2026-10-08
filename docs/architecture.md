@@ -329,9 +329,12 @@ different path:
 5. only intersecting features are returned;
 6. an `AbortController` cancels an obsolete request when the viewport changes.
 
-At low zoom the browser can hide or simplify dense cell geometry. At useful
-zoom it requests full geometry only for the viewport. Multiple dense sources
-receive distinct layer IDs, and every returned feature retains project scope.
+The browser requests the original geometry for every feature intersecting the
+viewport at every zoom. It does not replace GeoJSON boundaries with boxes,
+sample features, or reduce their vertices at overview magnification. This can
+increase transfer and drawing time for very large overview views. Multiple
+dense sources receive distinct layer IDs, and every returned feature retains
+project scope.
 
 The native index is an acceleration, not a semantic dependency. If the shared
 library is unavailable, R falls back to exact R bounding-box filtering.

@@ -922,8 +922,7 @@ desktop_initial_tissue_manifest <- function(items, output) {
       opacity = 0.86,
       colour = "#22C55E",
       fill_alpha = 0.16,
-      line_width = 2.2,
-      full_resolution_zoom = 0
+      line_width = 2.2
     )
   ))
 }
@@ -1048,14 +1047,6 @@ desktop_start_geojson_import_job <- function(path, output, name, kind, log_file 
   )
 }
 
-desktop_tissue_preview_points <- function() {
-  value <- suppressWarnings(as.integer(Sys.getenv("WSITOOLS_DESKTOP_TISSUE_PREVIEW_POINTS", "3000")))
-  if (!is.finite(value) || value < 128L) {
-    value <- 3000L
-  }
-  value
-}
-
 desktop_geojson_class_palette <- function() {
   tryCatch(
     getFromNamespace("wsi_viewer_roi_class_palette", "wsiTools")(),
@@ -1138,39 +1129,6 @@ desktop_apply_geojson_class_colours <- function(rois) {
   rois
 }
 
-desktop_ring_to_geojson <- function(ring) {
-  lapply(ring, function(point) {
-    unname(c(
-      suppressWarnings(as.numeric(point$x %||% point[[1L]] %||% NA_real_)),
-      suppressWarnings(as.numeric(point$y %||% point[[2L]] %||% NA_real_))
-    ))
-  })
-}
-
-desktop_ring_groups_to_geometry <- function(ring_groups, geometry_type) {
-  geometry_type <- tolower(as.character(geometry_type %||% "Polygon"))
-  if (!length(ring_groups)) {
-    return(NULL)
-  }
-  if (identical(geometry_type, "multipolygon")) {
-    return(list(
-      type = "MultiPolygon",
-      coordinates = lapply(ring_groups, function(group) {
-        lapply(group, desktop_ring_to_geojson)
-      })
-    ))
-  }
-  list(
-    type = "Polygon",
-    coordinates = lapply(ring_groups[[1L]], desktop_ring_to_geojson)
-  )
-}
-
-desktop_tissue_preview_geometry <- function() {
-  tolower(Sys.getenv("WSITOOLS_DESKTOP_TISSUE_PREVIEW_GEOMETRY", "false")) %in%
-    c("1", "true", "yes", "on")
-}
-
 desktop_bbox_geometry <- function(xmin, ymin, xmax, ymax) {
   xmin <- suppressWarnings(as.numeric(xmin))
   ymin <- suppressWarnings(as.numeric(ymin))
@@ -1250,82 +1208,6 @@ desktop_tissue_list_rois <- function(rois) {
   desktop_apply_geojson_class_colours(out)
 }
 
-desktop_decimate_tissue_rois <- function(rois, max_points_per_roi = desktop_tissue_preview_points()) {
-  if (!inherits(rois, "wsi_roi") || !nrow(rois)) {
-    return(rois)
-  }
-  if (!desktop_tissue_preview_geometry()) {
-    return(desktop_tissue_list_rois(rois))
-  }
-  rois <- desktop_apply_geojson_class_colours(rois)
-  max_points_per_roi <- suppressWarnings(as.integer(max_points_per_roi %||% 3000L))
-  if (!is.finite(max_points_per_roi) || max_points_per_roi < 128L) {
-    max_points_per_roi <- 3000L
-  }
-  features <- vector("list", nrow(rois))
-  for (i in seq_len(nrow(rois))) {
-    geometry_type <- as.character(rois$geometry_type[[i]] %||% "Polygon")
-    ring_groups <- tryCatch(
-      getFromNamespace("wsi_viewer_roi_ring_groups", "wsiTools")(geometry_type, rois$coordinates[[i]]),
-      error = function(err) list()
-    )
-    if (length(ring_groups)) {
-      ring_groups <- getFromNamespace("wsi_viewer_decimate_dense_ring_groups", "wsiTools")(
-        ring_groups,
-        max_points_per_roi = max_points_per_roi
-      )
-      geometry <- desktop_ring_groups_to_geometry(ring_groups, geometry_type)
-    } else {
-      geometry <- if ("geometry" %in% names(rois) && is.list(rois$geometry[[i]]) && length(rois$geometry[[i]])) {
-        rois$geometry[[i]]
-      } else {
-        list(type = geometry_type, coordinates = rois$coordinates[[i]])
-      }
-    }
-    properties <- if ("properties" %in% names(rois)) rois$properties[[i]] else list()
-    if (!is.list(properties)) {
-      properties <- list()
-    }
-    roi_class <- as.character(rois$class[[i]] %||% "annotation")
-    if (is.na(roi_class) || !nzchar(trimws(roi_class))) {
-      roi_class <- "annotation"
-    }
-    colour <- as.character(rois$color[[i]] %||% "#00BFC4")
-    classification <- properties$classification
-    if (!is.list(classification)) {
-      classification <- list()
-    }
-    classification$name <- roi_class
-    classification$color <- colour
-    classification$colour <- NULL
-    classification$colorRGB <- NULL
-    wsi_meta <- properties$wsiTools
-    if (!is.list(wsi_meta)) {
-      wsi_meta <- list()
-    }
-    wsi_meta$preview_geometry <- TRUE
-    wsi_meta$coordinate_space <- "level0_slide_pixels"
-    properties$wsiTools <- wsi_meta
-    properties$classification <- classification
-    properties$class <- roi_class
-    properties$name <- as.character(rois$name[[i]] %||% rois$roi_id[[i]] %||% roi_class)
-    features[[i]] <- list(
-      type = "Feature",
-      id = as.character(rois$roi_id[[i]] %||% i),
-      properties = properties,
-      geometry = geometry
-    )
-    bbox <- suppressWarnings(as.numeric(c(rois$xmin[[i]], rois$ymin[[i]], rois$xmax[[i]], rois$ymax[[i]])))
-    if (length(bbox) == 4L && all(is.finite(bbox))) {
-      features[[i]]$bbox <- unname(bbox)
-    }
-  }
-  out <- getFromNamespace("wsi_roi_from_geojson", "wsiTools")(list(
-    type = "FeatureCollection",
-    features = features
-  ))
-  desktop_apply_geojson_class_colours(out)
-}
 
 desktop_register_dense_geojson_source <- function(viewer, item, log_file = NULL) {
   if (!inherits(viewer, "wsi_viewer_session") ||
@@ -1365,13 +1247,6 @@ desktop_register_dense_geojson_source <- function(viewer, item, log_file = NULL)
     colour = if (is_tissue) "#22C55E" else "#F97316",
     fill_alpha = if (is_tissue) 0.16 else 0.22,
     line_width = if (is_tissue) 2.2 else 1.8,
-    max_points_per_roi = if (is_tissue) Inf else 700L,
-    full_resolution_zoom = if (is_tissue) 0 else Inf,
-    # Dense annotations remain discoverable at every magnification. The live
-    # endpoint already returns a bounded spatial sample (and bounding boxes at
-    # the widest overview), so hiding the source below 5x is unnecessary and
-    # makes an otherwise loaded annotation appear to have disappeared.
-    min_zoom = 0,
     bbox_index = bbox_index
   )
   viewer$dense_geojson_context$sources <- sources
@@ -1501,10 +1376,10 @@ desktop_poll_pending_imports <- function(viewer, pending, log_file = NULL) {
         registered <- desktop_register_dense_geojson_source(viewer, item, log_file = log_file)
         desktop_register_tissue_analysis(viewer, full_rois, path = item$path, log_file = log_file)
         item$rois <- tryCatch(
-          desktop_decimate_tissue_rois(full_rois, max_points_per_roi = desktop_tissue_preview_points()),
+          desktop_tissue_list_rois(full_rois),
           error = function(err) {
             desktop_log(
-              "Could not prepare tissue annotation preview; using viewport-only rendering: ",
+              "Could not prepare the tissue annotation list: ",
               conditionMessage(err),
               log_file = log_file
             )
@@ -1512,15 +1387,15 @@ desktop_poll_pending_imports <- function(viewer, pending, log_file = NULL) {
           }
         )
         if (inherits(item$rois, "wsi_roi") && nrow(item$rois)) {
-          item$compact_list_only <- !desktop_tissue_preview_geometry()
+          item$compact_list_only <- TRUE
           desktop_log(
-            "Large tissue GeoJSON will be listed in the Annotations panel as class-coloured compact entries; ",
-            "the browser renders adaptive class-coloured outlines at every zoom without reloading the file.",
+            "Large tissue GeoJSON will be listed in the Annotations panel; ",
+            "the browser renders the original full-resolution boundaries at every zoom.",
             log_file = log_file
           )
         } else {
           desktop_log(
-            "Large tissue GeoJSON was registered for viewport rendering but no preview ROIs could be queued. ",
+            "Large tissue GeoJSON was registered for viewport rendering but no list entries could be queued. ",
             "Set WSITOOLS_DESKTOP_AUTO_SEND_LARGE_GEOJSON=true if you explicitly want to stream all full-resolution regions as editable ROIs.",
             log_file = log_file
           )

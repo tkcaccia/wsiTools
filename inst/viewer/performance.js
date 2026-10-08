@@ -51,8 +51,7 @@ function wsiInvalidateGeometry(roi) {
 
 function wsiGeometrySignature(roi) {
   return [roi._wsiRevision || 0, roi.rings, roi.add_groups, roi.add_rings,
-    roi.subtract_rings, roi.raw_coordinates, roi.subtract_rings && roi.subtract_rings.length,
-    roi.dense_static_geometry && !denseStaticUsesFullResolution(roi) ? denseStaticDisplayCap(roi) : 0];
+    roi.subtract_rings, roi.raw_coordinates, roi.subtract_rings && roi.subtract_rings.length];
 }
 
 function wsiSameSignature(a, b) {
@@ -267,7 +266,7 @@ function wsiDrawPaneRois(cx, pane, state, rect) {
   cx.save(); cx.font = '600 12px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif'; cx.textBaseline = 'top';
   wsiVisibleRoiEntries(list, bounds).forEach(({ roi, index }) => {
     if (!visibleRoi(roi) || !isDrawable(roi) || !overlayFocusRoiAllowed(roi)) return;
-    if (!tissueAnnotationRoi(roi) && denseGeometryRoi(roi) &&
+    if (!tissueAnnotationRoi(roi) && !geojsonAnnotationRoi(roi) && denseGeometryRoi(roi) &&
         index !== Number(state.selectedRoi) && !roiClassHighlighted(roi) &&
         paneZoom < denseGeometryMinZoom()) return;
     if (!boundsOverlap(roiBounds(roi), bounds)) return;

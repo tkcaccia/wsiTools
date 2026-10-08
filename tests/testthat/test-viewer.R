@@ -3682,7 +3682,7 @@ test_that("desktop annotation cache is consumed without an intermediate RDS copy
   expect_false(grepl("saveRDS(cached, cache_file)", launcher, fixed = TRUE))
 })
 
-test_that("dense tissue annotations keep full boundaries at every zoom", {
+test_that("dense GeoJSON annotations keep full boundaries at every zoom", {
   html_code <- paste(deparse(wsiTools:::wsi_viewer_geometry_js), collapse = "\n")
   session_code <- paste(deparse(wsiTools:::wsi_start_viewer_state_server), collapse = "\n")
 
@@ -3692,11 +3692,10 @@ test_that("dense tissue annotations keep full boundaries at every zoom", {
   expect_match(html_code, "denseGeojsonInflight", fixed = TRUE)
   expect_match(html_code, "denseGeojsonQueued", fixed = TRUE)
   expect_match(html_code, "scheduleDenseGeojsonViewportLoad", fixed = TRUE)
-  expect_match(html_code, "denseStaticUsesFullResolution", fixed = TRUE)
-  expect_match(html_code, "item&&item.tissue_annotation===true)return true", fixed = TRUE)
-  expect_match(html_code, "full_resolution_zoom:tissueAnnotation?0", fixed = TRUE)
-  expect_match(html_code, "adaptive_lod:!tissue", fixed = TRUE)
-  expect_match(html_code, "denseStaticFullResolutionZoom", fixed = TRUE)
+  expect_match(html_code, "denseStaticRawGroups", fixed = TRUE)
+  expect_false(grepl("denseStaticDisplayCap", html_code, fixed = TRUE))
+  expect_false(grepl("denseStaticFullResolutionZoom", html_code, fixed = TRUE))
+  expect_false(grepl("adaptive_lod", html_code, fixed = TRUE))
   expect_match(html_code, "_dense_full_groups", fixed = TRUE)
   expect_match(html_code, "tissueAnnotationRoi(roi)", fixed = TRUE)
   expect_match(html_code, "Tissue annotation loaded with full boundary resolution at every zoom", fixed = TRUE)
@@ -3711,10 +3710,10 @@ test_that("dense tissue annotations keep full boundaries at every zoom", {
   expect_match(html, '"dense_geojson_sources":[{"source_id":"tissue"', fixed = TRUE)
   expect_match(session_code, "static_url", fixed = TRUE)
   expect_match(session_code, "static_source", fixed = TRUE)
-  expect_match(session_code, "full_resolution_zoom", fixed = TRUE)
-  expect_match(session_code, "tissue_source", fixed = TRUE)
-  expect_match(session_code, "bounds_only <- !tissue_source", fixed = TRUE)
-  expect_match(session_code, "full_resolution_zoom <- if (tissue_source)", fixed = TRUE)
+  expect_match(session_code, 'geometry_lod = "full"', fixed = TRUE)
+  expect_match(session_code, "sampled = FALSE", fixed = TRUE)
+  expect_false(grepl("bounds_only <- !tissue_source", session_code, fixed = TRUE))
+  expect_false(grepl("full_resolution_zoom", session_code, fixed = TRUE))
 })
 
 test_that("wand smooths boundaries and fills only new tiny artifacts", {
@@ -3742,10 +3741,12 @@ test_that("desktop dense annotations remain visible at overview zoom", {
   launcher <- paste(readLines(launcher_path, warn = FALSE), collapse = "\n")
   session_code <- paste(deparse(wsiTools:::wsi_start_viewer_state_server), collapse = "\n")
 
-  expect_match(launcher, "min_zoom = 0", fixed = TRUE)
-  expect_false(grepl("min_zoom = if (is_tissue) 0 else 5", launcher, fixed = TRUE))
-  expect_match(session_code, 'geometry_lod = if (isTRUE(bounds_only)) "overview_bounds" else "detail"', fixed = TRUE)
-  expect_match(session_code, "visible_at_all_zooms = source_min_zoom <= 0", fixed = TRUE)
+  expect_false(grepl("max_points_per_roi = if (is_tissue)", launcher, fixed = TRUE))
+  expect_false(grepl("full_resolution_zoom", launcher, fixed = TRUE))
+  expect_false(grepl("desktop_decimate_tissue_rois", launcher, fixed = TRUE))
+  expect_match(launcher, "desktop_tissue_list_rois(full_rois)", fixed = TRUE)
+  expect_match(session_code, 'geometry_lod = "full"', fixed = TRUE)
+  expect_match(session_code, "visible_at_all_zooms = TRUE", fixed = TRUE)
   expect_match(launcher, "desktop_tag_tissue_rois", fixed = TRUE)
 })
 
