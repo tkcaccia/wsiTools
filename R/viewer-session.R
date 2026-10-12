@@ -39,6 +39,7 @@ wsi_new_viewer_state <- function(name = "wsi_viewer_live_state", envir = parent.
   state <- new.env(parent = emptyenv())
   state$rois <- wsi_empty_roi()
   state$analysis_rois <- wsi_empty_roi()
+  state$analysis_rois_by_project <- list()
   state$measurements <- wsi_empty_measurements()
   state$trajectories <- wsi_empty_trajectories()
   state$segmentation <- wsi_empty_roi()
@@ -1863,8 +1864,17 @@ wsi_spatial_object_with_registration <- function(spatial, registration) {
 
 wsi_spatial_object_annotation_rois <- function(payload, state = NULL) {
   geojson <- payload$annotations %||% payload$rois %||% NULL
+  project_index <- payload$project_image_index %||% NULL
+  project_rois <- if (!is.null(project_index) &&
+                      !is.null(state) && inherits(state, "wsi_viewer_state")) {
+    state$analysis_rois_by_project[[as.character(project_index)]] %||% wsi_empty_roi()
+  } else {
+    NULL
+  }
   rois <- if (!is.null(geojson)) {
     wsi_roi_from_geojson(geojson)
+  } else if (!is.null(project_rois)) {
+    project_rois
   } else if (!is.null(state) && inherits(state, "wsi_viewer_state") &&
              inherits(state$analysis_rois, "wsi_roi") && nrow(state$analysis_rois)) {
     state$analysis_rois
@@ -1874,7 +1884,9 @@ wsi_spatial_object_annotation_rois <- function(payload, state = NULL) {
   } else {
     wsi_empty_roi()
   }
-  if (!nrow(rois) && !is.null(state) && inherits(state, "wsi_viewer_state") &&
+  if (!nrow(rois) && !is.null(project_rois)) {
+    rois <- project_rois
+  } else if (!nrow(rois) && !is.null(state) && inherits(state, "wsi_viewer_state") &&
       inherits(state$analysis_rois, "wsi_roi") && nrow(state$analysis_rois)) {
     rois <- state$analysis_rois
   }
@@ -3951,21 +3963,33 @@ wsi_attach_viewer_session_methods <- function(session) {
     invisible(self)
   }
   session$color_spots_by_gene <- session$colour_spots_by_gene
-  session$add_rois <- function(rois, name = "R session", service = TRUE) {
+  session$add_rois <- function(rois, name = "R session", service = TRUE,
+                               project_image_index = NULL) {
     rois <- wsi_viewer_coerce_rois(rois)
     if (!nrow(rois)) {
       return(invisible(self))
     }
-    self$state$rois <- wsi_viewer_bind_rois(self$state$rois, rois)
-    self$state$selected_roi <- wsi_viewer_selected_tail(self$state$rois)
-    self$state$selected_rois <- self$state$selected_roi %||% wsi_empty_roi()
+    if (!is.null(project_image_index)) {
+      if (length(project_image_index) != 1L || is.na(project_image_index) ||
+          !is.numeric(project_image_index) || !is.finite(project_image_index) ||
+          project_image_index < 0 || project_image_index > .Machine$integer.max ||
+          project_image_index != as.integer(project_image_index)) {
+        wsi_abort("`project_image_index` must be a non-negative, zero-based image index.")
+      }
+      project_image_index <- as.integer(project_image_index)
+    } else {
+      self$state$rois <- wsi_viewer_bind_rois(self$state$rois, rois)
+      self$state$selected_roi <- wsi_viewer_selected_tail(self$state$rois)
+      self$state$selected_rois <- self$state$selected_roi %||% wsi_empty_roi()
+      wsi_viewer_update_measurement_tables(self$state)
+    }
     self$state$last_event <- "r_add_rois"
     self$state$last_sync <- Sys.time()
-    wsi_viewer_update_measurement_tables(self$state)
     wsi_viewer_queue_command(
       self$state,
       "add_rois",
-      list(geojson = wsi_viewer_rois_to_geojson(rois), name = name)
+      list(geojson = wsi_viewer_rois_to_geojson(rois), name = name,
+           project_image_index = project_image_index)
     )
     wsi_assign_viewer_state(self$state)
     if (isTRUE(service)) {
@@ -5937,6 +5961,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
           name = as.character(source$name %||% "Tissue annotation"),
           kind = as.character(source$kind %||% "tissue"),
           source_type = as.character(source$source_type %||% "annotation"),
+          project_image_index = source$project_image_index %||% NULL,
           visible = isTRUE(source$visible %||% TRUE),
           opacity = suppressWarnings(as.numeric(source$opacity %||% 0.86)),
           colour = as.character(source$colour %||% "#22C55E"),
@@ -6019,6 +6044,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
       name = as.character(source$name %||% "Cell annotation"),
       type = "vector",
       source_type = source_type,
+      project_image_index = source$project_image_index %||% NULL,
       visible = isTRUE(source$visible %||% TRUE),
       opacity = suppressWarnings(as.numeric(source$opacity %||% 0.92)),
       colour = as.character(source$colour %||% "#F97316"),

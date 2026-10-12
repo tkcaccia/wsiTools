@@ -918,6 +918,7 @@ desktop_initial_tissue_manifest <- function(items, output) {
       name = "Tissue annotation",
       kind = "tissue",
       source_type = "annotation",
+      project_image_index = 0L,
       visible = TRUE,
       opacity = 0.86,
       colour = "#22C55E",
@@ -1238,6 +1239,7 @@ desktop_register_dense_geojson_source <- function(viewer, item, log_file = NULL)
     name = item$name %||% if (is_tissue) "Tissue annotation" else "Cell annotation",
     kind = kind,
     source_type = if (is_tissue) "annotation" else "cell_segmentation",
+    project_image_index = as.integer(item$project_image_index %||% previous$project_image_index %||% 0L),
     path = item$path,
     static_url = item$static_url %||% previous$static_url %||% NULL,
     rois = if (has_rois) item$rois else previous$rois %||% NULL,
@@ -1268,7 +1270,8 @@ desktop_register_dense_geojson_source <- function(viewer, item, log_file = NULL)
   TRUE
 }
 
-desktop_register_tissue_analysis <- function(viewer, rois, path = NULL, log_file = NULL) {
+desktop_register_tissue_analysis <- function(viewer, rois, path = NULL,
+                                             project_image_index = 0L, log_file = NULL) {
   if (!inherits(viewer, "wsi_viewer_session") ||
       !inherits(rois, "wsi_roi") || !nrow(rois)) {
     return(invisible(FALSE))
@@ -1277,7 +1280,12 @@ desktop_register_tissue_analysis <- function(viewer, rois, path = NULL, log_file
     c("polygon", "multipolygon")
   analysis_rois <- rois[area, , drop = FALSE]
   class(analysis_rois) <- unique(c("wsi_roi", class(analysis_rois)))
-  viewer$state$analysis_rois <- analysis_rois
+  index <- as.character(as.integer(project_image_index))
+  viewer$state$analysis_rois_by_project <- viewer$state$analysis_rois_by_project %||% list()
+  viewer$state$analysis_rois_by_project[[index]] <- analysis_rois
+  if (identical(index, "0")) {
+    viewer$state$analysis_rois <- analysis_rois
+  }
   getFromNamespace("wsi_assign_viewer_state", "wsiTools")(viewer$state)
   desktop_log(
     "Registered ",
@@ -1374,7 +1382,9 @@ desktop_poll_pending_imports <- function(viewer, pending, log_file = NULL) {
       if (identical(item$kind, "tissue") && !desktop_auto_send_large_geojson()) {
         full_rois <- item$rois
         registered <- desktop_register_dense_geojson_source(viewer, item, log_file = log_file)
-        desktop_register_tissue_analysis(viewer, full_rois, path = item$path, log_file = log_file)
+        desktop_register_tissue_analysis(viewer, full_rois, path = item$path,
+                                         project_image_index = item$project_image_index,
+                                         log_file = log_file)
         item$rois <- tryCatch(
           desktop_tissue_list_rois(full_rois),
           error = function(err) {
@@ -1451,7 +1461,8 @@ desktop_poll_pending_imports <- function(viewer, pending, log_file = NULL) {
     if (start <= end) {
       chunk <- item$rois[start:end, , drop = FALSE]
       tryCatch(
-        viewer$add_rois(chunk, name = item$name, service = FALSE),
+        viewer$add_rois(chunk, name = item$name, service = FALSE,
+                        project_image_index = item$project_image_index),
         error = function(err) {
           desktop_log(
             "Could not send deferred GeoJSON chunk for ",
@@ -1484,6 +1495,7 @@ desktop_poll_pending_imports <- function(viewer, pending, log_file = NULL) {
 desktop_add_annotation_files <- function(viewer, cell_annotation = NULL,
                                          tissue_annotation = NULL,
                                          image = NULL,
+                                         image_index = 1L,
                                          output = NULL,
                                          log_file = NULL) {
   if (!inherits(viewer, "wsi_viewer_session")) {
@@ -1506,8 +1518,11 @@ desktop_add_annotation_files <- function(viewer, cell_annotation = NULL,
       }
       if (is.null(deferred)) {
         rois <- desktop_tag_tissue_rois(wsiTools::read_geojson(tissue_annotation))
-        desktop_register_tissue_analysis(viewer, rois, path = tissue_annotation, log_file = log_file)
-        viewer$add_rois(rois, name = "Tissue annotation", service = FALSE)
+        desktop_register_tissue_analysis(viewer, rois, path = tissue_annotation,
+                                         project_image_index = image_index - 1L,
+                                         log_file = log_file)
+        viewer$add_rois(rois, name = "Tissue annotation", service = FALSE,
+                        project_image_index = image_index - 1L)
         desktop_log(
           "Added tissue annotation: ",
           tissue_annotation,
@@ -1517,6 +1532,7 @@ desktop_add_annotation_files <- function(viewer, cell_annotation = NULL,
           log_file = log_file
         )
       } else {
+        deferred$project_image_index <- image_index - 1L
         desktop_register_dense_geojson_source(viewer, deferred, log_file = log_file)
         pending[[length(pending) + 1L]] <- deferred
       }
@@ -1547,9 +1563,11 @@ desktop_add_annotation_files <- function(viewer, cell_annotation = NULL,
       if (is.null(deferred)) {
         rois <- wsiTools::read_geojson(cell_annotation)
         rois <- desktop_mark_dense_cell_rois(rois)
-        viewer$add_rois(rois, name = "Cell annotation", service = FALSE)
+        viewer$add_rois(rois, name = "Cell annotation", service = FALSE,
+                        project_image_index = image_index - 1L)
         desktop_log("Added cell annotation as vector geometry: ", cell_annotation, log_file = log_file)
       } else {
+        deferred$project_image_index <- image_index - 1L
         pending[[length(pending) + 1L]] <- deferred
       }
     } else if (ext %in% c("csv", "tsv")) {
@@ -2137,6 +2155,7 @@ desktop_apply_associated_data <- function(viewer, items, output, log_file) {
         cell_annotation = item$cell_annotation,
         tissue_annotation = tissue_annotation,
         image = item$image,
+        image_index = i,
         output = output,
         log_file = log_file
       )
@@ -2254,6 +2273,7 @@ desktop_open_new_project <- function(items, output, log_file) {
       viewer,
       initial_rois,
       path = items[[1L]]$tissue_annotation %||% NULL,
+      project_image_index = 0L,
       log_file = log_file
     )
     attr(viewer, "desktop_initial_tissue_index") <- 1L
