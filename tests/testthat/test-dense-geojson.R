@@ -66,3 +66,26 @@ test_that("imported GeoJSON ROIs use detailed boundaries at overview zoom", {
   expect_identical(js$eval("denseGeometryVisible(imported)"), "true")
   expect_identical(js$eval("roiLodMode(imported,1,null,null,false)"), "detail")
 })
+
+test_that("GeoJSON tissue classes appear in annotation selectors", {
+  skip_if_not_installed("V8")
+  slide <- wsiTools:::wsi_mock_slide(width = 100, height = 80, levels = c(1, 4))
+  path <- tempfile(fileext = ".html")
+  wsi_viewer(slide, output = path, open = FALSE, overwrite = TRUE)
+  definition <- grep("^function syncAnnotationClassOptions\\(", readLines(path, warn = FALSE), value = TRUE)
+  expect_length(definition, 1L)
+  js <- V8::v8()
+  js$eval(paste0(
+    "var options=[],rois=[{class:'Tumour',colour:'#ff0000'}],",
+    "layers=[{source_type:'annotation',items:[{class:'Stroma'},",
+    "{class:'Necrosis',scope:'other'}]},",
+    "{source_type:'cell_segmentation',items:[{class:'Cell'}]}];",
+    "function classPresetKey(x){return String(x).toLowerCase();}",
+    "function ensureClassPreset(x){return {class:x};}",
+    "function ensureRoiClassOption(x){options.push(x);}",
+    "function layerItemMatchesActiveProject(x){return x.scope!=='other';}"
+  ))
+  js$eval(definition)
+  js$eval("syncAnnotationClassOptions()")
+  expect_identical(unlist(js$get("options"), use.names = FALSE), c("Tumour", "Stroma"))
+})
