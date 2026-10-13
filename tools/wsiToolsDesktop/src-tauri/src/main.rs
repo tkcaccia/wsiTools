@@ -8,7 +8,7 @@ use std::{
     net::TcpStream,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{mpsc, Arc, Mutex},
+    sync::{mpsc, Arc, Mutex, OnceLock},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -704,12 +704,24 @@ fn launch_script_path(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|err| format!("Could not resolve bundled R launcher script: {err}"))
 }
 
+fn desktop_instance_id() -> &'static str {
+    static INSTANCE_ID: OnceLock<String> = OnceLock::new();
+    INSTANCE_ID.get_or_init(|| {
+        let started = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        format!("desktop-{}-{started}", std::process::id())
+    })
+}
+
 fn session_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
         .app_data_dir()
         .map_err(|err| format!("Could not resolve app data directory: {err}"))?
-        .join("sessions");
+        .join("sessions")
+        .join(desktop_instance_id());
     fs::create_dir_all(&dir).map_err(|err| {
         format!(
             "Could not create session directory {}: {err}",
@@ -2011,6 +2023,15 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn desktop_instance_uses_a_stable_private_session_directory() {
+        let id = desktop_instance_id();
+        assert!(id.starts_with(&format!("desktop-{}-", std::process::id())));
+        assert_eq!(id, desktop_instance_id());
+        let private = PathBuf::from("sessions").join(id);
+        assert_ne!(pid_file(&private), PathBuf::from("sessions/current-r-viewer.pid"));
+    }
 
     #[test]
     fn stale_pid_cleanup_requires_the_recorded_r_launcher() {
