@@ -65,6 +65,12 @@ test_that("imported GeoJSON ROIs use detailed boundaries at overview zoom", {
   js$eval("var imported={imported:true,source:'imported: cells.geojson'};")
   expect_identical(js$eval("denseGeometryVisible(imported)"), "true")
   expect_identical(js$eval("roiLodMode(imported,1,null,null,false)"), "detail")
+  js$eval("var fromR={source:'geojson',source_type:'cell_segmentation',dense_geometry:true};")
+  expect_identical(js$eval("denseGeometryVisible(fromR)"), "true")
+  expect_identical(js$eval("roiLodMode(fromR,1,null,null,false)"), "detail")
+  js$eval("var restored={source:'saved annotation',feature:{type:'Feature'}};")
+  expect_identical(js$eval("denseGeometryVisible(restored)"), "true")
+  expect_identical(js$eval("roiLodMode(restored,1,null,null,false)"), "detail")
 })
 
 test_that("GeoJSON tissue classes appear in annotation selectors", {

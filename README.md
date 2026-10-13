@@ -280,6 +280,7 @@ automatically update the R session after the file is opened.
 | `B` | Brush annotation tool |
 | Ctrl + B (or Ctrl + Shift + B) | Brush annotation tool |
 | Ctrl + W (or Ctrl + Shift + W) | Magic wand annotation tool |
+| Shift + A | Show or hide tissue annotations |
 | `E` | Edit selected annotation or trajectory |
 | `M` | Measurement tool |
 | `T` | Trajectory tool |
