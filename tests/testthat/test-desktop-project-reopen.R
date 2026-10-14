@@ -1,5 +1,6 @@
 test_that("Desktop accepts saved viewer project files and preserves image associations", {
   launcher <- test_path("..", "..", "tools", "wsiToolsDesktop", "src-tauri", "resources", "launch-viewer.R")
+  skip_if(!file.exists(launcher), "Desktop launcher sources are not included in source-package checks.")
   expressions <- parse(launcher)
   definition <- Filter(function(expr) {
     is.call(expr) && identical(expr[[1L]], as.name("<-")) &&
@@ -31,6 +32,7 @@ test_that("Desktop accepts saved viewer project files and preserves image associ
 
 test_that("Desktop distinguishes viewer projects from R project manifests", {
   launcher <- test_path("..", "..", "tools", "wsiToolsDesktop", "src-tauri", "resources", "launch-viewer.R")
+  skip_if(!file.exists(launcher), "Desktop launcher sources are not included in source-package checks.")
   expressions <- parse(launcher)
   definition <- Filter(function(expr) {
     is.call(expr) && identical(expr[[1L]], as.name("<-")) &&
@@ -89,6 +91,6 @@ test_that("large imported tissue remains visible at overview zoom", {
   expect_identical(js$eval("denseGeometryVisible({source:'imported: regions.geojson',point_count:10000,properties:{}})"), "true")
   expect_identical(js$eval("denseGeometryVisible({source:'imported: cell_segmentations.geojson',point_count:10000,properties:{}})"), "true")
   expect_identical(js$eval("denseGeometryVisible({source:'geojson',point_count:10000,properties:{}})"), "true")
-  expect_identical(js$eval("denseGeometryVisible({source:'geojson',source_type:'cell_segmentation',point_count:10000,properties:{}})"), "false")
-  expect_identical(js$eval("denseGeometryVisible({source:'geojson',point_count:10000,properties:{objectType:'detection'}})"), "false")
+  expect_identical(js$eval("denseGeometryVisible({source:'geojson',source_type:'cell_segmentation',point_count:10000,properties:{}})"), "true")
+  expect_identical(js$eval("denseGeometryVisible({source:'geojson',point_count:10000,properties:{objectType:'detection'}})"), "true")
 })

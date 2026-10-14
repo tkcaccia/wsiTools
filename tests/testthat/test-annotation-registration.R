@@ -17,7 +17,10 @@ test_that("annotation registration transforms and resets coordinates", {
   node <- Sys.which("node")
   skip_if(!nzchar(node), "Node.js is unavailable")
   script <- testthat::test_path("..", "viewer", "annotation-registration.test.js")
-  result <- suppressWarnings(system2(node, shQuote(script), stdout = TRUE, stderr = TRUE))
+  viewer_assets <- system.file("viewer", package = "wsiTools")
+  expect_true(nzchar(viewer_assets))
+  result <- suppressWarnings(system2(node, c(shQuote(script), shQuote(viewer_assets)),
+                                     stdout = TRUE, stderr = TRUE))
   status <- attr(result, "status")
   expect_identical(if (is.null(status)) 0L else status, 0L, info = paste(result, collapse = "\n"))
   expect_true(any(grepl("registration transforms", result, fixed = TRUE)))

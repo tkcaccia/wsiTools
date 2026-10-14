@@ -3,8 +3,9 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 
-const source = fs.readFileSync(path.join(__dirname, '../../inst/viewer/annotation-registration.js'), 'utf8');
-const transactions = fs.readFileSync(path.join(__dirname, '../../inst/viewer/edit-transactions.js'), 'utf8');
+const viewerAssets = process.argv[2] || path.join(__dirname, '../../inst/viewer');
+const source = fs.readFileSync(path.join(viewerAssets, 'annotation-registration.js'), 'utf8');
+const transactions = fs.readFileSync(path.join(viewerAssets, 'edit-transactions.js'), 'utf8');
 const controls = new Map([
   ['annotationRegistrationScope', { value: 'selected' }],
   ['annotationRegistrationMoveStep', { value: '50' }],
