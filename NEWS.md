@@ -1,3 +1,9 @@
+# wsiTools 0.1.28
+
+- Listed imported and manually drawn tissue annotations together in the
+  Annotations panel. Imported polygons remain indexed until selected for
+  editing, so large GeoJSON files do not need to become editable ROIs at load.
+
 # wsiTools 0.1.27
 
 - Unified visibility for imported and newly drawn tissue annotations while

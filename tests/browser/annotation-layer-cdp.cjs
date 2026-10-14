@@ -68,11 +68,15 @@ async function evaluate(expression, awaitPromise = false) {
     return {note:document.getElementById('selectedAnnotationText').textContent,
       visible:getComputedStyle(document.getElementById('selectedAnnotationNote')).display!=='none',
       enabled:!document.getElementById('roiToggle').disabled,
+      importedListed:document.querySelectorAll('#roiList .roiItem[data-layer-index]').length,
+      annotationRows:document.querySelectorAll('#roiList .roiItem').length,
       kind:overlayFocusLayerKind(layers.find(layer=>layer.id==='imported-test-layer'))};
   })()`);
   assert.equal(setup.note, 'Selected: Drawn tumour');
   assert.equal(setup.visible, true);
   assert.equal(setup.enabled, true);
+  assert.equal(setup.importedListed, 1, 'Imported tissue appears in the Annotations panel');
+  assert.equal(setup.annotationRows, 2, 'Imported and drawn regions share one Annotations list');
   assert.equal(setup.kind, 'annotation');
   const visibility = await evaluate(`(() => {
     const layer=layers.find(layer=>layer.id==='imported-test-layer');
@@ -81,11 +85,13 @@ async function evaluate(expression, awaitPromise = false) {
     document.getElementById('roiToggle').click();
     selectLayerObject(layers.indexOf(layer),0);wsiRequestDraw();
     return {hidden,shown:showRois&&overlayFocusLayerAllowed(layer),
-      note:document.getElementById('selectedAnnotationText').textContent};
+      note:document.getElementById('selectedAnnotationText').textContent,
+      listedActive:document.querySelector('#roiList .roiItem[data-layer-index]')?.classList.contains('active')};
   })()`);
   assert.equal(visibility.hidden, true);
   assert.equal(visibility.shown, true);
   assert.equal(visibility.note, 'Selected: Imported stroma');
+  assert.equal(visibility.listedActive, true, 'Imported row follows viewer selection');
   const result = await evaluate(`(async () => {
     selectAnnotation(0);
     const before=JSON.stringify(wsiRoiCoordinates(rois[0]));
@@ -113,12 +119,14 @@ async function evaluate(expression, awaitPromise = false) {
     selectLayerObject(layers.indexOf(layer),0);
     const index=promoteSelectedLayerAnnotationForEdit();
     return {index,count:rois.filter(roi=>roi.id==='imported-test').length,
-      layerCount:layer.items.length,drawable:isDrawable(rois[index]),selected:selectedRoi===index};
+      layerCount:layer.items.length,drawable:isDrawable(rois[index]),selected:selectedRoi===index,
+      importedRows:document.querySelectorAll('#roiList .roiItem[data-layer-index]').length};
   })()`);
   assert.equal(promotion.count, 1, 'Imported annotation and editable ROI are one logical object');
   assert.equal(promotion.layerCount, 0, 'Promoted item is removed from the imported vector source');
   assert.equal(promotion.drawable, true);
   assert.equal(promotion.selected, true);
+  assert.equal(promotion.importedRows, 0, 'Promotion leaves one editable panel row');
   const screenshot = await command('Page.captureScreenshot', { format:'png', captureBeyondViewport:false });
   fs.writeFileSync('/tmp/wsitools-annotation-layer-smoke.png', Buffer.from(screenshot.data, 'base64'));
   console.log('Shared annotation layer, selection note, non-overlap and undo passed');
