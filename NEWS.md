@@ -1,3 +1,12 @@
+# wsiTools 0.1.27
+
+- Unified visibility for imported and newly drawn tissue annotations while
+  retaining the indexed vector source used for large GeoJSON files.
+- Prevented Brush and Wand extension from erasing a selected region or
+  overlapping an imported annotation. A blocked edit now leaves geometry
+  unchanged; promoting an imported region no longer duplicates its list entry.
+- Added a compact selected tissue-annotation indicator in the upper-right viewer.
+
 # wsiTools 0.1.26
 
 - Kept dense tissue GeoJSON boundaries visible at every zoom and started

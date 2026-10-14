@@ -26,8 +26,29 @@ if (typeof window !== 'undefined' && typeof window.requestDraw !== 'function') {
 }
 
 function wsiRequestDraw() {
+  wsiUpdateSelectedAnnotationNote();
   if (typeof requestDraw === 'function') requestDraw();
   else if (typeof draw === 'function') draw();
+}
+
+function wsiUpdateSelectedAnnotationNote() {
+  const note = document.getElementById('selectedAnnotationNote');
+  if (!note) return;
+  const selected = selectedRoi >= 0 && !(typeof roiIsCellLike === 'function' && roiIsCellLike(rois[selectedRoi]))
+    ? rois[selectedRoi] : null;
+  const layerSelection = !selected && typeof selectedLayerObject === 'function' ? selectedLayerObject() : null;
+  const layerItem = layerSelection && typeof overlayFocusLayerKind === 'function' &&
+    overlayFocusLayerKind(layerSelection.layer) === 'annotation' && isDrawable(layerSelection.item)
+    ? layerSelection.item : null;
+  const item = selected || layerItem;
+  const text = document.getElementById('selectedAnnotationText');
+  const swatch = document.getElementById('selectedAnnotationSwatch');
+  const name = item && String(item.name || item.label || item.class || item.id || 'Annotation');
+  const label = name ? 'Selected: ' + name : 'No annotation selected';
+  if (text && text.textContent !== label) text.textContent = label;
+  if (swatch) swatch.style.backgroundColor = item ? String(item.colour || item.color || '#5eead4') : '#64748b';
+  note.classList.toggle('empty', !item);
+  note.title = item ? [name, item.class && item.class !== name ? item.class : '', item.id || ''].filter(Boolean).join(' | ') : label;
 }
 
 function wsiProjectKey() {
@@ -216,6 +237,7 @@ function wsiPaintRoi(cx, roi, index, project, viewBounds, selected, highlighted,
 }
 
 function wsiDrawRois() {
+  wsiUpdateSelectedAnnotationNote();
   if (!screenshotIncludeComponent('annotations') || !showRois || !rois.length) return;
   const viewBounds = roiVisibleSlideBounds(.10), labels = [], highlightActive = annotationHighlightActive();
   ctx.save(); ctx.font = '600 12px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif'; ctx.textBaseline = 'top';
@@ -283,6 +305,7 @@ function wsiDrawPaneRois(cx, pane, state, rect) {
 }
 
 function wsiRequestPaneDraw(pane = null) {
+  wsiUpdateSelectedAnnotationNote();
   if (multiViewLayout <= 1) return;
   if (pane) wsiDirtyPanes.add(pane); else wsiAllPanesDirty = true;
   if (multiViewOverlayDrawQueued) return;
@@ -550,16 +573,15 @@ function wsiMaterializePriorityLayerRecords(result, recordsById) {
   return touchedLayers.size;
 }
 
-function wsiBrushProtection(task) {
-  const bounds = boundsFromRing(task.points);
-  bounds.xmin -= task.radius; bounds.xmax += task.radius;
-  bounds.ymin -= task.radius; bounds.ymax += task.radius;
+function wsiLayerAnnotationProtection(bounds, priorityClaim = false) {
+  if (!bounds) return [];
   const protectedItems = [];
   for (const layer of layers) {
-    if (layer.visible === false || !/annotation|tissue/.test(String(layer.source_type || ''))) continue;
+    if (!/annotation|tissue/.test(String(layer.source_type || ''))) continue;
     for (const item of layer.items || []) {
-      if (item.visible !== false && layerItemMatchesActiveProject(item, layer) && isDrawable(item) && boundsOverlap(roiBounds(item), bounds) &&
-          (lockedRoi(item) || (!task.priority_claim && roiClassKey(item) !== task.class_key))) {
+      if (layerItemMatchesActiveProject(item, layer) && isDrawable(item) &&
+          !(typeof roiIsCellLike === 'function' && roiIsCellLike(item)) &&
+          boundsOverlap(roiBounds(item), bounds) && (!priorityClaim || lockedRoi(item))) {
         const parts = wsiCachedGeometry(item).parts.filter(part => boundsOverlap(part.bounds, bounds));
         if (parts.length) protectedItems.push(parts.map(part => {
           if (!part.coordinates) part.coordinates = part.group.rings.concat(part.group.holes).map(ring => ring.map(p => [p.x, p.y]));
@@ -569,6 +591,14 @@ function wsiBrushProtection(task) {
     }
   }
   return protectedItems;
+}
+
+function wsiBrushProtection(task) {
+  const bounds = boundsFromRing(task.points);
+  if (!bounds) return [];
+  bounds.xmin -= task.radius; bounds.xmax += task.radius;
+  bounds.ymin -= task.radius; bounds.ymax += task.radius;
+  return wsiLayerAnnotationProtection(bounds, task.priority_claim);
 }
 
 function wsiResetBrush() {
@@ -702,11 +732,13 @@ async function wsiApplyWandEdit(groups, index = selectedRoi, operation = 'extend
   }
   const task = { type: 'wand_edit', operation, target_id: wsiRoiId(target), class_key: classPresetKey(roiClassName(target)),
     geometry: (groups || []).map(group => group.map(ring => ring.map(p => [Number(p.x), Number(p.y)]))),
-    sources, active_ids: records.map(record => record.id), protection: [],
+    sources, active_ids: records.map(record => record.id),
+    protection: operation === 'subtract' ? [] : wsiLayerAnnotationProtection(editBounds),
     hole_area_threshold: Number(options.hole_area_threshold) || 0 };
   const result = await wsiWorkerRequest(task), unchanged = wsiRecordsUnchanged(records, sourceVersions, key);
   if (generation !== wsiEditGeneration) throw new Error('The Wand edit was cancelled.');
   if (key !== wsiProjectKey() || !unchanged || !rois.includes(target)) throw new Error('The tissue or annotations changed before the Wand edit finished.');
+  if (result.unchanged) throw new Error('The Wand selection is already occupied by another annotation. No change was made.');
   if (wsiWorkerGeometryEmpty(result.geometry)) throw new Error('The Wand selection would remove the entire annotation.');
   const started = performance.now(), eventName = operation === 'subtract' ? 'roi_wand_subtract' : 'roi_wand_refined';
   const transaction = wsiBeginEditTransaction(records, result, target);
@@ -740,7 +772,6 @@ async function wsiFinishBrush() {
   const cls = brushClass || currentRoiClass(), pane = typeof multiViewPointerPane !== 'undefined' ? multiViewPointerPane : null;
   const generation = wsiEditGeneration;
   brushing = false;
-  markAnnotationsDirty('brush_pending');
   wsiRequestInteraction(); wsiRequestDraw();
   const run = async () => {
     const editBounds = wsiBrushEditBounds(task.points, task.radius), records = wsiAnnotationRecords(editBounds, target, task.priority_claim);
@@ -758,6 +789,7 @@ async function wsiFinishBrush() {
     const unchanged = wsiRecordsUnchanged(records, sourceVersions, key);
     if (generation !== wsiEditGeneration) { wsiResetBrush(); return; }
     if (key !== wsiProjectKey() || !unchanged || target && !rois.includes(target)) throw new Error('The tissue or annotations changed before the brush edit finished. The edit was not applied.');
+    if (result.unchanged) { wsiResetBrush(); notify('Brush area is already occupied by another annotation. No change was made.', 'warning', 3200); return; }
     if (wsiWorkerGeometryEmpty(result.geometry)) throw new Error('The brush would remove the whole annotation or overlaps another class. The annotation was left unchanged.');
     const started = performance.now();
     const transaction = wsiBeginEditTransaction(records, result, target);

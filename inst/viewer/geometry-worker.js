@@ -142,6 +142,8 @@ function geometryEdit(task) {
     }
     if (protection.length) stroke = polygonClipping.difference(stroke, ...protection.map(g => geometryLocalCandidates(g, strokeBounds)));
   }
+  if (!stroke.length) return { geometry: target ? target.geometry : [], removed, updates,
+    unchanged: !!target, empty: !target, duration_ms: performance.now() - started };
   let result = target
     ? geometryLocalClip(task.operation === 'subtract' ? 'ctDifference' : 'ctUnion', target.geometry, stroke)
     : stroke;
@@ -219,7 +221,8 @@ function geometryWandEdit(task) {
     }
   }
   if (protection.length) selection = polygonClipping.difference(selection, ...protection);
-  if (!selection.length) return { geometry: target.geometry, removed, updates, empty: false, duration_ms: performance.now() - started };
+  if (!selection.length) return { geometry: target.geometry, removed, updates,
+    unchanged: true, empty: false, duration_ms: performance.now() - started };
   let result = geometryLocalClip('ctUnion', target.geometry, selection), changed = true;
   while (changed) {
     changed = false;
@@ -282,7 +285,7 @@ self.onmessage = event => { geometryQueue = geometryQueue.then(async () => {
     task.protection = (task.protection || []).map(wsiUnpackPolygons);
     const baselines = new Map(Array.from(active, id => [id, geometrySources.get(id).geometry]));
     const result = task.type === 'claim' ? geometryClaim(task) : task.type === 'wand_edit' ? geometryWandEdit(task) : geometryEdit(task);
-    const changed = [...(result.updates || []), ...(task.target_id && result.geometry.length ? [{ id: task.target_id, geometry: result.geometry }] : [])];
+    const changed = [...(result.updates || []), ...(task.target_id && result.geometry.length && !result.unchanged ? [{ id: task.target_id, geometry: result.geometry }] : [])];
     for (const update of changed) {
       const source = geometrySources.get(update.id);
       if (source) geometryStore({ ...source, geometry: update.geometry });

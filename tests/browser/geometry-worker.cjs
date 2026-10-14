@@ -49,6 +49,18 @@ assert.ok(edited.some(p=>p.length>1), 'Subtraction creates a real hole');
 const protectedEdit = (await run({...task, target_id:null, points:[{x:60,y:50},{x:80,y:50}],
   active_ids:['other'], sources:[{id:'other',class_key:'stroma',geometry:box(0,0,200,200),locked:false}]})).geometry;
 assert.equal(protectedEdit.length,0, 'New class cannot overlap another class');
+const layerProtectedBrush = await run({...task, project_key:'layer-protected-brush', target_id:'a',
+  points:[{x:105,y:40},{x:125,y:45}], active_ids:['a'], sources:[task.sources[0]],
+  protection:[box(110,20,80,80)]});
+context.layerProtectedBrush = layerProtectedBrush.geometry;
+context.layerProtection = box(110,20,80,80);
+assert.equal(area(vm.runInContext('geometryClip("ctIntersection",layerProtectedBrush,layerProtection)',context)),0,
+  'Normal Brush cannot expand across an imported annotation layer, even with the same class');
+const fullyProtectedBrush = await run({...task, project_key:'layer-protected-brush-full', target_id:'a',
+  points:[{x:105,y:40},{x:125,y:45}], active_ids:['a'], sources:[task.sources[0]],
+  protection:[box(0,0,200,200)]});
+assert.equal(fullyProtectedBrush.unchanged,true,'A fully blocked Brush edit reports no change');
+assert.equal(area(fullyProtectedBrush.geometry),area(original),'A fully blocked Brush edit preserves its target');
 const lockedEdit = (await run({...task, target_id:null, points:[{x:60,y:50},{x:80,y:50}],
   active_ids:['other'], sources:[{id:'other',class_key:'tumour',geometry:box(0,0,200,200),locked:true}]})).geometry;
 assert.equal(lockedEdit.length,0, 'Same-class locked annotation is protected');
@@ -80,6 +92,17 @@ const wandEdit = await run({type:'wand_edit',project_key:'wand',operation:'exten
 assert.ok(area(wandEdit.geometry)>area(original), 'Normal Wand extends the selected annotation locally');
 assert.ok(area(wandEdit.geometry)<10900,
   'Normal Wand excludes another annotation class');
+const layerProtectedWand = await run({type:'wand_edit',project_key:'layer-protected-wand',operation:'extend',
+  target_id:'a',class_key:'tumour',geometry:box(105,40,35,30),active_ids:['a'],
+  sources:[{id:'a',class_key:'tumour',geometry:original,locked:false}],protection:[box(110,20,80,80)]});
+context.layerProtectedWand = layerProtectedWand.geometry;
+assert.equal(area(vm.runInContext('geometryClip("ctIntersection",layerProtectedWand,layerProtection)',context)),0,
+  'Normal Wand cannot expand across an imported annotation layer');
+const fullyProtectedWand = await run({type:'wand_edit',project_key:'layer-protected-wand-full',operation:'extend',
+  target_id:'a',class_key:'tumour',geometry:box(105,40,35,30),active_ids:['a'],
+  sources:[{id:'a',class_key:'tumour',geometry:original,locked:false}],protection:[box(0,0,200,200)]});
+assert.equal(fullyProtectedWand.unchanged,true,'A fully blocked Wand edit reports no change');
+assert.equal(area(fullyProtectedWand.geometry),area(original),'A fully blocked Wand edit preserves its target');
 const wandSubtract = await run({type:'wand_edit',project_key:'wand-subtract',operation:'subtract',target_id:'a',class_key:'tumour',
   geometry:box(40,40,20,20),active_ids:['a'],sources:[{id:'a',class_key:'tumour',geometry:original,locked:false}]});
 assert.equal(Math.round(area(wandSubtract.geometry)),9600,'Wand subtraction changes only the local selected area');
