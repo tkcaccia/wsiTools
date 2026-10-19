@@ -1,3 +1,14 @@
+# wsiTools 0.1.30
+
+- Accept browser vertex, trajectory-border, cell-layer and image-export events
+  in the live R bridge so valid editing actions synchronize successfully.
+- Require consistent explicit image paths as well as IDs when routing channels;
+  duplicate basename-derived project IDs cannot expose another image's markers.
+- Marker visibility summaries now distinguish a hidden H&E background.
+- Add explicit browser downloads for projects and PNG, JPEG, SVG and PDF
+  screenshots, preserving selected names and reporting tissue-capture errors.
+- Keep edits made during a pending project save visibly unsaved.
+
 # wsiTools 0.1.29
 
 - Browser saves fall back to downloads when a native file picker is unavailable

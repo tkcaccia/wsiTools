@@ -687,7 +687,7 @@ function wsiGigatimeRender() {
     meta?allRows.length.toLocaleString()+' segmented '+(meta.segmentation_unit==='nucleus'?'nuclei':'cells')+' · '+entry.marker+(meta.source_column?' · score field '+meta.source_column:'')+
       ' · colour scale '+meta.min+' to '+meta.max+' (this dataset).':
     'Marker image available. No linked single-cell quantification was registered.';
-  const visibility=entry?.image?(entry.image.visible===false?' Marker image is hidden; enable Marker image above to see it.':' Marker image is shown on H&E.'):'';
+  const visibility=entry?.image?(entry.image.visible===false?' Marker image is hidden; enable Marker image above to see it.':' Marker image is shown'+(typeof baseImageState!=='undefined'&&baseImageState.visible===false?' (H&E background is hidden).':' on H&E.')):'';
   el('experimentGigatimeSummary').textContent+=visibility;
   el('experimentGigatimePage').textContent=rows.length?'Showing '+(offset+1)+'–'+Math.min(offset+50,rows.length)+' of '+rows.length.toLocaleString()+(query?' matching':'')+' objects. Export includes all '+allRows.length.toLocaleString()+' registered rows for this tissue, marker and segmentation.':query?'No object IDs match this search.':'No per-object rows to display.';
   const body=el('experimentGigatimeTable');body.replaceChildren();

@@ -33,6 +33,8 @@ matches(a, 0, true, 'explicit matching tissue ID');
 matches(a, 1, false, 'duplicate image basename cannot override a different tissue ID');
 matches({...a, metadata: {...a.metadata, target_path: '/study/b/image.png'}}, 1, false,
   'matching path cannot override contradictory explicit tissue ID');
+matches({...a, metadata: {...a.metadata, target_path: '/study/b/image.png'}}, 0, false,
+  'matching tissue ID cannot override a contradictory explicit full path');
 matches({...a, metadata: {...a.metadata, project_item_id: 'b'}}, 1, false,
   'an additional identity cannot override a contradictory explicit tissue ID');
 matches({id: 'case', metadata: {target_project_item_id: 'A'}}, 0, false,
@@ -51,4 +53,24 @@ context.projectItems = [context.projectItems[0]];
 matches({id: 'wrong', metadata: {target_project_item_id: 'b'}}, 0, false,
   'single-image viewer still honors contradictory explicit bindings');
 matches({id: 'unbound-stain'}, 0, true, 'unbound single-image legacy channel remains supported');
+context.projectItems = [{id: 'project_slide_image_png', path: '/study/a/image.png'},
+  {id: 'project_slide_image_png', path: '/study/b/image.png'}];
+const generated = {id: 'marker-a', metadata: {target_project_item_id: 'project_slide_image_png',
+  target_path: '/study/a/image.png', base_slide_path: '/study/a/image.png'}};
+matches(generated, 0, true, 'a full path disambiguates matching generated IDs');
+matches(generated, 1, false, 'a duplicate generated ID cannot override the other image full path');
+matches({id: 'id-only', metadata: {target_project_item_id: 'project_slide_image_png'}}, 0, false,
+  'duplicate generated ID without a disambiguating path is unavailable');
+matches({id: 'id-only', metadata: {target_project_item_id: 'project_slide_image_png'}}, 1, false,
+  'an ambiguous ID never selects both images');
+matches({id: 'basename', metadata: {target_project_item_id: 'project_slide_image_png', target_path: 'image.png'}}, 0, false,
+  'duplicate ID plus duplicate basename does not disambiguate an image');
+matches({...generated, metadata: {...generated.metadata, base_slide_path: '/study/b/image.png'}}, 0, false,
+  'every asserted full path must agree');
+context.projectItems[1].id = 'unique-b';
+matches({id: 'unique-id', metadata: {target_project_item_id: 'unique-b', target_path: 'image.png'}}, 1, true,
+  'a unique explicit ID preserves an otherwise ambiguous legacy basename binding');
+context.projectItems[1].id = 'project_slide_image_png';
+context.projectItems[1].path = '/study/a/image.png';
+matches(generated, 0, false, 'duplicate ID and duplicate full path still provide no unique project binding');
 console.log(assertions + ' main/multi-view channel targeting assertions passed.');
