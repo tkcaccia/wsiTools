@@ -1172,7 +1172,7 @@ wsi_http_json_response <- function(status = 200L, body = list(), content_type = 
   } else if (is.character(body) && length(body) == 1L) {
     body
   } else {
-    jsonlite::toJSON(body, auto_unbox = TRUE, null = "null")
+    jsonlite::toJSON(body, auto_unbox = TRUE, null = "null", digits = 17)
   }
   list(
     status = status,

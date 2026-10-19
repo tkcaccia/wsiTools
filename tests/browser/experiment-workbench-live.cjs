@@ -95,10 +95,10 @@ let browser,page;
     return {geometry:wsiRoiCoordinates(roi),count:roi.wand_observation_count,tolerance:roi.wand_tolerance,recipe:roi.appearance_recipe};
   });
   assert.equal(first.tolerance,0.05);assert.ok(first.count>0);assert.ok(first.recipe);
-  const roundtrip=await page.evaluate(()=>{
+  const roundtrip=await page.evaluate(async()=>{
     saveActiveProjectAnnotations();const saved=projectBrowserSnapshot(false);
     el('experimentWandReach').value='111';el('experimentWandTolerance').value='0.9';el('experimentWandSource').value='he';
-    restoreBrowserProjectInLiveSession(saved);
+    await restoreBrowserProjectInLiveSession(saved);
     return {saved,current:wsiExperimentSnapshot(),points:wsiExperimentActiveAppearance().points.length,
       tissues:projectItems.map(item=>(item.layers||[]).some(layer=>layer.id==='wsi_experiment_appearance'))};
   });

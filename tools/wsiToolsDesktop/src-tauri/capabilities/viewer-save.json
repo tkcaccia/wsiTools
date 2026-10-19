@@ -10,6 +10,7 @@
     "core:default",
     "dialog:default",
     "allow-choose-viewer-save-path",
-    "allow-save-viewer-file"
+    "allow-save-viewer-file",
+    "allow-choose-viewer-review-data"
   ]
 }

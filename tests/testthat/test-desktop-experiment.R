@@ -54,6 +54,9 @@ test_that("Desktop resolves experiment links beside saved sessions", {
   expect_error(scope$desktop_experiment_reference(list(path = basename(experiment), manifest_sha256 = "bad"), session),
                "invalid experiment digest")
   if (requireNamespace("openssl", quietly = TRUE)) {
+    digest <- paste0(openssl::sha256(readBin(experiment, "raw", file.info(experiment)$size)))
+    expect_identical(scope$desktop_experiment_reference(list(path = basename(experiment), manifest_sha256 = digest), session),
+                     normalizePath(experiment, winslash = "/"))
     expect_error(scope$desktop_experiment_reference(list(path = basename(experiment), manifest_sha256 = paste(rep("0", 64), collapse = "")), session),
                  "experiment index changed")
   }

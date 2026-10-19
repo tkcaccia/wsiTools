@@ -2392,7 +2392,7 @@ desktop_experiment_reference <- function(reference, project_path) {
     }
     con <- file(value, "rb")
     on.exit(close(con), add = TRUE)
-    digest <- as.character(openssl::sha256(con))
+    digest <- paste0(openssl::sha256(con))
     if (!identical(tolower(expected), digest)) {
       stop("The linked experiment index changed after this session was saved. ",
            "Reopen the revised experiment directly before continuing.", call. = FALSE)
@@ -2401,7 +2401,7 @@ desktop_experiment_reference <- function(reference, project_path) {
   normalizePath(value, winslash = "/", mustWork = TRUE)
 }
 
-desktop_open_experiment <- function(path, output, log_file, open_fun = NULL) {
+desktop_open_experiment <- function(path, output, log_file, open_fun = NULL, review_context = NULL, review_checkpoint = NULL) {
   if (is.null(open_fun)) {
     if (!"wsi_viewer_experiment" %in% getNamespaceExports("wsiTools")) {
       stop("This experiment needs a newer wsiTools R package with wsi_viewer_experiment(). ",
@@ -2416,7 +2416,15 @@ desktop_open_experiment <- function(path, output, log_file, open_fun = NULL) {
                                       if (count == 1L) "tissue" else "tissues"))
   desktop_log("Opening saved experiment results; no feature extraction or inference is started.",
               log_file = log_file)
-  viewer <- open_fun(path, output = output, open = FALSE, wait = FALSE)
+  extra <- list()
+  if (!is.null(review_context)) {
+    experiment <- wsiTools::wsi_read_experiment(path)
+    base <- wsiTools::wsi_experiment_review_context(experiment, feature_set_ids = character(), strict = FALSE)
+    validate_restore <- getFromNamespace("wsi_review_restore_context", "wsiTools")
+    extra$review_context <- validate_restore(base, review_context, review_checkpoint)
+    extra$review_checkpoint <- review_checkpoint
+  }
+  viewer <- do.call(open_fun, c(list(path, output = output, open = FALSE, wait = FALSE), extra))
   attr(viewer, "desktop_experiment_path") <- path
   viewer
 }
@@ -2435,7 +2443,12 @@ desktop_open_target <- function(target_path, mode, output, log_file) {
       snapshot <- jsonlite::read_json(target_path, simplifyVector = FALSE)
       experiment_path <- desktop_experiment_reference(snapshot$experiment, target_path)
       viewer <- if (!is.null(experiment_path)) {
-        desktop_open_experiment(experiment_path, output = output, log_file = log_file)
+        if (is.null(snapshot$review_workbench)) {
+          desktop_open_experiment(experiment_path, output = output, log_file = log_file)
+        } else {
+          desktop_open_experiment(experiment_path, output = output, log_file = log_file,
+            review_context = snapshot$review_workbench, review_checkpoint = snapshot$review_checkpoint)
+        }
       } else {
         saved <- desktop_viewer_project_items(target_path)
         desktop_open_new_project(saved$items, output = output, log_file = log_file)

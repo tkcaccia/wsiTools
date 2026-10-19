@@ -51,6 +51,8 @@ wsi_new_viewer_state <- function(name = "wsi_viewer_live_state", envir = parent.
   state$layers <- list()
   state$project <- list()
   state$project_snapshot <- NULL
+  state$review_context <- NULL
+  state$review_checkpoint <- NULL
   state$tile_preview <- wsi_empty_tile_preview()
   state$prediction <- wsi_empty_prediction_result()
   state$proximity <- wsi_empty_proximity_result()
@@ -340,7 +342,7 @@ wsi_viewer_allowed_payload_fields <- function() {
     "artifacts", "view", "annotations", "history", "logs", "stain",
     "channel_sources", "annotation_masks", "channel_settings",
     "tile_sources", "kodama_selection", "seurat_selection",
-    "annotation_spots", "performance", "detail", "sync"
+    "annotation_spots", "performance", "detail", "sync", "review_checkpoint"
   )
 }
 
@@ -547,7 +549,7 @@ wsi_viewer_take_commands <- function(state) {
 }
 
 wsi_viewer_ws_json <- function(body) {
-  jsonlite::toJSON(body, auto_unbox = TRUE, null = "null")
+  jsonlite::toJSON(body, auto_unbox = TRUE, null = "null", digits = 17)
 }
 
 wsi_viewer_send_ws_one <- function(ws, body) {
@@ -2357,6 +2359,8 @@ wsi_assign_viewer_state <- function(state) {
   assign(paste0(name, "_segmentation"), state$segmentation, envir = envir)
   assign(paste0(name, "_layers"), state$layers, envir = envir)
   assign(paste0(name, "_project"), state$project %||% list(), envir = envir)
+  assign(paste0(name, "_review_context"), state$review_context, envir = envir)
+  assign(paste0(name, "_review_checkpoint"), state$review_checkpoint, envir = envir)
   assign(paste0(name, "_project_snapshot"), state$project_snapshot %||% NULL, envir = envir)
   assign(paste0(name, "_channel_sources"), state$channel_sources %||% list(), envir = envir)
   assign(paste0(name, "_annotation_masks"), state$annotation_masks %||% list(), envir = envir)
@@ -2397,6 +2401,9 @@ wsi_viewer_state_apply <- function(state, payload) {
   if (!is.null(sync_update) && isTRUE(sync_update$replay)) {
     state$browser_sync_ack <- sync_update$ack
     return(invisible(state))
+  }
+  if (!is.null(payload$review_checkpoint)) {
+    checked_review <- wsi_review_commit_checkpoint(state, payload$review_checkpoint, ignore_stale = TRUE)
   }
   native_source_id <- payload$detail$native_wgpu_source_id %||% NULL
   native_overlay_fields <- c(
@@ -2612,6 +2619,7 @@ wsi_viewer_state_apply <- function(state, payload) {
   if (!is.null(payload[["layers", exact = TRUE]])) {
     state$layers <- wsi_viewer_update_layers_from_payload(state$layers, payload[["layers", exact = TRUE]])
   }
+  if (!is.null(payload$review_checkpoint)) state$review_checkpoint <- checked_review
   state$project <- payload[["project", exact = TRUE]] %||% state$project %||% list()
   detail <- payload[["detail", exact = TRUE]]
   if (is.list(detail) && !is.null(detail$project_snapshot)) {
@@ -3926,6 +3934,8 @@ wsi_attach_viewer_session_methods <- function(session) {
   session$get_logs <- function(service = TRUE) {
     session$get_state(service = service)$logs
   }
+  session$get_review_checkpoint <- function(service = TRUE) session$get_state(service = service)$review_checkpoint
+  session$get_review_context <- function(service = TRUE) session$get_state(service = service)$review_context
   session$get_tile_preview <- function(service = TRUE) {
     session$get_state(service = service)$tile_preview
   }
@@ -4910,6 +4920,7 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
                                           native_renderer_path = "/native-renderer",
                                           native_state_path = "/native-renderer-state",
                                           native_points_path = "/native-points",
+                                          review_path = "/review",
                                           auth_token = NULL) {
   if (!requireNamespace("httpuv", quietly = TRUE)) {
     wsi_abort(
@@ -6373,6 +6384,14 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
       if (!wsi_viewer_request_authorized(req, auth_token)) {
         return(wsi_http_json_response(status = 403L, body = list(error = "Viewer session token is missing or invalid.")))
       }
+      if (identical(request_path, review_path)) {
+        if (!identical(method, "POST")) return(wsi_http_json_response(status = 405L, body = list(error = "Use POST for review actions.")))
+        return(tryCatch({
+          body <- wsi_http_request_body(req)
+          payload <- jsonlite::fromJSON(body, simplifyVector = FALSE)
+          wsi_http_json_response(body = wsi_review_live_request(state, payload))
+        }, error = function(err) wsi_http_json_response(status = 400L, body = list(ok = FALSE, error = conditionMessage(err)))))
+      }
 	      if (identical(request_path, seurat_gene_path)) {
 	        return(seurat_gene_response(req))
 	      }
@@ -6534,7 +6553,8 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	        native_renderer_url = auth_url(native_renderer_path),
 	        native_state_url = auth_url(native_state_path),
 	        native_points_url = auth_url(native_points_path),
-	        auth_token = auth_token,
+	        review_url = auth_url(review_path),
+        auth_token = auth_token,
 	        tile_sources = tile_sources
 	      ))
     }
@@ -6927,6 +6947,11 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   }
 
   dots <- list(...)
+  if (!is.null(dots$review_context)) {
+    state$review_context <- wsi_validate_review_context(dots$review_context)
+    state$review_checkpoint <- if (is.null(dots$review_checkpoint)) wsi_review_checkpoint(state$review_context) else wsi_validate_review_checkpoint(dots$review_checkpoint, state$review_context)
+    dots$review_checkpoint <- state$review_checkpoint
+  }
   if (is.null(dots$output)) {
     dots$output <- tempfile(fileext = ".html")
     dots$overwrite <- TRUE
@@ -7173,6 +7198,7 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
     # the three allowlisted engines without accepting arbitrary commands.
     state$native_segmentation_run_url <- stardist_bridge$url
   }
+  dots$review_url <- bridge$review_url
   dots$viewer_state_url <- bridge$url
   dots$viewer_state_ws_url <- if (identical(transport, "polling")) NULL else bridge$ws_url
 	  dots$viewer_transport <- transport
@@ -7337,6 +7363,7 @@ wsi_viewer_state <- function(x) {
     layers = state$layers %||% list(),
     project = state$project %||% list(),
     project_snapshot = state$project_snapshot %||% NULL,
+    review_context = state$review_context, review_checkpoint = state$review_checkpoint,
     channel_sources = state$channel_sources %||% list(),
     annotation_masks = state$annotation_masks %||% list(),
     channel_settings = state$channel_settings %||% wsi_empty_channel_settings(),

@@ -907,6 +907,15 @@ async fn save_viewer_file(
 }
 
 #[tauri::command]
+async fn choose_viewer_review_data(app: AppHandle, window: tauri::WebviewWindow) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.dialog().file().set_parent(&window).set_title("Attach trusted same-section Seurat RDS")
+            .add_filter("Spatial RDS", &["rds", "RDS"]).blocking_pick_file()
+            .map(|path| path.into_path().map(|p| p.to_string_lossy().to_string()).map_err(|e| e.to_string())).transpose()
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn choose_viewer_save_path(
     app: AppHandle,
     window: tauri::WebviewWindow,
@@ -2058,7 +2067,8 @@ fn main() {
             viewer_logs,
             save_launcher_log,
             save_viewer_file,
-            choose_viewer_save_path
+            choose_viewer_save_path,
+            choose_viewer_review_data
         ])
         .run(tauri::generate_context!())
         .expect("error while running wsiTools Desktop");

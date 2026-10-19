@@ -25,3 +25,8 @@ commands.allow = [
   "stop_r_viewer",
   "viewer_logs"
 ]
+
+[[permission]]
+identifier = "allow-choose-viewer-review-data"
+description = "Allows explicit local spatial RDS selection from a viewer window."
+commands.allow = ["choose_viewer_review_data"]

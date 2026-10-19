@@ -251,6 +251,8 @@ wsi_project_viewer_summary <- function(viewer) {
     native_states[[native_active_source]] <- wsi_native_project_state_snapshot(viewer)
   }
   list(
+    review_context = viewer$review_context, review_checkpoint = viewer$review_checkpoint,
+    review_view_state = viewer$project_snapshot$review_view_state %||% NULL,
     view = viewer$view %||% list(),
     project = viewer$project_snapshot %||% viewer$project %||% NULL,
     stain = viewer$stain %||% NULL,
@@ -311,6 +313,11 @@ wsi_new_project_object <- function(slide = NULL, viewer_state = NULL, rois = NUL
                                    processing_provenance = list(),
                                    path = NULL, manifest = NULL) {
   viewer <- wsi_project_state(viewer_state)
+  source <- viewer$review_context$provenance$source_reference
+  if (is.null(metadata$cellphenotyper_experiment) && identical(source$type, "cellphenotyper-experiment")) {
+    metadata$cellphenotyper_experiment <- list(manifest_path = source$manifest_path,
+      manifest_sha256 = source$manifest_sha256, experiment_id = viewer$review_context$experiment_id)
+  }
   rois <- rois %||% viewer$rois
   measurements <- measurements %||% viewer$measurements
   segmentation <- segmentation %||% viewer$segmentation
@@ -492,6 +499,7 @@ wsi_save_project <- function(project, path = NULL, overwrite = FALSE,
     wsi_project_manifest_file(path),
     auto_unbox = TRUE,
     pretty = TRUE,
+    digits = 17,
     null = "null"
   )
 
@@ -654,6 +662,13 @@ restore_project_state <- function(viewer, project, service = TRUE) {
   }
   saved <- project$viewer_state %||% list()
   state <- viewer$state
+  if (!is.null(saved$review_context)) {
+    checked_review_context <- wsi_review_restore_context(state$review_context, saved$review_context, saved$review_checkpoint)
+    checked_review_checkpoint <- if (is.null(saved$review_checkpoint)) wsi_review_checkpoint(checked_review_context) else wsi_validate_review_checkpoint(saved$review_checkpoint, checked_review_context)
+    if (!is.null(state$review_checkpoint)) checked_review_checkpoint$revision <- max(checked_review_checkpoint$revision, state$review_checkpoint$revision) + 1L
+    state$review_context <- checked_review_context
+    state$review_checkpoint <- checked_review_checkpoint
+  }
   if (inherits(project$rois, "wsi_roi")) {
     state$rois <- project$rois
   }
@@ -706,6 +721,8 @@ restore_project_state <- function(viewer, project, service = TRUE) {
       segmentation = if (inherits(state$segmentation, "wsi_roi") && nrow(state$segmentation)) wsi_viewer_rois_to_geojson(state$segmentation) else NULL,
       channel_sources = state$channel_sources,
       channel_settings = state$channel_settings,
+      review_context = state$review_context, review_checkpoint = state$review_checkpoint,
+      review_view_state = saved$review_view_state,
       view = state$view,
       stain = state$stain
     )

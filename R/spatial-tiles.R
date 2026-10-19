@@ -21,18 +21,27 @@ wsi_spatial_tile_size_pixels <- function(slide, tile_size, units = c("px", "um")
 
 wsi_spatial_tile_grid <- function(linked, tile_size = 512, units = c("px", "um"),
                                   roi = NULL, level = 0, bounds = c("drop", "trim", "error"),
-                                  format = c("png", "jpeg", "tiff"), prefix = NULL) {
+                                  format = c("png", "jpeg", "tiff"), prefix = NULL,
+                                  selected_ids = NULL, selection_scope = c("all", "selected")) {
   if (!inherits(linked, "wsi_seurat_spatial") && !inherits(linked, "wsi_spatial_object")) {
     wsi_abort("`linked` must be returned by a wsiTools spatial-image linker.")
   }
   units <- match.arg(units)
   bounds <- match.arg(bounds)
   format <- match.arg(format)
+  selection_scope <- match.arg(selection_scope)
   slide <- linked$slide
   wsi_check_slide(slide)
   spots <- linked$spots
   if (!is.data.frame(spots) || !nrow(spots) || !all(c("x", "y") %in% names(spots))) {
     return(wsi_empty_tile_preview())
+  }
+  source_ids <- as.character(spots$barcode %||% spots$id %||% spots$label %||% seq_len(nrow(spots)))
+  if (identical(selection_scope, "selected") || !is.null(selected_ids)) {
+    if (anyDuplicated(source_ids)) wsi_abort("Spot IDs must be unique within the selected tissue before tile export.")
+    selected_ids <- wsi_review_ids(selected_ids, "selected spot IDs", source_ids)
+    spots <- spots[source_ids %in% selected_ids, , drop = FALSE]
+    if (!nrow(spots)) return(wsi_empty_tile_preview())
   }
 
   size_px <- wsi_spatial_tile_size_pixels(slide, tile_size = tile_size, units = units)
@@ -85,10 +94,7 @@ wsi_spatial_tile_grid <- function(linked, tile_size = 512, units = c("px", "um")
     y0 <- as.numeric(grid$y)
     x1 <- x0 + as.numeric(grid$width) * downsample
     y1 <- y0 + as.numeric(grid$height) * downsample
-    inside <- wsi_points_in_roi(roi, i, x0, y0) &
-      wsi_points_in_roi(roi, i, x1, y0) &
-      wsi_points_in_roi(roi, i, x1, y1) &
-      wsi_points_in_roi(roi, i, x0, y1)
+    inside <- wsi_rectangular_footprints_in_roi(data.frame(x0 = x0, y0 = y0, x1 = x1, y1 = y1), roi, i)
     keep <- keep | inside
   }
   wsi_tile_preview(grid[keep, , drop = FALSE])
@@ -219,7 +225,9 @@ wsi_spatial_tile_export_response <- function(slide, payload, state = NULL) {
   }
   unknown <- setdiff(names(payload), c(
     "output_dir", "format", "overwrite", "manifest_file", "spot_index_file", "tiles",
-    "source_name", "project", "selected_roi", "tile_size", "units"
+    "source_name", "project", "selected_roi", "tile_size", "units",
+    "selection_scope", "selected_ids", "review_selected_ids", "context_id",
+    "source_signature", "tissue_id", "frame_id", "image_sha256"
   ))
   if (length(unknown)) {
     wsi_abort(sprintf(
@@ -240,6 +248,35 @@ wsi_spatial_tile_export_response <- function(slide, payload, state = NULL) {
   format <- match.arg(format, c("png", "jpeg", "tiff"))
   overwrite <- isTRUE(payload$overwrite)
   grid <- wsi_spatial_tile_payload_grid(payload$tiles %||% NULL)
+  scope <- match.arg(payload$selection_scope %||% "all", c("all", "selected"))
+  ids <- payload$review_selected_ids %||% payload$selected_ids
+  if (identical(scope, "selected") || !is.null(ids)) {
+    context <- if (inherits(state, "wsi_viewer_state")) state$review_context else NULL
+    if (!is.null(payload$review_selected_ids) || !is.null(payload$source_signature)) {
+      if (is.null(context)) wsi_abort("No canonical review context is attached to this tile-export session.")
+      grid <- wsi_spatial_tile_review_filter(grid, context, ids,
+        tissue_id = payload$tissue_id, frame_id = payload$frame_id,
+        source_signature = payload$source_signature, context_id = payload$context_id,
+        image_sha256 = payload$image_sha256, slide = slide)
+    } else {
+      if (!"spot_id" %in% names(grid)) wsi_abort("Selected tile export requires explicit spot IDs.")
+      ids <- wsi_review_ids(ids, "selected spot IDs")
+      if (!length(ids)) wsi_abort("No observations are selected; no tiles were exported.")
+      if (any(!ids %in% grid$spot_id)) wsi_abort("Selected spot IDs do not match the tile preview.")
+      grid <- grid[grid$spot_id %in% ids, , drop = FALSE]
+    }
+  }
+  if (!is.null(payload$selected_roi)) {
+    roi <- wsi_viewer_coerce_rois(payload$selected_roi)
+    if (!nrow(roi)) wsi_abort("The selected tile-export annotation has no polygon geometry.")
+    rectangles <- data.frame(x0 = grid$x, y0 = grid$y,
+      x1 = grid$x + grid$width * grid$downsample,
+      y1 = grid$y + grid$height * grid$downsample)
+    keep <- rep(FALSE, nrow(grid))
+    for (i in seq_len(nrow(roi))) keep <- keep | wsi_rectangular_footprints_in_roi(rectangles, roi, i)
+    grid <- grid[keep, , drop = FALSE]
+  }
+  if (!nrow(grid)) wsi_abort("No complete selected tile footprints remain inside the annotation; no tiles were exported.")
   ext <- wsi_format_extension(format)
   grid$output_file <- paste0(tools::file_path_sans_ext(basename(grid$output_file)), ".", ext)
   manifest <- wsi_export_tiles(slide, grid, output_dir = output_dir, format = format, overwrite = overwrite)
@@ -271,4 +308,191 @@ wsi_spatial_tile_export_response <- function(slide, payload, state = NULL) {
     spot_index_file = normalizePath(spot_index_file, winslash = "/", mustWork = FALSE),
     format = format
   )
+}
+
+#' Test complete rectangular footprints against a polygon annotation
+#' @param rectangles Data frame with native-pixel edge columns x0, y0, x1, y1.
+#' @param rois Polygon or multipolygon wsi_roi annotations, with holes retained.
+#' @param index One annotation row.
+#' @return Logical containment for each rectangle. Touching the boundary is
+#'   allowed within a relative 1e-9 numerical tolerance; entering a hole or a
+#'   concave boundary is excluded. This is not an area-coverage estimate.
+#' @export
+wsi_rectangular_footprints_in_roi <- function(rectangles, rois, index = 1L) {
+  if (!is.data.frame(rectangles) || !all(c("x0", "y0", "x1", "y1") %in% names(rectangles)))
+    wsi_abort("Rectangular footprints require native edge columns x0, y0, x1 and y1.")
+  values <- as.matrix(rectangles[, c("x0", "y0", "x1", "y1"), drop = FALSE])
+  if (!is.numeric(values) || any(!is.finite(values)) ||
+      any(values[, "x1"] <= values[, "x0"]) || any(values[, "y1"] <= values[, "y0"]))
+    wsi_abort("Rectangular footprints must have finite edges and positive area.")
+  if (!inherits(rois, "wsi_roi") || length(index) != 1L || !is.numeric(index) ||
+      !is.finite(index) || index != as.integer(index) || index < 1L || index > nrow(rois))
+    wsi_abort("Choose one valid polygon annotation row for footprint containment.")
+  type <- tolower(rois$geometry_type[[index]])
+  polygons <- if (type == "polygon") list(rois$coordinates[[index]]) else if (type == "multipolygon") rois$coordinates[[index]] else list()
+  if (!length(polygons)) wsi_abort("Footprint containment requires polygon or multipolygon annotations.")
+  if (!nrow(rectangles)) return(logical())
+  epsilon <- pmin(values[, "x1"] - values[, "x0"], values[, "y1"] - values[, "y0"]) * 1e-9
+  left <- values[, "x0"] + epsilon; right <- values[, "x1"] - epsilon
+  top <- values[, "y0"] + epsilon; bottom <- values[, "y1"] - epsilon
+  inside <- wsi_points_in_roi(rois, index, (left + right) / 2, (top + bottom) / 2)
+  for (corner in list(c(left, top), c(left, bottom), c(right, top), c(right, bottom))) {
+    n <- nrow(rectangles)
+    inside <- inside & wsi_points_in_roi(rois, index, corner[seq_len(n)], corner[n + seq_len(n)])
+  }
+  # Slab intersection catches boundaries wholly enclosed by the rectangle,
+  # including small holes and notches which miss all four corners and centre.
+  for (polygon in polygons) for (ring in polygon) {
+    vertices <- wsi_ring_matrix(ring)
+    if (nrow(vertices) < 3L) next
+    if (!identical(unname(vertices[1L, ]), unname(vertices[nrow(vertices), ]))) vertices <- rbind(vertices, vertices[1L, ])
+    for (j in seq_len(nrow(vertices) - 1L)) {
+      point <- vertices[j, ]; delta <- vertices[j + 1L, ] - point
+      interval <- function(value, change, lower, upper) {
+        if (abs(change) < .Machine$double.eps) {
+          good <- value >= lower & value <= upper
+          return(list(lo = ifelse(good, -Inf, Inf), hi = ifelse(good, Inf, -Inf)))
+        }
+        a <- (lower - value) / change; b <- (upper - value) / change
+        list(lo = pmin(a, b), hi = pmax(a, b))
+      }
+      tx <- interval(point[[1L]], delta[[1L]], left, right)
+      ty <- interval(point[[2L]], delta[[2L]], top, bottom)
+      crosses <- pmax(0, tx$lo, ty$lo) <= pmin(1, tx$hi, ty$hi)
+      inside[crosses] <- FALSE
+    }
+  }
+  inside
+}
+
+wsi_spatial_tile_review_filter <- function(grid, context, selected_ids, tissue_id,
+                                           frame_id = NULL, source_signature = NULL,
+                                           context_id = NULL, image_sha256 = NULL,
+                                           slide = NULL) {
+  context <- wsi_validate_review_context(context)
+  if (!identical(source_signature, context$source_signature) ||
+      (!is.null(context_id) && !identical(context_id, context$context_id)))
+    wsi_abort("The tile preview has a stale or different review source signature.")
+  tissue_id <- wsi_review_text(tissue_id, "tile-export tissue_id")
+  index <- match(tissue_id, vapply(context$images, `[[`, character(1), "tissue_id"))
+  if (is.na(index)) wsi_abort("Tile export references an unknown tissue.")
+  image <- context$images[[index]]
+  if ((!is.null(frame_id) && !identical(frame_id, image$frame_id)) ||
+      (!is.null(image_sha256) && !identical(image_sha256, image$sha256)))
+    wsi_abort("Tile export image hash/frame differs from the review context.")
+  if (!is.null(slide)) {
+    wsi_check_slide(slide)
+    path <- slide$path
+    if (!is.character(path) || !file.exists(path)) wsi_abort("The live tile-export source image cannot be verified.")
+    con <- file(path, "rb")
+    actual <- tryCatch(paste0(openssl::sha256(con)), finally = close(con))
+    if (!identical(actual, image$sha256)) wsi_abort("The live tile-export source image hash does not match the selected tissue.")
+  }
+  ids <- wsi_review_select(context, ids = selected_ids)
+  if (!length(ids)) wsi_abort("No observations are selected; no tiles were exported.")
+  observations <- Filter(function(observation) observation$id %in% ids && identical(observation$tissue_id, tissue_id), context$observations)
+  if (!length(observations)) wsi_abort("The selection contains no observations on the active tile-export tissue.")
+  # A spot-centred legacy preview must identify its selected source observation;
+  # free-standing work tiles use wsi_review_tile_plan() instead.
+  key <- if ("observation_id" %in% names(grid)) "observation_id" else if ("spot_id" %in% names(grid)) "spot_id" else NULL
+  if (is.null(key)) wsi_abort("Tile preview needs canonical observation_id or unambiguous selected spot_id values.")
+  candidates <- if (identical(key, "observation_id")) vapply(observations, `[[`, character(1), "id") else vapply(observations, `[[`, character(1), "original_id")
+  if (anyDuplicated(candidates)) wsi_abort("Repeated local IDs need canonical observation_id values before tile export.")
+  keep <- as.character(grid[[key]]) %in% candidates
+  grid <- grid[keep, , drop = FALSE]
+  if (!nrow(grid)) wsi_abort("No tile preview rows match the explicit selected observations.")
+  positions <- match(as.character(grid[[key]]), candidates)
+  if (anyDuplicated(as.character(grid[[key]])))
+    wsi_abort("Selected spot-centred preview contains duplicate observation IDs.")
+  downsample <- grid$downsample %||% rep(1, nrow(grid))
+  if (any(!is.finite(downsample)) || any(downsample <= 0))
+    wsi_abort("Selected tile preview downsample must be finite and positive.")
+  if (any((grid$level %||% rep(0L, nrow(grid))) != 0L) || any(downsample != 1))
+    wsi_abort("Canonical selected tile export currently requires native level-0 pixels.")
+  for (i in seq_len(nrow(grid))) {
+    observation <- observations[[positions[[i]]]]
+    if (abs(grid$x[[i]] + grid$width[[i]] * downsample[[i]] / 2 - observation$x) > 0.51 ||
+        abs(grid$y[[i]] + grid$height[[i]] * downsample[[i]] / 2 - observation$y) > 0.51)
+      wsi_abort("Tile preview coordinates no longer match the selected observation centres.")
+    if (grid$x[[i]] < 0 || grid$y[[i]] < 0 ||
+        grid$x[[i]] + grid$width[[i]] * downsample[[i]] > image$width ||
+        grid$y[[i]] + grid$height[[i]] * downsample[[i]] > image$height)
+      wsi_abort("Selected tile footprint leaves its declared image frame.")
+  }
+  grid$observation_id <- vapply(observations[positions], `[[`, character(1), "id")
+  grid$tissue_id <- image$tissue_id; grid$frame_id <- image$frame_id; grid$image_sha256 <- image$sha256
+  grid
+}
+
+#' Plan deduplicated image-frame tiles from an explicit review selection
+#' @param context A canonical review context.
+#' @param selected_ids Explicit canonical selected observation IDs.
+#' @param tile_size Positive tile side length; pixels must be integer values.
+#' @param units Pixels or microns. Microns require image calibration.
+#' @param bounds Drop incomplete edge tiles, trim them, or raise an error.
+#' @param context_px Optional non-negative context margin in native pixels.
+#' @param max_tiles Maximum deduplicated work-tile count.
+#' @return A JSON-compatible plan; this never reads pixels or submits work.
+#' @export
+wsi_review_tile_plan <- function(context, selected_ids, tile_size = 112,
+                                 units = c("px", "um"), bounds = c("drop", "trim", "error"),
+                                 context_px = 0, max_tiles = 10000L) {
+  context <- wsi_validate_review_context(context)
+  units <- match.arg(units); bounds <- match.arg(bounds)
+  tile_size <- wsi_review_number(tile_size, "tile_size", TRUE, identical(units, "px"))
+  context_px <- wsi_review_number(context_px, "context_px", integer = TRUE)
+  if (context_px < 0) wsi_abort("Tile context margin must be non-negative.")
+  max_tiles <- wsi_review_number(max_tiles, "max_tiles", TRUE, TRUE)
+  selected_ids <- sort(wsi_review_select(context, ids = selected_ids))
+  observations <- Filter(function(observation) observation$id %in% selected_ids, context$observations)
+  tile_map <- new.env(parent = emptyenv())
+  work_count <- 0L
+  excluded <- character()
+  for (observation in observations) {
+    image <- context$images[[match(observation$tissue_id, vapply(context$images, `[[`, character(1), "tissue_id"))]]
+    if (identical(units, "um")) {
+      if (is.null(image$mpp_x) || is.null(image$mpp_y)) wsi_abort("Micron tile planning requires positive calibration for each selected image.")
+      width <- round(tile_size / image$mpp_x); height <- round(tile_size / image$mpp_y)
+    } else width <- height <- tile_size
+    if (width < 1 || height < 1) wsi_abort("Requested physical tile size is smaller than one image pixel.")
+    column <- floor(observation$x / width); row <- floor(observation$y / height)
+    x <- column * width; y <- row * height
+    incomplete <- x + width > image$width || y + height > image$height
+    if (incomplete && identical(bounds, "error")) wsi_abort("A selected observation belongs to an incomplete edge tile.")
+    if (incomplete && identical(bounds, "drop")) {
+      excluded <- c(excluded, observation$id)
+      next
+    }
+    work_width <- min(width, image$width - x); work_height <- min(height, image$height - y)
+    identity <- list(tissue_id = image$tissue_id, frame_id = image$frame_id, image_sha256 = image$sha256,
+      x = x, y = y, width = work_width, height = work_height,
+      nominal_width_px = width, nominal_height_px = height, context_px = context_px)
+    tile_id <- paste0("review_tile_", substr(wsi_review_digest(identity), 1L, 24L))
+    if (exists(tile_id, tile_map, inherits = FALSE)) {
+      tile <- get(tile_id, tile_map, inherits = FALSE)
+      tile$observation_ids <- as.list(sort(c(unlist(tile$observation_ids), observation$id)))
+    } else {
+      if (work_count >= max_tiles) wsi_abort("Review tile plan exceeds max_tiles; no partial plan was returned.")
+      work_count <- work_count + 1L
+      tile <- c(list(tile_id = tile_id), identity,
+        list(level = 0L, grid_col = column, grid_row = row,
+          read_x = max(0, x - context_px), read_y = max(0, y - context_px),
+          read_width = min(image$width, x + work_width + context_px) - max(0, x - context_px),
+          read_height = min(image$height, y + work_height + context_px) - max(0, y - context_px),
+          observation_ids = list(observation$id)))
+    }
+    assign(tile_id, tile, tile_map)
+  }
+  tiles <- as.list(tile_map, all.names = TRUE)
+  if (length(tiles)) tiles <- unname(tiles[order(vapply(tiles, `[[`, character(1), "tissue_id"),
+    vapply(tiles, `[[`, numeric(1), "grid_row"), vapply(tiles, `[[`, numeric(1), "grid_col"))])
+  list(schema = "wsitools-review-tile-plan", schema_version = 1L,
+    context_id = context$context_id, source_signature = context$source_signature,
+    selected_ids = as.list(selected_ids), row_count = length(selected_ids), work_count = length(tiles),
+    included_observation_count = length(selected_ids) - length(excluded),
+    membership_rule = "observation_centres", bounds_policy = bounds,
+    tile_size = tile_size, units = units, context_px = context_px,
+    images = Filter(function(image) image$tissue_id %in% vapply(observations, `[[`, character(1), "tissue_id"), context$images),
+    tiles = tiles, excluded_ids = as.list(sort(excluded)),
+    interpretation = "Centres select work tiles; this is not spot footprint coverage or biological ground truth. No image processing, inference or job submission was performed.")
 }

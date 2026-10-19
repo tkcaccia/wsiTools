@@ -423,3 +423,21 @@ reference:
       - wsi_case_report
       - write_case_report
       - wsi_write_case_report
+
+  - title: Human review and spatial selections
+    contents:
+      - wsi_review_context
+      - wsi_validate_review_context
+      - wsi_review_select
+      - wsi_review_checkpoint
+      - wsi_validate_review_checkpoint
+      - wsi_write_review_checkpoint
+      - wsi_read_review_checkpoint
+      - wsi_review_tile_plan
+      - wsi_experiment_review_context
+      - wsi_experiment_train_reviewed_classifier
+      - wsi_review_attach_spatial
+      - wsi_review_attach_seurat
+      - wsi_review_inspect_spatial
+      - wsi_review_context_from_linked
+      - wsi_rectangular_footprints_in_roi

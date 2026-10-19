@@ -75,6 +75,9 @@ wsi_viewer(
   session_inputs = NULL,
   experiment = NULL,
   experiment_prediction = NULL,
+  review_context = NULL,
+  review_checkpoint = NULL,
+  review_url = NULL,
   viewer_transport = c("auto", "websocket", "polling")
 )
 }
@@ -284,6 +287,10 @@ object, and sample-mapping records shown by \strong{History > Copy inputs}.}
 \item{experiment}{Internal experiment source identity retained by saved viewer projects.}
 
 \item{experiment_prediction}{Internal typed feature-source configuration supplied by \code{wsi_viewer_experiment()}.}
+
+\item{review_context, review_checkpoint}{Validated same-section observation/reduction metadata and human review checkpoint.}
+
+\item{review_url}{Authenticated live endpoint for review metadata and selected work tile planning.}
 
 \item{viewer_transport}{Browser-to-R live transport advertised to the
 viewer: \code{"auto"}, \code{"websocket"}, or \code{"polling"}. Static viewers ignore

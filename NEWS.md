@@ -1,3 +1,11 @@
+# Development: spatial human review
+
+- Added explicit same-section Seurat metadata and declared reduction adapters,
+  linked tissue/plot selections, a separate human review ledger with undo/redo,
+  and deterministic selected-only work tile plans.
+- Saved review sessions retain source identities and full coordinate precision.
+- Hardened full tile containment for polygon holes and concave annotations.
+
 # wsiTools 0.1.28
 
 - Listed imported and manually drawn tissue annotations together in the

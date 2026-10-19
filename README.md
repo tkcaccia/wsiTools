@@ -2340,3 +2340,10 @@ Known limitations and planned work:
   definitive diagnostic classifier;
 - native OpenSlide bindings and deeper polygon topology operations may be added
   later if they can be kept compatible with the CRAN-light core.
+
+### Human review with spatial clusters
+
+The experiment viewer includes a [Review workspace](docs/human-review.md) for
+linked H&E/reduction selection, separate human labels, selected-only work tile
+plans, and saved review sessions. Same-section Seurat attachments require an
+explicit coordinate mapping to the exact image.
