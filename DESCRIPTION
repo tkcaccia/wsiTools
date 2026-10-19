@@ -31,6 +31,7 @@ Imports:
 Suggests:
     callr,
     clinical,
+    curl,
     e1071,
     httpuv,
     knitr,
@@ -47,7 +48,9 @@ Suggests:
     sf,
     SpatialExperiment,
     SummarizedExperiment,
-    testthat (>= 3.0.0)
+    testthat (>= 3.0.0),
+    V8,
+    withr
 SystemRequirements: None required for installation. Optional runtime tools:
     OpenSlide command-line tools; libvips command-line tools; Bio-Formats
     command-line tools; optional ZEISS libCZI for native CZI builds; optional

@@ -1,3 +1,16 @@
+wsi_vips_clean_metadata_text <- function(x) {
+  # system2() returns unmarked UTF-8 bytes on some non-UTF-8 R locales. Mark
+  # valid bytes before native-locale cleaning; never decode literal <xx> text.
+  values <- as.character(x)
+  utf8 <- !is.na(values) & Encoding(values) == "unknown" & validUTF8(values)
+  if (any(utf8)) {
+    text <- values[utf8]
+    Encoding(text) <- "UTF-8"
+    values[utf8] <- text
+  }
+  wsi_clean_text(values)
+}
+
 wsi_vips_field <- function(path, field, collapse = FALSE) {
   if (!wsi_has_vips()) {
     return(NA_character_)
@@ -10,7 +23,7 @@ wsi_vips_field <- function(path, field, collapse = FALSE) {
   if (!identical(as.integer(status), 0L) || length(out) == 0L) {
     return(NA_character_)
   }
-  out <- wsi_clean_text(out)
+  out <- wsi_vips_clean_metadata_text(out)
   out <- out[!grepl("VIPS-WARNING", out, fixed = TRUE)]
   if (isTRUE(collapse)) {
     out <- out[nzchar(out)]

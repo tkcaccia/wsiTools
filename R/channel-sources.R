@@ -447,6 +447,22 @@ wsi_channel_settings_from_sources <- function(sources) {
   out
 }
 
+wsi_ome_attribute_text <- function(value) {
+  # Decode XML attribute entities once. In particular &amp;lt; remains the
+  # literal text &lt;, and byte-looking marker strings are never interpreted.
+  matches <- gregexpr("&(?:amp|lt|gt|quot|apos|#[0-9]+|#x[0-9A-Fa-f]+);", value, perl = TRUE)
+  entities <- regmatches(value, matches)
+  standard <- c("&amp;" = "&", "&lt;" = "<", "&gt;" = ">", "&quot;" = '"', "&apos;" = "'")
+  regmatches(value, matches) <- lapply(entities, function(tokens) vapply(tokens, function(token) {
+    if (token %in% names(standard)) return(unname(standard[[token]]))
+    hex <- startsWith(token, "&#x")
+    number <- suppressWarnings(strtoi(substr(token, if (hex) 4L else 3L, nchar(token) - 1L), if (hex) 16L else 10L))
+    if (is.na(number) || number <= 0 || number > 0x10ffff || number %in% 0xd800:0xdfff) return(token)
+    intToUtf8(number)
+  }, character(1)))
+  value
+}
+
 wsi_ome_channel_names <- function(path, pages = NULL) {
   description <- tryCatch(
     wsi_vips_field(path, "image-description", collapse = TRUE),
@@ -454,22 +470,27 @@ wsi_ome_channel_names <- function(path, pages = NULL) {
   )
   names <- character()
   if (is.character(description) && length(description) == 1L && !is.na(description) && nzchar(description)) {
-    matches <- gregexpr("<Channel[^>]*\\bName=\"([^\"]+)\"", description, perl = TRUE)
+    # Every Channel occupies its original page slot, including unnamed ones.
+    # Match complete quoted attributes so a literal '>' cannot end a tag early.
+    matches <- gregexpr("<(?:[A-Za-z_][A-Za-z0-9_.-]*:)?Channel(?=[[:space:]/>])(?:\"[^\"]*\"|'[^']*'|[^'\">])*>", description, perl = TRUE)
     raw <- regmatches(description, matches)[[1L]]
     if (length(raw) && !identical(raw, character(0))) {
-      names <- sub(".*\\bName=\"([^\"]+)\".*", "\\1", raw, perl = TRUE)
+      names <- vapply(seq_along(raw), function(i) {
+        attribute <- regmatches(raw[[i]], regexec("[[:space:]]Name\\s*=\\s*(['\"])(.*?)\\1", raw[[i]], perl = TRUE))[[1L]]
+        if (length(attribute) < 3L || !nzchar(attribute[[3L]])) return(sprintf("Channel %d", i))
+        wsi_ome_attribute_text(attribute[[3L]])
+      }, character(1), USE.NAMES = FALSE)
     }
   }
   if (is.null(pages)) {
     pages <- seq_along(names) - 1L
   }
-  n <- length(pages)
-  if (length(names) < n) {
-    names <- c(names, sprintf("Channel %d", seq_len(n)))[seq_len(n)]
-  } else {
-    names <- names[seq_len(n)]
-  }
-  names
+  if (!is.numeric(pages) || anyNA(pages) || any(!is.finite(pages)) || any(pages < 0 | pages != floor(pages)))
+    wsi_abort("OME channel pages must be finite nonnegative zero-based integers.")
+  selected <- sprintf("Channel %d", pages + 1L)
+  known <- pages < length(names)
+  selected[known] <- names[pages[known] + 1L]
+  selected
 }
 
 wsi_channel_palette <- function(n) {

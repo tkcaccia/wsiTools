@@ -123,10 +123,14 @@ wsi_review_spatial_mapping <- function(image, mapping) {
 #' @export
 wsi_review_inspect_spatial <- function(object, trusted = FALSE, coordinates = NULL, image_name = NULL) {
   source <- wsi_review_spatial_source(object, trusted)
-  coords <- wsi_review_spatial_coordinates(source$object, coordinates, image_name)
   metadata <- wsi_seurat_slot(source$object, "meta.data") %||% wsi_seurat_slot(source$object, "metadata")
   reductions <- wsi_seurat_slot(source$object, "reductions") %||% list()
-  list(observation_count = length(coords$ids), coordinate_metadata = coords$metadata,
+  images <- as.character(wsi_seurat_images(source$object))
+  needs_image <- is.null(coordinates) && is.null(image_name) && length(images) > 1L
+  coords <- if (needs_image) NULL else wsi_review_spatial_coordinates(source$object, coordinates, image_name)
+  list(observation_count = if (needs_image) NULL else length(coords$ids),
+    coordinate_metadata = if (needs_image) NULL else coords$metadata,
+    image_names = as.list(images), needs_image_selection = needs_image,
     metadata_fields = as.list(names(metadata) %||% character()),
     reduction_names = as.list(names(reductions) %||% character()), source_reference = source$reference,
     mapping_confirmed = FALSE)

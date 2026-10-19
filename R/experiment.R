@@ -340,8 +340,13 @@ wsi_experiment_project <- function(experiment, output = NULL, overwrite = FALSE)
 #' @param ... Arguments for wsi_viewer_live().
 #' @export
 wsi_viewer_experiment <- function(experiment, open = interactive(), wait = FALSE, ...) {
-  experiment <- wsi_read_experiment(experiment)
+  previous <- if (inherits(experiment, "wsi_experiment")) experiment else NULL
+  experiment <- wsi_read_experiment(if (is.null(previous)) experiment else previous$manifest_path)
+  if (!is.null(previous) && !identical(previous$manifest_sha256, experiment$manifest_sha256))
+    wsi_abort("The experiment index changed since it was opened. Reopen the updated index before viewing it.")
   slide <- wsi_open(experiment$tissues[[1L]]$image$resolved_path)
+  handed_off <- FALSE
+  on.exit(if (!handed_off) wsi_close(slide), add = TRUE)
   context <- wsi_experiment_prediction_context(experiment)
   args <- list(...)
   args$slide <- slide
@@ -365,9 +370,11 @@ wsi_viewer_experiment <- function(experiment, open = interactive(), wait = FALSE
   args$session_inputs <- utils::modifyList(args$session_inputs %||% list(),
     list(cellphenotyper_experiment = list(manifest_path = experiment$manifest_path,
       experiment_id = experiment$experiment_id, manifest_sha256 = experiment$manifest_sha256)))
-  session <- tryCatch(do.call(wsi_viewer_live, args), error = function(e) { wsi_close(slide); stop(e) })
+  project <- wsi_experiment_project(experiment)
+  session <- do.call(wsi_viewer_live, args)
   session$experiment <- experiment
-  session$experiment_project <- wsi_experiment_project(experiment)
+  session$experiment_project <- project
+  handed_off <- TRUE
   session
 }
 

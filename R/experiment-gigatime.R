@@ -56,14 +56,14 @@ wsi_experiment_gigatime_validate <- function(experiment) {
           if (any(pages >= page_count)) wsi_abort("GigaTIME channel page exceeds the actual TIFF page count.")
           description <- wsi_vips_field(a$resolved_path, "image-description", collapse = TRUE)
           actual_markers <- wsi_ome_channel_names(a$resolved_path, pages = seq_len(page_count) - 1L)
-          if (is.na(description) || !grepl("<OME\\b", description) ||
+          if (is.na(description) || !grepl("<(?:[A-Za-z_][A-Za-z0-9_.-]*:)?OME\\b", description, perl = TRUE) ||
               !identical(actual_markers[pages + 1L], markers))
             wsi_abort("GigaTIME marker names/pages must match the explicit OME channel identities.")
           size <- function(key) {
             match <- regmatches(description, regexec(paste0("\\b", key, "=['\"]([0-9]+)['\"]"), description, perl = TRUE))[[1L]]
             if (length(match) != 2L) NA_real_ else as.numeric(match[[2L]])
           }
-          pixel_blocks <- regmatches(description, gregexpr("<Pixels\\b", description))[[1L]]
+          pixel_blocks <- regmatches(description, gregexpr("<(?:[A-Za-z_][A-Za-z0-9_.-]*:)?Pixels\\b", description, perl = TRUE))[[1L]]
           if (length(pixel_blocks) != 1L || !identical(size("SizeZ"), 1) || !identical(size("SizeT"), 1) ||
               !identical(size("SizeC"), page_count))
             wsi_abort("GigaTIME OME-TIFF must contain one channel-only image series with singleton Z/T axes.")
@@ -205,8 +205,7 @@ wsi_experiment_gigatime_viewer <- function(experiment) {
   catalog <- wsi_experiment_gigatime_validate(experiment)
   sources <- list(); layers <- list()
   point_count <- sum(vapply(catalog$scores, function(entry) entry$artifact$row_count * length(entry$artifact$marker_names), numeric(1)))
-  if (point_count > getOption("wsiTools.experiment_max_marker_items", 250000L))
-    wsi_abort("GigaTIME marker layers exceed wsiTools.experiment_max_marker_items; use a bounded experiment export. No cells were sampled.")
+  item_budget_exceeded <- point_count > getOption("wsiTools.experiment_max_marker_items", 250000L)
   if (length(catalog$images) && !wsi_has_vips())
     wsi_abort("GigaTIME experiment marker overlays require libvips (`vips` and `vipsheader`); no inference is required.")
   for (entry in catalog$images) {
@@ -229,15 +228,26 @@ wsi_experiment_gigatime_viewer <- function(experiment) {
     }
   }
   for (entry in catalog$scores) {
-    a <- entry$artifact; tissue <- entry$tissue; data <- wsi_experiment_gigatime_scores(experiment, entry)
+    a <- entry$artifact; tissue <- entry$tissue
+    reason <- if (a$row_count > getOption("wsiTools.experiment_max_marker_rows", 10000L))
+      "Cell display was not loaded: this score table exceeds wsiTools.experiment_max_marker_rows. Use a bounded derivative or explicitly raise the reviewed limit. No cells were sampled."
+    else if (file.info(a$resolved_path)$size > getOption("wsiTools.experiment_max_marker_bytes", 64 * 1024^2))
+      "Cell display was not loaded: this CSV exceeds wsiTools.experiment_max_marker_bytes. Use a bounded derivative. No cells were sampled."
+    else if (item_budget_exceeded)
+      "Cell display was not loaded: registered marker layers exceed wsiTools.experiment_max_marker_items. Use a bounded experiment derivative. No cells were sampled."
+    else NULL
+    # Integrity/schema checks above remain strict. Only known display budgets
+    # produce unavailable descriptors, and their CSV rows are never parsed.
+    data <- if (is.null(reason)) wsi_experiment_gigatime_scores(experiment, entry) else NULL
     for (marker in a$marker_names) {
-      values <- data$scores[[marker]]
-      range <- range(values)
-      fraction <- if (diff(range) > 0) (values - range[[1]]) / diff(range) else rep(.5, length(values))
+      values <- if (is.null(data)) numeric() else data$scores[[marker]]
+      range <- if (length(values)) range(values) else c(NA_real_, NA_real_)
+      fraction <- if (length(values) && diff(range) > 0) (values - range[[1]]) / diff(range) else rep(.5, length(values))
       colours <- grDevices::rgb(.15 + .85 * fraction, .35 * (1 - fraction), 1 - .85 * fraction)
       layer <- wsi_viewer_layer_payload(paste(tissue$name, marker, a$mask_name, "GigaTIME cells", sep = " / "),
-        data.frame(id = data$id, original_id = data$original_id, x = data$x, y = data$y,
-          colour = colours, image_id = tissue$tissue_id, project_image_index = entry$image_index),
+        data.frame(id = data$id %||% character(), original_id = data$original_id %||% character(),
+          x = data$x %||% numeric(), y = data$y %||% numeric(), colour = colours,
+          image_id = rep(tissue$tissue_id, length(values)), project_image_index = rep(entry$image_index, length(values))),
         type = "points", visible = FALSE, radius = 4)
       layer$id <- paste0("gigatime_cells_", wsi_review_digest(list(experiment$experiment_id, tissue$tissue_id, a$artifact_id, marker)))
       layer$source_type <- "gigatime_cell_marker"
@@ -245,7 +255,8 @@ wsi_experiment_gigatime_viewer <- function(experiment) {
         source_artifact_id = a$source_artifact_id, mask_name = a$mask_name,
         source_column = a$score_columns[[match(marker, a$marker_names)]],
         segmentation_unit = entry$mask$segmentation_unit, score_semantics = a$score_semantics,
-        min = unname(range[[1]]), max = unname(range[[2]]))
+        available = is.null(reason), reason = reason, row_count = a$row_count,
+        min = if (length(values)) unname(range[[1]]) else NULL, max = if (length(values)) unname(range[[2]]) else NULL)
       layer$metadata <- list(gigatime = meta)
       layer$items <- lapply(seq_along(layer$items), function(j) {
         item <- layer$items[[j]]

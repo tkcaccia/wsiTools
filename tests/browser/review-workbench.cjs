@@ -332,3 +332,128 @@ test('dataset view state is durable, legacy views derive a concrete dataset, and
   replay.setDataset('rna'); assert.equal(replay.viewState().reduction_id, 'rna');
   replay.setDataset('*'); assert.equal(replay.viewState().dataset_id, '*');
 });
+
+test('cluster defaults follow unit, dataset, tissue and scope without changing hidden selections or reviews', () => {
+  const context = twoSpatialDatasets(), original = clone(context);
+  for (const row of context.observations.filter(row => row.observation_unit === 'spot'))
+    row.cluster_values = row.dataset_id === 'rna' ? {rna_cluster: '0'} : row.tissue_id === 'a' ? {a_cluster: '1'} : {other_cluster: '2'};
+  const ui = workbench.create({context, getActiveTissueId: () => 'a'});
+  ui.selectIds(['a::tiles::tile-0', 'b::spots::barcode-1']);
+  ui.review({action: 'confirm', label: 'reviewed class', reviewer: 'A'});
+  const evidence = ui.snapshot();
+  assert.equal(ui.viewState().cluster_field, 'kodama');
+  ui.setReduction('rna'); assert.equal(ui.viewState().cluster_field, 'rna_cluster');
+  ui.setDataset('second-rna'); assert.equal(ui.viewState().cluster_field, 'a_cluster');
+  ui.setActiveTissue('b'); assert.equal(ui.viewState().cluster_field, 'other_cluster');
+  ui.setScope('all'); assert.equal(ui.viewState().cluster_field, 'other_cluster', 'Keep a valid deliberate choice.');
+  ui.setActiveTissue('a'); assert.equal(ui.viewState().cluster_field, 'other_cluster');
+  ui.setScope('current'); assert.equal(ui.viewState().cluster_field, 'a_cluster');
+  ui.restoreViewState({...ui.viewState(), cluster_field: 'rna_cluster'});
+  assert.equal(ui.viewState().cluster_field, 'a_cluster', 'A known legacy field outside this dataset gets a valid default.');
+  assert.deepEqual(ui.snapshot(), evidence);
+  assert.deepEqual(context.observations.filter(row => row.observation_unit === 'tile'), original.observations.filter(row => row.observation_unit === 'tile'));
+  const before = ui.viewState();
+  assert.throws(() => ui.restoreViewState({...before, cluster_field: 'unknown'}), /Unknown cluster/);
+  assert.deepEqual(ui.viewState(), before);
+});
+
+const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return {promise, resolve, reject}; };
+
+test('deferred exports reject duplicates and guard the download after a tissue switch', async () => {
+  const gate = deferred(), downloads = []; let guard;
+  const {ui} = create({export: async (rows, options) => {
+    guard = options.isCurrent; await gate.promise;
+    if (!guard()) throw new Error('Old work-tile export was discarded before download.');
+    downloads.push(rows); return rows;
+  }, plan: async () => ({tiles: []})});
+  ui.selectIds(['a::tiles::tile-0', 'b::tiles::tile-0']);
+  const pending = ui.exportSelected(); assert.equal(guard(), true);
+  assert.throws(() => ui.exportSelected(), /already in progress/);
+  await assert.rejects(ui.planSelected(), /already in progress/);
+  ui.setActiveTissue('b'); assert.equal(guard(), false);
+  gate.resolve(); await assert.rejects(pending, /discarded before download/);
+  assert.deepEqual(downloads, []); assert.equal(ui.selection().length, 2);
+  await ui.planSelected(); assert.deepEqual(ui.workPlan().tiles, []);
+});
+
+test('selection, dataset, scope, tile-option changes and destruction invalidate pending export guards', async () => {
+  for (const change of [ui => ui.selectIds([]), ui => ui.setDataset('*'), ui => ui.setScope('all'),
+    ui => ui.invalidatePlan(), ui => ui.destroy()]) {
+    const gate = deferred(); let guard;
+    const {ui} = create({export: (rows, options) => { guard = options.isCurrent; return gate.promise; }});
+    ui.selectIds(['a::tiles::tile-0']); const pending = ui.exportSelected();
+    change(ui); assert.equal(guard(), false); gate.resolve('unused');
+    await assert.rejects(pending, /old work-tile export was discarded/);
+  }
+});
+
+test('planning rejects repeated requests and releases its busy guard after failure', async () => {
+  const gate = deferred(); let calls = 0;
+  const {ui} = create({plan: () => { calls++; return calls === 1 ? gate.promise : Promise.resolve({tiles: []}); }});
+  ui.selectIds(['a::tiles::tile-0']); const pending = ui.planSelected();
+  await assert.rejects(ui.planSelected(), /already in progress/);
+  assert.throws(() => ui.exportSelected(), /already in progress/);
+  gate.reject(new Error('Planner unavailable')); await assert.rejects(pending, /Planner unavailable/);
+  await ui.planSelected(); assert.equal(calls, 2);
+});
+
+// Minimal DOM surface for visible controls; this does not emulate browser drawing.
+function mountedSurface(ui) {
+  const doc = {createElement(tag) {
+    const node = {tag, ownerDocument: doc, children: [], style: {}, attributes: {}, value: '',
+      appendChild(child) { this.children.push(child); child.parent = this; return child; },
+      append(...children) { children.forEach(child => this.appendChild(child)); },
+      replaceChildren(...children) { this.children = []; this.append(...children); },
+      setAttribute(name, value) { this.attributes[name] = String(value); },
+      focus() { doc.activeElement = this; },
+      remove() { if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this); },
+      getContext() { return {clearRect() {}, fillText() {}, beginPath() {}, arc() {}, fill() {}, stroke() {}, moveTo() {}, lineTo() {}}; }};
+    Object.defineProperty(node, 'options', {get() { return this.children.filter(child => child.tag === 'option'); }});
+    return node;
+  }, createTextNode(text) { return {textContent: text}; }};
+  const root = doc.createElement('div'); ui.mount(root);
+  const find = (node, attribute) => Object.hasOwn(node.attributes || {}, attribute) ? node :
+    node.children?.map(child => find(child, attribute)).find(Boolean);
+  return role => find(root, role === 'panel' ? 'data-review-workbench' : 'data-review-' + role);
+}
+
+test('mounted work controls expose scope, busy state, recovery and dataset-specific empty metadata', async () => {
+  const context = twoSpatialDatasets();
+  for (const row of context.observations) if (row.dataset_id === 'second-rna') row.cluster_values = {};
+  const gate = deferred();
+  const ui = workbench.create({context, getActiveTissueId: () => 'a', plan: () => gate.promise, export: () => []});
+  const node = mountedSurface(ui);
+  ui.setReduction('second-rna-umap');
+  assert.equal(node('cluster-field').disabled, true);
+  assert.equal(ui.viewState().cluster_field, '');
+  ui.setDataset('rna'); assert.equal(node('cluster-field').disabled, false);
+  assert.deepEqual(node('cluster-field').options.map(option => option.value), ['seurat']);
+  ui.selectIds(['a::spots::barcode-1', 'b::spots::barcode-1']);
+  assert.match(node('work-scope').textContent, /current tissue a · spot · dataset rna · 1 selected/);
+  const pending = ui.planSelected();
+  assert.equal(node('panel').attributes['aria-busy'], 'true');
+  assert.equal(node('plan').disabled, true); assert.equal(node('export').disabled, true);
+  assert.match(node('plan').textContent, /Planning/);
+  ui.setActiveTissue('b'); gate.resolve({tiles: []});
+  await assert.rejects(pending, /old work-tile plan was discarded/);
+  assert.equal(node('panel').attributes['aria-busy'], 'false');
+  assert.equal(node('plan').disabled, false); assert.equal(node('export').disabled, false);
+  assert.match(node('work-scope').textContent, /current tissue b · spot · dataset rna/);
+  assert.equal(ui.selection().length, 2);
+  ui.exportSelected();
+  assert.match(node('status').textContent, /export request finished.*tissue b/);
+  assert.equal(node('panel').attributes['aria-busy'], 'false');
+});
+
+test('cluster keyboard focus survives selection and errors use the viewer theme colour', () => {
+  const {ui} = create(), node = mountedSurface(ui);
+  const original = node('clusters').children[0].children.find(child => child.tag === 'input');
+  original.focus(); original.checked = true; original.onchange();
+  const replacement = node('clusters').children[0].children.find(child => child.tag === 'input');
+  assert.notEqual(replacement, original);
+  assert.equal(replacement.ownerDocument.activeElement, replacement);
+  assert.equal(replacement.checked, true); assert.equal(ui.selection().length, 6);
+  node('confirm').onclick();
+  assert.match(node('status').textContent, /Enter the class/);
+  assert.equal(node('status').style.color, 'var(--wsi-review-error, #fca5a5)');
+});

@@ -40,7 +40,8 @@ conventional available cluster fields, including \code{seurat_clusters}.}
 \item{reductions}{Explicitly named matrices/data frames with stable row names, or
 lists containing \code{cell.embeddings}. Only their first two dimensions are
 included in the bounded plot configuration.}
-\item{image_name}{Explicit spatial image name when several are present.}
+\item{image_name}{Explicit spatial image name when several are present. Inspection
+without this choice returns the available image names before extracting coordinates.}
 \item{observation_unit}{\code{"spot"} or \code{"cell"}; never tile/token.}
 \item{trusted}{Explicit permission to deserialize a trusted local RDS file.}
 \item{footprint_width_px,footprint_height_px}{Optional native-image footprint
@@ -57,7 +58,7 @@ Without it, only image metadata and an unavailable status are returned. A
 }
 \description{
 Attaches normalized same-section coordinates, selected cluster metadata and
-cached reductions to the exact H\&E image frame. Coordinate tables that happen
+cached reductions to the exact H&E image frame. Coordinate tables that happen
 to resemble pixels are never automatically confirmed. No registration,
 expression export, cross-section matching, model execution or automatic
 conversion of transcriptomic clusters into expert labels is performed.
@@ -72,6 +73,11 @@ Seurat object. Read only trusted RDS files. Their default size limit is
 \code{getOption("wsiTools.review_max_rds_bytes", 256 * 1024^2)}.
 This limits file bytes, not decompressed R memory; large sources should first be
 exported as bounded metadata and reductions.
+
+\code{wsi_review_inspect_spatial()} returns \code{image_names} and
+\code{needs_image_selection}. When several spatial images exist and none was
+selected, \code{observation_count} and \code{coordinate_metadata} are NULL;
+metadata/reduction choices are available but no coordinate mapping was inferred.
 
 Inspection reports coordinate source/count and available field/reduction names
 without declaring a mapping valid. Multiple spatial images require an explicit

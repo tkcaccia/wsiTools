@@ -1,4 +1,44 @@
 /* CellPhenotyper experiments use cached, typed observations. No encoder runs here. */
+// Shared modeless panels leave the tissue and the Project menu accessible.
+const wsiWorkspacePanels = new Map();
+function wsiWorkspaceBind(button,panel,titleId,onClose=()=>{},onOpen=()=>{}) {
+  let dock=el('experimentWorkspaceTools');
+  if(!dock){
+    const style=document.createElement('style');style.textContent=`
+      #experimentWorkspaceTools{position:fixed;right:16px;bottom:16px;z-index:1100;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;max-width:calc(100vw - 32px)}
+      .wsiExperimentPanel{box-sizing:border-box;position:fixed;right:12px;bottom:66px;width:min(680px,calc(100vw - 24px));overflow:auto;z-index:1490;background:#172033;color:#e2e8f0;padding:12px;border:1px solid #64748b;border-radius:10px;box-shadow:0 10px 40px #0008;overflow-wrap:anywhere}
+      .wsiExperimentPanel[hidden]{display:none}.wsiExperimentPanel *{box-sizing:border-box;min-width:0}
+      .wsiExperimentPanel select,.wsiExperimentPanel input:not([type=checkbox]){max-width:100%}
+      .wsiExperimentPanel select{white-space:nowrap;text-overflow:ellipsis}
+      .wsiExperimentPanel fieldset{margin:12px 0}.wsiExperimentPanel fieldset label{display:inline-block;margin:4px 0}
+      .wsiWorkspaceHead{position:sticky;top:-12px;z-index:3;display:flex;align-items:center;justify-content:space-between;gap:12px;background:#172033;padding:8px 0;border-bottom:1px solid #64748b}
+      .wsiWorkspaceHead h2{font-size:16px;margin:0}.wsiExperimentPanel :focus-visible{outline:2px solid #67e8f9;outline-offset:2px}
+      .wsiTableScroll{max-width:100%;overflow-x:auto}.wsiTableScroll td{padding:4px 8px}.wsiSpatialStatus{position:sticky;bottom:-12px;z-index:2;background:#172033;padding:10px 0;margin-bottom:0}
+      #reviewSpatialInspection{white-space:pre-wrap;max-height:150px;overflow:auto}
+      @media(max-width:900px){.wsiExperimentWorkspaces #workspacePanel{right:auto;width:min(340px,calc(100vw - 24px))}}
+    `;document.head.appendChild(style);
+    document.body.classList.add('wsiExperimentWorkspaces');
+    dock=document.createElement('div');dock.id='experimentWorkspaceTools';dock.setAttribute('role','toolbar');dock.setAttribute('aria-label','Experiment workspaces');document.body.appendChild(dock);
+  }
+  dock.appendChild(button);panel.classList.add('wsiExperimentPanel');
+  panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','false');panel.setAttribute('aria-labelledby',titleId);
+  button.setAttribute('aria-controls',panel.id);button.setAttribute('aria-expanded','false');
+  const updatePosition=()=>{const bar=document.querySelector('.bar'),bottom=bar?.getBoundingClientRect().bottom||80;
+    panel.style.top=Math.max(12,Math.min(window.innerHeight-180,bottom+8))+'px';};
+  window.addEventListener('resize',updatePosition);if(typeof ResizeObserver!=='undefined'&&document.querySelector('.bar'))new ResizeObserver(updatePosition).observe(document.querySelector('.bar'));updatePosition();
+  const setOpen=(open,focus=true)=>{
+    if(panel.inert)return false;
+    if(open){for(const [other,close] of wsiWorkspacePanels)if(other!==panel&&!other.hidden&&!close(false,false))return false;}
+    panel.hidden=!open;button.setAttribute('aria-expanded',String(open));
+    if(open){onOpen();if(focus)el(titleId)?.focus();}else{onClose();if(focus)button.focus();}return true;
+  };
+  wsiWorkspacePanels.set(panel,setOpen);button.onclick=()=>setOpen(panel.hidden);
+  document.addEventListener('keydown',event=>{
+    if(event.key==='Escape'&&!panel.hidden){setOpen(false);event.preventDefault();event.stopPropagation();}
+  });
+  return setOpen;
+}
+
 let wsiExperimentAppearance = null;
 let wsiExperimentBusy = false;
 let wsiExperimentRequest = 0;
@@ -463,6 +503,10 @@ function wsiExperimentBindWorkbench() {
 // The scientific index owns GigaTIME sources. This panel only changes their
 // display settings and exports already-quantified values; it runs no model.
 let wsiGigatimeFreshSources=null;
+let wsiGigatimeSelection={};
+let wsiGigatimePage=0;
+let wsiGigatimeRenderedTissue=null;
+let wsiGigatimeExporting=false;
 function wsiGigatimeSource(value) { return !!value?.metadata?.gigatime||String(value?.id||'').startsWith('gigatime_'); }
 function wsiGigatimeCaptureSources() {
   const clone=value=>JSON.parse(JSON.stringify(value));
@@ -482,6 +526,7 @@ function wsiGigatimePrepareSnapshot(input) {
   const preference=source=>{
     const result=clone(source),setting=saved.find(item=>item.id===source.id)||{};
     if(typeof setting.visible==='boolean')result.visible=setting.visible;
+    if(source.metadata?.gigatime?.available===false)result.visible=false;
     for(const key of ['opacity','gain'])if(Number.isFinite(setting[key])&&setting[key]>=0&&(key!=='opacity'||setting[key]<=1))result[key]=setting[key];
     if(typeof setting.colour==='string'&&/^#[0-9a-f]{6}$/i.test(setting.colour))result.colour=setting.colour;
     const lo=setting.contrast_min,hi=setting.contrast_max;
@@ -512,6 +557,9 @@ function wsiGigatimeRestoreDisplay(input) {
     channelSources.splice(0,channelSources.length,...channelSources.filter(src=>!wsiGigatimeSource(src)),...checked.channel_sources.filter(wsiGigatimeSource));
     if(typeof syncChannelSourcesForActiveImage==='function')syncChannelSourcesForActiveImage();
   }
+  const saved=input?.gigatime_workbench?.selected_by_tissue;
+  wsiGigatimeSelection=saved&&typeof saved==='object'&&!Array.isArray(saved)?Object.assign({},saved):{};
+  wsiGigatimeRenderedTissue=null;
   if(typeof buildLayerList==='function')buildLayerList();if(typeof draw==='function')draw();wsiGigatimeRender();
 }
 function wsiGigatimeEntries() {
@@ -536,7 +584,7 @@ function wsiGigatimeRows(entry) {
     item.project_image_index===activeProjectIndex);
 }
 function wsiGigatimeSetCellVisible(entry,visible) {
-  for(const candidate of wsiGigatimeEntries())if(candidate.cell){candidate.cell.visible=!!visible&&candidate.cell.id===entry?.cell?.id;
+  for(const candidate of wsiGigatimeEntries())if(candidate.cell){candidate.cell.visible=!!visible&&candidate.cell.metadata.gigatime.available!==false&&candidate.cell.id===entry?.cell?.id;
     const item=projectItems[activeProjectIndex];if(item)item.layers=(item.layers||[]).map(layer=>layer.id===candidate.cell.id?candidate.cell:layer);}
   if(typeof overlayFocusMode!=='undefined')overlayFocusMode='all';
   if(typeof applyOverlayFocus==='function')applyOverlayFocus();
@@ -553,22 +601,39 @@ function wsiGigatimeCsv(entry) {
 }
 function wsiGigatimeRender() {
   const select=el('experimentGigatimeMarker');if(!select)return;
-  const previous=select.value,entries=wsiGigatimeEntries();select.replaceChildren();
+  const tissue=wsiExperimentTissueId(),entries=wsiGigatimeEntries(),sameTissue=tissue===wsiGigatimeRenderedTissue;
+  const visible=entries.find(entry=>entry.cell&&entry.cell.visible!==false&&entry.cell.metadata.gigatime.available!==false);
+  const previous=wsiGigatimeSelection[tissue]||(sameTissue?select.value:null)||visible?.key;
+  if(!sameTissue){wsiGigatimePage=0;el('experimentGigatimeSearch').value='';}
+  wsiGigatimeRenderedTissue=tissue;select.replaceChildren();
   for(const entry of entries){const option=document.createElement('option');option.value=entry.key;
     const meta=entry.cell?.metadata.gigatime;
     option.textContent=entry.marker+(meta?' · '+meta.mask_name+' ('+meta.segmentation_unit+')':' · image');select.appendChild(option);}
   if(entries.some(entry=>entry.key===previous))select.value=previous;
-  const entry=entries.find(entry=>entry.key===select.value),rows=wsiGigatimeRows(entry),meta=entry?.cell?.metadata.gigatime;
-  const image=el('experimentGigatimeImage'),cells=el('experimentGigatimeCells');
+  select.disabled=!entries.length;select.title=select.selectedOptions[0]?.textContent||'No GigaTIME output for this tissue';
+  const entry=entries.find(entry=>entry.key===select.value),allRows=wsiGigatimeRows(entry),meta=entry?.cell?.metadata.gigatime;
+  if(entry)wsiGigatimeSelection[tissue]=entry.key;
+  const image=el('experimentGigatimeImage'),cells=el('experimentGigatimeCells'),available=!!entry?.cell&&meta?.available!==false;
   image.disabled=!entry?.image;image.checked=!!entry?.image&&entry.image.visible!==false;
-  cells.disabled=!entry?.cell;cells.checked=!!entry?.cell&&entry.cell.visible!==false;
-  el('experimentGigatimeExport').disabled=!rows.length;
-  el('experimentGigatimeSummary').textContent=!entry?'No registered GigaTIME output for this tissue.':meta?
-    rows.length+' segmented '+(meta.segmentation_unit==='nucleus'?'nuclei':'cells')+' · '+entry.marker+(meta.source_column?' · score field '+meta.source_column:'')+
-      ' · colour scale '+meta.min+' to '+meta.max+' (this dataset) · showing '+Math.min(50,rows.length)+' rows.':
+  cells.disabled=!available;cells.checked=available&&entry.cell.visible!==false;
+  el('experimentGigatimeExport').disabled=!allRows.length||!available||wsiGigatimeExporting;
+  el('experimentGigatimeSearch').disabled=!allRows.length;
+  const query=el('experimentGigatimeSearch').value.trim().toLocaleLowerCase();
+  const rows=query?allRows.filter(item=>String(item.original_id??item.id).toLocaleLowerCase().includes(query)):allRows;
+  const pages=Math.max(1,Math.ceil(rows.length/50));wsiGigatimePage=Math.min(wsiGigatimePage,pages-1);
+  const offset=wsiGigatimePage*50;
+  el('experimentGigatimePrevious').disabled=wsiGigatimePage===0;
+  el('experimentGigatimeNext').disabled=wsiGigatimePage>=pages-1;
+  const name=projectItems[activeProjectIndex]?.name||tissue;
+  el('experimentGigatimeTissue').textContent='Tissue: '+name+' ('+tissue+')';
+  el('experimentGigatimeSummary').textContent=!entry?'No registered GigaTIME output for this tissue. Register an existing marker image in the CellPhenotyper experiment, then reopen the index.':meta?.available===false?
+    'Marker image remains available. Per-object display unavailable: '+meta.reason+(meta.row_count!=null?' Declared objects: '+Number(meta.row_count).toLocaleString()+'.':''):
+    meta?allRows.length.toLocaleString()+' segmented '+(meta.segmentation_unit==='nucleus'?'nuclei':'cells')+' · '+entry.marker+(meta.source_column?' · score field '+meta.source_column:'')+
+      ' · colour scale '+meta.min+' to '+meta.max+' (this dataset).':
     'Marker image available. No linked single-cell quantification was registered.';
+  el('experimentGigatimePage').textContent=rows.length?'Showing '+(offset+1)+'–'+Math.min(offset+50,rows.length)+' of '+rows.length.toLocaleString()+(query?' matching':'')+' objects. Export includes all '+allRows.length.toLocaleString()+' registered rows for this tissue, marker and segmentation.':query?'No object IDs match this search.':'No per-object rows to display.';
   const body=el('experimentGigatimeTable');body.replaceChildren();
-  for(const item of rows.slice(0,50)){const tr=document.createElement('tr'),identity=document.createElement('td'),focus=document.createElement('button');
+  for(const item of rows.slice(offset,offset+50)){const tr=document.createElement('tr'),identity=document.createElement('td'),focus=document.createElement('button');
     focus.textContent=String(item.original_id??item.id);focus.title='Select this segmented object on the tissue';
     focus.onclick=()=>{const index=layers.findIndex(layer=>layer.id===entry.cell.id);if(index<0)return;
       if(typeof selectLayerObject==='function')selectLayerObject(index,entry.cell.items.indexOf(item),true);
@@ -583,30 +648,43 @@ function wsiGigatimeBindWorkbench() {
   if(!hasSources)return;
   wsiGigatimeCaptureSources();
   const button=document.createElement('button');button.id='openGigatimeWorkbench';button.type='button';button.textContent='GigaTIME markers';
-  button.style.cssText='position:fixed;right:18px;top:88px;z-index:1100';document.body.appendChild(button);
   const panel=document.createElement('section');panel.id='gigatimeWorkbenchWindow';panel.hidden=true;
-  panel.style.cssText='position:fixed;right:16px;top:126px;width:min(600px,90vw);max-height:72vh;overflow:auto;z-index:1490;background:#172033;color:#e2e8f0;padding:12px;border:1px solid #64748b;border-radius:10px';
-  panel.innerHTML='<div style="display:flex;justify-content:space-between"><strong>Predicted GigaTIME markers</strong><button id="closeGigatimeWorkbench">Close</button></div>'+
-    '<p>Virtual marker scores are uncalibrated predictions from H&amp;E. They are not measured protein abundance or calibrated probabilities.</p>'+
-    '<label>Marker / segmentation <select id="experimentGigatimeMarker" aria-label="GigaTIME marker and segmentation"></select></label>'+
+  panel.innerHTML='<div class="wsiWorkspaceHead"><h2 id="gigatimeWorkbenchTitle" tabindex="-1">Predicted GigaTIME markers</h2><button id="closeGigatimeWorkbench">Close</button></div>'+
+    '<p id="experimentGigatimeTissue"></p><p>Virtual marker scores are uncalibrated predictions from H&amp;E. They are not measured protein abundance or calibrated probabilities.</p>'+
+    '<label style="display:block">Marker / segmentation <select style="display:block;width:100%" id="experimentGigatimeMarker" aria-label="GigaTIME marker and segmentation"></select></label>'+
     '<p><label><input type="checkbox" id="experimentGigatimeImage"> Marker image (mIHC layer)</label> '+
     '<label><input type="checkbox" id="experimentGigatimeCells"> Per-cell scores</label></p>'+
     '<p>Combine marker images using their colour and opacity controls in Layers. Per-cell display shows one marker at a time; nucleus masks retain their nucleus label.</p>'+
-    '<p id="experimentGigatimeSummary" role="status"></p><button id="experimentGigatimeExport">Export this marker’s cell scores</button>'+
-    '<table style="width:100%;text-align:left"><thead><tr><th>Object ID</th><th>Predicted score</th><th>X</th><th>Y</th></tr></thead><tbody id="experimentGigatimeTable"></tbody></table>';
+    '<p id="experimentGigatimeSummary" role="status"></p><button id="experimentGigatimeExport">Export all cell scores for this marker</button><p id="experimentGigatimeExportStatus" role="status"></p>'+
+    '<label>Find object ID <input id="experimentGigatimeSearch" type="search" placeholder="Search object IDs"></label>'+
+    '<p id="experimentGigatimePage" role="status"></p><div><button id="experimentGigatimePrevious">Previous 50</button> <button id="experimentGigatimeNext">Next 50</button></div>'+
+    '<div class="wsiTableScroll"><table style="width:100%;text-align:left"><thead><tr><th>Object ID</th><th>Predicted score</th><th>X</th><th>Y</th></tr></thead><tbody id="experimentGigatimeTable"></tbody></table></div>';
   document.body.appendChild(panel);
-  button.onclick=()=>{panel.hidden=!panel.hidden;wsiGigatimeRender();};el('closeGigatimeWorkbench').onclick=()=>{panel.hidden=true;};
+  const setOpen=wsiWorkspaceBind(button,panel,'gigatimeWorkbenchTitle',()=>{},wsiGigatimeRender);
+  el('closeGigatimeWorkbench').onclick=()=>setOpen(false);
   const selected=()=>wsiGigatimeEntries().find(entry=>entry.key===el('experimentGigatimeMarker').value);
   el('experimentGigatimeMarker').onchange=()=>{
+    wsiGigatimeSelection[wsiExperimentTissueId()]=el('experimentGigatimeMarker').value;wsiGigatimePage=0;
+    el('experimentGigatimeSearch').value='';
     if(wsiGigatimeEntries().some(entry=>entry.cell&&entry.cell.visible!==false))wsiGigatimeSetCellVisible(selected(),true);
-    wsiGigatimeRender();};
+    if(typeof markProjectDirty==='function')markProjectDirty('gigatime_marker');wsiGigatimeRender();};
+  el('experimentGigatimeSearch').oninput=()=>{wsiGigatimePage=0;wsiGigatimeRender();};
+  el('experimentGigatimePrevious').onclick=()=>{wsiGigatimePage=Math.max(0,wsiGigatimePage-1);wsiGigatimeRender();};
+  el('experimentGigatimeNext').onclick=()=>{wsiGigatimePage++;wsiGigatimeRender();};
   el('experimentGigatimeImage').onchange=()=>{const entry=selected();if(!entry?.image)return;
     setChannelSettings(entry.image.id,{visible:el('experimentGigatimeImage').checked});
     if(typeof markProjectDirty==='function')markProjectDirty('gigatime_display');wsiGigatimeRender();};
-  el('experimentGigatimeCells').onchange=()=>{const entry=selected();if(!entry?.cell)return;
+  el('experimentGigatimeCells').onchange=()=>{const entry=selected();if(!entry?.cell||entry.cell.metadata.gigatime.available===false)return;
     wsiGigatimeSetCellVisible(entry,el('experimentGigatimeCells').checked);wsiGigatimeRender();};
-  el('experimentGigatimeExport').onclick=async()=>{const entry=selected();if(!entry?.cell)return;
-    await downloadBlob(new Blob([wsiGigatimeCsv(entry)],{type:'text/csv;charset=utf-8'}),'gigatime-cell-scores.csv');};
+  el('experimentGigatimeExport').onclick=async()=>{const entry=selected();if(!entry?.cell||entry.cell.metadata.gigatime.available===false||wsiGigatimeExporting)return;
+    const tissue=wsiExperimentTissueId(),safe=value=>String(value).replace(/[^a-zA-Z0-9_.-]/g,'_').slice(0,80);
+    wsiGigatimeExporting=true;el('experimentGigatimeExportStatus').textContent='Preparing cell score export…';wsiGigatimeRender();
+    try{await downloadBlob(new Blob([wsiGigatimeCsv(entry)],{type:'text/csv;charset=utf-8'}),[tissue,entry.marker,entry.cell.metadata.gigatime.mask_name,'cell-scores'].map(safe).join('-')+'.csv');
+      el('experimentGigatimeExportStatus').textContent='Exported all registered rows for '+tissue+' · '+entry.marker+'.';
+    }catch(error){el('experimentGigatimeExportStatus').textContent='Export failed: '+error.message;}
+    finally{wsiGigatimeExporting=false;wsiGigatimeRender();}};
+  const originalSnapshot=projectBrowserSnapshot;
+  projectBrowserSnapshot=function(...args){return {...originalSnapshot(...args),gigatime_workbench:{selected_by_tissue:{...wsiGigatimeSelection}}};};
   const originalPayloads=applyProjectPayloads;
   applyProjectPayloads=function(...args){const result=originalPayloads(...args);wsiGigatimeRender();return result;};
   const originalRestore=restoreBrowserProject;

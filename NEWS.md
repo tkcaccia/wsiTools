@@ -1,3 +1,15 @@
+# Development: experiment workflow usability
+
+- Docked accessible Review/GigaTIME panels avoid menu overlap, constrain narrow
+  layouts, return keyboard focus on Escape and keep long marker names readable.
+- GigaTIME tables support ID search and paging, remember per-tissue marker choices
+  and keep image layers available when a cell display budget is exceeded.
+- Spatial inspection lists multi-image Seurat choices, reports progress and
+  discards stale responses; tile exports cannot use changed selection/settings.
+- Valid Unicode and XML marker names retain their exact OME page identity.
+- Failed Desktop preflight no longer stops an existing viewer; experiment opening
+  rechecks source hashes and releases owned slides after preparation errors.
+
 # Development: GigaTIME experiment markers
 
 - Registered GigaTIME marker TIFF channels and segmented-object score tables

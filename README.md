@@ -67,6 +67,10 @@ wsiTools is not:
 The current development version includes several changes intended to make the
 viewer more stable for real pathology workflows:
 
+- **Polished experiment workspaces.** Review and GigaTIME share an accessible
+  bottom-right dock, keyboard close/focus controls and responsive panels. Spatial
+  import provides image choices and clear progress; cell-score tables have search
+  and paging. Oversized tables leave marker images usable.
 - **GigaTIME marker views in experiment projects.** Registered GigaTIME outputs
   can be viewed as tiled mIHC marker images and marker-coloured cell/nucleus
   observations with their exported scores. The **GigaTIME markers** panel keeps

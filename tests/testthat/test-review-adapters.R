@@ -116,7 +116,7 @@ test_that("Seurat metadata coordinates prefill fields but still require native m
   expect_error(wsi_review_attach_spatial(fixture$context, object, "t1", coordinate_mapping = fixture$mapping), "finite")
   multiple <- fixture$object
   multiple$images <- list(one = list(), two = list())
-  expect_error(wsi_review_inspect_spatial(multiple), "multiple spatial images")
+  expect_true(wsi_review_inspect_spatial(multiple)$needs_image_selection)
 })
 
 test_that("linked-image review uses image calibration and never confirms an automatic display mapping", {

@@ -1,7 +1,8 @@
 # Review spatial clusters alongside H&E
 
 Open a CellPhenotyper experiment through **Open Project**, then click **Review
-workspace** in the viewer. This workflow uses existing observations and cached
+workspace** in the bottom-right viewer dock. Escape closes a workspace and
+returns focus to its button. This workflow uses existing observations and cached
 image features. It does not start feature extraction or processing jobs.
 
 1. Choose **Current tissue** or explicitly **All tissues**, the observation unit,
@@ -22,7 +23,8 @@ image features. It does not start feature extraction or processing jobs.
    current tissue. Several selected spots can share one tile. Edge tiles are
    dropped, trimmed, or rejected according to the selected policy.
 5. **Export work tiles from current-tissue selection** downloads a JSON plan with
-   exact coordinates, image hashes and source observation IDs. Repeat for another
+   exact coordinates, image hashes and source observation IDs. A changed tissue,
+   selection or tile setting cancels an in-flight export. Repeat for another
    tissue. Empty selection produces no work. This is a processing request artifact;
    it does not submit CellPhenotyper or Bora work or export pixel patches.
 6. Use the viewer's **Save Project** to retain metadata, selection, review history
@@ -34,8 +36,9 @@ image features. It does not start feature extraction or processing jobs.
 
 Expand **Add spatial transcriptomics to this project**. Choose a trusted local `.rds`, or
 paste its path in a browser. For an object containing multiple spatial images,
-enter the exact Seurat image name for the active tissue. Inspect its metadata,
-choose the cluster fields and reductions to attach, then confirm that the coordinates are native full-resolution pixels of the same
+inspect first to list its available image names. Choose the exact Seurat image
+for the active tissue and inspect again. Select metadata,
+including the cluster fields and reductions to attach, then confirm that the coordinates are native full-resolution pixels of the same
 H&E section. If coordinates use another source pixel frame, provide an explicit
 invertible 3×3 affine. The application never guesses scale or orientation here.
 Leave **Save the original object and selected display data in this

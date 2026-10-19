@@ -763,15 +763,15 @@ async function handleLaunch(launcher, codeLog, successPrefix) {
         showLaunchError(error);
       }
     }
-    if (!launch?.viewer_url || launchCancelled) {
-      try {
-        await invoke("stop_r_viewer");
-        viewerWindowOpen = false;
-        stopViewer.disabled = true;
-      } catch (closeError) {
-        appendLog(`Could not stop failed viewer session: ${closeError}`);
-      }
+    if (launchCancelled) {
+      viewerWindowOpen = false;
+      stopViewer.disabled = true;
       stopLogPolling();
+    } else if (!launch?.viewer_url) {
+      // Native launchers clean up their own failed new child. A preflight
+      // rejection can leave an existing viewer running; never stop it here.
+      stopViewer.disabled = !viewerWindowOpen;
+      if (!viewerWindowOpen) stopLogPolling();
     }
   } finally {
     if (stopListening) stopListening();

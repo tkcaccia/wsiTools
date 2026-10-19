@@ -207,13 +207,77 @@ test_that("GigaTIME display limits are explicit and image-only experiments work"
   fixture <- gigatime_experiment_fixture(tissues = 1L)
   experiment <- wsi_read_experiment(fixture$path)
   withr::local_options(wsiTools.experiment_max_marker_rows = 2L)
-  expect_error(wsi_experiment_gigatime_viewer(experiment), "No rows were sampled")
+  expect_error(wsi_experiment_gigatime_scores(experiment, wsi_experiment_gigatime_validate(experiment)$scores[[1]]), "No rows were sampled")
+  limited <- with_mocked_bindings(wsi_experiment_gigatime_viewer(experiment),
+    wsi_experiment_gigatime_scores = function(...) stop("Oversized CSV must not be parsed"), .package = "wsiTools")
+  expect_length(limited$channel_sources, 2L)
+  expect_length(limited$layers, 2L)
+  expect_true(all(vapply(limited$layers, function(layer) identical(layer$metadata$gigatime$available, FALSE), logical(1))))
+  expect_true(all(vapply(limited$layers, function(layer) length(layer$items) == 0L, logical(1))))
+  expect_equal(limited$layers[[1]]$metadata$gigatime$row_count, 3)
+  expect_match(limited$layers[[1]]$metadata$gigatime$reason, "experiment_max_marker_rows")
+  expect_null(limited$layers[[1]]$metadata$gigatime$min)
+  withr::local_options(wsiTools.experiment_max_marker_rows = 10000L, wsiTools.experiment_max_marker_bytes = 1L)
+  limited <- wsi_experiment_gigatime_viewer(experiment)
+  expect_match(limited$layers[[1]]$metadata$gigatime$reason, "experiment_max_marker_bytes")
   withr::local_options(wsiTools.experiment_max_marker_rows = 10000L, wsiTools.experiment_max_marker_items = 5L)
-  expect_error(wsi_experiment_gigatime_viewer(experiment), "No cells were sampled")
+  withr::local_options(wsiTools.experiment_max_marker_bytes = 64 * 1024^2)
+  limited <- wsi_experiment_gigatime_viewer(experiment)
+  expect_match(limited$layers[[1]]$metadata$gigatime$reason, "experiment_max_marker_items")
   fixture$manifest$tissues[[1]]$artifacts <- fixture$manifest$tissues[[1]]$artifacts[1]
   jsonlite::write_json(fixture$manifest, fixture$path, auto_unbox = TRUE, null = "null", digits = 17)
   view <- wsi_experiment_gigatime_viewer(wsi_read_experiment(fixture$path))
   expect_length(view$channel_sources, 2L); expect_length(view$layers, 0L)
+})
+
+test_that("valid Unicode OME marker identities survive native-locale metadata decoding", {
+  skip_if_not_installed("openssl"); skip_if_not(wsi_has_vips())
+  fixture <- gigatime_experiment_fixture(tissues = 1L)
+  marker <- paste0("CD3 ", intToUtf8(0x2014), " ", intToUtf8(0x03b1), " literal <e2>")
+  file <- file.path(fixture$root, "markers.ome.tif")
+  # XML encodes literal '<', so the metadata round trip also checks that a
+  # genuine '<e2>' marker string is not mistaken for an escaped UTF-8 byte.
+  encoded <- gsub("<", "&lt;", marker, fixed = TRUE)
+  gigatime_test_tiff(file, markers = c(encoded, "CD8"))
+  manifest <- fixture$manifest
+  manifest$tissues[[1]]$artifacts[[1]]$sha256 <- wsi_experiment_sha256(file)
+  manifest$tissues[[1]]$artifacts[[1]]$channels[[1]]$marker <- marker
+  manifest$tissues[[1]]$artifacts[[3]]$marker_columns[[1]]$marker <- marker
+  jsonlite::write_json(manifest, fixture$path, auto_unbox = TRUE, null = "null", digits = 17)
+  raw <- system2("vipsheader", wsi_system2_args(c("-f", "image-description", file)), stdout = TRUE, stderr = TRUE)
+  expect_true(all(validUTF8(raw)))
+  cleaned <- wsi_vips_clean_metadata_text(raw)
+  expect_identical(charToRaw(cleaned[[1]]), charToRaw(raw[[1]]))
+  expect_false(grepl("<e2><80><94>", cleaned[[1]], fixed = TRUE))
+  expect_match(wsi_vips_clean_metadata_text("literal <e2><80><94>"), "literal <e2><80><94>", fixed = TRUE)
+  expect_identical(wsi_ome_channel_names(file, 0:1)[[1]], marker)
+  expect_no_error(wsi_read_experiment(fixture$path))
+})
+
+test_that("OME names retain XML attribute identity and actual page order", {
+  alpha <- intToUtf8(0x03b1)
+  description <- paste0('<ome:OME><ome:Channel Name=\'CD3 &amp; &lt;e2&gt; &#x03B1;\'/>',
+    '<ome:Channel Name="literal &amp;lt; &quot;Q&quot; &apos;A&apos;"/>',
+    '<ome:Channel Name="CD8"/></ome:OME>')
+  names <- with_mocked_bindings(wsi_ome_channel_names("unused", pages = c(2, 0, 1, 5)),
+    wsi_vips_field = function(...) description, .package = "wsiTools")
+  expect_identical(names, c("CD8", paste0("CD3 & <e2> ", alpha), 'literal &lt; "Q" \'A\'', "Channel 6"))
+  expect_identical(wsi_ome_attribute_text("literal <e2><80><94>"), "literal <e2><80><94>")
+  expect_identical(wsi_ome_attribute_text("&amp;lt;"), "&lt;")
+  expect_identical(wsi_ome_attribute_text("&#945;"), alpha)
+})
+
+test_that("unnamed OME channels retain their original page slots", {
+  description <- paste0("<ome:OME><ome:Channel ID='Channel:0'/>",
+    "<ome:Channel ID='Channel:1' Name='CD8 &amp; signal > background'/>",
+    '<ome:Channel ID="Channel:2" Name=""/>',
+    '<ome:Channel ID="Channel:3" Name="CD3"/></ome:OME>')
+  names <- with_mocked_bindings(wsi_ome_channel_names("unused"),
+    wsi_vips_field = function(...) description, .package = "wsiTools")
+  expect_identical(names, c("Channel 1", "CD8 & signal > background", "Channel 3", "CD3"))
+  selected <- with_mocked_bindings(wsi_ome_channel_names("unused", pages = c(3, 0, 2, 1)),
+    wsi_vips_field = function(...) description, .package = "wsiTools")
+  expect_identical(selected, c("CD3", "Channel 1", "Channel 3", "CD8 & signal > background"))
 })
 
 test_that("float display ranges must be explicit and cropped image scope is validated", {

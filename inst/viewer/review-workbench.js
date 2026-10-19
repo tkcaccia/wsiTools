@@ -11,7 +11,8 @@
  * review({action,label,reviewer,ids?}) records explicit human decisions; the UI
  * scopes them to displayed selected observations. exportSelected() passes only
  * selected CURRENT-tissue observations to the host, including unmodified RNA
- * spots. planSelected() requests separate derived work tiles; it never retags a
+ * spots, with an optional {isCurrent} guard checked before an async download.
+ * planSelected() requests separate derived work tiles; it never retags a
  * spot/cell as an image tile. Image lassos preserve holes/disjoint polygons;
  * exports retain separate native footprints and never construct a convex hull.
  */
@@ -158,12 +159,23 @@
     let activeTissue = typeof host.getActiveTissueId === 'function' ? String(host.getActiveTissueId()) : context.images[0].tissue_id;
     let scope = 'current', unit = units[0] || '', reductionId = context.reductions.find(r => r.observation_unit === unit)?.id || '';
     let datasetId = defaultDataset(unit, context.reductions.find(item => item.id === reductionId));
-    let clusterField = clusterFields[0] || '';
+    let clusterField = '';
     let state = {selected_ids: [], review_records: []}, revision = 0, past = [], future = [];
     let panel = null, ui = {}, destroyed = false, generation = 0, plotPoints = [], drag = null;
-    let planned = null, planGeneration = 0;
+    let planned = null, planGeneration = 0, workOperation = null;
     let message = 'Select clusters or draw around points. Human review leaves original model results unchanged.';
     let errorStatus = false;
+
+    function scopedClusterFields() {
+      return [...new Set(rows.filter(visible).flatMap(row => Object.keys(row.cluster_values)
+        .filter(field => row.cluster_values[field] != null)))].sort();
+    }
+    function ensureClusterField() {
+      const available = scopedClusterFields();
+      if (!available.includes(clusterField)) clusterField = available[0] || '';
+      return available;
+    }
+    ensureClusterField();
 
     function ordered(ids) {
       assert(ids == null || Array.isArray(ids), 'Selection must be an array of canonical observation IDs.');
@@ -211,7 +223,7 @@
     }
     function status(value, error) {
       message = String(value); errorStatus = !!error;
-      if (ui.status) { ui.status.textContent = message; ui.status.style.color = errorStatus ? '#a32222' : ''; }
+      if (ui.status) { ui.status.textContent = message; ui.status.style.color = errorStatus ? 'var(--wsi-review-error, #fca5a5)' : ''; }
       if (typeof host.status === 'function') host.status(message, errorStatus);
     }
     function call(name, ...args) {
@@ -300,7 +312,7 @@
     }
     function setActiveTissue(id) {
       assert(context.images.some(image => image.tissue_id === id), 'Unknown active tissue identity.');
-      activeTissue = id; planned = null; planGeneration++; render(); return activeTissue;
+      activeTissue = id; ensureClusterField(); invalidatePlan(); return activeTissue;
     }
     function viewState() { return {reduction_id: reductionId, scope, observation_unit: unit, cluster_field: clusterField, dataset_id: datasetId}; }
     function restoreViewState(view) {
@@ -308,28 +320,29 @@
       assert(Object.keys(view).every(name => ['reduction_id', 'scope', 'observation_unit', 'cluster_field', 'dataset_id'].includes(name)), 'Unknown review view-state field.');
       assert(['current', 'all'].includes(view.scope), 'Unknown review scope.');
       assert(units.length ? units.includes(view.observation_unit) : view.observation_unit === '', 'Unknown review observation unit.');
-      assert(clusterFields.length ? clusterFields.includes(view.cluster_field) : view.cluster_field === '', 'Unknown cluster metadata field.');
+      assert(view.cluster_field === '' || clusterFields.includes(view.cluster_field), 'Unknown cluster metadata field.');
       const reduction = context.reductions.find(item => item.id === view.reduction_id);
       const dataset = view.dataset_id == null ? defaultDataset(view.observation_unit, reduction) : view.dataset_id;
       assert(typeof dataset === 'string' && (dataset === '*' || datasetsFor(view.observation_unit).includes(dataset) || !units.length && dataset === ''), 'Unknown review dataset identity.');
       assert(reduction ? reduction.observation_unit === view.observation_unit && (dataset === '*' || reductionDatasets(reduction).includes(dataset)) :
         view.reduction_id === '' && !matchingReductions(view.observation_unit, dataset).length, 'Unknown or incompatible review reduction.');
       scope = view.scope; unit = view.observation_unit; clusterField = view.cluster_field; reductionId = view.reduction_id; datasetId = dataset;
+      ensureClusterField();
       invalidatePlan();
-      render(); call('onViewChange', viewState()); return viewState();
+      call('onViewChange', viewState()); return viewState();
     }
-    function setScope(value) { assert(['current', 'all'].includes(value), 'Unknown review scope.'); scope = value; render(); call('onViewChange', viewState()); }
+    function setScope(value) { assert(['current', 'all'].includes(value), 'Unknown review scope.'); scope = value; ensureClusterField(); invalidatePlan(); call('onViewChange', viewState()); }
     function setReduction(id) {
       const reduction = context.reductions.find(item => item.id === id);
       assert(reduction, 'Unknown reduction ID.'); reductionId = id; unit = reduction.observation_unit; datasetId = defaultDataset(unit, reduction);
-      invalidatePlan(); render(); call('onViewChange', viewState());
+      ensureClusterField(); invalidatePlan(); call('onViewChange', viewState());
     }
     function setDataset(id) {
       assert(typeof id === 'string' && (id === '*' || datasetsFor(unit).includes(id)), 'Unknown review dataset identity.');
       datasetId = id;
       const available = matchingReductions(unit, datasetId);
       if (!available.some(item => item.id === reductionId)) reductionId = available[0]?.id || '';
-      invalidatePlan(); render(); call('onViewChange', viewState()); return datasetId;
+      ensureClusterField(); invalidatePlan(); call('onViewChange', viewState()); return datasetId;
     }
     function selectImageGeometry(geometry, options) {
       const opts = options || {}, tissue = opts.tissue_id || activeTissue;
@@ -349,39 +362,67 @@
         'Choose a reduction and draw a finite selection polygon.');
       return selectIds(reduction.points.filter(point => visible(byId.get(point.id)) && ringContains([point.x, point.y], ring)).map(point => point.id), opts);
     }
+    function startWork(kind, selected) {
+      assert(!workOperation, 'A work-tile preview or export is already in progress. Wait for it to finish.');
+      const operation = {kind, generation: planGeneration, tissue: activeTissue, unit, datasetId, scope,
+        ids: selected.map(row => row.id)};
+      operation.isCurrent = () => !destroyed && operation.generation === planGeneration && operation.tissue === activeTissue &&
+        operation.unit === unit && operation.datasetId === datasetId && operation.scope === scope &&
+        JSON.stringify(operation.ids) === JSON.stringify(currentSelectedRows().map(row => row.id));
+      workOperation = operation;
+      render();
+      return operation;
+    }
+    function finishWork(operation) {
+      if (workOperation === operation) { workOperation = null; render(); }
+    }
     function exportSelected() {
       const selected = currentSelectedRows();
       assert(selected.length, 'No observations are selected in the displayed unit/dataset of the current tissue. Empty selection exports nothing.');
       assert(typeof host.export === 'function', 'Tile export is not connected in this viewer.');
-      return host.export(selected);
+      const operation = startWork('export', selected);
+      status('Exporting work tiles from ' + selected.length + ' selected observations in tissue ' + activeTissue + '…');
+      const completed = value => {
+        assert(operation.isCurrent(), 'Selection, tissue or tile options changed; the old work-tile export was discarded.');
+        status('Work-tile export request finished for ' + selected.length + ' selected observations in tissue ' + operation.tissue + '.');
+        return value;
+      };
+      try {
+        // The host must check isCurrent after awaiting its planner and before downloading.
+        const result = host.export(selected, {isCurrent: operation.isCurrent});
+        if (result && typeof result.then === 'function') return Promise.resolve(result).then(completed).finally(() => finishWork(operation));
+        const value = completed(result); finishWork(operation); return value;
+      } catch (error) { finishWork(operation); throw error; }
     }
     function invalidatePlan() { planned = null; planGeneration++; render(); }
     async function planSelected() {
       const selected = currentSelectedRows(), tissue = activeTissue;
       assert(selected.length, 'Select observations in the displayed unit/dataset of the current tissue before planning work tiles.');
       assert(typeof host.plan === 'function', 'Work-tile planning is not connected in this viewer.');
-      const request = ++planGeneration, selectedIds = new Set(selected.map(row => row.id));
+      const operation = startWork('plan', selected), selectedIds = new Set(selected.map(row => row.id));
       planned = null;
       status('Planning work tiles from ' + selected.length + ' selected observations…');
       render();
-      const result = await host.plan(selected);
-      assert(request === planGeneration && activeTissue === tissue && !destroyed, 'Selection or tissue changed; the old work-tile plan was discarded.');
-      assert(result && Array.isArray(result.tiles), 'Work-tile planner must return a tiles array.');
-      if (result.context_id != null) assert(result.context_id === context.context_id, 'Work-tile plan context differs.');
-      if (result.source_signature != null) assert(result.source_signature === context.source_signature, 'Work-tile plan sources changed.');
-      const seen = new Set();
-      for (const tile of result.tiles) {
-        const image = context.images.find(item => item.tissue_id === tile.tissue_id && item.frame_id === tile.frame_id), p = tile.footprint;
-        assert(image && tile.tissue_id === tissue && text(tile.id) && !seen.has(tile.id), 'Work-tile plan contains an unknown, duplicate or foreign image tile.');
-        assert(p && ['x0', 'y0', 'x1', 'y1'].every(name => finite(p[name])) && p.x0 >= 0 && p.y0 >= 0 &&
-          p.x1 <= image.width && p.y1 <= image.height && p.x1 > p.x0 && p.y1 > p.y0, 'Work-tile plan has invalid native bounds.');
-        assert(Array.isArray(tile.source_ids) && tile.source_ids.length && tile.source_ids.every(id => selectedIds.has(id)),
-          'Work tiles must retain their selected source observation IDs.');
-        seen.add(tile.id);
-      }
-      planned = clone(result); render();
-      status(selected.length + ' selected observations → ' + result.tiles.length + ' planned work tiles. Source observation units are unchanged.');
-      return clone(planned);
+      try {
+        const result = await host.plan(selected);
+        assert(operation.isCurrent(), 'Selection or tissue changed; the old work-tile plan was discarded.');
+        assert(result && Array.isArray(result.tiles), 'Work-tile planner must return a tiles array.');
+        if (result.context_id != null) assert(result.context_id === context.context_id, 'Work-tile plan context differs.');
+        if (result.source_signature != null) assert(result.source_signature === context.source_signature, 'Work-tile plan sources changed.');
+        const seen = new Set();
+        for (const tile of result.tiles) {
+          const image = context.images.find(item => item.tissue_id === tile.tissue_id && item.frame_id === tile.frame_id), p = tile.footprint;
+          assert(image && tile.tissue_id === tissue && text(tile.id) && !seen.has(tile.id), 'Work-tile plan contains an unknown, duplicate or foreign image tile.');
+          assert(p && ['x0', 'y0', 'x1', 'y1'].every(name => finite(p[name])) && p.x0 >= 0 && p.y0 >= 0 &&
+            p.x1 <= image.width && p.y1 <= image.height && p.x1 > p.x0 && p.y1 > p.y0, 'Work-tile plan has invalid native bounds.');
+          assert(Array.isArray(tile.source_ids) && tile.source_ids.length && tile.source_ids.every(id => selectedIds.has(id)),
+            'Work tiles must retain their selected source observation IDs.');
+          seen.add(tile.id);
+        }
+        planned = clone(result); render();
+        status(selected.length + ' selected observations → ' + result.tiles.length + ' planned work tiles. Source observation units are unchanged.');
+        return clone(planned);
+      } finally { finishWork(operation); }
     }
 
     function element(tag, role, value, parent) {
@@ -409,11 +450,10 @@
       const scopeLabel = element('label', null, 'Scope ', controls); ui.scope = element('select', 'scope', null, scopeLabel);
       option(ui.scope, 'current', 'Current tissue'); option(ui.scope, 'all', 'All tissues (explicit)'); ui.scope.onchange = () => run(() => setScope(ui.scope.value));
       const unitLabel = element('label', null, 'Observations ', controls); ui.unit = element('select', 'unit', null, unitLabel);
-      units.forEach(value => option(ui.unit, value, value)); ui.unit.onchange = () => { unit = ui.unit.value; reductionId = context.reductions.find(r => r.observation_unit === unit)?.id || ''; datasetId = defaultDataset(unit, context.reductions.find(item => item.id === reductionId)); invalidatePlan(); render(); call('onViewChange', viewState()); };
+      units.forEach(value => option(ui.unit, value, value)); ui.unit.onchange = () => { unit = ui.unit.value; reductionId = context.reductions.find(r => r.observation_unit === unit)?.id || ''; datasetId = defaultDataset(unit, context.reductions.find(item => item.id === reductionId)); ensureClusterField(); invalidatePlan(); call('onViewChange', viewState()); };
       const datasetLabel = element('label', null, 'Dataset ', controls); ui.dataset = element('select', 'dataset', null, datasetLabel);
       ui.dataset.onchange = () => run(() => setDataset(ui.dataset.value));
       const fieldLabel = element('label', null, 'Clusters ', controls); ui.field = element('select', 'cluster-field', null, fieldLabel);
-      clusterFields.forEach(value => option(ui.field, value, value));
       ui.field.onchange = () => { clusterField = ui.field.value; render(); call('onViewChange', viewState()); };
       ui.clusters = element('div', 'clusters', null, panel); ui.clusters.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;max-height:100px;overflow:auto;margin:6px 0';
       const reductionLabel = element('label', null, 'Linked plot ', panel); ui.reduction = element('select', 'reduction', null, reductionLabel);
@@ -434,6 +474,7 @@
       }
       element('div', null, 'Review actions apply only to selected observations in the displayed tissue/unit scope.', panel);
       ui.records = element('div', 'records', null, panel); ui.records.style.cssText = 'max-height:130px;overflow:auto;margin:6px 0';
+      ui.workScope = element('div', 'work-scope', null, panel);
       const tools = element('div', null, null, panel); tools.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin:8px 0';
       ui.undo = element('button', 'undo', 'Undo', tools); ui.undo.onclick = () => run(undo);
       ui.redo = element('button', 'redo', 'Redo', tools); ui.redo.onclick = () => run(redo);
@@ -483,11 +524,15 @@
       generation++; const currentGeneration = generation;
       const image = context.images.find(item => item.tissue_id === activeTissue);
       ui.identity.textContent = (image?.label || image?.name || activeTissue) + ' · ' + context.experiment_id + ' · native image coordinates';
-      ui.scope.value = scope; ui.unit.value = unit; ui.field.value = clusterField;
+      ui.scope.value = scope; ui.unit.value = unit;
+      ui.field.replaceChildren();
+      scopedClusterFields().forEach(value => option(ui.field, value, value));
+      ui.field.value = clusterField; ui.field.disabled = !ui.field.options.length;
       ui.dataset.replaceChildren();
       datasetsFor(unit).forEach(value => option(ui.dataset, value, value || 'Legacy observations'));
       option(ui.dataset, '*', 'All datasets (explicit)'); ui.dataset.value = datasetId;
-      ui.clusters.replaceChildren();
+      const focusedCluster = [...(ui.clusterInputs || [])].find(([, input]) => input === panel.ownerDocument.activeElement)?.[0];
+      ui.clusterInputs = new Map(); ui.clusters.replaceChildren();
       const groups = new Map(), field = clusterField;
       for (const row of rows.filter(visible)) if (row.cluster_values[field] != null) {
         const value = String(row.cluster_values[field]); if (!groups.has(value)) groups.set(value, []); groups.get(value).push(row.id);
@@ -495,11 +540,13 @@
       const selected = new Set(state.selected_ids);
       for (const [value, ids] of [...groups].sort((a, b) => a[0].localeCompare(b[0], undefined, {numeric: true}))) {
         const label = element('label', null, null, ui.clusters), box = element('input', null, null, label); box.type = 'checkbox';
+        ui.clusterInputs.set(value, box);
         const n = ids.filter(id => selected.has(id)).length; box.checked = n === ids.length; box.indeterminate = n > 0 && n < ids.length;
         box.onchange = () => run(() => selectIds(ids, {mode: box.checked ? 'add' : 'subtract'}));
         label.appendChild(panel.ownerDocument.createTextNode(' ' + value + ' (' + ids.length + ')'));
       }
       if (!groups.size) element('span', null, 'No cluster metadata in this scope.', ui.clusters);
+      if (focusedCluster != null) ui.clusterInputs.get(focusedCluster)?.focus({preventScroll: true});
       ui.reduction.replaceChildren();
       matchingReductions(unit, datasetId).forEach(item => option(ui.reduction, item.id, item.label));
       ui.reduction.value = reductionId; ui.reduction.disabled = !ui.reduction.options.length;
@@ -525,8 +572,14 @@
         if (recordRows.length > 12) element('div', null, 'Showing 12 of ' + recordRows.length + ' selected observations in this scope.', ui.records);
       }
       ui.undo.disabled = !past.length; ui.redo.disabled = !future.length;
-      ui.plan.disabled = !current.length || typeof host.plan !== 'function';
-      ui.export.disabled = !current.length || typeof host.export !== 'function';
+      panel.setAttribute('aria-busy', workOperation ? 'true' : 'false');
+      ui.workScope.textContent = 'Work-tile preview/export: current tissue ' + activeTissue + ' · ' + (unit || 'no observation unit') +
+        ' · ' + (datasetId === '*' ? 'all datasets (explicit)' : 'dataset ' + (datasetId || 'Legacy observations')) +
+        ' · ' + current.length + ' selected observations. Other selected tissues and datasets are retained.';
+      ui.plan.disabled = !!workOperation || !current.length || typeof host.plan !== 'function';
+      ui.export.disabled = !!workOperation || !current.length || typeof host.export !== 'function';
+      ui.plan.textContent = workOperation?.kind === 'plan' ? 'Planning work tiles…' : 'Preview work tiles from selection';
+      ui.export.textContent = workOperation?.kind === 'export' ? 'Exporting work tiles…' : 'Export work tiles from current-tissue selection';
       ui.preview.replaceChildren();
       if (!tiles.length) element('div', null, current.length ? 'Selected observations are not image tiles. Preview their explicitly planned work tiles above.' :
         'No selected observations in this tissue. Empty selection previews and exports nothing.', ui.preview);
@@ -551,7 +604,7 @@
         } else element('div', null, typeof host.focusObservation === 'function' ? 'Use the tile ID to focus its image footprint.' : 'Native footprint retained; image preview unavailable.', card);
       }
       if (tiles.length > 12) element('div', null, 'Showing the first 12 of ' + tiles.length + ' tiles. Export uses only selected source observations in this tissue.', ui.preview);
-      ui.status.textContent = message; ui.status.style.color = errorStatus ? '#a32222' : '';
+      ui.status.textContent = message; ui.status.style.color = errorStatus ? 'var(--wsi-review-error, #fca5a5)' : '';
       drawPlot();
     }
     function destroy() { destroyed = true; generation++; panel?.remove(); panel = null; ui = {}; }
