@@ -38,7 +38,7 @@ wsi_empty_prediction_result <- function() {
   out
 }
 
-wsi_prediction_config <- function(seurat = NULL, cellphenotyper = NULL) {
+wsi_prediction_config <- function(seurat = NULL, cellphenotyper = NULL, experiment = NULL) {
   sources <- list()
   seurat <- seurat %||% list(enabled = FALSE)
   cellphenotyper <- cellphenotyper %||% list(enabled = FALSE)
@@ -81,6 +81,9 @@ wsi_prediction_config <- function(seurat = NULL, cellphenotyper = NULL) {
       unit = "cell"
     )
   }
+  if (inherits(experiment, "wsi_experiment")) {
+    sources <- c(sources, wsi_experiment_catalog(experiment))
+  }
 
   list(
     enabled = length(sources) > 0L,
@@ -97,7 +100,8 @@ wsi_prediction_context_enabled <- function(context) {
   spatial <- context$spatial %||% context$seurat %||% NULL
   cellphenotyper_project <- context$cellphenotyper_project %||% context$cellphenotyper %||% NULL
   isTRUE(inherits(spatial, "wsi_seurat_spatial") || inherits(spatial, "wsi_spatial_object")) ||
-    isTRUE(inherits(cellphenotyper_project, "wsi_cellphenotyper_project"))
+    isTRUE(inherits(cellphenotyper_project, "wsi_cellphenotyper_project")) ||
+    inherits(context$experiment, "wsi_experiment")
 }
 
 #' Create live viewer prediction context
@@ -202,6 +206,10 @@ wsi_prediction_add_point_metadata <- function(points, source) {
 wsi_prediction_points <- function(context, source_id) {
   context <- context %||% list()
   source_id <- as.character(source_id %||% "")
+  if (startsWith(source_id, "experiment:")) {
+    if (!inherits(context$experiment, "wsi_experiment")) wsi_abort("No experiment is attached to this viewer session.")
+    return(wsi_experiment_features(context$experiment, substring(source_id, 12L), context$tissue_ids)$observations)
+  }
   if (startsWith(source_id, "cellphenotyper:")) {
     project <- context$cellphenotyper_project %||% context$cellphenotyper %||% NULL
     if (!inherits(project, "wsi_cellphenotyper_project")) {
@@ -918,6 +926,12 @@ wsi_prediction_feature_matrix <- function(context, source_id, ids,
                                           max_features = NULL) {
   context <- context %||% list()
   source_id <- as.character(source_id %||% "spatial:raw")
+  if (startsWith(source_id, "experiment:")) {
+    f <- wsi_experiment_features(context$experiment, substring(source_id, 12L), context$tissue_ids)
+    rows <- match(ids, f$observations$id)
+    if (anyNA(rows)) wsi_abort("Experiment feature IDs do not match the requested observations.")
+    return(f$x[rows, , drop = FALSE])
+  }
   if (identical(source_id, "cellphenotyper:numeric")) {
     return(wsi_prediction_matrix_for_cells(
       context$cellphenotyper_project %||% context$cellphenotyper,
@@ -1572,6 +1586,12 @@ wsi_prediction_run <- function(context, rois, source_id, train_ids, test_ids = c
                                ncomp = 2L, method = "simpls", scaling = "autoscaling",
                                max_features = 5000L, reduction_dims = NULL,
                                refine_svm = FALSE) {
+  if (startsWith(as.character(source_id), "experiment:")) {
+    if (!identical(method, "simpls") || isTRUE(refine_svm))
+      wsi_abort("Experiment classifiers currently use explicit CPU SIMPLS-LDA without SVM refinement.")
+    return(wsi_experiment_prediction_run(context, rois, source_id, train_ids, test_ids,
+      ncomp = ncomp, scaling = scaling, max_features = max_features))
+  }
   if (!inherits(rois, "wsi_roi") || !nrow(rois)) {
     wsi_abort("Draw or import annotations before running PLS-LDA prediction.")
   }
@@ -1682,7 +1702,7 @@ wsi_prediction_validate_payload <- function(payload) {
   allowed <- c(
     "feature_source", "train_annotations", "test_annotations", "rois",
     "ncomp", "method", "scaling", "max_features", "reduction_dims",
-    "refine_svm"
+    "refine_svm", "action", "mode", "tissue_ids", "active_tissue_id", "recipe_path", "model_path"
   )
   unknown <- setdiff(names(payload), allowed)
   if (length(unknown)) {
@@ -1702,13 +1722,24 @@ wsi_prediction_response <- function(context, state, payload) {
   } else {
     state$rois %||% wsi_empty_roi()
   }
-  if (inherits(rois, "wsi_roi")) {
-    state$rois <- rois
+  # Request annotations can combine several images and use analytical IDs.
+  # Only the viewer synchronization endpoint owns state$rois and its IDs;
+  # replacing them here invalidates the browser's next ordinary ROI delta.
+  if (identical(payload$action, "experiment_appearance")) {
+    appearance <- wsi_experiment_appearance_response(context, rois, payload)
+    state$experiment_appearance <- appearance
+    response <- wsi_viewer_state_response(state)
+    response$appearance <- appearance
+    return(response)
   }
+  if (!is.null(payload$action) && !payload$action %in% c("predict", "experiment_predict", "experiment_apply_classifier"))
+    wsi_abort("Unsupported prediction action.")
   wsi_viewer_state_record_event(state, "prediction_started", list(
     feature_source = payload$feature_source %||% "spatial:raw"
   ))
-  result <- wsi_prediction_run(
+  result <- if (identical(payload$action, "experiment_apply_classifier")) {
+    wsi_experiment_apply_saved_classifier(context, state, payload)
+  } else wsi_prediction_run(
     context = context,
     rois = rois,
     source_id = payload$feature_source %||% "spatial:raw",
@@ -1723,6 +1754,7 @@ wsi_prediction_response <- function(context, state, payload) {
   )
   layer <- wsi_prediction_layer(result, radius = 8)
   state$prediction <- result
+  if (!is.null(attr(result, "classifier_model"))) state$experiment_classifier <- attr(result, "classifier_model")
   state$layers <- wsi_viewer_set_layer(state$layers, layer)
   wsi_viewer_queue_command(
     state,
@@ -1749,6 +1781,9 @@ wsi_prediction_response <- function(context, state, payload) {
     project_count = length(project_counts),
     project_counts = project_counts
   )
+  if (!is.null(attr(result, "classifier_path"))) detail$classifier_path <- attr(result, "classifier_path")
+  if (!is.null(attr(result, "result_path"))) detail$result_path <- attr(result, "result_path")
+  if (!is.null(attr(result, "training_coverage"))) detail$training_coverage <- attr(result, "training_coverage")
   wsi_viewer_state_record_event(state, "prediction_finished", detail)
   response <- wsi_viewer_state_response(state)
   response$prediction <- detail

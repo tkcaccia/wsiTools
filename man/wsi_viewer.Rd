@@ -73,6 +73,8 @@ wsi_viewer(
   seurat = NULL,
   cellphenotyper = NULL,
   session_inputs = NULL,
+  experiment = NULL,
+  experiment_prediction = NULL,
   viewer_transport = c("auto", "websocket", "polling")
 )
 }
@@ -278,6 +280,10 @@ the top \strong{Cells} menu.}
 
 \item{session_inputs}{Optional list of source image, annotation, spatial
 object, and sample-mapping records shown by \strong{History > Copy inputs}.}
+
+\item{experiment}{Internal experiment source identity retained by saved viewer projects.}
+
+\item{experiment_prediction}{Internal typed feature-source configuration supplied by \code{wsi_viewer_experiment()}.}
 
 \item{viewer_transport}{Browser-to-R live transport advertised to the
 viewer: \code{"auto"}, \code{"websocket"}, or \code{"polling"}. Static viewers ignore

@@ -571,11 +571,17 @@ function rNewProjectLaunchCode() {
 }
 
 function rProjectLaunchCode(projectPath) {
-  if (/\.wsiproject\.json$/i.test(projectPath)) {
+  if (/\.json$/i.test(projectPath)) {
     return [
       "library(wsiTools)",
-      `project_snapshot <- jsonlite::read_json(${quoteRString(projectPath)}, simplifyVector = FALSE)`,
-      "# Desktop reopens the listed images with fresh tile URLs, then restores the annotations."
+      `project_file <- ${quoteRString(projectPath)}`,
+      "project_index <- jsonlite::read_json(project_file, simplifyVector = FALSE)",
+      'if (identical(project_index$schema, "cellphenotyper-experiment")) {',
+      "  viewer <- wsi_viewer_experiment(project_file, open = FALSE, wait = FALSE)",
+      "} else {",
+      "  # Desktop reopens the saved project with fresh tile URLs, then restores its state.",
+      "  # Saved experiment sessions also reopen their linked experiment and feature caches.",
+      "}"
     ].join("\n");
   }
   return [
@@ -868,8 +874,8 @@ async function chooseSavedProject(directory) {
     const selected = await open({
       multiple: false,
       directory,
-      title: directory ? "Open wsiTools R project folder" : "Open wsiTools viewer project file",
-      ...(directory ? {} : { filters: [{ name: "wsiTools viewer project", extensions: ["json"] }] })
+      title: directory ? "Open wsiTools project folder" : "Open experiment or saved project",
+      ...(directory ? {} : { filters: [{ name: "CellPhenotyper experiment or wsiTools project", extensions: ["json"] }] })
     });
     const projectPath = Array.isArray(selected) ? selected[0] : selected;
     if (!projectPath) {

@@ -692,6 +692,7 @@ select:focus-visible {
 
 .projectChoices:not([hidden]) {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 12px;
 }
@@ -701,6 +702,14 @@ select:focus-visible {
   min-width: 0;
   padding: 12px;
   text-align: left;
+}
+
+.projectChoices p {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  color: #cbd5e1;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .appShell {

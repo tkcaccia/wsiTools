@@ -5794,7 +5794,8 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
         cells_native <- prediction_context_native$cellphenotyper_project %||% prediction_context_native$cellphenotyper %||% NULL
         wsi_prediction_config(
           seurat = if (inherits(spatial_native, "wsi_seurat_spatial") || inherits(spatial_native, "wsi_spatial_object")) wsi_viewer_seurat_config(spatial_native) else list(enabled = FALSE),
-          cellphenotyper = if (inherits(cells_native, "wsi_cellphenotyper_project")) wsi_viewer_cellphenotyper_config(cells_native) else list(enabled = FALSE)
+          cellphenotyper = if (inherits(cells_native, "wsi_cellphenotyper_project")) wsi_viewer_cellphenotyper_config(cells_native) else list(enabled = FALSE),
+          experiment = prediction_context_native$experiment %||% NULL
         )
       },
       # Keep analytical requests on the same local, validated R bridge used

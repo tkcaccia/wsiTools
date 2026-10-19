@@ -272,7 +272,8 @@ function wsiPaintLayerPolygon(cx, pane, layer, item, selected) {
     cx.globalAlpha = layerOpacity(layer); cx.fillStyle = item.fill || hexToRgba(colour, .12);
     cx.strokeStyle = selected ? '#ffffff' : colour;
     cx.lineWidth = (selected ? Math.max(3, Number(layer.line_width || item.line_width || 2) + 2) : Number(layer.line_width || item.line_width || 2)) / unit;
-    cx.fill(path, 'evenodd'); cx.stroke(path);
+    cx.fill(path, 'evenodd');
+    if (selected || layer.outline !== false) cx.stroke(path);
     if (selected) { cx.globalAlpha = 1; cx.strokeStyle = '#facc15'; cx.lineWidth = 1.5 / unit; cx.stroke(path); }
   }
   cx.restore();

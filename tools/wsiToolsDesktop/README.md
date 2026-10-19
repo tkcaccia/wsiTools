@@ -20,6 +20,25 @@ This does not load whole-slide images into R memory. The viewer still uses
 precomputed tiles or the dynamic tile server, depending on the image and
 available backends.
 
+## Open an experiment
+
+Choose **Open project → Experiment or saved project (.json)** and select
+CellPhenotyper's `experiment.cellphenotyper.json`. The desktop app also accepts
+saved `.wsiproject.json` viewer sessions and `project.json` indices. Use the
+folder option for an existing `.wsiproject` directory.
+
+The experiment opens its recorded tissues, settings, calibration and compatible
+feature caches. It uses existing results; opening does not run feature
+extraction or launch a GPU job. Keep the experiment index and its referenced
+images and feature files together when moving a study. Missing files are
+reported with their paths so they can be restored.
+
+Save annotations and viewing settings to a separate `.wsiproject.json` session.
+The session links back to the experiment so reopening retains its feature
+sources. The scientific experiment index is preserved, and the desktop save
+dialog prevents a viewer session from replacing it. Reopening a saved session
+requires its linked experiment and image assets to remain available.
+
 The base-image renderer defaults to `auto`: OpenSeadragon uses WebGL/WebGL2
 when the system WebView supports it and falls back to the Canvas CPU renderer.
 The same renderer setting is used when the viewer is launched directly from R.

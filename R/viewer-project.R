@@ -686,7 +686,20 @@ wsi_viewer_project_config <- function(slide, project_images = NULL, width = 768,
     }
     items <- c(list(active), extras)
   }
-  list(items = items, active_index = 0L)
+  safe_name <- function(value) {
+    value <- sub("\\.[^.]+$", "", as.character(value))
+    value <- gsub("[^A-Za-z0-9_-]+", "_", value)
+    value <- gsub("^_+|_+$", "", value)
+    if (nzchar(value)) value else "annotations"
+  }
+  bases <- vapply(seq_along(items), function(i) safe_name(items[[i]]$id %||% items[[i]]$path %||% items[[i]]$label %||% paste0("image_", i)), character(1))
+  annotation_sets <- lapply(seq_along(items), function(i) {
+    base <- bases[[i]]
+    if (sum(bases == base) > 1L) base <- paste0(base, "__item_", i)
+    list(key = paste0(base, "::image"), rois = items[[i]]$rois %||% list(),
+         selectedRoi = -1L, dirty = FALSE)
+  })
+  list(items = items, active_index = 0L, annotation_sets = annotation_sets)
 }
 
 wsi_viewer_project_items <- function(images, width = 768, height = NULL, czi_sections = TRUE) {
@@ -802,7 +815,7 @@ wsi_viewer_project_item_from_record <- function(record, index = 1L, width = 768,
     "tile_url_base", "tile_url_template", "tile_url_style", "tile_format",
     "tile_size", "tile_overlap", "min_level", "max_level", "cache_key", "content_bbox",
     "layers", "seurat", "cellphenotyper", "channel_sources", "mpp",
-    "pixel_size", "objective_power"
+    "pixel_size", "objective_power", "rois", "artifact_references", "tissue_id", "frame_id"
   )
   for (field in intersect(extra_fields, names(record))) {
     if (!is.null(record[[field]])) {

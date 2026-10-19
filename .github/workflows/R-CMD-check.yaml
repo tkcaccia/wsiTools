@@ -91,6 +91,7 @@ jobs:
           node tests/browser/component-cache.cjs
           node tests/browser/edit-transactions.cjs
           node tests/browser/sync-patches.cjs
+          node tests/browser/experiment-workbench.cjs
 
       - name: Report optional runtime tools
         shell: Rscript {0}

@@ -2327,18 +2327,98 @@ desktop_viewer_project_items <- function(path) {
 }
 
 desktop_project_input <- function(path) {
+  if (!file.exists(path)) {
+    stop("Project not found: ", path, ". Select its current location.", call. = FALSE)
+  }
   path <- normalizePath(path, winslash = "/", mustWork = TRUE)
-  if (dir.exists(path)) return(list(kind = "r", path = path))
-  schema <- tryCatch(jsonlite::read_json(path, simplifyVector = FALSE)$schema,
-                     error = function(err) NULL)
+  manifest <- if (dir.exists(path)) file.path(path, "project.json") else path
+  if (!file.exists(manifest)) {
+    stop("This folder has no project.json. Select a .wsiproject folder or an experiment JSON file: ",
+         path, call. = FALSE)
+  }
+  index <- tryCatch(jsonlite::read_json(manifest, simplifyVector = FALSE),
+                    error = function(err) {
+                      stop("Could not read project JSON: ", manifest, ". ",
+                           conditionMessage(err), call. = FALSE)
+                    })
+  schema <- if (is.list(index)) index$schema else NULL
+  if (identical(schema, "cellphenotyper-experiment")) {
+    if (length(index$schema_version) != 1L ||
+        !is.numeric(index$schema_version) || !identical(as.numeric(index$schema_version), 1)) {
+      stop("This CellPhenotyper experiment has an unsupported schema_version; version 1 is supported.",
+           call. = FALSE)
+    }
+    return(list(kind = "experiment", path = manifest))
+  }
   if (identical(schema, "wsiTools-viewer-project")) {
-    return(list(kind = "viewer", path = path))
+    return(list(kind = "viewer", path = manifest))
   }
   if (identical(schema, "wsiTools-project")) {
-    return(list(kind = "r", path = dirname(path)))
+    if (!identical(basename(manifest), "project.json")) {
+      stop("A wsiTools R project manifest must be named project.json inside its project folder.",
+           call. = FALSE)
+    }
+    return(list(kind = "r", path = dirname(manifest)))
   }
-  stop("This file is not a wsiTools viewer project or an R project manifest. ",
-       "Choose a .wsiproject.json file or a .wsiproject folder.", call. = FALSE)
+  stop("This file is not a wsiTools viewer project, R project manifest, or CellPhenotyper experiment. ",
+       "Choose experiment.cellphenotyper.json, a .wsiproject.json file, or a .wsiproject folder.",
+       call. = FALSE)
+}
+
+desktop_experiment_reference <- function(reference, project_path) {
+  if (is.null(reference)) return(NULL)
+  value <- if (is.list(reference)) reference$path %||% reference$manifest_path else reference
+  if (!is.character(value) || length(value) != 1L || is.na(value) || !nzchar(value)) {
+    stop("The saved project has an invalid experiment reference; reopen the experiment index directly.",
+         call. = FALSE)
+  }
+  if (!startsWith(value, "/") && !grepl("^[A-Za-z]:", value) && !startsWith(value, "\\\\")) {
+    value <- file.path(if (dir.exists(project_path)) project_path else dirname(project_path), value)
+  }
+  if (!file.exists(value)) {
+    stop("The linked CellPhenotyper experiment is missing: ", value,
+         ". Restore its location or reopen the experiment index directly. Keep the experiment and its assets together.",
+         call. = FALSE)
+  }
+  expected <- if (is.list(reference)) reference$manifest_sha256 else NULL
+  if (!is.null(expected)) {
+    if (!is.character(expected) || length(expected) != 1L || is.na(expected) ||
+        !grepl("^[0-9a-fA-F]{64}$", expected)) {
+      stop("The saved project has an invalid experiment digest; reopen the experiment index directly.",
+           call. = FALSE)
+    }
+    if (!requireNamespace("openssl", quietly = TRUE)) {
+      stop("Experiment verification requires the optional openssl R package.", call. = FALSE)
+    }
+    con <- file(value, "rb")
+    on.exit(close(con), add = TRUE)
+    digest <- as.character(openssl::sha256(con))
+    if (!identical(tolower(expected), digest)) {
+      stop("The linked experiment index changed after this session was saved. ",
+           "Reopen the revised experiment directly before continuing.", call. = FALSE)
+    }
+  }
+  normalizePath(value, winslash = "/", mustWork = TRUE)
+}
+
+desktop_open_experiment <- function(path, output, log_file, open_fun = NULL) {
+  if (is.null(open_fun)) {
+    if (!"wsi_viewer_experiment" %in% getNamespaceExports("wsiTools")) {
+      stop("This experiment needs a newer wsiTools R package with wsi_viewer_experiment(). ",
+           "Update the R package, then reopen the experiment.", call. = FALSE)
+    }
+    open_fun <- getExportedValue("wsiTools", "wsi_viewer_experiment")
+  }
+  index <- jsonlite::read_json(path, simplifyVector = FALSE)
+  name <- as.character(index$name %||% "CellPhenotyper experiment")[[1L]]
+  count <- length(index$tissues %||% list())
+  desktop_stage("experiment", sprintf("Opening %s (%d %s)", name, count,
+                                      if (count == 1L) "tissue" else "tissues"))
+  desktop_log("Opening saved experiment results; no feature extraction or inference is started.",
+              log_file = log_file)
+  viewer <- open_fun(path, output = output, open = FALSE, wait = FALSE)
+  attr(viewer, "desktop_experiment_path") <- path
+  viewer
 }
 
 desktop_open_target <- function(target_path, mode, output, log_file) {
@@ -2348,13 +2428,30 @@ desktop_open_target <- function(target_path, mode, output, log_file) {
     input <- desktop_project_input(target_path)
     target_path <- input$path
     desktop_log("Opening project: ", target_path, log_file = log_file)
+    if (identical(input$kind, "experiment")) {
+      return(desktop_open_experiment(target_path, output = output, log_file = log_file))
+    }
     if (identical(input$kind, "viewer")) {
-      saved <- desktop_viewer_project_items(target_path)
-      viewer <- desktop_open_new_project(saved$items, output = output, log_file = log_file)
+      snapshot <- jsonlite::read_json(target_path, simplifyVector = FALSE)
+      experiment_path <- desktop_experiment_reference(snapshot$experiment, target_path)
+      viewer <- if (!is.null(experiment_path)) {
+        desktop_open_experiment(experiment_path, output = output, log_file = log_file)
+      } else {
+        saved <- desktop_viewer_project_items(target_path)
+        desktop_open_new_project(saved$items, output = output, log_file = log_file)
+      }
       attr(viewer, "desktop_restore_viewer_project") <- target_path
       return(viewer)
     }
     project <- wsiTools::wsi_read_project(target_path, open_slide = FALSE)
+    experiment_path <- desktop_experiment_reference(
+      project$metadata$cellphenotyper_experiment, target_path
+    )
+    if (!is.null(experiment_path)) {
+      viewer <- desktop_open_experiment(experiment_path, output = output, log_file = log_file)
+      wsiTools::restore_project_state(viewer, project, service = FALSE)
+      return(viewer)
+    }
     image_path <- desktop_project_slide_path(project)
   } else {
     image_path <- normalizePath(target_path, winslash = "/", mustWork = TRUE)

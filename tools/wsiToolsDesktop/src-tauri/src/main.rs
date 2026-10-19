@@ -883,12 +883,13 @@ async fn save_viewer_file(
         let path = path
             .into_path()
             .map_err(|err| format!("Could not resolve selected save path: {err}"))?;
-        if !confirm_file_replacement(&confirmation_app, &confirmation_window, &path) {
-            return Ok(None);
-        }
         let bytes = general_purpose::STANDARD
             .decode(data_base64.as_bytes())
             .map_err(|err| format!("Could not decode viewer file data: {err}"))?;
+        protect_experiment_manifest(&path, &bytes)?;
+        if !confirm_file_replacement(&confirmation_app, &confirmation_window, &path) {
+            return Ok(None);
+        }
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|err| {
                 format!(
@@ -1548,6 +1549,56 @@ fn launch_r_new_project_target(
     Ok(result)
 }
 
+// Validate the selected entry point before stopping an already open viewer.
+// The R reader remains responsible for scientific schema and asset validation.
+fn project_input_summary(target: &Path) -> Result<String, String> {
+    if !target.exists() {
+        return Err(format!("Project not found: {}. Select its current location.", target.display()));
+    }
+    let manifest = if target.is_dir() {
+        target.join("project.json")
+    } else {
+        target.to_path_buf()
+    };
+    if !manifest.is_file() {
+        return Err(format!(
+            "This folder has no project.json: {}. Select a .wsiproject folder or an experiment JSON file.",
+            target.display()
+        ));
+    }
+    let bytes = fs::read(&manifest)
+        .map_err(|error| format!("Could not read project {}: {error}", manifest.display()))?;
+    let index: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("Could not read project JSON {}: {error}. Select the experiment or project index file.", manifest.display()))?;
+    match index.get("schema").and_then(|value| value.as_str()) {
+        Some("cellphenotyper-experiment") => {
+            if index.get("schema_version").and_then(|value| value.as_u64()) != Some(1) {
+                return Err("This CellPhenotyper experiment has an unsupported schema_version. This desktop app supports version 1.".to_string());
+            }
+            let name = index.get("name").and_then(|value| value.as_str()).unwrap_or("CellPhenotyper experiment");
+            let count = index.get("tissues").and_then(|value| value.as_array()).map_or(0, |items| items.len());
+            Ok(format!("Opening {name} ({count} tissue{}); using saved results", if count == 1 { "" } else { "s" }))
+        }
+        Some("wsiTools-viewer-project") => Ok("Opening saved viewer project".to_string()),
+        Some("wsiTools-project") => Ok("Opening wsiTools project".to_string()),
+        _ => Err("This JSON is not a supported project. Choose experiment.cellphenotyper.json, a saved .wsiproject.json, or a .wsiproject folder.".to_string()),
+    }
+}
+
+fn protect_experiment_manifest(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let incoming = serde_json::from_slice::<serde_json::Value>(bytes).ok();
+    if incoming.as_ref().and_then(|value| value.get("schema")).and_then(|value| value.as_str())
+        != Some("wsiTools-viewer-project") {
+        return Ok(());
+    }
+    let existing = fs::read(path).ok().and_then(|value| serde_json::from_slice::<serde_json::Value>(&value).ok());
+    if existing.as_ref().and_then(|value| value.get("schema")).and_then(|value| value.as_str())
+        == Some("cellphenotyper-experiment") {
+        return Err("Keep the CellPhenotyper experiment index unchanged. Save your viewer session with a different name ending in .wsiproject.json; it will link back to the experiment.".to_string());
+    }
+    Ok(())
+}
+
 fn launch_r_target(
     app: AppHandle,
     state: Arc<RViewerState>,
@@ -1561,26 +1612,19 @@ fn launch_r_target(
     };
     if target_path.trim().is_empty() {
         return Err(if mode == "project" {
-            "Choose a wsiTools project folder first.".to_string()
+            "Choose a CellPhenotyper experiment, saved project file, or .wsiproject folder first.".to_string()
         } else {
             "Choose an image file first.".to_string()
         });
     }
     let target = PathBuf::from(&target_path);
-    if mode == "project" {
-        if !target.is_dir() {
-            return Err(format!("Project folder not found: {}", target.display()));
-        }
-        let manifest = target.join("project.json");
-        if !manifest.exists() {
-            return Err(format!(
-                "This folder is not a wsiTools project because project.json was not found: {}",
-                manifest.display()
-            ));
-        }
+    let project_summary = if mode == "project" {
+        Some(project_input_summary(&target)?)
     } else if !target.exists() {
         return Err(format!("Image file not found: {}", target.display()));
-    }
+    } else {
+        None
+    };
 
     state.logs.lock().unwrap().clear();
 
@@ -1609,18 +1653,22 @@ fn launch_r_target(
     push_log(&state.logs, format!("Tile compositor: {tile_compositor}"));
     push_log(&state.logs, format!("Mode: {mode}"));
     push_log(&state.logs, format!("Target: {}", target.display()));
+    if let Some(summary) = project_summary {
+        push_log(&state.logs, &summary);
+        emit_viewer_progress(&app, &format!("metadata\t{summary}"));
+    }
     push_log(&state.logs, "R code sent to R:");
     push_log(&state.logs, "library(wsiTools)");
     if mode == "project" {
         push_log(
             &state.logs,
             format!(
-                "project <- wsi_read_project({})",
+                "# Open saved project by its JSON schema: {}",
                 r_string(&target.to_string_lossy())
             ),
         );
-        push_log(&state.logs, "viewer <- wsi_open_viewer(");
-        push_log(&state.logs, "  project$slide_path,");
+        push_log(&state.logs, "# CellPhenotyper: wsi_viewer_experiment(path, open = FALSE, wait = FALSE)");
+        push_log(&state.logs, "# Viewer projects: reopen sources and restore the saved annotations and settings.");
     } else {
         push_log(&state.logs, "viewer <- wsi_open_viewer(");
         push_log(
@@ -1628,18 +1676,14 @@ fn launch_r_target(
             format!("  {},", r_string(&target.to_string_lossy())),
         );
     }
-    push_log(&state.logs, "  live = \"yes\",");
-    push_log(&state.logs, "  tiled = \"yes\",");
-    push_log(&state.logs, format!("  renderer = \"{renderer}\","));
-    push_log(&state.logs, "  dynamic_tiles = FALSE,");
-    push_log(&state.logs, "  open = FALSE,");
-    push_log(&state.logs, "  wait = FALSE");
-    push_log(&state.logs, ")");
-    if mode == "project" {
-        push_log(
-            &state.logs,
-            "restore_project_state(viewer, project, service = FALSE)",
-        );
+    if mode != "project" {
+        push_log(&state.logs, "  live = \"yes\",");
+        push_log(&state.logs, "  tiled = \"yes\",");
+        push_log(&state.logs, format!("  renderer = \"{renderer}\","));
+        push_log(&state.logs, "  dynamic_tiles = FALSE,");
+        push_log(&state.logs, "  open = FALSE,");
+        push_log(&state.logs, "  wait = FALSE");
+        push_log(&state.logs, ")");
     }
 
     let mut child = rscript_command(&rscript)
@@ -2031,6 +2075,51 @@ mod tests {
         assert_eq!(id, desktop_instance_id());
         let private = PathBuf::from("sessions").join(id);
         assert_ne!(pid_file(&private), PathBuf::from("sessions/current-r-viewer.pid"));
+    }
+
+    #[test]
+    fn project_picker_accepts_experiment_and_viewer_json_before_launching_r() {
+        let folder = env::temp_dir().join(format!("wsitools-project-input-{}", std::process::id()));
+        fs::create_dir_all(&folder).unwrap();
+        let experiment = folder.join("experiment.cellphenotyper.json");
+        fs::write(&experiment, r#"{"schema":"cellphenotyper-experiment","schema_version":1,"name":"Study one","tissues":[{},{}]}"#).unwrap();
+        assert_eq!(project_input_summary(&experiment).unwrap(), "Opening Study one (2 tissues); using saved results");
+        let viewer = folder.join("saved.wsiproject.json");
+        fs::write(&viewer, r#"{"schema":"wsiTools-viewer-project","version":1}"#).unwrap();
+        assert!(project_input_summary(&viewer).unwrap().contains("saved viewer"));
+        let r_project = folder.join("project.json");
+        fs::write(&r_project, r#"{"schema":"wsiTools-project","version":1}"#).unwrap();
+        assert!(project_input_summary(&folder).unwrap().contains("wsiTools project"));
+        assert!(project_input_summary(&r_project).is_ok());
+        fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn project_picker_explains_unsupported_and_missing_inputs() {
+        let folder = env::temp_dir().join(format!("wsitools-project-errors-{}", std::process::id()));
+        fs::create_dir_all(&folder).unwrap();
+        assert!(project_input_summary(&folder).unwrap_err().contains("no project.json"));
+        let input = folder.join("input.json");
+        fs::write(&input, r#"{"schema":"cellphenotyper-experiment","schema_version":2}"#).unwrap();
+        assert!(project_input_summary(&input).unwrap_err().contains("supports version 1"));
+        fs::write(&input, r#"{"schema":"unrelated-data"}"#).unwrap();
+        assert!(project_input_summary(&input).unwrap_err().contains("not a supported project"));
+        fs::write(&input, "{").unwrap();
+        assert!(project_input_summary(&input).unwrap_err().contains("Could not read project JSON"));
+        fs::remove_dir_all(&folder).unwrap();
+        assert!(project_input_summary(&input).unwrap_err().contains("Project not found"));
+    }
+
+    #[test]
+    fn saving_a_viewer_session_cannot_overwrite_the_experiment_index() {
+        let path = env::temp_dir().join(format!("wsitools-protected-experiment-{}.json", std::process::id()));
+        let experiment = br#"{"schema":"cellphenotyper-experiment","schema_version":1}"#;
+        fs::write(&path, experiment).unwrap();
+        let snapshot = br#"{"schema":"wsiTools-viewer-project","version":1}"#;
+        assert!(protect_experiment_manifest(&path, snapshot).unwrap_err().contains("different name"));
+        assert_eq!(fs::read(&path).unwrap(), experiment);
+        fs::remove_file(&path).unwrap();
+        assert!(protect_experiment_manifest(&path, snapshot).is_ok());
     }
 
     #[test]
