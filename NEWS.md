@@ -1,3 +1,10 @@
+# Development: GigaTIME experiment markers
+
+- Registered GigaTIME marker TIFF channels and segmented-object score tables
+  can be opened with a CellPhenotyper experiment, without running inference.
+- A marker panel switches tiled image and cell/nucleus views, preserves native
+  exported values and exports tissue-specific scores with their provenance.
+
 # Development: spatial objects in experiment projects
 
 - Spatial transcriptomics RDS objects can be stored in CellPhenotyper projects

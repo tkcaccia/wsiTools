@@ -143,6 +143,7 @@ wsi_read_experiment <- function(path, verify_hashes = TRUE) {
   for (tissue in tissues) for (pair in wsi_experiment_spatial_pairs(tissue))
     wsi_experiment_spatial_bundle(result, tissue, pair,
       max_observations = getOption("wsiTools.review_max_observations", 10000L))
+  wsi_experiment_gigatime_validate(result)
   result
 }
 
@@ -347,6 +348,13 @@ wsi_viewer_experiment <- function(experiment, open = interactive(), wait = FALSE
   args$open <- open
   args$wait <- wait
   args$project_images <- wsi_experiment_images(experiment)
+  gigatime <- wsi_experiment_gigatime_viewer(experiment)
+  args$project_images <- lapply(args$project_images, function(image) {
+    scoped <- Filter(function(layer) identical(layer$metadata$gigatime$tissue_id, image$tissue_id), gigatime$layers)
+    if (length(scoped)) image$layers <- c(wsi_viewer_layers_config(image$layers), scoped)
+    image
+  })
+  args$channel_sources <- wsi_channel_sources_combine(args$channel_sources, gigatime$channel_sources)
   args$prediction_context <- context
   args$review_context <- args$review_context %||%
     wsi_experiment_review_context(experiment, strict = FALSE)

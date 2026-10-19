@@ -282,6 +282,8 @@ wsi_dynamic_source_cache_key <- function(source) {
     tile_overlap = source$tile_overlap %||% "",
     tile_format = source$tile_format %||% ""
   )
+  if (is.list(source$metadata$gigatime)) fields <- c(fields,
+    gigatime_renderer = "scalar-v1", gigatime_display_max = source$metadata$gigatime$display_max %||% "")
   paste0("v2_", wsi_dynamic_hash_text(paste(names(fields), fields, sep = "=", collapse = "|")))
 }
 
@@ -1332,6 +1334,12 @@ wsi_dynamic_colourize_tile <- function(input, output, source, settings = list())
   hi <- settings$contrast_max
   scale <- settings$gain / max(hi - lo, 1e-6)
   offset <- -255 * lo * scale
+  if (is.list(source$metadata$gigatime)) {
+    display_max <- source$metadata$gigatime$display_max
+    if (!is.numeric(display_max) || length(display_max) != 1L || !is.finite(display_max) || display_max <= 0)
+      wsi_abort("GigaTIME rendering requires a finite positive display_max; source scores are never rescaled in storage.")
+    scale <- scale * 255 / display_max
+  }
   current <- input
   bands <- suppressWarnings(as.integer(wsi_vips_field(input, "bands")))
   if (is.finite(bands) && bands > 1L) {
@@ -1431,8 +1439,11 @@ wsi_dynamic_image_region_to_file <- function(source, region, output, settings = 
   )
   crop_x <- as.integer(floor(region$x / region$downsample))
   crop_y <- as.integer(floor(region$y / region$downsample))
-  tmp_crop <- tempfile(fileext = ".png", tmpdir = dirname(output))
-  tmp_resized <- tempfile(fileext = ".png", tmpdir = dirname(output))
+  # Preserve predicted scalar values until the declared display gain is
+  # applied. PNG would quantize a floating-point 0..1 marker plane to 0/1.
+  scalar_extension <- if (is.list(source$metadata$gigatime)) ".tif" else ".png"
+  tmp_crop <- tempfile(fileext = scalar_extension, tmpdir = dirname(output))
+  tmp_resized <- tempfile(fileext = scalar_extension, tmpdir = dirname(output))
   on.exit(unlink(c(tmp_crop, tmp_resized)), add = TRUE)
   wsi_run_command(
     "vips",

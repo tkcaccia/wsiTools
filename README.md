@@ -67,6 +67,11 @@ wsiTools is not:
 The current development version includes several changes intended to make the
 viewer more stable for real pathology workflows:
 
+- **GigaTIME marker views in experiment projects.** Registered GigaTIME outputs
+  can be viewed as tiled mIHC marker images and marker-coloured cell/nucleus
+  observations with their exported scores. The **GigaTIME markers** panel keeps
+  tissue, marker and segmentation sources separate and labels values as
+  uncalibrated virtual marker predictions. See the [GigaTIME project guide](docs/gigatime-projects.md).
 - **Spatial objects saved with CellPhenotyper experiments.** The Review workspace
   can copy a trusted same-section Seurat RDS and selected spot metadata/reductions
   into the experiment project. Fresh **Open Project** restores those views from

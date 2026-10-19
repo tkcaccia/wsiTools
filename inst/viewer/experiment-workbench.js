@@ -460,4 +460,166 @@ function wsiExperimentBindWorkbench() {
   wsiExperimentRefreshControls();
 }
 
-if (typeof document !== 'undefined') setTimeout(wsiExperimentBindWorkbench,0);
+// The scientific index owns GigaTIME sources. This panel only changes their
+// display settings and exports already-quantified values; it runs no model.
+let wsiGigatimeFreshSources=null;
+function wsiGigatimeSource(value) { return !!value?.metadata?.gigatime||String(value?.id||'').startsWith('gigatime_'); }
+function wsiGigatimeCaptureSources() {
+  const clone=value=>JSON.parse(JSON.stringify(value));
+  wsiGigatimeFreshSources={tissues:projectItems.map((item,index)=>wsiExperimentTissueId(index)),items:projectItems.map(item=>clone((item.layers||[]).filter(wsiGigatimeSource))),
+    itemSources:projectItems.map(item=>{const {layers,...source}=item;return clone(source);}),
+    channels:clone((typeof channelSources==='undefined'?[]:channelSources).filter(wsiGigatimeSource))};
+}
+function wsiGigatimePrepareSnapshot(input) {
+  const clone=value=>JSON.parse(JSON.stringify(value)),snapshot=clone(input);
+  if(!wsiGigatimeFreshSources)return snapshot;
+  if(Array.isArray(snapshot.project?.items)&&(snapshot.project.items.length!==wsiGigatimeFreshSources.tissues.length||
+    snapshot.project.items.some((item,index)=>String(item.tissue_id||item.id||'')!==wsiGigatimeFreshSources.tissues[index])))
+    throw new Error('Saved GigaTIME tissue identities/order differ from this experiment. Open the scientific index first.');
+  const saved=[...(snapshot.layers||[]),...(snapshot.project?.items||[]).flatMap(item=>item.layers||[]),
+    ...(snapshot.channel_sources||[]),...(snapshot.channel_settings||[]),...layers,
+    ...projectItems.flatMap(item=>item.layers||[]),...(typeof channelSources==='undefined'?[]:channelSources)];
+  const preference=source=>{
+    const result=clone(source),setting=saved.find(item=>item.id===source.id)||{};
+    if(typeof setting.visible==='boolean')result.visible=setting.visible;
+    for(const key of ['opacity','gain'])if(Number.isFinite(setting[key])&&setting[key]>=0&&(key!=='opacity'||setting[key]<=1))result[key]=setting[key];
+    if(typeof setting.colour==='string'&&/^#[0-9a-f]{6}$/i.test(setting.colour))result.colour=setting.colour;
+    const lo=setting.contrast_min,hi=setting.contrast_max;
+    if(Number.isFinite(lo)&&Number.isFinite(hi)&&lo>=0&&hi<=1&&lo<hi){result.contrast_min=lo;result.contrast_max=hi;}
+    return result;
+  };
+  const known=wsiGigatimeFreshSources.items.map(items=>items.map(preference));
+  Object.defineProperty(snapshot,'_gigatimeDisplayItems',{value:known,enumerable:false});
+  if(Array.isArray(snapshot.project?.items))snapshot.project.items.forEach((item,index)=>{
+    snapshot.project.items[index]={...clone(wsiGigatimeFreshSources.itemSources[index]),
+      layers:(item.layers||[]).filter(layer=>!wsiGigatimeSource(layer)).concat(known[index]||[])};});
+  const active=Number(snapshot.project?.active_index??activeProjectIndex);
+  snapshot.layers=(snapshot.layers||[]).filter(layer=>!wsiGigatimeSource(layer)).concat(known[active]||[]);
+  snapshot.channel_sources=(snapshot.channel_sources||[]).filter(src=>!wsiGigatimeSource(src)).concat(wsiGigatimeFreshSources.channels.map(preference));
+  // A later generic restore command must not overwrite the checked settings.
+  const channelIds=new Set(wsiGigatimeFreshSources.channels.map(src=>src.id));
+  snapshot.channel_settings=(snapshot.channel_settings||[]).filter(setting=>!channelIds.has(setting.id)&&!wsiGigatimeSource(setting));
+  return snapshot;
+}
+function wsiGigatimeRestoreDisplay(input) {
+  if(!wsiGigatimeFreshSources)return;
+  const checked=wsiGigatimePrepareSnapshot(input);
+  projectItems.forEach((item,index)=>{item.layers=(item.layers||[]).filter(layer=>!wsiGigatimeSource(layer))
+    .concat(checked._gigatimeDisplayItems[index]||[]);});
+  layers.splice(0,layers.length,...layers.filter(layer=>!wsiGigatimeSource(layer)),...(projectItems[activeProjectIndex]?.layers||[]).filter(wsiGigatimeSource));
+  if(typeof channelSources!=='undefined'){
+    for(const src of channelSources.filter(wsiGigatimeSource))if(typeof removeChannelItem==='function')removeChannelItem(src.id);
+    channelSources.splice(0,channelSources.length,...channelSources.filter(src=>!wsiGigatimeSource(src)),...checked.channel_sources.filter(wsiGigatimeSource));
+    if(typeof syncChannelSourcesForActiveImage==='function')syncChannelSourcesForActiveImage();
+  }
+  if(typeof buildLayerList==='function')buildLayerList();if(typeof draw==='function')draw();wsiGigatimeRender();
+}
+function wsiGigatimeEntries() {
+  const tissue=wsiExperimentTissueId(),sources=typeof channelSources==='undefined'?[]:channelSources;
+  const images=sources.filter(src=>src.metadata?.gigatime?.tissue_id===tissue);
+  const cells=(layers||[]).filter(layer=>layer.metadata?.gigatime?.tissue_id===tissue);
+  const entries=cells.map(layer=>{
+    const meta=layer.metadata.gigatime;
+    return {key:JSON.stringify([meta.artifact_id,meta.marker]),marker:meta.marker,cell:layer,
+      image:images.find(src=>src.metadata.gigatime.marker===meta.marker&&
+        src.metadata.gigatime.artifact_id===meta.source_artifact_id)||null};
+  });
+  for(const image of images){const meta=image.metadata.gigatime;
+    if(!entries.some(entry=>entry.image?.id===image.id))entries.push({
+      key:JSON.stringify([meta.artifact_id,meta.marker]),marker:meta.marker,image,cell:null});
+  }
+  return entries;
+}
+function wsiGigatimeRows(entry) {
+  const tissue=wsiExperimentTissueId();
+  return (entry?.cell?.items||[]).filter(item=>(item.tissue_id==null||item.tissue_id===tissue)&&
+    item.project_image_index===activeProjectIndex);
+}
+function wsiGigatimeSetCellVisible(entry,visible) {
+  for(const candidate of wsiGigatimeEntries())if(candidate.cell){candidate.cell.visible=!!visible&&candidate.cell.id===entry?.cell?.id;
+    const item=projectItems[activeProjectIndex];if(item)item.layers=(item.layers||[]).map(layer=>layer.id===candidate.cell.id?candidate.cell:layer);}
+  if(typeof overlayFocusMode!=='undefined')overlayFocusMode='all';
+  if(typeof applyOverlayFocus==='function')applyOverlayFocus();
+  if(typeof buildLayerList==='function')buildLayerList();if(typeof draw==='function')draw();
+  if(typeof markProjectDirty==='function')markProjectDirty('gigatime_display');
+}
+function wsiGigatimeCsv(entry) {
+  const quote=value=>{let text=String(value??'');if(typeof value==='string'&&/^[=+\-@\t\r]/.test(text))text="'"+text;return '"'+text.replaceAll('"','""')+'"';};
+  const meta=entry?.cell?.metadata?.gigatime||{};
+  const rows=[['observation_id','original_id','tissue_id','marker','value','source_column','mask_name','segmentation_unit','score_semantics'],
+    ...wsiGigatimeRows(entry).map(item=>[item.id,item.original_id,wsiExperimentTissueId(),entry.marker,
+      item.value,meta.source_column,meta.mask_name,meta.segmentation_unit,meta.score_semantics])];
+  return rows.map(row=>row.map(quote).join(',')).join('\r\n')+'\r\n';
+}
+function wsiGigatimeRender() {
+  const select=el('experimentGigatimeMarker');if(!select)return;
+  const previous=select.value,entries=wsiGigatimeEntries();select.replaceChildren();
+  for(const entry of entries){const option=document.createElement('option');option.value=entry.key;
+    const meta=entry.cell?.metadata.gigatime;
+    option.textContent=entry.marker+(meta?' · '+meta.mask_name+' ('+meta.segmentation_unit+')':' · image');select.appendChild(option);}
+  if(entries.some(entry=>entry.key===previous))select.value=previous;
+  const entry=entries.find(entry=>entry.key===select.value),rows=wsiGigatimeRows(entry),meta=entry?.cell?.metadata.gigatime;
+  const image=el('experimentGigatimeImage'),cells=el('experimentGigatimeCells');
+  image.disabled=!entry?.image;image.checked=!!entry?.image&&entry.image.visible!==false;
+  cells.disabled=!entry?.cell;cells.checked=!!entry?.cell&&entry.cell.visible!==false;
+  el('experimentGigatimeExport').disabled=!rows.length;
+  el('experimentGigatimeSummary').textContent=!entry?'No registered GigaTIME output for this tissue.':meta?
+    rows.length+' segmented '+(meta.segmentation_unit==='nucleus'?'nuclei':'cells')+' · '+entry.marker+(meta.source_column?' · score field '+meta.source_column:'')+
+      ' · colour scale '+meta.min+' to '+meta.max+' (this dataset) · showing '+Math.min(50,rows.length)+' rows.':
+    'Marker image available. No linked single-cell quantification was registered.';
+  const body=el('experimentGigatimeTable');body.replaceChildren();
+  for(const item of rows.slice(0,50)){const tr=document.createElement('tr'),identity=document.createElement('td'),focus=document.createElement('button');
+    focus.textContent=String(item.original_id??item.id);focus.title='Select this segmented object on the tissue';
+    focus.onclick=()=>{const index=layers.findIndex(layer=>layer.id===entry.cell.id);if(index<0)return;
+      if(typeof selectLayerObject==='function')selectLayerObject(index,entry.cell.items.indexOf(item),true);
+      if(typeof setMode==='function')setMode('select');if(typeof draw==='function')draw();};
+    identity.appendChild(focus);tr.appendChild(identity);
+    for(const value of [item.value,item.x,item.y]){const td=document.createElement('td');td.textContent=String(value??'');tr.appendChild(td);}body.appendChild(tr);}
+}
+function wsiGigatimeBindWorkbench() {
+  if(!wsiExperimentConfig()||el('gigatimeWorkbenchWindow'))return;
+  const hasSources=(typeof channelSources!=='undefined'&&channelSources.some(src=>src.metadata?.gigatime))||
+    (layers||[]).some(layer=>layer.metadata?.gigatime)||projectItems.some(item=>(item.layers||[]).some(layer=>layer.metadata?.gigatime));
+  if(!hasSources)return;
+  wsiGigatimeCaptureSources();
+  const button=document.createElement('button');button.id='openGigatimeWorkbench';button.type='button';button.textContent='GigaTIME markers';
+  button.style.cssText='position:fixed;right:18px;top:88px;z-index:1100';document.body.appendChild(button);
+  const panel=document.createElement('section');panel.id='gigatimeWorkbenchWindow';panel.hidden=true;
+  panel.style.cssText='position:fixed;right:16px;top:126px;width:min(600px,90vw);max-height:72vh;overflow:auto;z-index:1490;background:#172033;color:#e2e8f0;padding:12px;border:1px solid #64748b;border-radius:10px';
+  panel.innerHTML='<div style="display:flex;justify-content:space-between"><strong>Predicted GigaTIME markers</strong><button id="closeGigatimeWorkbench">Close</button></div>'+
+    '<p>Virtual marker scores are uncalibrated predictions from H&amp;E. They are not measured protein abundance or calibrated probabilities.</p>'+
+    '<label>Marker / segmentation <select id="experimentGigatimeMarker" aria-label="GigaTIME marker and segmentation"></select></label>'+
+    '<p><label><input type="checkbox" id="experimentGigatimeImage"> Marker image (mIHC layer)</label> '+
+    '<label><input type="checkbox" id="experimentGigatimeCells"> Per-cell scores</label></p>'+
+    '<p>Combine marker images using their colour and opacity controls in Layers. Per-cell display shows one marker at a time; nucleus masks retain their nucleus label.</p>'+
+    '<p id="experimentGigatimeSummary" role="status"></p><button id="experimentGigatimeExport">Export this marker’s cell scores</button>'+
+    '<table style="width:100%;text-align:left"><thead><tr><th>Object ID</th><th>Predicted score</th><th>X</th><th>Y</th></tr></thead><tbody id="experimentGigatimeTable"></tbody></table>';
+  document.body.appendChild(panel);
+  button.onclick=()=>{panel.hidden=!panel.hidden;wsiGigatimeRender();};el('closeGigatimeWorkbench').onclick=()=>{panel.hidden=true;};
+  const selected=()=>wsiGigatimeEntries().find(entry=>entry.key===el('experimentGigatimeMarker').value);
+  el('experimentGigatimeMarker').onchange=()=>{
+    if(wsiGigatimeEntries().some(entry=>entry.cell&&entry.cell.visible!==false))wsiGigatimeSetCellVisible(selected(),true);
+    wsiGigatimeRender();};
+  el('experimentGigatimeImage').onchange=()=>{const entry=selected();if(!entry?.image)return;
+    setChannelSettings(entry.image.id,{visible:el('experimentGigatimeImage').checked});
+    if(typeof markProjectDirty==='function')markProjectDirty('gigatime_display');wsiGigatimeRender();};
+  el('experimentGigatimeCells').onchange=()=>{const entry=selected();if(!entry?.cell)return;
+    wsiGigatimeSetCellVisible(entry,el('experimentGigatimeCells').checked);wsiGigatimeRender();};
+  el('experimentGigatimeExport').onclick=async()=>{const entry=selected();if(!entry?.cell)return;
+    await downloadBlob(new Blob([wsiGigatimeCsv(entry)],{type:'text/csv;charset=utf-8'}),'gigatime-cell-scores.csv');};
+  const originalPayloads=applyProjectPayloads;
+  applyProjectPayloads=function(...args){const result=originalPayloads(...args);wsiGigatimeRender();return result;};
+  const originalRestore=restoreBrowserProject;
+  restoreBrowserProject=function(snapshot,...args){wsiExperimentValidateSnapshot(snapshot);
+    const result=originalRestore(wsiGigatimePrepareSnapshot(snapshot),...args);wsiGigatimeRestoreDisplay(snapshot);return result;};
+  const originalLiveRestore=restoreBrowserProjectInLiveSession;
+  restoreBrowserProjectInLiveSession=async function(snapshot,...args){const result=await originalLiveRestore(snapshot,...args);
+    wsiGigatimeRestoreDisplay(snapshot);return result;};
+  const originalCommand=handleViewerCommand;
+  handleViewerCommand=function(command){if(command?.type!=='restore_project_state')return originalCommand(command);
+    const checked={...command,payload:wsiGigatimePrepareSnapshot(command.payload||{})};
+    const result=originalCommand(checked);wsiGigatimeRestoreDisplay(command.payload||{});return result;};
+  wsiGigatimeRender();
+}
+
+if (typeof document !== 'undefined') setTimeout(()=>{wsiExperimentBindWorkbench();wsiGigatimeBindWorkbench();},0);
