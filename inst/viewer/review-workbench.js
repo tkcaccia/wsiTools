@@ -60,6 +60,7 @@
       assert(text(row.id) && text(row.original_id) && text(row.observation_unit),
         'Each observation needs canonical/original IDs and its observation unit.');
       assert(['spot', 'cell', 'tile', 'token'].includes(row.observation_unit), 'Unknown review observation unit.');
+      assert(row.dataset_id == null || typeof row.dataset_id === 'string' && row.dataset_id !== '*', 'Observation dataset IDs must be strings; * is reserved for explicit all-dataset view scope.');
       assert(!ids.has(row.id), 'Duplicate canonical observation ID: ' + row.id);
       const image = images.get(key(row.tissue_id, row.frame_id));
       assert(image, 'Observation refers to an unknown image/frame: ' + row.id);
@@ -94,6 +95,8 @@
         const row = ids.get(point.id);
         assert(row && !seen.has(point.id), 'Unknown or duplicate reduction observation ID: ' + point.id);
         assert(row.observation_unit === reduction.observation_unit, 'Reduction and observation units differ: ' + point.id);
+        if (reduction.dataset_id != null) assert(typeof reduction.dataset_id === 'string' &&
+          (row.dataset_id || '') === reduction.dataset_id, 'Reduction and observation datasets differ: ' + point.id);
         assert(finite(point.x) && finite(point.y), 'Reduction coordinates must be finite.');
         seen.add(point.id);
       }
@@ -140,8 +143,21 @@
     const byId = new Map(rows.map(row => [row.id, row]));
     const units = [...new Set(rows.map(row => row.observation_unit))];
     const clusterFields = [...new Set(rows.flatMap(row => Object.keys(row.cluster_values)))].sort();
+    const rowDataset = row => row.dataset_id || '';
+    const datasetsFor = value => [...new Set(rows.filter(row => row.observation_unit === value).map(rowDataset))];
+    function reductionDatasets(reduction) {
+      return reduction.dataset_id != null ? [reduction.dataset_id] : [...new Set(reduction.points.map(point => rowDataset(byId.get(point.id))))];
+    }
+    function defaultDataset(value, reduction) {
+      const known = datasetsFor(value), fromReduction = reduction ? reductionDatasets(reduction) : [];
+      return fromReduction.length === 1 && known.includes(fromReduction[0]) ? fromReduction[0] : known[0] || '';
+    }
+    function matchingReductions(value, dataset) {
+      return context.reductions.filter(item => item.observation_unit === value && (dataset === '*' || reductionDatasets(item).includes(dataset)));
+    }
     let activeTissue = typeof host.getActiveTissueId === 'function' ? String(host.getActiveTissueId()) : context.images[0].tissue_id;
     let scope = 'current', unit = units[0] || '', reductionId = context.reductions.find(r => r.observation_unit === unit)?.id || '';
+    let datasetId = defaultDataset(unit, context.reductions.find(item => item.id === reductionId));
     let clusterField = clusterFields[0] || '';
     let state = {selected_ids: [], review_records: []}, revision = 0, past = [], future = [];
     let panel = null, ui = {}, destroyed = false, generation = 0, plotPoints = [], drag = null;
@@ -183,10 +199,11 @@
     function selectedRows(options) {
       const opts = options || {}, selected = new Set(state.selected_ids);
       return clone(rows.filter(row => selected.has(row.id) && (!opts.tissue_id || row.tissue_id === opts.tissue_id) &&
-        (!opts.observation_unit || row.observation_unit === opts.observation_unit)));
+        (!opts.observation_unit || row.observation_unit === opts.observation_unit) &&
+        (opts.dataset_id == null || opts.dataset_id === '*' || rowDataset(row) === opts.dataset_id)));
     }
-    function selectedTileRows() { return selectedRows({tissue_id: activeTissue, observation_unit: 'tile'}); }
-    function currentSelectedRows() { return selectedRows({tissue_id: activeTissue}); }
+    function selectedTileRows() { return unit === 'tile' ? selectedRows({tissue_id: activeTissue, observation_unit: 'tile', dataset_id: datasetId}) : []; }
+    function currentSelectedRows() { return selectedRows({tissue_id: activeTissue, observation_unit: unit, dataset_id: datasetId}); }
     function snapshot() {
       return clone({schema: 'wsitools-review-checkpoint', schema_version: 1, context_id: context.context_id,
         source_signature: context.source_signature, selected_ids: state.selected_ids, review_records: state.review_records,
@@ -230,14 +247,17 @@
       return commit({selected_ids: ordered([...selected]), review_records: state.review_records},
         selected.size + ' observations selected. Selection does not assign a biological label.');
     }
-    function visible(row) { return row.observation_unit === unit && (scope === 'all' || row.tissue_id === activeTissue); }
+    function visible(row) { return row.observation_unit === unit && (datasetId === '*' || rowDataset(row) === datasetId) && (scope === 'all' || row.tissue_id === activeTissue); }
     function selectCluster(field, value, options) {
       const opts = options || {};
       assert(text(field) && rows.some(row => Object.prototype.hasOwnProperty.call(row.cluster_values, field)), 'Unknown cluster metadata field.');
       if (opts.tissue_ids != null) assert(Array.isArray(opts.tissue_ids) && opts.tissue_ids.every(id => context.images.some(image => image.tissue_id === id)), 'Unknown cluster-selection tissue identity.');
       if (opts.observation_unit != null) assert(units.includes(opts.observation_unit), 'Unknown cluster-selection observation unit.');
+      const requestedUnit = opts.observation_unit || unit, requestedDataset = opts.dataset_id == null ? datasetId : opts.dataset_id;
+      assert(requestedDataset === '*' || datasetsFor(requestedUnit).includes(requestedDataset), 'Unknown cluster-selection dataset identity.');
       const matches = rows.filter(row => (opts.tissue_ids ? opts.tissue_ids.includes(row.tissue_id) : scope === 'all' || row.tissue_id === activeTissue) &&
-        row.observation_unit === (opts.observation_unit || unit) && row.cluster_values[field] != null && String(row.cluster_values[field]) === String(value));
+        row.observation_unit === requestedUnit && (requestedDataset === '*' || rowDataset(row) === requestedDataset) &&
+        row.cluster_values[field] != null && String(row.cluster_values[field]) === String(value));
       return selectIds(matches.map(row => row.id), {mode: opts.mode || 'add'});
     }
     function review(options) {
@@ -282,30 +302,44 @@
       assert(context.images.some(image => image.tissue_id === id), 'Unknown active tissue identity.');
       activeTissue = id; planned = null; planGeneration++; render(); return activeTissue;
     }
-    function viewState() { return {reduction_id: reductionId, scope, observation_unit: unit, cluster_field: clusterField}; }
+    function viewState() { return {reduction_id: reductionId, scope, observation_unit: unit, cluster_field: clusterField, dataset_id: datasetId}; }
     function restoreViewState(view) {
       assert(view && typeof view === 'object' && !Array.isArray(view), 'Review view state must be an object.');
-      assert(Object.keys(view).every(name => ['reduction_id', 'scope', 'observation_unit', 'cluster_field'].includes(name)), 'Unknown review view-state field.');
+      assert(Object.keys(view).every(name => ['reduction_id', 'scope', 'observation_unit', 'cluster_field', 'dataset_id'].includes(name)), 'Unknown review view-state field.');
       assert(['current', 'all'].includes(view.scope), 'Unknown review scope.');
       assert(units.length ? units.includes(view.observation_unit) : view.observation_unit === '', 'Unknown review observation unit.');
       assert(clusterFields.length ? clusterFields.includes(view.cluster_field) : view.cluster_field === '', 'Unknown cluster metadata field.');
       const reduction = context.reductions.find(item => item.id === view.reduction_id);
-      assert(reduction ? reduction.observation_unit === view.observation_unit : view.reduction_id === '' &&
-        !context.reductions.some(item => item.observation_unit === view.observation_unit), 'Unknown or incompatible review reduction.');
-      scope = view.scope; unit = view.observation_unit; clusterField = view.cluster_field; reductionId = view.reduction_id;
+      const dataset = view.dataset_id == null ? defaultDataset(view.observation_unit, reduction) : view.dataset_id;
+      assert(typeof dataset === 'string' && (dataset === '*' || datasetsFor(view.observation_unit).includes(dataset) || !units.length && dataset === ''), 'Unknown review dataset identity.');
+      assert(reduction ? reduction.observation_unit === view.observation_unit && (dataset === '*' || reductionDatasets(reduction).includes(dataset)) :
+        view.reduction_id === '' && !matchingReductions(view.observation_unit, dataset).length, 'Unknown or incompatible review reduction.');
+      scope = view.scope; unit = view.observation_unit; clusterField = view.cluster_field; reductionId = view.reduction_id; datasetId = dataset;
+      invalidatePlan();
       render(); call('onViewChange', viewState()); return viewState();
     }
     function setScope(value) { assert(['current', 'all'].includes(value), 'Unknown review scope.'); scope = value; render(); call('onViewChange', viewState()); }
     function setReduction(id) {
       const reduction = context.reductions.find(item => item.id === id);
-      assert(reduction, 'Unknown reduction ID.'); reductionId = id; unit = reduction.observation_unit; render(); call('onViewChange', viewState());
+      assert(reduction, 'Unknown reduction ID.'); reductionId = id; unit = reduction.observation_unit; datasetId = defaultDataset(unit, reduction);
+      invalidatePlan(); render(); call('onViewChange', viewState());
+    }
+    function setDataset(id) {
+      assert(typeof id === 'string' && (id === '*' || datasetsFor(unit).includes(id)), 'Unknown review dataset identity.');
+      datasetId = id;
+      const available = matchingReductions(unit, datasetId);
+      if (!available.some(item => item.id === reductionId)) reductionId = available[0]?.id || '';
+      invalidatePlan(); render(); call('onViewChange', viewState()); return datasetId;
     }
     function selectImageGeometry(geometry, options) {
       const opts = options || {}, tissue = opts.tissue_id || activeTissue;
       assert(text(opts.frame_id) && context.images.some(image => image.tissue_id === tissue && image.frame_id === opts.frame_id),
         'Image selection needs an exact tissue and native coordinate frame.');
       const polygons = geometryPolygons(geometry);
+      const requestedDataset = opts.dataset_id == null ? datasetId : opts.dataset_id;
+      assert(requestedDataset === '*' || datasetsFor(opts.observation_unit || unit).includes(requestedDataset), 'Unknown image-selection dataset identity.');
       const ids = rows.filter(row => row.tissue_id === tissue && row.frame_id === opts.frame_id && row.observation_unit === (opts.observation_unit || unit) &&
+        (requestedDataset === '*' || rowDataset(row) === requestedDataset) &&
         polygons.some(polygon => ringContains([row.x, row.y], polygon[0]) && !polygon.slice(1).some(hole => ringContains([row.x, row.y], hole)))).map(row => row.id);
       return selectIds(ids, {mode: opts.mode || 'replace'});
     }
@@ -317,14 +351,14 @@
     }
     function exportSelected() {
       const selected = currentSelectedRows();
-      assert(selected.length, 'No observations are selected in the current tissue. Empty selection exports nothing.');
+      assert(selected.length, 'No observations are selected in the displayed unit/dataset of the current tissue. Empty selection exports nothing.');
       assert(typeof host.export === 'function', 'Tile export is not connected in this viewer.');
       return host.export(selected);
     }
     function invalidatePlan() { planned = null; planGeneration++; render(); }
     async function planSelected() {
       const selected = currentSelectedRows(), tissue = activeTissue;
-      assert(selected.length, 'Select observations in the current tissue before planning work tiles.');
+      assert(selected.length, 'Select observations in the displayed unit/dataset of the current tissue before planning work tiles.');
       assert(typeof host.plan === 'function', 'Work-tile planning is not connected in this viewer.');
       const request = ++planGeneration, selectedIds = new Set(selected.map(row => row.id));
       planned = null;
@@ -375,7 +409,9 @@
       const scopeLabel = element('label', null, 'Scope ', controls); ui.scope = element('select', 'scope', null, scopeLabel);
       option(ui.scope, 'current', 'Current tissue'); option(ui.scope, 'all', 'All tissues (explicit)'); ui.scope.onchange = () => run(() => setScope(ui.scope.value));
       const unitLabel = element('label', null, 'Observations ', controls); ui.unit = element('select', 'unit', null, unitLabel);
-      units.forEach(value => option(ui.unit, value, value)); ui.unit.onchange = () => { unit = ui.unit.value; reductionId = context.reductions.find(r => r.observation_unit === unit)?.id || ''; render(); call('onViewChange', viewState()); };
+      units.forEach(value => option(ui.unit, value, value)); ui.unit.onchange = () => { unit = ui.unit.value; reductionId = context.reductions.find(r => r.observation_unit === unit)?.id || ''; datasetId = defaultDataset(unit, context.reductions.find(item => item.id === reductionId)); invalidatePlan(); render(); call('onViewChange', viewState()); };
+      const datasetLabel = element('label', null, 'Dataset ', controls); ui.dataset = element('select', 'dataset', null, datasetLabel);
+      ui.dataset.onchange = () => run(() => setDataset(ui.dataset.value));
       const fieldLabel = element('label', null, 'Clusters ', controls); ui.field = element('select', 'cluster-field', null, fieldLabel);
       clusterFields.forEach(value => option(ui.field, value, value));
       ui.field.onchange = () => { clusterField = ui.field.value; render(); call('onViewChange', viewState()); };
@@ -448,6 +484,9 @@
       const image = context.images.find(item => item.tissue_id === activeTissue);
       ui.identity.textContent = (image?.label || image?.name || activeTissue) + ' · ' + context.experiment_id + ' · native image coordinates';
       ui.scope.value = scope; ui.unit.value = unit; ui.field.value = clusterField;
+      ui.dataset.replaceChildren();
+      datasetsFor(unit).forEach(value => option(ui.dataset, value, value || 'Legacy observations'));
+      option(ui.dataset, '*', 'All datasets (explicit)'); ui.dataset.value = datasetId;
       ui.clusters.replaceChildren();
       const groups = new Map(), field = clusterField;
       for (const row of rows.filter(visible)) if (row.cluster_values[field] != null) {
@@ -462,10 +501,10 @@
       }
       if (!groups.size) element('span', null, 'No cluster metadata in this scope.', ui.clusters);
       ui.reduction.replaceChildren();
-      context.reductions.filter(item => item.observation_unit === unit).forEach(item => option(ui.reduction, item.id, item.label));
+      matchingReductions(unit, datasetId).forEach(item => option(ui.reduction, item.id, item.label));
       ui.reduction.value = reductionId; ui.reduction.disabled = !ui.reduction.options.length;
       const current = currentSelectedRows(), tiles = planned ? planned.tiles : selectedTileRows();
-      ui.count.textContent = state.selected_ids.length + ' selected observations total · ' + current.length + ' in current tissue · ' +
+      ui.count.textContent = state.selected_ids.length + ' selected observations total · ' + current.length + ' in current tissue / displayed unit and dataset · ' +
         (planned ? planned.tiles.length + ' planned work tiles · ' : '') + state.review_records.length + ' human review records';
       const visibleSelected = rows.filter(row => visible(row) && selected.has(row.id)).length;
       ui.actions.forEach(button => { button.disabled = !visibleSelected; });
@@ -517,7 +556,7 @@
     }
     function destroy() { destroyed = true; generation++; panel?.remove(); panel = null; ui = {}; }
     const api = {mount, snapshot, restore, selection, selectIds, selectCluster, selectedRows, selectedTileRows, review, undo, redo,
-      setActiveTissue, setScope, setReduction, selectImageGeometry, selectReductionPolygon, exportSelected, planSelected, invalidatePlan,
+      setActiveTissue, setScope, setReduction, setDataset, selectImageGeometry, selectReductionPolygon, exportSelected, planSelected, invalidatePlan,
       viewState, restoreViewState, workPlan: () => planned ? clone(planned) : null, destroy};
     return api;
   }

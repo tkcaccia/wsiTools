@@ -441,3 +441,4 @@ reference:
       - wsi_review_inspect_spatial
       - wsi_review_context_from_linked
       - wsi_rectangular_footprints_in_roi
+      - wsi_experiment_add_spatial

@@ -235,12 +235,14 @@ test('RNA observations can plan and export work tiles without becoming image-til
 test('late or foreign work-tile plans cannot install after selection changes', async () => {
   let release;
   const {ui} = create({plan: () => new Promise(resolve => { release = resolve; })});
+  ui.setReduction('rna');
   ui.selectIds(['a::spots::barcode-1']); const pending = ui.planSelected();
   ui.selectIds([]); release({tiles: []});
   await assert.rejects(pending, /old work-tile plan was discarded/);
   assert.equal(ui.workPlan(), null);
   const foreign = create({plan: async () => ({tiles: [{id: 'foreign', tissue_id: 'b', frame_id: 'b-native',
     footprint: {x0: 0, y0: 0, x1: 10, y1: 10}, source_ids: ['b::spots::barcode-1']}]})}).ui;
+  foreign.setReduction('rna');
   foreign.selectIds(['a::spots::barcode-1']);
   await assert.rejects(foreign.planSelected(), /foreign image tile/);
   assert.equal(foreign.workPlan(), null);
@@ -263,12 +265,70 @@ test('view state independently restores reduction, unit, cluster field and scope
   const {ui} = create(); ui.selectIds(['a::spots::barcode-1']);
   const evidence = ui.snapshot();
   const view = {reduction_id: 'rna', scope: 'all', observation_unit: 'spot', cluster_field: 'seurat'};
-  ui.restoreViewState(view); assert.deepEqual(ui.viewState(), view); assert.deepEqual(ui.snapshot(), evidence);
+  const expected = {...view, dataset_id: 'rna'};
+  ui.restoreViewState(view); assert.deepEqual(ui.viewState(), expected); assert.deepEqual(ui.snapshot(), evidence);
   const replay = create().ui; replay.restore(ui.snapshot()); replay.restoreViewState(clone(ui.viewState()));
-  assert.deepEqual(replay.viewState(), view); assert.deepEqual(replay.snapshot(), evidence);
+  assert.deepEqual(replay.viewState(), expected); assert.deepEqual(replay.snapshot(), evidence);
   for (const change of [v => { v.reduction_id = 'unknown'; }, v => { v.scope = 'unknown'; },
     v => { v.observation_unit = 'tile'; }, v => { v.cluster_field = 'missing'; }, v => { v.unknown = true; }]) {
     const wrong = clone(view); change(wrong); assert.throws(() => ui.restoreViewState(wrong));
-    assert.deepEqual(ui.viewState(), view); assert.deepEqual(ui.snapshot(), evidence);
+    assert.deepEqual(ui.viewState(), expected); assert.deepEqual(ui.snapshot(), evidence);
   }
+});
+
+function twoSpatialDatasets() {
+  const context = fixture();
+  for (const row of context.observations) if (row.observation_unit === 'spot') row.cluster_values.seurat = '0';
+  const added = context.observations.filter(row => row.observation_unit === 'spot').map(row => ({...clone(row),
+    id: row.tissue_id + '::second-rna::barcode-1', dataset_id: 'second-rna', x: 15, y: 18}));
+  context.observations.push(...added);
+  context.reductions.find(row => row.id === 'rna').dataset_id = 'rna';
+  context.reductions.push({id: 'second-rna-umap', label: 'Second object UMAP', observation_unit: 'spot', dataset_id: 'second-rna',
+    points: added.map((row, i) => ({id: row.id, x: 20 + i, y: 10 + i})).reverse()});
+  return context;
+}
+
+test('two ST objects with cluster zero stay separate for plots, clusters, image lasso and work exports', async () => {
+  const context = twoSpatialDatasets(), exports = [], plannedSources = [];
+  const ui = workbench.create({context, getActiveTissueId: () => 'a', export: rows => exports.push(rows),
+    plan: async rows => {
+      plannedSources.push(rows);
+      return {tiles: [{id: 'work-B', tissue_id: 'a', frame_id: 'a-native',
+        footprint: {x0: 10, y0: 10, x1: 20, y1: 20}, source_ids: rows.map(row => row.id)}]};
+    }});
+  ui.setReduction('rna'); ui.selectCluster('seurat', '0');
+  assert.deepEqual(ui.selection(), ['a::spots::barcode-1']);
+  ui.setReduction('second-rna-umap');
+  assert.equal(ui.viewState().dataset_id, 'second-rna');
+  ui.selectCluster('seurat', '0');
+  assert.equal(ui.selection().length, 2, 'Other dataset selection is retained, but stays out of displayed work.');
+  await ui.planSelected(); ui.exportSelected();
+  assert.deepEqual(plannedSources[0].map(row => row.id), ['a::second-rna::barcode-1']);
+  assert.deepEqual(exports[0].map(row => row.id), ['a::second-rna::barcode-1']);
+  ui.selectReductionPolygon(square(19.5, 9.5, 20.5, 10.5));
+  assert.deepEqual(ui.selection(), ['a::second-rna::barcode-1']);
+  ui.selectImageGeometry({type: 'Polygon', coordinates: [square(0, 0, 40, 40)]}, {tissue_id: 'a', frame_id: 'a-native'});
+  assert.deepEqual(ui.selection(), ['a::second-rna::barcode-1']);
+  ui.setScope('all'); ui.selectCluster('seurat', '0', {mode: 'replace'});
+  assert.equal(ui.selection().length, 3);
+  assert.ok(ui.selectedRows().every(row => row.dataset_id === 'second-rna'));
+  ui.setScope('current'); ui.setDataset('*'); ui.selectCluster('seurat', '0', {mode: 'replace'});
+  assert.equal(ui.selection().length, 2, 'All datasets requires an explicit wildcard choice.');
+  ui.selectIds([...ui.selection(), 'a::tiles::tile-0']); ui.exportSelected();
+  assert.equal(exports.at(-1).length, 2);
+  assert.ok(exports.at(-1).every(row => row.observation_unit === 'spot'));
+});
+
+test('dataset view state is durable, legacy views derive a concrete dataset, and wrong datasets fail atomically', () => {
+  const context = twoSpatialDatasets(), ui = workbench.create({context});
+  ui.setReduction('second-rna-umap');
+  const saved = ui.viewState(), legacy = clone(saved); delete legacy.dataset_id;
+  const replay = workbench.create({context}); replay.restoreViewState(legacy);
+  assert.equal(replay.viewState().dataset_id, 'second-rna');
+  replay.restoreViewState(saved); assert.deepEqual(replay.viewState(), saved);
+  assert.throws(() => replay.restoreViewState({...saved, dataset_id: 'missing'}), /Unknown review dataset/);
+  assert.throws(() => replay.restoreViewState({...saved, dataset_id: 'rna'}), /incompatible review reduction/);
+  assert.deepEqual(replay.viewState(), saved);
+  replay.setDataset('rna'); assert.equal(replay.viewState().reduction_id, 'rna');
+  replay.setDataset('*'); assert.equal(replay.viewState().dataset_id, '*');
 });

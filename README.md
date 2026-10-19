@@ -67,6 +67,11 @@ wsiTools is not:
 The current development version includes several changes intended to make the
 viewer more stable for real pathology workflows:
 
+- **Spatial objects saved with CellPhenotyper experiments.** The Review workspace
+  can copy a trusted same-section Seurat RDS and selected spot metadata/reductions
+  into the experiment project. Fresh **Open Project** restores those views from
+  checked display metadata. Dataset controls keep image features and separate
+  spatial datasets distinct; see the [human review guide](docs/human-review.md).
 - **Live R synchronization by default for spatial projects.** Seurat, Giotto,
   SpatialExperiment, and multi-section spatial project viewers now default to a
   live `httpuv` bridge. Viewer edits, selected ROIs, measurements, spot

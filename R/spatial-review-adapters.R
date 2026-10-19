@@ -37,7 +37,39 @@ wsi_review_spatial_coordinates <- function(object, coordinates = NULL, image_nam
     }
   }
   if (is.null(coordinates)) {
+    # Legacy display extraction may remove invalid rows. Capture the selected
+    # image's unfiltered identities first, so a persistent import cannot silently
+    # become a smaller dataset or fall back to unrelated global metadata.
+    expected_ids <- NULL
+    if (length(images)) {
+      selected_image <- wsi_seurat_image_name(object, image_name)
+      image_object <- wsi_seurat_image_object(object, selected_image)
+      raw <- wsi_seurat_coordinates_from_accessor(object, selected_image) %||%
+        wsi_seurat_slot(image_object, "coordinates")
+      if (is.null(raw)) {
+        boundaries <- wsi_seurat_slot(image_object, "boundaries") %||% list()
+        for (name in unique(c("centroids", "Centroids", names(boundaries)))) {
+          boundary <- boundaries[[name]]
+          candidate <- wsi_seurat_slot(boundary, "coords")
+          if ((!is.matrix(candidate) && !is.data.frame(candidate)) || !nrow(candidate) || ncol(candidate) < 2L) next
+          cells <- wsi_seurat_slot(boundary, "cells")
+          raw <- as.data.frame(candidate, stringsAsFactors = FALSE)
+          if (!is.null(cells) && length(cells) == nrow(raw)) raw$barcode <- as.character(cells)
+          break
+        }
+      }
+      if ((!is.data.frame(raw) && !is.matrix(raw)) || !nrow(raw))
+        wsi_abort("The selected spatial image has no identifiable coordinate table; global metadata was not used. Supply explicit same-section coordinates.")
+      raw <- as.data.frame(raw, stringsAsFactors = FALSE)
+      id <- wsi_seurat_first_column(raw, c("id", "barcode", "cell_id", "cell_ID", "spot_id", "cell", "cells"))
+      expected_ids <- if (!is.null(id)) as.character(raw[[id]]) else wsi_seurat_coordinate_ids(raw)
+      if (length(expected_ids) != nrow(raw) || anyNA(expected_ids) || any(!nzchar(trimws(expected_ids))) || anyDuplicated(expected_ids))
+        wsi_abort("Selected-image coordinates contain invalid/missing rows or IDs; no rows were imported.")
+    }
     coordinates <- wsi_seurat_coordinates(object, image_name = image_name)
+    if (!is.null(expected_ids) && (nrow(coordinates) != length(expected_ids) ||
+        !setequal(as.character(coordinates$id), expected_ids)))
+      wsi_abort("Selected-image coordinates contain invalid/missing rows; no rows were imported.")
   }
   if (!is.data.frame(coordinates) && !is.matrix(coordinates)) wsi_abort("Spatial coordinates must be an explicit table.")
   attrs <- attributes(coordinates)

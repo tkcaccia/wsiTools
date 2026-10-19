@@ -6319,6 +6319,9 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	      return(wsi_http_json_response(status = 405L, body = list(error = "Use POST for PLS-LDA prediction.")))
 	    }
 	    context <- prediction_context %||% list()
+      if (inherits(state$review_experiment, "wsi_experiment")) {
+        context$experiment <- state$review_experiment
+      }
 	    if (is.null(context$spatial) && !is.null(seurat)) {
 	      context$spatial <- seurat
 	    }
@@ -6345,6 +6348,9 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	      return(wsi_http_json_response(status = 405L, body = list(error = "Use POST for proximity analysis.")))
 	    }
 	    context <- proximity_context %||% prediction_context %||% list()
+      if (inherits(state$review_experiment, "wsi_experiment")) {
+        context$experiment <- state$review_experiment
+      }
 	    if (is.null(context$spatial) && !is.null(seurat)) {
 	      context$spatial <- seurat
 	    }

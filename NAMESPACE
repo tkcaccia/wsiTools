@@ -294,3 +294,5 @@ export(wsi_review_attach_seurat)
 export(wsi_review_inspect_spatial)
 export(wsi_review_context_from_linked)
 export(wsi_rectangular_footprints_in_roi)
+
+export(wsi_experiment_add_spatial)

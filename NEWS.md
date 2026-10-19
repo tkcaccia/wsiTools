@@ -1,3 +1,11 @@
+# Development: spatial objects in experiment projects
+
+- Spatial transcriptomics RDS objects can be stored in CellPhenotyper projects
+  with a bounded display bundle, image/frame mapping and immutable hashed assets.
+- Fresh Open Project verifies the stored object without deserializing it;
+  atomic index updates retain the previous index.
+- Dataset selection keeps equally named clusters from different objects apart.
+
 # Development: spatial human review
 
 - Added explicit same-section Seurat metadata and declared reduction adapters,

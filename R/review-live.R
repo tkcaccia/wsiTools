@@ -47,16 +47,84 @@ wsi_review_live_request <- function(state, payload) {
     state$review_checkpoint <- checkpoint
   } else if (identical(action, "attach_spatial")) {
     if (!isTRUE(payload$trusted)) wsi_abort("Confirm that this local RDS file is trusted before opening it.")
-    candidate <- wsi_review_attach_spatial(context, payload$path,
-      tissue_id = payload$tissue_id, dataset_id = payload$dataset_id %||% "spatial",
-      image_name = payload$image_name, coordinate_mapping = payload$coordinate_mapping,
-      trusted = TRUE, cluster_columns = unlist(payload$cluster_columns, use.names = FALSE),
-      reduction_names = unlist(payload$reduction_names, use.names = FALSE))
-    previous <- state$review_checkpoint %||% wsi_review_checkpoint(context)
+    dataset_id <- wsi_review_text(payload$dataset_id %||% "spatial", "dataset_id")
+    if (!grepl("^[A-Za-z0-9][A-Za-z0-9_.:-]*$", dataset_id))
+      wsi_abort("dataset_id must begin with a letter/digit and contain only letters, digits, underscore, dot, colon or hyphen.")
+    previous <- if (!is.null(payload$checkpoint)) wsi_review_commit_checkpoint(state, payload$checkpoint) else wsi_validate_review_checkpoint(state$review_checkpoint %||% wsi_review_checkpoint(context), context)
+    persisted <- NULL
+    if (isTRUE(payload$persist_to_experiment)) {
+      source <- context$provenance$source_reference
+      if (!identical(source$type, "cellphenotyper-experiment"))
+        wsi_abort("Project storage requires a CellPhenotyper experiment. Open its experiment index first.")
+      experiment <- wsi_read_experiment(source$manifest_path)
+      if (!identical(experiment$manifest_sha256, source$manifest_sha256))
+        wsi_abort("The experiment index changed outside this viewer. Reopen it before adding an object.")
+      # A project save must not silently drop another session-only dataset.
+      base <- wsi_experiment_review_context(experiment)
+      ids <- vapply(context$observations, `[[`, character(1), "id")
+      known <- vapply(base$observations, `[[`, character(1), "id")
+      import_path <- payload$path
+      extra <- context$observations[!ids %in% known]
+      if (length(extra)) {
+        if (any(!vapply(extra, function(row) identical(row$tissue_id, payload$tissue_id) &&
+            identical(row$dataset_id, dataset_id), logical(1))))
+          wsi_abort("Use the original dataset ID to save a viewer-only object. Other viewer-only datasets must be saved separately before reopening the experiment.")
+        preview <- wsi_review_attach_spatial(base, payload$path, tissue_id = payload$tissue_id,
+          dataset_id = dataset_id, image_name = payload$image_name,
+          coordinate_mapping = payload$coordinate_mapping, trusted = TRUE,
+          cluster_columns = if ("cluster_columns" %in% names(payload)) as.character(unlist(payload$cluster_columns, use.names = FALSE)) else NULL,
+          reduction_names = if ("reduction_names" %in% names(payload)) as.character(unlist(payload$reduction_names, use.names = FALSE)) else NULL)
+        old <- Filter(function(attachment) identical(attachment$tissue_id, payload$tissue_id) &&
+          identical(attachment$dataset_id, dataset_id), context$provenance$spatial_attachments %||% list())
+        incoming <- utils::tail(preview$provenance$spatial_attachments, 1L)[[1L]]
+        if (length(old) != 1L || !identical(old[[1L]]$source_reference$sha256, incoming$source_reference$sha256))
+          wsi_abort("The viewer-only object's RDS bytes changed. Keep the original source object to preserve its reviewed observations.")
+        base <- preview
+        known <- vapply(base$observations, `[[`, character(1), "id")
+        # Pin the exact verified bytes for promotion; later source-file changes
+        # cannot swap another object into the project while retaining old labels.
+        temporary <- tempfile("wsi-spatial-promotion-"); dir.create(temporary)
+        on.exit(unlink(temporary, recursive = TRUE), add = TRUE)
+        import_path <- file.path(temporary, "object.rds")
+        wsi_experiment_spatial_copy(payload$path, import_path, incoming$source_reference$sha256)
+      }
+      positions <- match(ids, known)
+      if (anyNA(positions) || !identical(wsi_review_digest(context$observations),
+          wsi_review_digest(base$observations[positions])))
+        wsi_abort("Preserve the existing viewer-only object's metadata and mapping when adding it to the project.")
+      reduction_positions <- match(vapply(context$reductions, `[[`, character(1), "id"),
+        vapply(base$reductions, `[[`, character(1), "id"))
+      if (anyNA(reduction_positions) || !identical(wsi_review_digest(context$reductions),
+          wsi_review_digest(base$reductions[reduction_positions])))
+        wsi_abort("Preserve the existing viewer reductions when saving an object to the project. Include the viewer-only object's reductions or reopen the unchanged project before importing.")
+      persisted <- wsi_experiment_add_spatial(experiment, import_path,
+        tissue_id = payload$tissue_id, dataset_id = payload$dataset_id %||% "spatial",
+        image_name = payload$image_name, coordinate_mapping = payload$coordinate_mapping,
+        trusted = TRUE, cluster_columns = if ("cluster_columns" %in% names(payload)) as.character(unlist(payload$cluster_columns, use.names = FALSE)) else NULL,
+        reduction_names = if ("reduction_names" %in% names(payload)) as.character(unlist(payload$reduction_names, use.names = FALSE)) else NULL)
+      candidate <- persisted$context
+    } else {
+      candidate <- wsi_review_attach_spatial(context, payload$path,
+        tissue_id = payload$tissue_id, dataset_id = payload$dataset_id %||% "spatial",
+        image_name = payload$image_name, coordinate_mapping = payload$coordinate_mapping,
+        trusted = TRUE, cluster_columns = if ("cluster_columns" %in% names(payload)) as.character(unlist(payload$cluster_columns, use.names = FALSE)) else NULL,
+        reduction_names = if ("reduction_names" %in% names(payload)) as.character(unlist(payload$reduction_names, use.names = FALSE)) else NULL)
+    }
     checkpoint <- wsi_review_checkpoint(candidate, selected_ids = previous$selected_ids,
-      review_records = previous$review_records, revision = previous$revision + 1L)
+      review_records = previous$review_records, revision = previous$revision + 1L,
+      history = previous$history)
     state$review_context <- candidate
     state$review_checkpoint <- checkpoint
+    if (!is.null(persisted)) {
+      state$review_experiment <- persisted$experiment
+      reference <- list(manifest_path = persisted$experiment$manifest_path,
+        experiment_id = persisted$experiment$experiment_id,
+        manifest_sha256 = persisted$experiment$manifest_sha256)
+      wsi_assign_viewer_state(state)
+      return(list(ok = TRUE, context = candidate, checkpoint = checkpoint,
+        persisted = TRUE, experiment_reference = reference, backup_path = persisted$backup_path,
+        object_artifact = persisted$object_artifact, bundle_artifact = persisted$bundle_artifact))
+    }
   } else if (identical(action, "inspect_spatial")) {
     if (!isTRUE(payload$trusted)) wsi_abort("Confirm the local RDS file is trusted.")
     return(list(ok = TRUE, inspection = wsi_review_inspect_spatial(payload$path, trusted = TRUE,

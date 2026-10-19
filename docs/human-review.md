@@ -5,7 +5,9 @@ workspace** in the viewer. This workflow uses existing observations and cached
 image features. It does not start feature extraction or processing jobs.
 
 1. Choose **Current tissue** or explicitly **All tissues**, the observation unit,
-   and the cluster field. Check a cluster to select its observations.
+   the dataset and the cluster field. Check a cluster to select its observations.
+   Equally named clusters from different objects stay separate unless you
+   explicitly choose all datasets.
 2. Choose a declared KODAMA or other reduction in **Linked plot**. Drag a lasso in
    the plot, or click **Lasso on tissue** and drag on H&E. Shift adds and Alt
    subtracts. **Select inside annotation** respects polygon holes and multiple
@@ -28,15 +30,41 @@ image features. It does not start feature extraction or processing jobs.
    the original experiment, images and artifact tables accessible. Changed images,
    calibration, or observation metadata require a new validated context.
 
-## Attach a same-section Seurat object
+## Add a spatial transcriptomics object to the CellPhenotyper project
 
-Expand **Attach same-section Seurat metadata**. Choose a trusted local `.rds`, or
+Expand **Add spatial transcriptomics to this project**. Choose a trusted local `.rds`, or
 paste its path in a browser. For an object containing multiple spatial images,
 enter the exact Seurat image name for the active tissue. Inspect its metadata,
 choose the cluster fields and reductions to attach, then confirm that the coordinates are native full-resolution pixels of the same
 H&E section. If coordinates use another source pixel frame, provide an explicit
 invertible 3×3 affine. The application never guesses scale or orientation here.
-Inspect the resulting cyan points over H&E before using cluster selections.
+Leave **Save the original object and selected display data in this
+CellPhenotyper project** checked, then click **Add to CellPhenotyper project**.
+The experiment index now links an untouched RDS copy and a small JSON file with
+selected coordinates, clusters and reductions. Reopening the experiment index
+restores that data without automatically deserializing the RDS. The RDS retains
+the complete original object even when only one Seurat image/FOV is selected.
+Its artifact row count describes the selected tissue view. External backing files
+referenced from inside an RDS are not discovered or copied; keep those files
+available for subsequent RNA analysis. The saved display bundle opens independently.
+
+A previous-index backup stays beside the index, and the new assets have
+immutable names under `spatial/objects` and `spatial/review`. Existing tissues,
+features, settings and source files are preserved. The import fails if another
+writer changed the index or the selected image coordinates lose invalid rows.
+For a multi-image object, repeat the import for each matching tissue with its
+explicit Seurat image name. Identical RDS bytes share one stored copy. Dataset
+IDs are unique within a tissue; equal IDs on different tissues are allowed.
+
+**Saved spatial objects** lists stored datasets for the active tissue. Choose a
+dataset before selecting clusters; multiple objects can reuse the same cluster
+names. Inspect the resulting cyan points over H&E before using selections.
+
+Uncheck project storage to attach display data to the current viewer only.
+Use **Save Project** separately to retain human decisions, selections and undo
+history. After adding an object, save a fresh viewer project: older viewer files
+retain their previous experiment-index identity. Keep the full experiment tree
+together when moving it.
 
 Only metadata, coordinates and named reductions enter the review context;
 expression matrices are not embedded. Interactive contexts are bounded to 10,000
@@ -55,7 +83,8 @@ RData files. Existing legacy KODAMA workflows remain available.
 ```r
 context <- wsi_experiment_review_context(experiment)
 ids <- wsi_review_select(context, cluster_field = "seurat_clusters",
-                        cluster_values = "3", tissue_ids = "section-1")
+                        cluster_values = "3", tissue_ids = "section-1",
+                        dataset_ids = "spatial")
 plan <- wsi_review_tile_plan(context, ids, tile_size = 112, units = "um")
 ```
 
@@ -68,3 +97,8 @@ The small integration fixture tests selection and persistence with synthetic RNA
 and a declared synthetic KODAMA-shaped embedding over real image/cache references.
 It does not establish biological validity, classifier accuracy, KODAMA fitting, or
 HPC/GPU lifecycle correctness.
+
+To add an object from R, use `wsi_experiment_add_spatial()` with a trusted local
+RDS path, the selected tissue, dataset ID, cluster/reduction names and a confirmed
+image mapping. It returns the updated experiment, review context, object/bundle
+artifacts and previous-index backup path. Imports currently use spot observations.

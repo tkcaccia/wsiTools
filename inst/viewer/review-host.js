@@ -43,6 +43,13 @@ function wsiReviewOverlay(rows, selected=false) {
   if(typeof buildLayerList==='function')buildLayerList();
   if(typeof draw==='function')draw();
 }
+function wsiReviewRefreshOverlays() {
+  if(!wsiReviewController||!wsiReviewContext)return;
+  const view=wsiReviewController.viewState(),selected=new Set(wsiReviewController.selection());
+  const rows=wsiReviewContext.observations.filter(row=>row.tissue_id===wsiReviewActiveTissue()&&
+    row.observation_unit===view.observation_unit&&(view.dataset_id==='*'||(row.dataset_id||'')===view.dataset_id));
+  wsiReviewOverlay(rows);wsiReviewOverlay(rows.filter(row=>selected.has(row.id)),true);
+}
 async function wsiReviewPlan(rows) {
   const result=await wsiReviewRequest({action:'tile_plan',context_id:wsiReviewContext.context_id,
     source_signature:wsiReviewContext.source_signature,selected_ids:rows.map(r=>r.id),
@@ -64,13 +71,19 @@ async function wsiReviewPreview(row) {
     (p.x1-p.x0)/native.width*image.width,(p.y1-p.y0)/native.height*image.height,0,0,100,100);
   return {url:crop.toDataURL(),caption:'Thumbnail preview · '+(row.original_id||row.id)};
 }
+function wsiReviewStoredObjects() {
+  const node=el('reviewStoredObjects');if(!node||!wsiReviewContext)return;
+  const objects=(wsiReviewContext.provenance?.dataset_catalog||[]).filter(item=>item.role==='spatial_transcriptomics_object'&&item.tissue_id===wsiReviewActiveTissue());
+  node.replaceChildren();for(const item of objects){const row=document.createElement('p');row.style.margin='4px 0';row.textContent=item.dataset_id+' · '+item.row_count+' '+item.observation_unit+' observations · saved in project';row.title=item.object_path||'';node.appendChild(row);}
+  if(!objects.length)node.textContent='No saved spatial transcriptomics object for this tissue.';
+}
 function wsiReviewInstall(context,checkpoint) {
   if(wsiReviewController)wsiReviewController.destroy();
   const mount=el('reviewWorkbenchMount');mount.replaceChildren();
   wsiReviewContext=context;cfg.review_workbench=context;window.wsiReviewContext=context;
   wsiReviewController=WsiReviewWorkbench.create({context,getActiveTissueId:wsiReviewActiveTissue,
-    selectOverlay:rows=>wsiReviewOverlay(rows,true),
-    onViewChange:()=>{if(typeof markProjectDirty==='function')markProjectDirty('review_view_updated');},
+    selectOverlay:()=>wsiReviewRefreshOverlays(),
+    onViewChange:()=>{wsiReviewRefreshOverlays();if(typeof markProjectDirty==='function')markProjectDirty('review_view_updated');},
     draw:()=>{if(typeof draw==='function')draw();},
     sync:checkpoint=>{
       cfg.review_checkpoint=checkpoint;
@@ -87,7 +100,7 @@ function wsiReviewInstall(context,checkpoint) {
   wsiReviewController.mount(mount);
   if(checkpoint)wsiReviewController.restore(checkpoint);
   window.wsiReviewWorkbench=wsiReviewController;
-  wsiReviewOverlay(context.observations);
+  wsiReviewRefreshOverlays();wsiReviewStoredObjects();
   const activeImage=context.images.find(i=>i.tissue_id===wsiReviewActiveTissue());
   const physicalOption=el('reviewTileUnits').querySelector('option[value=um]');physicalOption.disabled=!(activeImage?.mpp_x>0&&activeImage?.mpp_y>0);
   if(physicalOption.disabled&&el('reviewTileUnits').value==='um')el('reviewTileUnits').value='px';
@@ -107,7 +120,8 @@ function wsiReviewBindWorkbench() {
     '<select id="reviewTileUnits" aria-label="Tile units"><option value="px">native pixels</option><option value="um">µm (image calibration required)</option></select> '+
     '<select id="reviewTileBounds" aria-label="Tile bounds"><option value="drop">Drop edge tiles</option><option value="trim">Trim at image edge</option><option value="error">Reject edge tiles</option></select>'+
     '<p>One image-anchored grid; overlapping selections share a work tile. The plan records selected source IDs and image hashes. Review labels are saved with your viewer project.</p></fieldset>'+
-    '<details><summary>Attach same-section Seurat metadata</summary><p>Choose a trusted local RDS. Coordinates must refer to this exact H&amp;E image. Large datasets need a bounded metadata export (10,000 observations per view).</p>'+
+    '<details><summary>Add spatial transcriptomics to this project</summary><p>Choose a trusted local RDS. Coordinates must refer to this exact H&amp;E image. Large datasets need a bounded metadata export (10,000 observations per view).</p>'+
+    '<strong>Saved spatial objects</strong><div id="reviewStoredObjects" aria-label="Saved spatial transcriptomics objects"></div>'+
     '<input id="reviewSpatialPath" placeholder="Local .rds path" aria-label="Spatial RDS path"><button id="reviewChooseSpatial">Choose RDS…</button> '+
     '<label>Dataset <input id="reviewDatasetId" value="spatial"></label><label>Seurat image <input id="reviewImageName" placeholder="required for multiple images"></label>'+
     '<p><label><input id="reviewTrustSpatial" type="checkbox"> I trust this local RDS file</label></p>'+
@@ -117,7 +131,9 @@ function wsiReviewBindWorkbench() {
     '<label>Coordinates <select id="reviewCoordinateSpace"><option value="native_pixels">Full-resolution H&amp;E pixels</option><option value="source_pixels">Source pixels with explicit affine</option></select></label>'+
     '<label>Affine JSON <input id="reviewAffine" value="[[1,0,0],[0,1,0],[0,0,1]]" style="width:100%"></label>'+
     '<p><label><input id="reviewConfirmMapping" type="checkbox"> I verified the same section, image orientation and full-resolution coordinate mapping</label></p>'+
-    '<button id="reviewAttachSpatial">Attach to current tissue</button></details>';
+    '<p><label><input id="reviewPersistSpatial" type="checkbox" checked> Save the original object and selected display data in this CellPhenotyper project</label></p>'+
+    '<p>The project keeps its own RDS copy and a small metadata/reduction file. A previous-index backup is retained. Opening the project loads display data; it does not automatically deserialize the RDS.</p>'+
+    '<button id="reviewAttachSpatial">Add to CellPhenotyper project</button></details>';
   document.body.appendChild(panel);button.onclick=()=>{panel.hidden=!panel.hidden;};el('closeReviewWorkbench').onclick=()=>{panel.hidden=true;};
   wsiReviewInstall(cfg.review_workbench,cfg.review_checkpoint);
   for(const id of ['reviewTileSize','reviewTileUnits','reviewTileBounds'])el(id).onchange=()=>wsiReviewController.invalidatePlan();
@@ -139,7 +155,7 @@ function wsiReviewBindWorkbench() {
   document.addEventListener('keydown',event=>{if(event.key==='Escape'){drag=null;erase();wsiReviewSelecting=false;el('reviewSelectOnTissue').textContent='Lasso on tissue';}});
   for(const type of ['mousedown','mousemove','mouseup','click','dblclick'])canvas.addEventListener(type,event=>{if(wsiReviewSelecting){event.stopImmediatePropagation();event.preventDefault();}},true);
   const run=fn=>async()=>{try{await fn();}catch(error){wsiReviewStatus(error.message,true);}};
-  el('reviewChooseSpatial').onclick=run(async()=>{const invoke=tauriViewerInvoke();if(!invoke)throw new Error('Paste the local RDS path when using a browser.');const path=await invoke('choose_viewer_review_data');if(path)el('reviewSpatialPath').value=path;});
+  el('reviewChooseSpatial').onclick=run(async()=>{const invoke=tauriViewerInvoke();if(!invoke)throw new Error('Paste the local RDS path when using a browser.');const path=await invoke('choose_viewer_review_data');if(path){el('reviewSpatialPath').value=path;el('reviewConfirmMapping').checked=false;}});
   const attachment=()=>({path:el('reviewSpatialPath').value,trusted:el('reviewTrustSpatial').checked,image_name:el('reviewImageName').value||null});
   let inspectedAttachment=null;
   el('reviewInspectSpatial').onclick=run(async()=>{
@@ -149,19 +165,44 @@ function wsiReviewBindWorkbench() {
       const select=el(id);select.replaceChildren();for(const value of values||[]){const option=document.createElement('option');option.value=option.textContent=value;select.appendChild(option);}
     }
   });
+  let verifiedMapping=null,attaching=false;
+  const mappingFingerprint=()=>{const im=wsiReviewContext.images.find(i=>i.tissue_id===wsiReviewActiveTissue());return JSON.stringify({
+    tissue_id:im?.tissue_id,frame_id:im?.frame_id,image_sha256:im?.sha256,source_signature:wsiReviewContext.source_signature,
+    path:el('reviewSpatialPath').value,image_name:el('reviewImageName').value,space:el('reviewCoordinateSpace').value,affine:el('reviewAffine').value});};
+  const invalidateMapping=()=>{verifiedMapping=null;el('reviewConfirmMapping').checked=false;};
+  el('reviewConfirmMapping').onchange=()=>{verifiedMapping=el('reviewConfirmMapping').checked?mappingFingerprint():null;};
+  for(const id of ['reviewSpatialPath','reviewImageName','reviewCoordinateSpace','reviewAffine'])el(id).addEventListener('input',invalidateMapping);
+  el('reviewPersistSpatial').onchange=()=>{el('reviewAttachSpatial').textContent=el('reviewPersistSpatial').checked?'Add to CellPhenotyper project':'Attach to this viewer only';};
   el('reviewAttachSpatial').onclick=run(async()=>{
+    if(attaching)return;
     if(inspectedAttachment!==JSON.stringify(attachment()))throw new Error('Inspect this file and image first, then choose the cluster fields and reductions.');
     const clusterColumns=Array.from(el('reviewClusterColumns').selectedOptions,o=>o.value),reductionNames=Array.from(el('reviewReductionNames').selectedOptions,o=>o.value);
     if(!clusterColumns.length&&!reductionNames.length)throw new Error('Choose at least one cluster field or reduction to attach.');
-    if(!el('reviewConfirmMapping').checked)throw new Error('Verify and confirm the same-section coordinate mapping first.');
-    await wsiReviewSync;const im=wsiReviewContext.images.find(i=>i.tissue_id===wsiReviewActiveTissue()),space=el('reviewCoordinateSpace').value;
-    const data=await wsiReviewRequest({action:'attach_spatial',...attachment(),cluster_columns:clusterColumns,reduction_names:reductionNames,tissue_id:im.tissue_id,dataset_id:el('reviewDatasetId').value,
+    if(!/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(el('reviewDatasetId').value))throw new Error('Dataset ID must begin with a letter/digit and use letters, digits, underscores, dots, colons or hyphens.');
+    if(!el('reviewConfirmMapping').checked||verifiedMapping!==mappingFingerprint())throw new Error('Verify and confirm the coordinate mapping for this exact tissue and file first.');
+    const verified=verifiedMapping,im=wsiReviewContext.images.find(i=>i.tissue_id===wsiReviewActiveTissue()),space=el('reviewCoordinateSpace').value;
+    const persist=el('reviewPersistSpatial').checked,button=el('reviewAttachSpatial');
+    const request={action:'attach_spatial',...attachment(),persist_to_experiment:persist,cluster_columns:clusterColumns,reduction_names:reductionNames,
+      tissue_id:im.tissue_id,dataset_id:el('reviewDatasetId').value,checkpoint:wsiReviewController.snapshot(),
       coordinate_mapping:{confirmed:true,same_section:true,image_sha256:im.sha256,frame_id:im.frame_id,coordinate_space:space,
-        affine:space==='source_pixels'?JSON.parse(el('reviewAffine').value):null}});
-    wsiReviewInstall(data.context,data.checkpoint);
-    const linked=data.context.reductions.find(r=>r.dataset_id===el('reviewDatasetId').value&&r.frame_id===im.frame_id);
-    wsiReviewController.restoreViewState({scope:'current',observation_unit:'spot',cluster_field:clusterColumns[0]||'',reduction_id:linked?.id||''});
-    wsiReviewStatus('Attached selected metadata and reductions. Inspect the cyan points on H&E before selecting tiles.');
+        affine:space==='source_pixels'?JSON.parse(el('reviewAffine').value):null}};
+    attaching=true;button.disabled=true;panel.inert=true;wsiReviewSelecting=false;drag=null;erase();el('reviewSelectOnTissue').textContent='Lasso on tissue';
+    try{
+      await wsiReviewSync;
+      if(verified!==mappingFingerprint())throw new Error('The target tissue or mapping changed. Confirm the mapping again before adding this object.');
+      wsiReviewStatus(persist?'Adding object and saving the CellPhenotyper project…':'Attaching display data to this viewer…');
+      const data=await wsiReviewRequest(request);
+      if(data.experiment_reference){
+        cfg.experiment=data.experiment_reference;cfg.session_inputs=cfg.session_inputs||{};
+        cfg.session_inputs.cellphenotyper_experiment=data.experiment_reference;wsiExperimentRequest++;
+      }
+      wsiReviewInstall(data.context,data.checkpoint);invalidateMapping();
+      const linked=data.context.reductions.find(r=>r.dataset_id===request.dataset_id&&r.frame_id===im.frame_id);
+      const fallbackReduction=data.context.reductions.find(r=>r.observation_unit==='spot'&&r.dataset_id===request.dataset_id);
+      const fields=[...new Set(data.context.observations.flatMap(row=>Object.keys(row.cluster_values||{})))].sort();
+      wsiReviewController.restoreViewState({scope:'current',observation_unit:'spot',dataset_id:request.dataset_id,cluster_field:clusterColumns[0]||fields[0]||'',reduction_id:linked?.id||fallbackReduction?.id||''});
+      wsiReviewStatus(data.persisted?'Added to the CellPhenotyper project. Reopen its experiment index to find this object and its selected metadata/reductions. Use Save Project as well to retain human review decisions.':'Attached selected metadata and reductions to this viewer. Inspect the cyan points on H&E before selecting tiles.');
+    }finally{attaching=false;button.disabled=false;panel.inert=false;}
   });
   const originalSnapshot=projectBrowserSnapshot;
   projectBrowserSnapshot=function(...args){return {...originalSnapshot(...args),review_workbench:wsiReviewContext,review_checkpoint:wsiReviewController.snapshot(),review_view_state:wsiReviewController.viewState()};};
@@ -170,7 +211,7 @@ function wsiReviewBindWorkbench() {
   const originalSave=requestProjectSave;
   requestProjectSave=async function(...args){await wsiReviewSync;return originalSave(...args);};
   const originalPreview=applyProjectPreview;
-  applyProjectPreview=function(...args){const result=originalPreview(...args);wsiReviewSelecting=false;drag=null;erase();wsiReviewController.setActiveTissue(wsiReviewActiveTissue());const im=wsiReviewContext.images.find(i=>i.tissue_id===wsiReviewActiveTissue());el('reviewTileUnits').querySelector('option[value=um]').disabled=!(im?.mpp_x>0&&im?.mpp_y>0);if(!(im?.mpp_x>0&&im?.mpp_y>0))el('reviewTileUnits').value='px';return result;};
+  applyProjectPreview=function(...args){const result=originalPreview(...args);invalidateMapping();wsiReviewSelecting=false;drag=null;erase();wsiReviewController.setActiveTissue(wsiReviewActiveTissue());wsiReviewRefreshOverlays();wsiReviewStoredObjects();const im=wsiReviewContext.images.find(i=>i.tissue_id===wsiReviewActiveTissue());el('reviewTileUnits').querySelector('option[value=um]').disabled=!(im?.mpp_x>0&&im?.mpp_y>0);if(!(im?.mpp_x>0&&im?.mpp_y>0))el('reviewTileUnits').value='px';return result;};
   const originalRestore=restoreBrowserProjectInLiveSession;
   restoreBrowserProjectInLiveSession=async function(snapshot,...args){
     await wsiReviewSync;
@@ -186,7 +227,7 @@ function wsiReviewBindWorkbench() {
       const data=await wsiReviewRequest({action:'restore',context:snapshot.review_workbench,checkpoint:snapshot.review_checkpoint});
       wsiReviewInstall(data.context,data.checkpoint);
     }
-    const result=await originalRestore(snapshot,...args);wsiReviewController.setActiveTissue(wsiReviewActiveTissue());
+    const result=await originalRestore(snapshot,...args);wsiReviewController.setActiveTissue(wsiReviewActiveTissue());wsiReviewRefreshOverlays();
     if(snapshot.review_view_state)wsiReviewController.restoreViewState(snapshot.review_view_state);return result;
   };
 }

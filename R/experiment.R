@@ -135,10 +135,15 @@ wsi_read_experiment <- function(path, verify_hashes = TRUE) {
   digest <- wsi_experiment_sha256(path)
   if (!is.null(reference$manifest_sha256) && !identical(reference$manifest_sha256, digest))
     wsi_abort("Saved experiment manifest identity changed; reopen the revised experiment explicitly.")
-  structure(list(manifest_path = path, root = root, manifest_sha256 = digest,
+  result <- structure(list(manifest_path = path, root = root, manifest_sha256 = digest,
                  experiment_id = manifest$experiment_id, name = manifest$name,
                  settings = manifest$settings %||% list(), provenance = manifest$provenance %||% list(),
                  tissues = tissues, manifest = manifest), class = "wsi_experiment")
+  # Passive RDS artifacts are hash-checked; only bounded plain JSON is parsed.
+  for (tissue in tissues) for (pair in wsi_experiment_spatial_pairs(tissue))
+    wsi_experiment_spatial_bundle(result, tissue, pair,
+      max_observations = getOption("wsiTools.review_max_observations", 10000L))
+  result
 }
 
 wsi_experiment_namespace_id <- function(experiment_id, tissue_id, feature_set_id, id) {
@@ -965,6 +970,18 @@ wsi_experiment_review_context <- function(experiment, tissue_ids = NULL, feature
       catalog[[length(catalog) + 1L]] <- list(tissue_id = tissue$tissue_id, dataset_id = dataset,
         observation_unit = artifact$observation_unit, row_count = count)
     }
+    for (pair in wsi_experiment_spatial_pairs(tissue)) {
+      dataset <- pair$artifact$dataset_id
+      key <- paste(tissue$tissue_id, dataset, sep = "\034")
+      if (key %in% seen) wsi_abort("Duplicate review dataset_id within a tissue.")
+      seen <- c(seen, key)
+      descriptors[[length(descriptors) + 1L]] <- list(tissue = tissue, pair = pair,
+        dataset_id = dataset, spatial = TRUE)
+      catalog[[length(catalog) + 1L]] <- list(tissue_id = tissue$tissue_id, dataset_id = dataset,
+        observation_unit = pair$artifact$observation_unit, row_count = as.numeric(pair$artifact$row_count),
+        role = "spatial_transcriptomics_object", object_path = pair$object$path,
+        object_sha256 = pair$object$sha256)
+    }
   }
   if (!is.null(feature_set_ids) && any(!feature_set_ids %in% requested)) wsi_abort("Unknown feature_set_ids in the selected tissues.")
   total <- sum(vapply(catalog, `[[`, numeric(1), "row_count"))
@@ -982,15 +999,21 @@ wsi_experiment_review_context <- function(experiment, tissue_ids = NULL, feature
     return(construct(list(), list()))
   }
   observations <- list()
+  spatial_reductions <- list()
   datasets <- list()
   for (descriptor in descriptors) {
-    rows <- wsi_experiment_review_rows(experiment, descriptor$tissue, descriptor$entry,
+    if (isTRUE(descriptor$spatial)) {
+      bundle <- wsi_experiment_spatial_bundle(experiment, descriptor$tissue, descriptor$pair, max_observations)
+      rows <- bundle$observations
+      spatial_reductions <- c(spatial_reductions, bundle$reductions)
+      provenance$spatial_attachments <- c(provenance$spatial_attachments %||% list(), list(bundle$attachment))
+    } else rows <- wsi_experiment_review_rows(experiment, descriptor$tissue, descriptor$entry,
       descriptor$dataset_id, max_observations, descriptor$feature)
     key <- paste(descriptor$tissue$tissue_id, descriptor$dataset_id, sep = "\034")
     datasets[[key]] <- rows
     observations <- c(observations, rows)
   }
-  reductions <- list()
+  reductions <- spatial_reductions
   for (tissue in tissues) for (artifact in tissue$artifacts %||% list()) {
     if (!identical(artifact$role, "observation_reduction")) next
     dataset <- artifact$dataset_id

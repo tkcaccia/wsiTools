@@ -11,7 +11,8 @@ wsi_validate_review_context(context, verify_hashes = FALSE,
   require_calibration = FALSE)
 
 wsi_review_select(context, ids = NULL, cluster_field = NULL,
-  cluster_values = NULL, tissue_ids = NULL, observation_unit = NULL)
+  cluster_values = NULL, tissue_ids = NULL, observation_unit = NULL,
+  dataset_ids = NULL)
 }
 \arguments{
 \item{images}{Image record list or data frame. Each record declares
@@ -42,6 +43,8 @@ Source references and spatial attachments participate in source integrity.}
 \item{cluster_field, cluster_values}{An explicit categorical metadata field and
 values to select. Mutually exclusive with explicit IDs.}
 \item{tissue_ids}{Optional explicit tissue scope.}
+\item{dataset_ids}{Optional explicit dataset identities, keeping equally named clusters from different spatial objects separate.}
+
 \item{observation_unit}{Optional observation unit scope.}
 }
 \description{

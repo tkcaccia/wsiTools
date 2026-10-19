@@ -202,6 +202,13 @@ wsi_review_context <- function(images, observations, reductions = list(), contex
   if (is.null(context_id)) context_id <- paste0("review:", substr(signature, 1L, 24L))
   context_id <- wsi_review_text(context_id, "context_id")
   if (!is.null(experiment_id)) experiment_id <- wsi_review_text(experiment_id, "experiment_id")
+  # Empty categorical metadata is a JSON object. Shape it after the canonical
+  # digest, preserving signatures of existing empty-metadata contexts. Validation
+  # normalizes this presentation back through wsi_review_observation before hashing.
+  observations <- lapply(observations, function(row) {
+    if (!length(row$cluster_values)) row$cluster_values <- structure(list(), names = character())
+    row
+  })
   list(schema = "wsitools-review-context", schema_version = 1L,
     context_id = context_id, source_signature = signature, experiment_id = experiment_id,
     images = images, observations = observations, reductions = reductions, provenance = provenance)
@@ -234,11 +241,14 @@ wsi_validate_review_context <- function(context, verify_hashes = FALSE, require_
 #' @param cluster_values Explicit categorical values in that field.
 #' @param tissue_ids Optional tissue scope.
 #' @param observation_unit Optional spot, cell, tile or token scope.
+#' @param dataset_ids Optional explicit dataset identities. Use this to keep
+#'   equally named clusters from different spatial objects separate.
 #' @inheritParams wsi_review_context
 #' @return Selected canonical IDs in context observation order.
 #' @export
 wsi_review_select <- function(context, ids = NULL, cluster_field = NULL,
-                              cluster_values = NULL, tissue_ids = NULL, observation_unit = NULL) {
+                              cluster_values = NULL, tissue_ids = NULL, observation_unit = NULL,
+                              dataset_ids = NULL) {
   context <- wsi_validate_review_context(context)
   observations <- context$observations
   known <- vapply(observations, `[[`, character(1), "id")
@@ -264,6 +274,11 @@ wsi_review_select <- function(context, ids = NULL, cluster_field = NULL,
     observation_unit <- wsi_review_text(observation_unit, "observation_unit")
     if (!observation_unit %in% c("spot", "cell", "tile", "token")) wsi_abort("Unknown review observation unit.")
     keep <- keep & vapply(observations, function(observation) identical(observation$observation_unit, observation_unit), logical(1))
+  }
+  if (!is.null(dataset_ids)) {
+    available <- vapply(observations, function(row) row$dataset_id %||% "", character(1))
+    wanted <- wsi_review_ids(dataset_ids, "dataset_ids", unique(available))
+    keep <- keep & available %in% wanted
   }
   known[keep]
 }
