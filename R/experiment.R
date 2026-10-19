@@ -466,9 +466,9 @@ wsi_experiment_train_classifier <- function(experiment, feature_set_id, labels, 
   x <- wsi_experiment_preprocess_apply(features$x[rows, , drop = FALSE], recipe)
   ncomp <- min(ncomp, nrow(x) - 1L, ncol(x))
   if (!wsi_has_fastpls()) wsi_abort("CPU classifier fitting requires the optional fastPLS package.")
-  fit <- get("pls", asNamespace(wsi_fastpls_package()))(Xtrain = x, Ytrain = y,
-    ncomp = ncomp, method = "simpls", classifier = "lda", backend = "cpu", n.cores = 1L,
-    scaling = "none", fit = FALSE, proj = FALSE, return_variance = FALSE, seed = seed)
+  fit <- wsi_fastpls_cpu_call(get("pls", asNamespace(wsi_fastpls_package())), list(Xtrain = x, Ytrain = y,
+    ncomp = ncomp, method = "simpls", classifier = "lda", backend = "cpu",
+    scaling = "none", fit = FALSE, proj = FALSE, return_variance = FALSE, seed = seed))
   structure(list(schema = "wsitools-experiment-classifier", schema_version = 1L,
     experiment_id = features$experiment_id, feature_set_id = features$feature_set_id,
     signature = features$signature, preprocessing = recipe, model = fit,
@@ -491,7 +491,7 @@ wsi_experiment_predict_classifier <- function(model, experiment, tissue_ids = NU
     wsi_experiment_features(experiment, model$feature_set_id, tissue_ids)
   if (!identical(features$signature, model$signature)) wsi_abort("Model and feature encoder/schema/preprocessing are incompatible.")
   x <- wsi_experiment_preprocess_apply(features$x, model$preprocessing)
-  prediction <- stats::predict(model$model, x, backend = "cpu", n.cores = 1L, raw_scores = TRUE)
+  prediction <- wsi_fastpls_cpu_predict(model$model, x, raw_scores = TRUE)
   labels <- prediction$Ypred
   if (is.data.frame(labels) && ncol(labels) == 1L) labels <- labels[[1L]]
   if (is.matrix(labels) && ncol(labels) == 1L) labels <- labels[, 1L]

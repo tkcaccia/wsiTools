@@ -94,8 +94,12 @@ jobs:
           node tests/browser/experiment-workbench.cjs
           node tests/browser/review-workbench.cjs
           node tests/browser/gigatime-workbench.cjs
+          node tests/browser/gigatime-display.cjs
           node tests/browser/desktop-launch.cjs
           node tests/browser/workspace-panels.cjs
+          node tests/browser/browser-save.cjs
+          node tests/browser/channel-targeting.cjs
+          node tests/browser/prediction-readiness.cjs
 
       - name: Report optional runtime tools
         shell: Rscript {0}

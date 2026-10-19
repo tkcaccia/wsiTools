@@ -18,6 +18,30 @@ wsi_fastpls_package <- function() {
   paste0("fast", "PLS")
 }
 
+# fastPLS 0.3 accepts n.cores explicitly; current fastPLS uses options(cores)
+# and rejects n.cores in its SVD-control dots. Do not filter statistical arguments
+# through formals(): seed and other valid solver controls deliberately use dots.
+wsi_fastpls_cpu_call <- function(fun, args) {
+  if (!is.function(fun) || !is.list(args)) wsi_abort("Expected a fastPLS function and named arguments.")
+  supported <- names(formals(fun))
+  if (!"backend" %in% supported)
+    wsi_abort("This fastPLS API cannot explicitly select the required CPU backend.")
+  if (!is.null(args$backend) && !identical(args$backend, "cpu"))
+    wsi_abort("Viewer classifiers require backend='cpu'.")
+  args$backend <- "cpu"
+  # Both public option generations are scoped, including when fitting fails.
+  previous <- options(cores = 1L, n.cores = 1L)
+  on.exit(options(previous), add = TRUE)
+  if ("n.cores" %in% supported) args$n.cores <- 1L
+  else if ("cores" %in% supported) args$cores <- 1L
+  do.call(fun, args)
+}
+
+wsi_fastpls_cpu_predict <- function(object, newdata, raw_scores = FALSE) {
+  fun <- utils::getS3method("predict", "fastPLS", envir = asNamespace(wsi_fastpls_package()))
+  wsi_fastpls_cpu_call(fun, list(object = object, newdata = newdata, raw_scores = raw_scores))
+}
+
 wsi_empty_prediction_result <- function() {
   out <- data.frame(
     id = character(),
@@ -1386,7 +1410,7 @@ wsi_prediction_fit <- function(x_train, y_train, x_test, ncomp = 2L,
   method <- match.arg(as.character(method %||% "simpls"), c("simpls", "plssvd", "opls", "kernelpls"))
   scaling <- match.arg(as.character(scaling %||% "autoscaling"), c("autoscaling", "centering", "none"))
   pls_fun <- get("pls", envir = asNamespace(wsi_fastpls_package()), inherits = FALSE)
-  model <- pls_fun(
+  model <- wsi_fastpls_cpu_call(pls_fun, list(
     Xtrain = x_train,
     Ytrain = factor(y_train),
     Xtest = x_test,
@@ -1398,7 +1422,7 @@ wsi_prediction_fit <- function(x_train, y_train, x_test, ncomp = 2L,
     return_variance = FALSE,
     fit = FALSE,
     proj = FALSE
-  )
+  ))
   wsi_prediction_extract_predicted(model, x_test)
 }
 

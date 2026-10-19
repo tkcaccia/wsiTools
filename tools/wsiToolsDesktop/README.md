@@ -39,6 +39,29 @@ sources. The scientific experiment index is preserved, and the desktop save
 dialog prevents a viewer session from replacing it. Reopening a saved session
 requires its linked experiment and image assets to remain available.
 
+## Experiment workflows
+
+The **Experiment guide** shows what the opened index actually contains.
+Choose **Show marker on current tissue** to enable a registered GigaTIME image;
+**Per-cell scores** additionally requires a matching segmentation/score table.
+Use the marker panel's display range, opacity and H&E toggle to inspect weak
+signal. These controls leave exported numeric scores unchanged.
+
+For PLS, choose a compatible predictor source and select training annotations
+from at least two labelled classes. Virchow2 training accepts only complete
+feature footprints contained in those annotations. RGB contrast needs enough
+labelled reference rows; use a compatible token cache when a small pooled cache
+has too few rows. A project containing only marker images cannot demonstrate
+feature PLS. The prediction window explains missing inputs and dependencies.
+
+Stored spatial objects open as bounded review bundles. Gene lookup and
+expression statistics require an explicitly linked trusted expression object.
+Review tile export creates a work plan and does not submit processing jobs.
+
+Save a separate viewer session to retain viewing/review settings. Browser saves
+use Downloads when a native picker is unavailable or blocked. Cancelling a
+supported save dialog does not download another copy.
+
 The base-image renderer defaults to `auto`: OpenSeadragon uses WebGL/WebGL2
 when the system WebView supports it and falls back to the Canvas CPU renderer.
 The same renderer setting is used when the viewer is launched directly from R.

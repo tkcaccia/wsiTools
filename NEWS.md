@@ -1,3 +1,17 @@
+# wsiTools 0.1.29
+
+- Browser saves fall back to downloads when a native file picker is unavailable
+  or blocked; cancelled and failed disk writes remain distinct.
+
+- Added a project guide with actions based on available marker, feature and
+  spatial data, plus clear PLS training readiness and failure recovery.
+- GigaTIME markers expose native-scale display bounds, opacity, reset and H&E
+  visibility controls without modifying marker images or exported cell scores.
+- Matched channel overlays to explicit tissue identities before legacy basenames,
+  preventing same-named image files from showing another tissue's markers.
+- Restored CPU PLS fitting and saved-classifier replay with both explicit
+  `n.cores` and option-based fastPLS APIs; temporary thread options are restored.
+
 # Development: experiment workflow usability
 
 - Docked accessible Review/GigaTIME panels avoid menu overlap, constrain narrow
