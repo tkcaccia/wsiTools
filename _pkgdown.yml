@@ -377,6 +377,13 @@ reference:
       - wsi_proximity_context
       - wsi_has_fastpls
 
+  - title: Cached experiments, classifiers, and feature appearance
+    desc: Open multi-tissue experiments, reuse fitted PLS classifiers, and create local or shared feature contrasts.
+    contents:
+      - wsi_read_experiment
+      - wsi_experiment_train_classifier
+      - wsi_experiment_appearance
+
   - title: CellPhenotyper, cells, and segmentation overlays
     desc: Open CellPhenotyper projects and import or run optional segmentation outputs in ROI-aware workflows.
     contents:
