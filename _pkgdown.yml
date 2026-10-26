@@ -381,6 +381,7 @@ reference:
     desc: Open multi-tissue experiments, reuse fitted PLS classifiers, and create local or shared feature contrasts.
     contents:
       - wsi_read_experiment
+      - wsi_experiment_registered_tissue_viewport
       - wsi_experiment_train_classifier
       - wsi_experiment_appearance
 
