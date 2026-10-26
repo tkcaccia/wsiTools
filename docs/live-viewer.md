@@ -78,6 +78,42 @@ wsi_tile_cache_info()
 wsi_tile_cache_prune()
 ```
 
+## Import Tissue Or Cell Masks
+
+In a live viewer, choose **Annotations > Import mask TIFF** and select a TIFF
+or OME-TIFF mask. Set **Import as** to tissue annotation or cell segmentation.
+The mask appears as a tiled color overlay on its project image; black pixels
+are transparent. The **Mask opacity** slider runs from 0% (invisible) to 100%
+(fully opaque). Color-coded RGB masks retain their colors; grayscale masks
+use a visible tint. For R-supplied masks, a label-color sidecar can also
+provide class names. The mask should already be registered to the tissue
+image and cover the same field of view; its full extent is fitted to the image.
+
+To export polygons, choose the mask and use **Annotations > Mask to GeoJSON**.
+Select **Visible area** for a large mask, or **Whole mask** for a small one.
+Conversion traces native mask pixels in slide coordinates and is limited to
+one million mask pixels per request to avoid freezing the viewer. Zoom in and
+convert a smaller area if this limit is reached. GeoJSON export creates a new
+file and leaves the raster overlay unchanged.
+
+The equivalent R setup is:
+
+```r
+slide <- wsi_open("/path/to/tissue.ome.tif")
+mask <- wsi_annotation_mask_source(
+  "/path/to/cells_mask.ome.tif",
+  slide = slide,
+  annotation_kind = "cell",
+  opacity = 0.6
+)
+viewer <- wsi_viewer_live(slide, annotation_masks = mask, wait = FALSE)
+viewer$open()
+```
+
+The live TIFF import and tile generation require libvips. Imported masks are
+stored in the user's wsiTools data directory so their tiles remain available
+after the browser tab is closed.
+
 ## What Live Synchronization Means
 
 `wsi_viewer_live()` starts a local `httpuv` web service from R. The browser

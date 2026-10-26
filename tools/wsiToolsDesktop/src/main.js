@@ -577,7 +577,7 @@ function rProjectLaunchCode(projectPath) {
       `project_file <- ${quoteRString(projectPath)}`,
       "project_index <- jsonlite::read_json(project_file, simplifyVector = FALSE)",
       'if (identical(project_index$schema, "cellphenotyper-experiment")) {',
-      "  viewer <- wsi_viewer_experiment(project_file, open = FALSE, wait = FALSE)",
+      '  viewer <- wsi_viewer_experiment(project_file, open = FALSE, wait = FALSE, mode = "tiles", dynamic_tiles = TRUE)',
       "} else {",
       "  # Desktop reopens the saved project with fresh tile URLs, then restores its state.",
       "  # Saved experiment sessions also reopen their linked experiment and feature caches.",

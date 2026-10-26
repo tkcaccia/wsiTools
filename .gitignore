@@ -23,3 +23,7 @@ release-artifacts/
 tmp/
 tmp_dress_check/
 wsiTools_Implementation_and_Architecture_Reference.docx
+
+# Python feature-decoder test/runtime caches
+__pycache__/
+*.py[cod]

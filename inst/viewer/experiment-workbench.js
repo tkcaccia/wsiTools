@@ -443,8 +443,325 @@ function wsiExperimentRefreshControls() {
   }
 }
 
+function wsiExperimentBoraReviewEntry(){
+  if(typeof tissueAnnotationLayerEntries!=='function')return null;
+  return tissueAnnotationLayerEntries().find(entry=>entry?.review===true&&
+    entry?.layer?.metadata?.review_only===true&&
+    entry?.layer?.metadata?.training_eligible===false)||null;
+}
+function wsiExperimentBoraDraftFor(item,layer){
+  const sourceId=String(item?.id||'');
+  const sourceHash=String(layer?.metadata?.source_sha256||'');
+  return Array.isArray(rois)?rois.find(roi=>roi?.properties?.manual_review_status==='draft_from_prediction'&&
+    String(roi.properties.source_prediction_id||'')===sourceId&&
+    String(roi.properties.source_prediction_sha256||'')===sourceHash):null;
+}
+function wsiExperimentSyncBoraReviewVisibility(){
+  if(typeof layers==='undefined'||!Array.isArray(layers))return;
+  layers.filter(layer=>layer?.source_type==='bora_candidate_review'&&
+    Number(layer?.metadata?.group_count)===3).forEach(layer=>{
+    (layer.items||[]).forEach(item=>{
+      const draft=wsiExperimentBoraDraftFor(item,layer);
+      if(draft){
+        item._boraHiddenByDraft=true;
+        item.visible=!!item._boraShowOriginalForCompare;
+      }else if(item._boraHiddenByDraft){
+        item._boraHiddenByDraft=false;
+        item._boraShowOriginalForCompare=false;
+        item.visible=true;
+      }
+    });
+  });
+}
+function wsiExperimentBoraAnnotationMessage(){
+  if(wsiExperimentConfig()?.bora_annotations_mode==='ordinary_editable')return '';
+  const evidence=wsiExperimentConfig()?.viewer_evidence||{};
+  const interpretation=evidence.bora_interpretation;
+  const review=wsiExperimentBoraReviewEntry();
+  if(review&&Number(review.layer.metadata.group_count)===3)return 'Three anonymous KODAMA groups were refined by Bora. The technical seam check failed: grid-aligned boundary artifacts may remain. Click a Bora boundary on the slide or in Annotations to edit a separate autosaved copy with Brush or polygon tools. The original prediction remains available for comparison or reset. These predictions are not ground truth.';
+  if(review)return review.layer.metadata.native_he_boundary_refinement_applied===true?
+    'Bora predicted tissue boundaries are available for exploratory review after native H&E refinement. They are not ground truth or PLS training regions.':
+    'Bora predicted tissue boundaries are available for exploratory review. They are not ground truth or PLS training regions.';
+  if(typeof interpretation!=='string'||!interpretation.trim())return '';
+  const withheld=/^(withheld|pending)/i.test(String(evidence.bora_status||''));
+  const qualified=typeof rois!=='undefined'&&Array.isArray(rois)&&rois.some(roi=>
+    roi?.properties?.source_role==='tissue_annotations');
+  const imported=typeof tissueAnnotationLayerEntries==='function'&&
+    tissueAnnotationLayerEntries().some(entry=>entry?.item?.properties?.source_role==='tissue_annotations');
+  if(!withheld&&(qualified||imported))return '';
+  return 'No Bora tissue boundaries are available in this project. Predictions are withheld pending review. '+interpretation;
+}
+function wsiExperimentEvidenceSummary(){
+  const evidence=wsiExperimentConfig()?.viewer_evidence||{},coverage=evidence.cell_coverage||[];
+  const partial=coverage.map(item=>`${item.tissue_id}: CellViT ${item.completed_shards}/${item.planned_shards} shards · ${Number(item.cell_count).toLocaleString()} cells`);
+  if(wsiExperimentConfig()?.bora_annotations_mode==='ordinary_editable')
+    return ['Bora tissue annotations · edit with standard tools',...partial].join(' | ');
+  const review=wsiExperimentBoraReviewEntry();
+  return [review?'Bora prediction · exploratory review':evidence.bora_interpretation?(wsiExperimentBoraAnnotationMessage()?'Bora tissue predictions withheld':'Bora prediction · exploratory'):'',...partial].filter(Boolean).join(' | ');
+}
+function wsiExperimentRefreshBoraAnnotationStatus(){
+  const summary=el('experimentEvidenceSummary');if(summary)summary.textContent=wsiExperimentEvidenceSummary();
+  const notice=el('experimentBoraAnnotationStatus');if(!notice)return;
+  const message=wsiExperimentBoraAnnotationMessage();notice.hidden=!message;
+  if(notice.textContent!==message)notice.textContent=message;
+  const save=el('experimentManualReviewExport');
+  if(save){const three=Number(wsiExperimentBoraReviewEntry()?.layer?.metadata?.group_count)===3;
+    save.hidden=!three;save.disabled=!three||!Array.isArray(rois)||
+      !rois.some(roi=>roi?.properties?.manual_review_status==='draft_from_prediction');}
+  wsiExperimentDecorateBoraReviewRows();
+  wsiExperimentDecorateBoraDraftRows();
+}
+function wsiExperimentBindBoraAnnotationStatus(){
+  if(wsiExperimentConfig()?.bora_annotations_mode==='ordinary_editable')return;
+  if(!wsiExperimentConfig()||!el('roiPanelBody')||el('experimentBoraAnnotationStatus'))return;
+  const notice=document.createElement('p');notice.id='experimentBoraAnnotationStatus';
+  notice.setAttribute('role','status');notice.style.cssText='border:1px solid #f59e0b;border-radius:6px;background:#422006;color:#fef3c7;padding:10px;margin:6px 0;font-size:13px;line-height:1.45';
+  const summary=el('roiSummary');if(summary&&typeof summary.after==='function')summary.after(notice);
+  else el('roiPanelBody').prepend(notice);
+  const save=document.createElement('button');save.id='experimentManualReviewExport';
+  save.type='button';save.textContent='Export manual corrections · GeoJSON';
+  save.title='Export separate editable review drafts. The locked Bora predictions are not included.';
+  save.style.cssText='margin:0 0 8px 0;padding:7px 10px';
+  save.onclick=()=>wsiExperimentExportBoraDrafts();
+  notice.after(save);
+  if(typeof buildRoiList==='function'){
+    const original=buildRoiList;
+    buildRoiList=function(...args){wsiExperimentSyncBoraReviewVisibility();const result=original(...args);wsiExperimentRefreshBoraAnnotationStatus();return result;};
+  }
+  wsiExperimentSyncBoraReviewVisibility();
+  wsiExperimentRefreshBoraAnnotationStatus();
+}
+
+// Model boundaries stay immutable. A reviewer can copy one into a separate
+// draft ROI, edit it with the ordinary polygon/Brush/Wand tools, and export
+// only the draft ROIs as GeoJSON. Copying is not an expert validation event.
+function wsiExperimentCopyBoraBoundaryForReview(layerIndex,itemIndex){
+  const layer=layers?.[Number(layerIndex)],item=layer?.items?.[Number(itemIndex)];
+  const group=Number(item?.properties?.value);
+  if(layer?.source_type!=='bora_candidate_review'||
+     layer?.metadata?.review_only!==true||layer?.metadata?.training_eligible!==false||
+     Number(layer?.metadata?.group_count)!==3||![1,2,3].includes(group)||
+     !item||typeof denseLayerEditableGroups!=='function'){
+    notify('Select a three-group Bora prediction to copy for manual review.','warning');return false;
+  }
+  const existing=wsiExperimentBoraDraftFor(item,layer);
+  if(existing){
+    wsiExperimentSyncBoraReviewVisibility();
+    selectAnnotation(rois.indexOf(existing),false);
+    if(typeof setMode==='function')setMode('brush');
+    if(typeof buildRoiList==='function')buildRoiList();
+    if(typeof draw==='function')draw();
+    notify('Continuing the saved review draft.','info',2400);
+    return true;
+  }
+  const groups=denseLayerEditableGroups(item);
+  if(!groups.length){notify('This boundary has no editable polygon.','warning');return false;}
+  const sourceId=String(item.id||itemIndex),sourceHash=String(layer.metadata.source_sha256||'');
+  const id='manual_bora_review_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,9);
+  const label='KODAMA Group '+group;
+  const draftColour=item.colour||'#5eead4';
+  const roi={id,name:'Review draft · '+label,class:label,colour:draftColour,
+    original_colour:draftColour,fill:hexToRgba(draftColour,0.12),
+    rings:groups[0],add_groups:groups.slice(1),add_rings:[],subtract_rings:[],
+    raw_coordinates:null,dense_static_geometry:false,dense_geometry:false,
+    drawable:true,locked:false,isLocked:false,visible:true,source:'Manual Bora review draft',
+    source_type:'manual_review_draft',tissue_annotation:false,
+    properties:{class:label,review_only:true,training_eligible:false,
+      predicted_not_expert_annotation:true,manual_review_status:'draft_from_prediction',
+      source_prediction_id:sourceId,source_prediction_sha256:sourceHash,
+      source_frame_id:layer.metadata.source_frame_id||null,
+      source_image_sha256:layer.metadata.image_sha256||null,
+      tissue_id:item.tissue_id||projectItems?.[activeProjectIndex]?.tissue_id||null,
+      project_image_index:activeProjectIndex,project_section_index:activeProjectSectionIndex,
+      coordinate_space:'level0_slide_pixels'}};
+  if(typeof pushAnnotationUndo==='function')pushAnnotationUndo('bora_review_draft_copied');
+  refreshRoiGeometry(roi);
+  rois.push(roi);
+  wsiExperimentSyncBoraReviewVisibility();
+  if(typeof ensureRoiClassOption==='function')ensureRoiClassOption(label);
+  selectAnnotation(rois.length-1,false);
+  if(typeof markAnnotationsDirty==='function')markAnnotationsDirty('bora_review_draft_copied');
+  if(typeof buildRoiList==='function')buildRoiList();
+  if(typeof updateButtons==='function')updateButtons();
+  if(typeof scheduleViewerStateSync==='function')scheduleViewerStateSync('roi_added',
+    {id,source_prediction_id:sourceId,source_prediction_sha256:sourceHash,
+      manual_review_status:'draft_from_prediction',training_eligible:false});
+  if(typeof recordAnnotationHistory==='function')recordAnnotationHistory('roi_added',
+    {id,name:roi.name,source:'Bora prediction copy for manual review'});
+  if(typeof setMode==='function')setMode('brush');
+  if(typeof draw==='function')draw();
+  notify('Editable review copy created. Refine it with Brush or polygon editing, then export the annotations as GeoJSON. The prediction remains unchanged.','success',6000);
+  return true;
+}
+function wsiExperimentBoraPredictionForDraft(roi){
+  if(roi?.properties?.manual_review_status!=='draft_from_prediction')return null;
+  for(let li=0;li<(layers?.length||0);li++){
+    const layer=layers[li];if(layer?.source_type!=='bora_candidate_review'||
+      String(layer.metadata?.source_sha256||'')!==String(roi.properties.source_prediction_sha256||''))continue;
+    const ii=(layer.items||[]).findIndex(item=>String(item.id||'')===String(roi.properties.source_prediction_id||''));
+    if(ii>=0)return {layer,item:layer.items[ii],layerIndex:li,itemIndex:ii};
+  }
+  return null;
+}
+function wsiExperimentRevertBoraDraft(index){
+  const roi=rois?.[Number(index)];if(!roi||roi.properties?.manual_review_status!=='draft_from_prediction')return false;
+  const prediction=wsiExperimentBoraPredictionForDraft(roi);
+  if(typeof deleteRoi==='function')deleteRoi(index);
+  else return false;
+  if(prediction){prediction.item._boraShowOriginalForCompare=false;prediction.item.visible=true;}
+  wsiExperimentSyncBoraReviewVisibility();
+  if(typeof buildRoiList==='function')buildRoiList();
+  if(typeof draw==='function')draw();
+  notify('Review draft removed; original Bora prediction is visible again.','info',3400);
+  return true;
+}
+function wsiExperimentDecorateBoraDraftRows(){
+  const list=el('roiList');if(!list)return;
+  list.querySelectorAll('.roiItem[data-index]').forEach(row=>{
+    const index=Number(row.dataset.index),roi=rois?.[index];
+    if(roi?.properties?.manual_review_status!=='draft_from_prediction'||row.querySelector('.boraReviewRevert'))return;
+    const controls=row.querySelector('.roiControls');if(!controls)return;
+    const revert=document.createElement('button');revert.type='button';
+    revert.className='boraReviewRevert';revert.textContent='Revert to prediction';
+    revert.title='Discard this manual draft and reveal the unchanged Bora prediction';
+    revert.onclick=event=>{event.stopPropagation();wsiExperimentRevertBoraDraft(index);};
+    controls.prepend(revert);
+    const prediction=wsiExperimentBoraPredictionForDraft(roi);
+    if(prediction){
+      const compare=document.createElement('button');compare.type='button';
+      compare.className='boraReviewCompare';
+      compare.textContent=prediction.item._boraShowOriginalForCompare?'Hide original':'Show original';
+      compare.title='Toggle the unchanged model prediction for comparison';
+      compare.onclick=event=>{
+        event.stopPropagation();prediction.item._boraShowOriginalForCompare=!prediction.item._boraShowOriginalForCompare;
+        wsiExperimentSyncBoraReviewVisibility();
+        if(typeof buildRoiList==='function')buildRoiList();if(typeof draw==='function')draw();
+      };
+      controls.prepend(compare);
+    }
+  });
+}
+function wsiExperimentBoraCanvasHit(event){
+  if(event.button!==0||event.target!==canvas||typeof pointerToSlide!=='function'||
+     typeof layerObjectAt!=='function')return null;
+  const hit=layerObjectAt(pointerToSlide(event),(item,layer)=>
+    layer?.source_type==='bora_candidate_review'&&Number(layer?.metadata?.group_count)===3);
+  return hit;
+}
+let wsiExperimentBoraSuppressClickUntil=0;
+function wsiExperimentHandleBoraCanvasPointerDown(event){
+  if(!['brush','wand','polygon','draw'].includes(String(mode)))return;
+  const hit=wsiExperimentBoraCanvasHit(event);if(!hit)return;
+  event.preventDefault();event.stopImmediatePropagation();
+  wsiExperimentBoraSuppressClickUntil=performance.now()+700;
+  wsiExperimentCopyBoraBoundaryForReview(hit.layerIndex,hit.itemIndex);
+}
+function wsiExperimentHandleBoraCanvasMouseDown(event){
+  if(event.target!==canvas||performance.now()>wsiExperimentBoraSuppressClickUntil)return;
+  event.preventDefault();event.stopImmediatePropagation();
+}
+function wsiExperimentHandleBoraCanvasClick(event){
+  if(event.target===canvas&&performance.now()<=wsiExperimentBoraSuppressClickUntil){
+    event.preventDefault();event.stopImmediatePropagation();
+    wsiExperimentBoraSuppressClickUntil=0;return;
+  }
+  const hit=wsiExperimentBoraCanvasHit(event);
+  if(!hit)return;
+  event.preventDefault();event.stopImmediatePropagation();
+  wsiExperimentCopyBoraBoundaryForReview(hit.layerIndex,hit.itemIndex);
+}
+
+async function wsiExperimentExportBoraDrafts(){
+  const drafts=rois.map((roi,index)=>({roi,index})).filter(entry=>
+    entry.roi?.properties?.manual_review_status==='draft_from_prediction');
+  if(!drafts.length){notify('Copy and edit a Bora boundary first.','warning');return false;}
+  const features=drafts.map(entry=>roiFeature(entry.roi,entry.index)).filter(Boolean);
+  if(features.length!==drafts.length){notify('A review draft has no exportable geometry.','error');return false;}
+  const payload={type:'FeatureCollection',coordinate_space:'level0_slide_pixels',
+    review_status:'manual_correction_draft_not_yet_expert_validated',
+    experiment_manifest_sha256:wsiExperimentConfig()?.manifest_sha256||null,
+    features};
+  const name='PM016_KODAMA3_Bora_manual_corrections.geojson';
+  const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/geo+json'});
+  try{
+    const format={description:'GeoJSON manual corrections',
+      accept:{'application/geo+json':['.geojson'],'application/json':['.json']}};
+    const result=typeof saveBlobWithLocation==='function'&&
+      typeof savePickerAvailable==='function'&&savePickerAvailable()?
+      await saveBlobWithLocation(blob,name,format):'unsupported';
+    if(result==='unsupported'){
+      if(typeof downloadBlob!=='function')throw new Error('No browser download is available.');
+      await downloadBlob(blob,name);
+    }
+    else if(result==='cancelled')return false;
+    else if(result!=='saved'&&result!=='unsupported')throw new Error('Save did not complete.');
+    if(typeof scheduleViewerStateSync==='function')scheduleViewerStateSync('roi_exported',
+      {count:features.length,source:'manual_bora_review_draft'});
+    notify('Exported '+features.length+' editable review draft'+(features.length===1?'':'s')+' as GeoJSON.','success');
+    return true;
+  }catch(error){notify('Manual correction export failed: '+error.message,'error');return false;}
+}
+
+function wsiExperimentDecorateBoraReviewRows(){
+  const list=el('roiList');if(!list)return;
+  list.querySelectorAll('.roiItem[data-layer-index][data-item-index]').forEach(row=>{
+      const layerIndex=Number(row.dataset.layerIndex),itemIndex=Number(row.dataset.itemIndex),
+        layer=layers?.[layerIndex],group=Number(layer?.items?.[itemIndex]?.properties?.value);
+      if(layer?.source_type!=='bora_candidate_review'||
+         layer?.metadata?.review_only!==true||Number(layer?.metadata?.group_count)!==3||
+         ![1,2,3].includes(group)||row.querySelector('.boraReviewCopy'))return;
+      const name=row.querySelector('.roiName'),klass=row.querySelector('.roiClass');
+      if(name)name.textContent='Bora prediction · click to edit';
+      if(klass)klass.textContent='KODAMA Group '+group;
+      const controls=row.querySelector('.roiControls');if(!controls)return;
+      const copy=document.createElement('button');copy.type='button';
+      copy.className='boraReviewCopy';copy.textContent='Edit boundary';
+      copy.title='Edit a separate review draft while preserving the model prediction';
+      copy.onclick=event=>{event.stopPropagation();wsiExperimentCopyBoraBoundaryForReview(layerIndex,itemIndex);};
+      controls.prepend(copy);
+      const originalClick=row.onclick;
+      row.onclick=event=>{
+        event.stopPropagation();wsiExperimentCopyBoraBoundaryForReview(layerIndex,itemIndex);
+      };
+  });
+}
+function wsiExperimentBindBoraManualReview(){
+  if(wsiExperimentConfig()?.bora_annotations_mode==='ordinary_editable')return;
+  if(typeof appendImportedTissueAnnotationList==='function'&&
+     !appendImportedTissueAnnotationList._boraManualReviewBound){
+    const original=appendImportedTissueAnnotationList;
+    appendImportedTissueAnnotationList=function(...args){
+      const result=original(...args);wsiExperimentDecorateBoraReviewRows();return result;
+    };
+    appendImportedTissueAnnotationList._boraManualReviewBound=true;
+  }
+  if(typeof window!=='undefined'&&!wsiExperimentBindBoraManualReview._canvasBound){
+    window.addEventListener('pointerdown',wsiExperimentHandleBoraCanvasPointerDown,true);
+    window.addEventListener('mousedown',wsiExperimentHandleBoraCanvasMouseDown,true);
+    window.addEventListener('click',wsiExperimentHandleBoraCanvasClick,true);
+    wsiExperimentBindBoraManualReview._canvasBound=true;
+  }
+  wsiExperimentDecorateBoraReviewRows();
+  wsiExperimentDecorateBoraDraftRows();
+}
+
 function wsiExperimentBindWorkbench() {
   if (!wsiExperimentConfig() || el('experimentWorkbench')) return;
+  const evidence=wsiExperimentConfig().viewer_evidence||{},coverage=evidence.cell_coverage||[];
+  wsiExperimentBindBoraManualReview();
+  wsiExperimentBindBoraAnnotationStatus();
+  if((coverage.length||evidence.bora_interpretation||wsiExperimentBoraReviewEntry())&&el('projectPanelBody')&&!el('experimentEvidenceNotice')){
+    const notice=document.createElement('details');notice.id='experimentEvidenceNotice';
+    notice.style.cssText='border:1px solid #64748b;border-radius:6px;padding:6px;margin:4px 0 8px;color:#e2e8f0;font-size:12px';
+    const summary=document.createElement('summary');summary.id='experimentEvidenceSummary';summary.style.cursor='pointer';
+    summary.textContent=wsiExperimentEvidenceSummary();
+    const detail=document.createElement('p');detail.style.margin='6px 0 0';
+    detail.textContent=(wsiExperimentConfig()?.bora_annotations_mode==='ordinary_editable'?
+      'Bora polygons are editable tissue annotations. Their KODAMA group labels describe model output, not pathology ground truth.':
+      (wsiExperimentBoraReviewEntry()?wsiExperimentBoraAnnotationMessage():(evidence.bora_interpretation||'')))+
+      (coverage.length?' CellViT covers only the listed completed shards; unprocessed tissue has no cell prediction.':'');
+    notice.append(summary,detail);el('projectPanelBody').prepend(notice);
+  }
   const panel = el('predictionWindow'); if (!panel) return;
   const section = document.createElement('section'); section.id = 'experimentWorkbench';
   section.style.cssText = 'border-top:1px solid #475569;margin-top:12px;padding-top:12px;display:grid;gap:8px';
@@ -486,7 +803,7 @@ function wsiExperimentBindWorkbench() {
   const originalWand = runWandAt;
   runWandAt = async function(...args) { return el('experimentWandSource')?.value === 'feature' ? wsiExperimentRunWand(...args) : originalWand(...args); };
   const originalPreview = applyProjectPreview;
-  applyProjectPreview = function(...args) { const result=originalPreview(...args);wsiExperimentRequest++;wsiExperimentRefreshControls();return result; };
+  applyProjectPreview = function(...args) { const result=originalPreview(...args);wsiExperimentRequest++;wsiExperimentRefreshControls();wsiExperimentRefreshBoraAnnotationStatus();return result; };
   if (typeof restoreBrowserProjectInLiveSession === 'function' && !restoreBrowserProjectInLiveSession._experimentBound) {
     const originalRestore = restoreBrowserProjectInLiveSession;
     restoreBrowserProjectInLiveSession = function(snapshot, ...args) {
@@ -498,6 +815,8 @@ function wsiExperimentBindWorkbench() {
     restoreBrowserProjectInLiveSession._experimentBound = true;
   }
   wsiExperimentRefreshControls();
+  if(wsiExperimentConfig()?.bora_annotations_mode==='ordinary_editable'&&
+     typeof setMode==='function')setMode('pan');
 }
 
 // Start with the actual project capabilities, rather than unexplained disabled tools.

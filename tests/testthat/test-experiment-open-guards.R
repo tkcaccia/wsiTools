@@ -31,9 +31,46 @@ test_that("viewer preparation closes its owned slide on failure before live hand
   on.exit(unlink(fixture$root, recursive = TRUE), add = TRUE)
   closed <- 0L
   testthat::local_mocked_bindings(
-    wsi_open = function(...) list(path = fixture$image),
+    wsi_open = function(...) list(path = fixture$image, dimensions = c(width = 8L, height = 8L)),
     wsi_close = function(...) { closed <<- closed + 1L; invisible(NULL) },
     wsi_experiment_images = function(...) stop("Preparation fixture failure"))
   expect_error(wsi_viewer_experiment(fixture$path, open = FALSE), "Preparation fixture failure")
+  expect_equal(closed, 1L)
+})
+
+test_that("registered display uses its explicit reader and the analyzed native frame", {
+  skip_if_not_installed("openssl")
+  fixture <- experiment_open_guard_fixture()
+  on.exit(unlink(fixture$root, recursive = TRUE), add = TRUE)
+  display <- file.path(fixture$root, "display.ppm")
+  file.copy(fixture$image, display)
+  image <- fixture$manifest$tissues[[1L]]$image
+  fixture$manifest$tissues[[1L]]$image$display <- list(path = "display.ppm",
+    format = "native-pixel-pyramid", sha256 = wsi_experiment_sha256(display),
+    source_sha256 = image$sha256, source_frame_id = image$frame_id, backend = "vips")
+  jsonlite::write_json(fixture$manifest, fixture$path, auto_unbox = TRUE)
+  opened <- NULL; closed <- 0L
+  testthat::local_mocked_bindings(
+    wsi_open = function(path, backend) {
+      opened <<- list(path = path, backend = backend)
+      list(path = path, dimensions = c(width = 8L, height = 8L))
+    },
+    wsi_close = function(...) { closed <<- closed + 1L; invisible(NULL) },
+    wsi_experiment_images = function(...) stop("Registered display fixture handoff"))
+  expect_error(wsi_viewer_experiment(fixture$path, open = FALSE), "Registered display fixture handoff")
+  expect_identical(opened$backend, "vips")
+  expect_identical(opened$path, normalizePath(display, winslash = "/"))
+  expect_equal(closed, 1L)
+})
+
+test_that("mismatched display dimensions stop before viewer handoff and close the reader", {
+  skip_if_not_installed("openssl")
+  fixture <- experiment_open_guard_fixture()
+  on.exit(unlink(fixture$root, recursive = TRUE), add = TRUE)
+  closed <- 0L
+  testthat::local_mocked_bindings(
+    wsi_open = function(...) list(dimensions = c(width = 9L, height = 8L)),
+    wsi_close = function(...) { closed <<- closed + 1L; invisible(NULL) })
+  expect_error(wsi_viewer_experiment(fixture$path, open = FALSE), "dimensions differ")
   expect_equal(closed, 1L)
 })

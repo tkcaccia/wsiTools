@@ -5,7 +5,7 @@ desktop_experiment_test_scope <- function() {
   scope$desktop_stage <- function(...) invisible(NULL)
   scope$desktop_log <- function(...) invisible(NULL)
   wanted <- c("%||%", "desktop_project_input", "desktop_experiment_reference",
-              "desktop_open_experiment", "desktop_open_target")
+              "desktop_experiment_display", "desktop_open_experiment", "desktop_open_target")
   for (definition in as.list(parse(launcher))) {
     if (is.call(definition) && identical(definition[[1L]], as.name("<-")) &&
         as.character(definition[[2L]]) %in% wanted) eval(definition, scope)
@@ -72,12 +72,14 @@ test_that("Desktop experiment opener uses the existing-results viewer and does n
                            name = "Two tissues", tissues = list(list(id = "a"), list(id = "b"))),
                        experiment, auto_unbox = TRUE)
   received <- NULL
-  opener <- function(path, output, open, wait) {
-    received <<- list(path = path, output = output, open = open, wait = wait)
+  opener <- function(path, output, open, wait, mode, dynamic_tiles) {
+    received <<- list(path = path, output = output, open = open, wait = wait,
+                      mode = mode, dynamic_tiles = dynamic_tiles)
     structure(list(html = output), class = "wsi_viewer_session")
   }
   viewer <- scope$desktop_open_experiment(experiment, "viewer.html", NULL, open_fun = opener)
-  expect_identical(received, list(path = experiment, output = "viewer.html", open = FALSE, wait = FALSE))
+  expect_identical(received, list(path = experiment, output = "viewer.html", open = FALSE, wait = FALSE,
+                                  mode = "tiles", dynamic_tiles = TRUE))
   expect_identical(attr(viewer, "desktop_experiment_path"), experiment)
 })
 

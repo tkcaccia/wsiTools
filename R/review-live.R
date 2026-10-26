@@ -132,6 +132,12 @@ wsi_review_live_request <- function(state, payload) {
   } else if (identical(action, "checkpoint")) {
     checkpoint <- wsi_review_commit_checkpoint(state, payload$checkpoint)
     state$review_checkpoint <- checkpoint
+    # The browser already owns this immutable context. A selection/review
+    # acknowledgement must not serialize every source observation again.
+    wsi_assign_viewer_state(state)
+    return(list(ok = TRUE, context_id = context$context_id,
+      source_signature = context$source_signature, revision = checkpoint$revision,
+      checkpoint = checkpoint))
   } else if (identical(action, "tile_plan")) {
     if (!identical(payload$context_id, context$context_id) ||
         !identical(payload$source_signature, context$source_signature))

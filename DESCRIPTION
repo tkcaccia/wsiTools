@@ -32,6 +32,7 @@ Suggests:
     callr,
     clinical,
     curl,
+    DBI,
     e1071,
     httpuv,
     knitr,
@@ -42,6 +43,7 @@ Suggests:
     RANN,
     Rnanoflann,
     rmarkdown,
+    RSQLite,
     S4Vectors,
     SeuratObject,
     SingleCellExperiment,
@@ -52,6 +54,7 @@ Suggests:
     V8,
     withr
 SystemRequirements: None required for installation. Optional runtime tools:
+    Python 3.9 or later for indexed CellViT feature decoding;
     OpenSlide command-line tools; libvips command-line tools; Bio-Formats
     command-line tools; optional ZEISS libCZI for native CZI builds; optional
     local web services for interactive workflows; optional WebKitGTK 4.1 for

@@ -31,6 +31,7 @@ wsi_viewer_runtime_js <- function() {
     wsi_viewer_runtime_asset("annotation-selection.js"), "\n",
     wsi_viewer_runtime_asset("experiment-workbench.js"), "\n",
     wsi_viewer_runtime_asset("review-workbench.js"), "\n",
-    wsi_viewer_runtime_asset("review-host.js"), "\n"
+    wsi_viewer_runtime_asset("review-host.js"), "\n",
+    wsi_viewer_runtime_asset("cell-workbench.js"), "\n"
   )
 }

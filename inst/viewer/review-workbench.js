@@ -32,6 +32,39 @@
   const finite = value => typeof value === 'number' && Number.isFinite(value);
   const assert = (condition, message) => { if (!condition) throw new Error(message); };
   const key = (tissue, frame) => JSON.stringify([tissue, frame]);
+  const CLUSTER_PALETTE = ['#4363D8','#E6194B','#3CB44B','#F58231','#911EB4','#42D4F4','#F032E6','#BFEF45','#9A6324','#469990','#800000','#000075'];
+  function clusterPaletteColour(index) {
+    if (index < CLUSTER_PALETTE.length) return CLUSTER_PALETTE[index];
+    const h = ((index * 137.507764) % 360) / 360, l = .45, a = .7 * Math.min(l,1-l);
+    return '#'+[0,8,4].map(n => {const k=(n+h*12)%12;return Math.round(255*(l-a*Math.max(-1,Math.min(k-3,9-k,1)))).toString(16).padStart(2,'0');}).join('').toUpperCase();
+  }
+  const isKodama = reduction => /^KODAMA(?:[. _-]|$)/i.test(String(reduction?.source_reference?.method || reduction?.method || ''));
+  function reviewDisplayDefaults(context) {
+    const defaults=context?.provenance?.review_defaults;
+    assert(defaults==null||typeof defaults==='object'&&!Array.isArray(defaults), 'Experiment review_defaults must be an object.');
+    if(defaults&&Object.hasOwn(defaults,'show_bora_predictions'))
+      assert(typeof defaults.show_bora_predictions==='boolean', 'Experiment review_defaults.show_bora_predictions must be a boolean.');
+    // The analytical tile grid can obscure native cell and tissue boundaries.
+    // Open project viewers on the image/annotations; users can enable the
+    // unified KODAMA-group/processing-footprint control when needed.
+    return {show_cluster_overlay:false,show_processing_tile_footprints:false,
+      show_tissue_predictions:defaults?.show_bora_predictions??true};
+  }
+  function kodamaAvailability(context, tissueId) {
+    const image = (context?.images || []).find(item => item.tissue_id === tissueId);
+    if (!image) return {maps: [], reason: 'This tissue has no registered image frame.'};
+    const byId = new Map((context.observations || []).map(row => [row.id, row]));
+    const maps = (context.reductions || []).filter(reduction => isKodama(reduction) &&
+      (!reduction.frame_id || reduction.frame_id === image.frame_id) && reduction.points?.some(point => {
+        const row = byId.get(point.id);
+        return row?.tissue_id === tissueId && row.frame_id === image.frame_id && row.observation_unit === reduction.observation_unit &&
+          (reduction.dataset_id == null || reduction.dataset_id === (row.dataset_id || ''));
+      })).sort((a,b) => {
+        const rank = item => item.observation_unit === 'tile' && (item.source_feature_set_id === 'virchow2-pooled' || item.dataset_id === 'experiment:virchow2-pooled') ? 0 : item.observation_unit === 'tile' ? 1 : 2;
+        return rank(a) - rank(b) || a.id.localeCompare(b.id);
+      });
+    return {maps, reason: maps.length ? '' : context?.provenance?.availability?.reason || 'No registered KODAMA coordinates are available for this tissue. Export its ID-keyed KODAMA reduction with the CellPhenotyper project; opening an RData file alone does not create a map.'};
+  }
 
   function validateContext(input) {
     assert(input && input.schema === 'wsitools-review-context' && input.schema_version === 1,
@@ -40,6 +73,7 @@
       'Review context needs its context ID, experiment ID and source signature.');
     assert(Array.isArray(input.images) && input.images.length && Array.isArray(input.observations),
       'Review context needs image identities and an observation table.');
+    reviewDisplayDefaults(input);
     const context = clone(input), images = new Map(), tissues = new Set(), ids = new Map();
     for (const image of context.images) {
       assert(text(image.tissue_id) && text(image.frame_id) && /^[a-f0-9]{64}$/i.test(image.sha256 || ''),
@@ -96,6 +130,9 @@
         const row = ids.get(point.id);
         assert(row && !seen.has(point.id), 'Unknown or duplicate reduction observation ID: ' + point.id);
         assert(row.observation_unit === reduction.observation_unit, 'Reduction and observation units differ: ' + point.id);
+        if (reduction.frame_id != null) assert(row.frame_id === reduction.frame_id, 'Reduction and observation frames differ: ' + point.id);
+        if (reduction.source_feature_set_id != null) assert(row.feature_set_id === reduction.source_feature_set_id,
+          'Reduction and observation feature sets differ: ' + point.id);
         if (reduction.dataset_id != null) assert(typeof reduction.dataset_id === 'string' &&
           (row.dataset_id || '') === reduction.dataset_id, 'Reduction and observation datasets differ: ' + point.id);
         assert(finite(point.x) && finite(point.y), 'Reduction coordinates must be finite.');
@@ -154,12 +191,16 @@
       return fromReduction.length === 1 && known.includes(fromReduction[0]) ? fromReduction[0] : known[0] || '';
     }
     function matchingReductions(value, dataset) {
-      return context.reductions.filter(item => item.observation_unit === value && (dataset === '*' || reductionDatasets(item).includes(dataset)));
+      return context.reductions.filter(item => item.observation_unit === value && (dataset === '*' || reductionDatasets(item).includes(dataset)) &&
+        (scope === 'all' || item.points.some(point => byId.get(point.id)?.tissue_id === activeTissue)));
     }
     let activeTissue = typeof host.getActiveTissueId === 'function' ? String(host.getActiveTissueId()) : context.images[0].tissue_id;
     let scope = 'current', unit = units[0] || '', reductionId = context.reductions.find(r => r.observation_unit === unit)?.id || '';
     let datasetId = defaultDataset(unit, context.reductions.find(item => item.id === reductionId));
     let clusterField = '';
+    const displayDefaults = reviewDisplayDefaults(context);
+    let displayOptions = {...displayDefaults};
+    const paletteCache = new Map();
     let state = {selected_ids: [], review_records: []}, revision = 0, past = [], future = [];
     let panel = null, ui = {}, destroyed = false, generation = 0, plotPoints = [], drag = null;
     let planned = null, planGeneration = 0, workOperation = null;
@@ -172,10 +213,42 @@
     }
     function ensureClusterField() {
       const available = scopedClusterFields();
-      if (!available.includes(clusterField)) clusterField = available[0] || '';
+      if (!available.includes(clusterField)) clusterField = ['leiden_cluster','cluster','kodama_cluster','seurat_clusters'].find(field => available.includes(field)) || available[0] || '';
       return available;
     }
     ensureClusterField();
+    function clusterLegend() {
+      const cacheKey = JSON.stringify([unit,datasetId,clusterField]);
+      if (!paletteCache.has(cacheKey)) {
+        const values = [...new Set(rows.filter(row => row.observation_unit === unit && (datasetId === '*' || rowDataset(row) === datasetId))
+          .map(row => row.cluster_values[clusterField]).filter(value => value != null).map(String))].sort((a,b) => a.localeCompare(b,undefined,{numeric:true}));
+        const colours = new Map(values.map((value,index) => [value,clusterPaletteColour(index)]));
+        paletteCache.set(cacheKey,colours);
+      }
+      const counts = new Map();
+      for (const row of rows.filter(visible)) {
+        const value = row.cluster_values[clusterField];
+        if (value != null) counts.set(String(value),(counts.get(String(value)) || 0) + 1);
+      }
+      return [...paletteCache.get(cacheKey)].filter(([value]) => counts.has(value)).map(([value,colour]) => ({value,colour,count:counts.get(value)}));
+    }
+    function observationColour(row) {
+      // The palette uses the complete declared dataset, so selection and tissue scope cannot recolour a cluster.
+      const cacheKey = JSON.stringify([unit,datasetId,clusterField]);
+      if (!paletteCache.has(cacheKey)) clusterLegend();
+      return paletteCache.get(cacheKey).get(String(row.cluster_values[clusterField])) || '#94A3B8';
+    }
+    function openKodamaMap(id) {
+      const available = kodamaAvailability(context,activeTissue);
+      const reduction = id == null ? available.maps.find(item => item.id === reductionId) || available.maps[0] : available.maps.find(item => item.id === id);
+      assert(reduction, id == null ? available.reason : 'The requested KODAMA map does not belong to this tissue and coordinate frame.');
+      scope = 'current'; unit = reduction.observation_unit; reductionId = reduction.id; datasetId = defaultDataset(unit,reduction);
+      const fields = scopedClusterFields();
+      clusterField = [reduction.preferred_cluster_field,'leiden_cluster','cluster','kodama_cluster','seurat_clusters'].find(field => fields.includes(field)) || fields[0] || '';
+      invalidatePlan(); call('onViewChange',viewState());
+      status('KODAMA embedding linked to '+unit+' observations on H&E. Colours show '+(clusterField || 'unavailable cluster metadata')+'; selection preserves source results.');
+      return viewState();
+    }
 
     function ordered(ids) {
       assert(ids == null || Array.isArray(ids), 'Selection must be an array of canonical observation IDs.');
@@ -312,12 +385,39 @@
     }
     function setActiveTissue(id) {
       assert(context.images.some(image => image.tissue_id === id), 'Unknown active tissue identity.');
-      activeTissue = id; ensureClusterField(); invalidatePlan(); return activeTissue;
+      activeTissue = id;
+      if (scope === 'current' && isKodama(context.reductions.find(item => item.id === reductionId))) {
+        const available = kodamaAvailability(context,activeTissue).maps;
+        if (!available.some(item => item.id === reductionId) && available.length) {
+          const reduction = available.find(item => item.dataset_id === datasetId) || available[0];
+          reductionId = reduction.id; unit = reduction.observation_unit; datasetId = defaultDataset(unit,reduction);
+        }
+      }
+      ensureClusterField(); invalidatePlan(); return activeTissue;
     }
-    function viewState() { return {reduction_id: reductionId, scope, observation_unit: unit, cluster_field: clusterField, dataset_id: datasetId}; }
+    function syncGroupGeometry() {
+      // One display choice controls both visibility and the native tile geometry.
+      // Keep the older field in saved views, but never expose visible tile points
+      // as though the unified processing-tile control were showing footprints.
+      displayOptions.show_processing_tile_footprints = unit === 'tile' && displayOptions.show_cluster_overlay;
+    }
+    function viewState() { syncGroupGeometry(); return {reduction_id: reductionId, scope, observation_unit: unit, cluster_field: clusterField, dataset_id: datasetId, ...displayOptions}; }
+    function setDisplayOptions(options) {
+      assert(options && typeof options === 'object' && !Array.isArray(options), 'Review display options must be an object.');
+      assert(Object.keys(options).every(name => Object.hasOwn(displayDefaults,name) && typeof options[name] === 'boolean'), 'Unknown or invalid review display option.');
+      // Older callers may still set only the footprint field. Treat that as the
+      // unified tile-overlay choice; an explicit visibility value takes priority.
+      if(unit === 'tile' && Object.hasOwn(options,'show_processing_tile_footprints') && !Object.hasOwn(options,'show_cluster_overlay'))
+        options = {...options,show_cluster_overlay:options.show_processing_tile_footprints};
+      displayOptions = {...displayOptions,...options};syncGroupGeometry(); render(); call('onViewChange',viewState()); return viewState();
+    }
     function restoreViewState(view) {
       assert(view && typeof view === 'object' && !Array.isArray(view), 'Review view state must be an object.');
-      assert(Object.keys(view).every(name => ['reduction_id', 'scope', 'observation_unit', 'cluster_field', 'dataset_id'].includes(name)), 'Unknown review view-state field.');
+      assert(Object.keys(view).every(name => ['reduction_id', 'scope', 'observation_unit', 'cluster_field', 'dataset_id', ...Object.keys(displayDefaults)].includes(name)), 'Unknown review view-state field.');
+      const display = {...displayDefaults};
+      for (const name of Object.keys(displayDefaults)) if (Object.hasOwn(view,name)) {
+        assert(typeof view[name] === 'boolean', 'Invalid review display option: '+name); display[name] = view[name];
+      }
       assert(['current', 'all'].includes(view.scope), 'Unknown review scope.');
       assert(units.length ? units.includes(view.observation_unit) : view.observation_unit === '', 'Unknown review observation unit.');
       assert(view.cluster_field === '' || clusterFields.includes(view.cluster_field), 'Unknown cluster metadata field.');
@@ -327,6 +427,10 @@
       assert(reduction ? reduction.observation_unit === view.observation_unit && (dataset === '*' || reductionDatasets(reduction).includes(dataset)) :
         view.reduction_id === '' && !matchingReductions(view.observation_unit, dataset).length, 'Unknown or incompatible review reduction.');
       scope = view.scope; unit = view.observation_unit; clusterField = view.cluster_field; reductionId = view.reduction_id; datasetId = dataset;
+      // In a legacy saved view the visible flag is authoritative. Visible tile
+      // groups now use registered processing footprints, even if the old view
+      // stored its separate optional-footprint flag as false.
+      displayOptions = display;syncGroupGeometry();
       ensureClusterField();
       invalidatePlan();
       call('onViewChange', viewState()); return viewState();
@@ -453,11 +557,13 @@
       units.forEach(value => option(ui.unit, value, value)); ui.unit.onchange = () => { unit = ui.unit.value; reductionId = context.reductions.find(r => r.observation_unit === unit)?.id || ''; datasetId = defaultDataset(unit, context.reductions.find(item => item.id === reductionId)); ensureClusterField(); invalidatePlan(); call('onViewChange', viewState()); };
       const datasetLabel = element('label', null, 'Dataset ', controls); ui.dataset = element('select', 'dataset', null, datasetLabel);
       ui.dataset.onchange = () => run(() => setDataset(ui.dataset.value));
-      const fieldLabel = element('label', null, 'Clusters ', controls); ui.field = element('select', 'cluster-field', null, fieldLabel);
+      const fieldLabel = element('label', null, 'Group metadata ', controls); ui.field = element('select', 'cluster-field', null, fieldLabel);
       ui.field.onchange = () => { clusterField = ui.field.value; render(); call('onViewChange', viewState()); };
+      ui.groupSummary = element('strong', 'group-summary', null, panel);
       ui.clusters = element('div', 'clusters', null, panel); ui.clusters.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;max-height:100px;overflow:auto;margin:6px 0';
       const reductionLabel = element('label', null, 'Linked plot ', panel); ui.reduction = element('select', 'reduction', null, reductionLabel);
       ui.reduction.onchange = () => run(() => setReduction(ui.reduction.value));
+      ui.plotCaption = element('p', 'plot-caption', null, panel);
       ui.plot = element('canvas', 'plot', null, panel); ui.plot.width = 620; ui.plot.height = 260;
       ui.plot.setAttribute('aria-label', 'Reduction plot. Drag to lasso observations; Shift adds, Alt subtracts.');
       ui.plot.style.cssText = 'display:block;width:100%;height:260px;touch-action:none;border:1px solid #9ba5b4;margin:6px 0;background:#fff';
@@ -513,9 +619,9 @@
         const p = [18 + (point.x - minX) / dx * (canvas.width - 36), canvas.height - 18 - (point.y - minY) / dy * (canvas.height - 36)];
         plotPoints.push({id: point.id, canvas: p});
         const stateColor = reviewed.get(point.id);
-        ctx.fillStyle = selected.has(point.id) ? '#ed7900' : stateColor === 'excluded' ? '#aaa' : stateColor === 'uncertain' ? '#9b59b6' : stateColor === 'reviewed' ? '#21844a' : '#4c78a8';
+        ctx.fillStyle = observationColour(byId.get(point.id));
         ctx.beginPath(); ctx.arc(p[0], p[1], selected.has(point.id) ? 4 : 2.5, 0, Math.PI * 2); ctx.fill();
-        if (selected.has(point.id)) { ctx.strokeStyle = '#222'; ctx.stroke(); }
+        if (selected.has(point.id) || stateColor) { ctx.strokeStyle = selected.has(point.id) ? '#ed7900' : stateColor === 'excluded' ? '#666' : stateColor === 'uncertain' ? '#9b59b6' : '#21844a'; ctx.lineWidth = 2; ctx.stroke(); }
       }
       if (drag && drag.points.length) { ctx.strokeStyle = '#e27700'; ctx.beginPath(); drag.points.forEach((p, i) => i ? ctx.lineTo(...p) : ctx.moveTo(...p)); ctx.stroke(); }
     }
@@ -538,11 +644,14 @@
         const value = String(row.cluster_values[field]); if (!groups.has(value)) groups.set(value, []); groups.get(value).push(row.id);
       }
       const selected = new Set(state.selected_ids);
+      const activeReduction = context.reductions.find(item => item.id === reductionId);
+      ui.groupSummary.textContent = (isKodama(activeReduction)?'KODAMA groups':'Observation groups')+' · '+groups.size+' groups · '+[...groups.values()].reduce((n,ids)=>n+ids.length,0)+' '+unit+' observations. Separate from Bora tissue predictions and RGB feature contrast.';
       for (const [value, ids] of [...groups].sort((a, b) => a[0].localeCompare(b[0], undefined, {numeric: true}))) {
         const label = element('label', null, null, ui.clusters), box = element('input', null, null, label); box.type = 'checkbox';
         ui.clusterInputs.set(value, box);
         const n = ids.filter(id => selected.has(id)).length; box.checked = n === ids.length; box.indeterminate = n > 0 && n < ids.length;
         box.onchange = () => run(() => selectIds(ids, {mode: box.checked ? 'add' : 'subtract'}));
+        const swatch = element('span',null,'■',label); swatch.style.color = observationColour(byId.get(ids[0])); swatch.setAttribute('aria-hidden','true');
         label.appendChild(panel.ownerDocument.createTextNode(' ' + value + ' (' + ids.length + ')'));
       }
       if (!groups.size) element('span', null, 'No cluster metadata in this scope.', ui.clusters);
@@ -550,6 +659,10 @@
       ui.reduction.replaceChildren();
       matchingReductions(unit, datasetId).forEach(item => option(ui.reduction, item.id, item.label));
       ui.reduction.value = reductionId; ui.reduction.disabled = !ui.reduction.options.length;
+      const reduction = context.reductions.find(item => item.id === reductionId);
+      ui.plotCaption.textContent = reduction && (!reduction.frame_id || context.images.find(image => image.tissue_id === activeTissue)?.frame_id === reduction.frame_id) && reduction.points.some(point => visible(byId.get(point.id))) ?
+        (isKodama(reduction) ? 'KODAMA embedding (dimensions 1 and 2)' : 'Registered reduction (dimensions 1 and 2)')+' · '+unit+' · '+datasetId+' · colours: '+(clusterField || 'no cluster field')+'. H&E uses the same cluster colours; orange outlines mark selection.' :
+        'No compatible reduction is registered in this tissue, unit and dataset scope.';
       const current = currentSelectedRows(), tiles = planned ? planned.tiles : selectedTileRows();
       ui.count.textContent = state.selected_ids.length + ' selected observations total · ' + current.length + ' in current tissue / displayed unit and dataset · ' +
         (planned ? planned.tiles.length + ' planned work tiles · ' : '') + state.review_records.length + ' human review records';
@@ -610,8 +723,8 @@
     function destroy() { destroyed = true; generation++; panel?.remove(); panel = null; ui = {}; }
     const api = {mount, snapshot, restore, selection, selectIds, selectCluster, selectedRows, selectedTileRows, review, undo, redo,
       setActiveTissue, setScope, setReduction, setDataset, selectImageGeometry, selectReductionPolygon, exportSelected, planSelected, invalidatePlan,
-      viewState, restoreViewState, workPlan: () => planned ? clone(planned) : null, destroy};
+      viewState, restoreViewState, setDisplayOptions, openKodamaMap, clusterLegend, observationColour, workPlan: () => planned ? clone(planned) : null, destroy};
     return api;
   }
-  return {create, validateContext, pointInGeometry, coordinateConvention: CONVENTION};
+  return {create, validateContext, kodamaAvailability, pointInGeometry, coordinateConvention: CONVENTION};
 });

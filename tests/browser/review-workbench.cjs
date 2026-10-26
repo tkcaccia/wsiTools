@@ -265,7 +265,8 @@ test('view state independently restores reduction, unit, cluster field and scope
   const {ui} = create(); ui.selectIds(['a::spots::barcode-1']);
   const evidence = ui.snapshot();
   const view = {reduction_id: 'rna', scope: 'all', observation_unit: 'spot', cluster_field: 'seurat'};
-  const expected = {...view, dataset_id: 'rna'};
+  const expected = {...view, dataset_id: 'rna', show_cluster_overlay: false,
+    show_processing_tile_footprints: false, show_tissue_predictions: true};
   ui.restoreViewState(view); assert.deepEqual(ui.viewState(), expected); assert.deepEqual(ui.snapshot(), evidence);
   const replay = create().ui; replay.restore(ui.snapshot()); replay.restoreViewState(clone(ui.viewState()));
   assert.deepEqual(replay.viewState(), expected); assert.deepEqual(replay.snapshot(), evidence);

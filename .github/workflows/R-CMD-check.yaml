@@ -100,6 +100,24 @@ jobs:
           node tests/browser/browser-save.cjs
           node tests/browser/channel-targeting.cjs
           node tests/browser/prediction-readiness.cjs
+          node tests/browser/cell-workbench.cjs
+          node tests/browser/cell-all-zoom.cjs
+          node tests/browser/cell-viewport-lazy.cjs
+          node tests/browser/cell-display-lifecycle.cjs
+          node tests/browser/cell-display-persistence.cjs
+          node tests/browser/cell-viewport-scheduling.cjs
+          node tests/browser/cell-geometry-resume.cjs
+          node tests/browser/experiment-bora-status.cjs
+          node tests/browser/bora-review-lock.cjs
+          node tests/browser/bora-three-group-manual-review.cjs
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Check lossless CellViT feature decoding
+        shell: bash
+        run: python -m unittest discover -s tests/python -v
 
       - name: Report optional runtime tools
         shell: Rscript {0}

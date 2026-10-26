@@ -240,6 +240,8 @@ function wsiDrawRois() {
   wsiUpdateSelectedAnnotationNote();
   if (!screenshotIncludeComponent('annotations') || !showRois || !rois.length) return;
   const viewBounds = roiVisibleSlideBounds(.10), labels = [], highlightActive = annotationHighlightActive();
+  const mpp = Number(cfg?.mpp?.x || cfg?.mpp_x || 0.25);
+  const fieldWidthUm = viewBounds ? (viewBounds.xmax - viewBounds.xmin) * mpp : Infinity;
   ctx.save(); ctx.font = '600 12px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif'; ctx.textBaseline = 'top';
   wsiVisibleRoiEntries(rois, viewBounds).forEach(({ roi, index }) => {
     if (!visibleRoi(roi) || !isDrawable(roi) || !denseGeometryVisible(roi) || !overlayFocusRoiAllowed(roi)) return;
@@ -250,7 +252,9 @@ function wsiDrawRois() {
     const metrics = roiCanvasMetrics(bounds), lod = roiLodMode(roi, index, bounds, metrics, highlighted);
     if (lod === 'detail') wsiPaintRoi(ctx, roi, index, slideToCanvas, viewBounds, selected, highlighted, dimmed);
     else drawRoiLodMarker(roi, index, bounds, metrics, lod, dimmed, highlighted, selected);
-    if (showLabels && !dimmed && (lod === 'detail' || highlighted || selected)) {
+    const boraPrediction = !!roi?.properties?.bora_prediction_sha256;
+    if (showLabels && !dimmed && (!boraPrediction || fieldWidthUm <= 1000 || selected) &&
+        (lod === 'detail' || highlighted || selected)) {
       const anchor = roiLabelPoint(roi), text = roiLabelText(roi, index);
       if (anchor && text) labels.push({ anchor, text, w: ctx.measureText(text).width + 18, h: 22,
         colour: roi.colour || '#5eead4', priority: highlighted ? 20 : selected ? 10 : 0 });

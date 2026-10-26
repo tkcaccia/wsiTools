@@ -2401,6 +2401,31 @@ desktop_experiment_reference <- function(reference, project_path) {
   normalizePath(value, winslash = "/", mustWork = TRUE)
 }
 
+desktop_experiment_display <- function(path, index) {
+  has_display <- vapply(index$tissues %||% list(), function(tissue)
+    !is.null(tissue$image$display), logical(1))
+  if (!any(has_display)) return(path)
+  experiment <- wsiTools::wsi_read_experiment(path, verify_hashes = TRUE)
+  checked_file <- utils::getFromNamespace("wsi_experiment_file", "wsiTools")
+  for (i in which(has_display)) {
+    image <- experiment$tissues[[i]]$image
+    display <- image$display
+    if (!identical(display$format, "native-pixel-pyramid") ||
+        !identical(display$source_sha256, image$sha256) ||
+        !identical(display$source_frame_id, image$frame_id))
+      stop("The display pyramid is not registered to the analyzed image.", call. = FALSE)
+    display <- checked_file(display, experiment$root, "display pyramid", TRUE)
+    slide <- wsiTools::wsi_open(display$resolved_path, backend = display$backend %||% "auto")
+    dimensions <- slide$dimensions
+    wsiTools::wsi_close(slide)
+    if (!identical(as.numeric(dimensions[c("width", "height")]),
+                   as.numeric(c(image$width, image$height))))
+      stop("The display pyramid dimensions differ from the analyzed image.", call. = FALSE)
+    experiment$tissues[[i]]$image$resolved_path <- display$resolved_path
+  }
+  experiment
+}
+
 desktop_open_experiment <- function(path, output, log_file, open_fun = NULL, review_context = NULL, review_checkpoint = NULL) {
   if (is.null(open_fun)) {
     if (!"wsi_viewer_experiment" %in% getNamespaceExports("wsiTools")) {
@@ -2424,7 +2449,7 @@ desktop_open_experiment <- function(path, output, log_file, open_fun = NULL, rev
     extra$review_context <- validate_restore(base, review_context, review_checkpoint)
     extra$review_checkpoint <- review_checkpoint
   }
-  viewer <- do.call(open_fun, c(list(path, output = output, open = FALSE, wait = FALSE), extra))
+  viewer <- do.call(open_fun, c(list(desktop_experiment_display(path, index), output = output, open = FALSE, wait = FALSE, mode = "tiles", dynamic_tiles = TRUE), extra))
   attr(viewer, "desktop_experiment_path") <- path
   viewer
 }

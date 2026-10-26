@@ -1077,6 +1077,23 @@ wsi_prediction_selected_roi_indices <- function(rois, ids, include_all = FALSE) 
   sort(unique(indices))
 }
 
+# Viewer review layers are separate from editable ROIs, but callers can also
+# supply a GeoJSON ROI table directly. Refuse exploratory Bora geometry even
+# when a caller explicitly selects it by ID, index, name or class.
+wsi_prediction_reject_review_training <- function(rois, indices) {
+  if (!length(indices)) return(invisible(FALSE))
+  for (i in indices) {
+    properties <- wsi_geojson_list(wsi_roi_column_value(rois, "properties", i, default = list()))
+    source <- as.character(wsi_roi_column_value(rois, "source_type", i, default = ""))
+    candidate <- identical(properties$review_only, TRUE) ||
+      identical(properties$source_type, "bora_candidate_review") ||
+      identical(source, "bora_candidate_review")
+    if (candidate)
+      wsi_abort("Bora exploratory boundaries are locked review geometry and cannot be used for PLS-LDA training.")
+  }
+  invisible(FALSE)
+}
+
 wsi_prediction_assign_points <- function(points, rois, ids, include_all = FALSE) {
   label <- rep(NA_character_, nrow(points))
   roi_id <- rep(NA_character_, nrow(points))
@@ -1272,6 +1289,8 @@ wsi_prediction_layer <- function(result, radius = 8) {
     ))
   }
   palette <- wsi_prediction_palette(result$predicted)
+  full_count <- attr(result, "total_count") %||% nrow(result)
+  partial_preview <- full_count > nrow(result)
   class_counts <- table(factor(as.character(result$predicted), levels = names(palette)))
   legend_entries <- lapply(seq_along(palette), function(i) {
     list(
@@ -1320,10 +1339,10 @@ wsi_prediction_layer <- function(result, radius = 8) {
   })
   list(
     id = "wsi_prediction_pls_lda",
-    name = "PLS-LDA prediction",
+    name = if (partial_preview) sprintf("PLS preview (%s of %s cells; full results saved)", nrow(result), full_count) else "PLS-LDA prediction",
     type = "vector",
     source_type = "prediction",
-    visible = TRUE,
+    visible = !partial_preview,
     opacity = 0.96,
     colour = "#FACC15",
     replace = TRUE,
@@ -1339,6 +1358,7 @@ wsi_prediction_layer <- function(result, radius = 8) {
       colours = unname(palette),
       vector_rendering = TRUE,
       coordinate_overlay = TRUE,
+      displayed_count = nrow(result), total_count = full_count, partial_preview = partial_preview,
       lod = list(enabled = FALSE, full_coordinates = TRUE),
       svm_refined = any(as.logical(result$svm_refined %||% FALSE), na.rm = TRUE)
     )
@@ -1625,6 +1645,8 @@ wsi_prediction_run <- function(context, rois, source_id, train_ids, test_ids = c
   if (!nrow(points)) {
     wsi_abort("No spatial spots or cells with finite coordinates are available for prediction.")
   }
+  wsi_prediction_reject_review_training(rois,
+    wsi_prediction_selected_roi_indices(rois, train_ids, include_all = FALSE))
   train <- wsi_prediction_assign_points(points, rois, train_ids, include_all = FALSE)
   train_rows <- which(!is.na(train$label) & nzchar(train$label))
   if (length(train_rows) < 3L) {
@@ -1726,8 +1748,14 @@ wsi_prediction_validate_payload <- function(payload) {
   allowed <- c(
     "feature_source", "train_annotations", "test_annotations", "rois",
     "ncomp", "method", "scaling", "max_features", "reduction_dims",
-    "refine_svm", "action", "mode", "tissue_ids", "active_tissue_id", "recipe_path", "model_path"
+    "refine_svm", "action", "mode", "tissue_ids", "active_tissue_id", "recipe_path", "model_path",
+    "train_ids", "checkpoint", "context_id", "source_signature", "tissue_id", "model_id",
+    "bbox", "limit", "cursor", "cell_id", "cell_ids", "selected_cell_ids", "class_name", "threshold"
   )
+  if (identical(payload$action, "experiment_cell_index") && identical(payload$mode, "display_points"))
+    allowed <- c(allowed, "display_limit", "source_sha256", "index_sha256", "feature_set_id", "frame_id", "source_frame_id")
+  if (identical(payload$action, "experiment_registered_tissue"))
+    allowed <- c(allowed, "asset_id")
   unknown <- setdiff(names(payload), allowed)
   if (length(unknown)) {
     wsi_abort(sprintf(
@@ -1741,6 +1769,14 @@ wsi_prediction_validate_payload <- function(payload) {
 
 wsi_prediction_response <- function(context, state, payload) {
   payload <- wsi_prediction_validate_payload(payload)
+  if (identical(payload$action, "experiment_cell_index"))
+    return(wsi_experiment_cell_index_response(context, state, payload))
+  if (identical(payload$action, "experiment_registered_tissue")) {
+    if (is.null(context$experiment)) wsi_abort("No CellPhenotyper experiment is open.")
+    return(list(ok = TRUE, registered_tissue = wsi_experiment_registered_tissue_query(
+      context$experiment, payload$tissue_id, payload$asset_id, payload$bbox,
+      payload$limit %||% 2000L)))
+  }
   rois <- if (!is.null(payload$rois)) {
     wsi_rois_from_payload(payload$rois)
   } else {
@@ -1756,13 +1792,15 @@ wsi_prediction_response <- function(context, state, payload) {
     response$appearance <- appearance
     return(response)
   }
-  if (!is.null(payload$action) && !payload$action %in% c("predict", "experiment_predict", "experiment_apply_classifier"))
+  if (!is.null(payload$action) && !payload$action %in% c("predict", "experiment_predict", "experiment_apply_classifier", "experiment_train_reviewed_classifier"))
     wsi_abort("Unsupported prediction action.")
   wsi_viewer_state_record_event(state, "prediction_started", list(
     feature_source = payload$feature_source %||% "spatial:raw"
   ))
   result <- if (identical(payload$action, "experiment_apply_classifier")) {
     wsi_experiment_apply_saved_classifier(context, state, payload)
+  } else if (identical(payload$action, "experiment_train_reviewed_classifier")) {
+    wsi_experiment_train_reviewed_response(context, state, payload)
   } else wsi_prediction_run(
     context = context,
     rois = rois,

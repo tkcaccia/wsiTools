@@ -297,7 +297,9 @@ wsi_roi_from_geojson <- function(geojson) {
     )
     color <- wsi_qupath_color(properties)
     data.frame(
-      roi_id = wsi_geojson_scalar(feature$id %||% properties$id %||% properties$objectId, default = as.character(i)),
+      roi_id = wsi_geojson_scalar(feature[["id", exact = TRUE]] %||%
+        properties[["id", exact = TRUE]] %||%
+        properties[["objectId", exact = TRUE]], default = as.character(i)),
       name = wsi_roi_name(properties, i),
       class = classification,
       object_type = object_type,

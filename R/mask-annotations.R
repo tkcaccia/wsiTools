@@ -1243,12 +1243,13 @@ wsi_annotation_mask_legend <- function(mask, legend = NULL) {
   legend
 }
 
-#' Create an editable tiled tissue-annotation mask source
+#' Create a tiled tissue or cell-annotation mask source
 #'
 #' Opens a TIFF/OME-TIFF annotation mask as a lazy dynamic tile source for
 #' [wsi_viewer_live()]. The complete mask is not loaded into R or the browser.
-#' Brush and Magic Wand edits are stored as sparse raster delta tiles in the
-#' viewer, avoiding polygon Boolean operations on every pointer movement.
+#' Tissue-mask Brush and Magic Wand edits are stored as sparse raster delta
+#' tiles in the viewer, avoiding polygon Boolean operations on every pointer
+#' movement. Cell masks are display-only overlays.
 #'
 #' @param mask TIFF or OME-TIFF mask path readable by libvips.
 #' @param slide Base microscopy slide or image path used to define the mask's
@@ -1263,6 +1264,8 @@ wsi_annotation_mask_legend <- function(mask, legend = NULL) {
 #' @param persistent_cache Keep generated mask tiles in the fingerprinted cache.
 #' @param target_path Optional project image path. Defaults to the base slide
 #'   path and keeps the mask attached to the correct image in multi-view.
+#' @param annotation_kind Whether the mask contains tissue regions or cell
+#'   segmentations. Cell masks are displayed as overlays but are not brush-editable.
 #'
 #' @return A `wsi_dynamic_annotation_mask_tile_source` suitable for
 #'   `annotation_masks` or `channel_sources` in [wsi_viewer_live()].
@@ -1273,7 +1276,9 @@ wsi_annotation_mask_source <- function(mask, slide, legend = NULL,
                                        visible = TRUE, tile_size = 512,
                                        cache_dir = NULL,
                                        persistent_cache = TRUE,
-                                       target_path = NULL) {
+                                       target_path = NULL,
+                                       annotation_kind = c("tissue", "cell")) {
+  annotation_kind <- match.arg(annotation_kind)
   if (!wsi_has_vips()) {
     wsi_abort(
       wsi_backend_action_message(
@@ -1315,12 +1320,12 @@ wsi_annotation_mask_source <- function(mask, slide, legend = NULL,
   source$kind <- "mask"
   source$visible <- isTRUE(visible)
   source$opacity <- wsi_channel_opacity(opacity)
-  source$colour <- "#ffffff"
+  source$colour <- "#00BFC4"
   source$extent <- list(x = 0, y = 0, width = base_width, height = base_height)
   source$metadata <- list(
     kind = "mask",
-    source_type = "tissue_annotation_mask",
-    editable_annotation_mask = TRUE,
+    source_type = if (identical(annotation_kind, "cell")) "cell_segmentation_mask" else "tissue_annotation_mask",
+    editable_annotation_mask = identical(annotation_kind, "tissue"),
     annotation_storage = "tiled_raster_with_sparse_deltas",
     transparent_background = TRUE,
     background_colour = "#000000",
@@ -1350,6 +1355,73 @@ wsi_annotation_mask_source <- function(mask, slide, legend = NULL,
     "list"
   )
   source
+}
+
+wsi_annotation_mask_region_rois <- function(source, bounds = NULL,
+                                            max_pixels = 1000000L,
+                                            min_area = 1L) {
+  if (!inherits(source, "wsi_dynamic_annotation_mask_tile_source")) {
+    wsi_abort("The selected overlay is not an imported TIFF annotation mask.")
+  }
+  extent <- source$extent
+  mask_width <- as.numeric(source$width)
+  mask_height <- as.numeric(source$height)
+  slide_width <- as.numeric(extent$width)
+  slide_height <- as.numeric(extent$height)
+  if (!all(is.finite(c(mask_width, mask_height, slide_width, slide_height))) ||
+      any(c(mask_width, mask_height, slide_width, slide_height) <= 0)) {
+    wsi_abort("The annotation mask has invalid dimensions or slide placement.")
+  }
+  if (is.null(bounds)) {
+    pixel <- c(0, 0, mask_width, mask_height)
+  } else {
+    values <- as.numeric(unlist(bounds[c("xmin", "ymin", "xmax", "ymax")], use.names = FALSE))
+    if (length(values) != 4L || any(!is.finite(values)) ||
+        values[[3L]] <= values[[1L]] || values[[4L]] <= values[[2L]]) {
+      wsi_abort("The visible mask region must have finite xmin, ymin, xmax, and ymax coordinates.")
+    }
+    pixel <- c(
+      floor((values[[1L]] - as.numeric(extent$x %||% 0)) / slide_width * mask_width),
+      floor((values[[2L]] - as.numeric(extent$y %||% 0)) / slide_height * mask_height),
+      ceiling((values[[3L]] - as.numeric(extent$x %||% 0)) / slide_width * mask_width),
+      ceiling((values[[4L]] - as.numeric(extent$y %||% 0)) / slide_height * mask_height)
+    )
+    pixel[c(1L, 3L)] <- pmin(mask_width, pmax(0, pixel[c(1L, 3L)]))
+    pixel[c(2L, 4L)] <- pmin(mask_height, pmax(0, pixel[c(2L, 4L)]))
+  }
+  width <- pixel[[3L]] - pixel[[1L]]
+  height <- pixel[[4L]] - pixel[[2L]]
+  if (width < 1 || height < 1) {
+    wsi_abort("The selected region does not intersect the annotation mask.")
+  }
+  max_pixels <- wsi_check_scalar_number(max_pixels, "max_pixels", allow_zero = FALSE)
+  if (width * height > max_pixels) {
+    wsi_abort(sprintf(
+      "Mask conversion covers %s pixels; zoom in and convert the visible area, or choose a smaller mask (limit: %s pixels).",
+      format(width * height, big.mark = ",", scientific = FALSE),
+      format(max_pixels, big.mark = ",", scientific = FALSE)
+    ))
+  }
+  image <- wsi_read_region(source$slide, x = pixel[[1L]], y = pixel[[2L]],
+                           width = width, height = height, format = "array")
+  legend <- source$metadata$legend %||% list()
+  class_map <- color_map <- character()
+  for (entry in legend) {
+    colour <- as.character(entry$colour %||% entry$color %||% "")
+    rgb <- tryCatch(grDevices::col2rgb(colour), error = function(e) NULL)
+    if (is.null(rgb)) next
+    key <- as.character(rgb[1L, 1L] * 65536 + rgb[2L, 1L] * 256 + rgb[3L, 1L])
+    class_map[[key]] <- as.character(entry$class %||% entry$label %||% key)
+    color_map[[key]] <- colour
+  }
+  wsi_mask_to_rois(
+    image, channel = "rgb", background = 0,
+    class_map = class_map, color_map = color_map,
+    origin = c(x = as.numeric(extent$x %||% 0) + pixel[[1L]] * slide_width / mask_width,
+               y = as.numeric(extent$y %||% 0) + pixel[[2L]] * slide_height / mask_height),
+    scale = c(x = slide_width / mask_width, y = slide_height / mask_height),
+    min_area = min_area, prefix = wsi_safe_id(source$name %||% "mask", "mask")
+  )
 }
 
 wsi_annotation_mask_sources <- function(annotation_masks, slide) {

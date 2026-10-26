@@ -2,7 +2,7 @@
 % Please edit documentation in R/mask-annotations.R
 \name{wsi_annotation_mask_source}
 \alias{wsi_annotation_mask_source}
-\title{Create an editable tiled tissue-annotation mask source}
+\title{Create a tiled tissue or cell-annotation mask source}
 \usage{
 wsi_annotation_mask_source(
   mask,
@@ -15,7 +15,8 @@ wsi_annotation_mask_source(
   tile_size = 512,
   cache_dir = NULL,
   persistent_cache = TRUE,
-  target_path = NULL
+  target_path = NULL,
+  annotation_kind = c("tissue", "cell")
 )
 }
 \arguments{
@@ -40,6 +41,9 @@ wsiTools looks for \verb{<mask>_labels.csv}, \verb{<mask>.labels.csv}, or \code{
 
 \item{target_path}{Optional project image path. Defaults to the base slide
 path and keeps the mask attached to the correct image in multi-view.}
+
+\item{annotation_kind}{Whether the mask contains tissue regions or cell
+segmentations. Cell masks are displayed as overlays but are not brush-editable.}
 }
 \value{
 A \code{wsi_dynamic_annotation_mask_tile_source} suitable for
@@ -48,6 +52,7 @@ A \code{wsi_dynamic_annotation_mask_tile_source} suitable for
 \description{
 Opens a TIFF/OME-TIFF annotation mask as a lazy dynamic tile source for
 \code{\link[=wsi_viewer_live]{wsi_viewer_live()}}. The complete mask is not loaded into R or the browser.
-Brush and Magic Wand edits are stored as sparse raster delta tiles in the
-viewer, avoiding polygon Boolean operations on every pointer movement.
+Tissue-mask Brush and Magic Wand edits are stored as sparse raster delta
+tiles in the viewer, avoiding polygon Boolean operations on every pointer
+movement. Cell masks are display-only overlays.
 }

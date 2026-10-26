@@ -323,6 +323,14 @@ wsi_review_records <- function(records, ids) {
 wsi_review_checkpoint <- function(context, selected_ids = character(), review_records = list(),
                                   revision = 0L, history = list(past = list(), future = list())) {
   context <- wsi_validate_review_context(context)
+  wsi_review_checkpoint_validated(context, selected_ids, review_records, revision, history)
+}
+
+# Private field validation for the normalized context from the same public call.
+# Do not cache/trust a marker on caller-supplied contexts: every public entry
+# point above/below still reconstructs and verifies their complete signature.
+wsi_review_checkpoint_validated <- function(context, selected_ids, review_records,
+                                            revision, history) {
   ids <- vapply(context$observations, `[[`, character(1), "id")
   selected_ids <- wsi_review_ids(selected_ids, "selected_ids", ids)
   review_records <- wsi_review_records(review_records, ids)
@@ -356,7 +364,7 @@ wsi_validate_review_checkpoint <- function(checkpoint, context) {
   if (!identical(checkpoint$context_id, context$context_id) ||
       !identical(checkpoint$source_signature, context$source_signature))
     wsi_abort("Review checkpoint belongs to a different or changed context/image source signature.")
-  wsi_review_checkpoint(context, checkpoint$selected_ids, checkpoint$review_records,
+  wsi_review_checkpoint_validated(context, checkpoint$selected_ids, checkpoint$review_records,
     checkpoint$revision, checkpoint$history %||% list(past = list(), future = list()))
 }
 

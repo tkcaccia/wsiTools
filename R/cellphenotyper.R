@@ -558,11 +558,14 @@ wsi_cellphenotyper_find_kodama_geojson <- function(manifest) {
     manifest$output_id %||% "",
     manifest$stage_id %||% "",
     manifest$stage_folder %||% "",
-    manifest$resolved_path %||% ""
+    basename(manifest$resolved_path %||% "")
   )
+  is_bora <- grepl("bora", manifest_text, ignore.case = TRUE) |
+    grepl("[/\\\\]07_bora[/\\\\]", manifest$resolved_path, ignore.case = TRUE)
   geojson_hit <- manifest$file_exists &
     grepl("\\.geojson$", manifest$resolved_path, ignore.case = TRUE) &
-    grepl("kodama|medsam|cluster_geojson|grown_mask_smooth_class|refined", manifest_text, ignore.case = TRUE)
+    grepl("kodama|medsam|cluster_geojson|grown_mask_smooth_class|refined", manifest_text, ignore.case = TRUE) &
+    !is_bora
   if (!any(geojson_hit)) {
     return(wsi_cellphenotyper_empty_kodama_geojson())
   }
@@ -587,6 +590,17 @@ wsi_cellphenotyper_find_kodama_geojson <- function(manifest) {
     stage_id = rows$stage_id,
     stringsAsFactors = FALSE
   )
+}
+
+wsi_cellphenotyper_find_bora_geojson <- function(manifest) {
+  if (!nrow(manifest)) return(NA_character_)
+  source <- paste(manifest$output_id, manifest$stage_id,
+                  basename(manifest$resolved_path))
+  matches <- manifest$resolved_path[manifest$file_exists &
+    grepl("\\.geojson$", manifest$resolved_path, ignore.case = TRUE) &
+    (grepl("bora", source, ignore.case = TRUE) |
+     grepl("[/\\\\]07_bora[/\\\\]", manifest$resolved_path, ignore.case = TRUE))]
+  wsi_cellphenotyper_find_first_existing(matches)
 }
 
 wsi_cellphenotyper_find_kodama_plots <- function(manifest, root) {
@@ -1144,6 +1158,7 @@ wsi_read_cellphenotyper_project <- function(path, load_cells = TRUE) {
       gigatime_metadata = wsi_cellphenotyper_find_gigatime_metadata(manifest),
       kodama_embedding = wsi_cellphenotyper_find_kodama_embedding(manifest, root),
       kodama_geojson = wsi_cellphenotyper_find_kodama_geojson(manifest),
+      bora_geojson = wsi_cellphenotyper_find_bora_geojson(manifest),
       kodama_plots = wsi_cellphenotyper_find_kodama_plots(manifest, root),
       grandqc_geojson = wsi_cellphenotyper_find_grandqc_geojson(manifest, root)
     )
@@ -1193,6 +1208,8 @@ wsi_viewer_cellphenotyper <- function(project, output = NULL, open = interactive
   layers <- Filter(Negate(is.null), layers)
   slide <- wsi_open(project$input_image, backend = backend)
   dots <- list(...)
+  if (is.null(dots$roi) && !is.na(project$files$bora_geojson %||% NA_character_))
+    dots$roi <- read_geojson(project$files$bora_geojson)
   if (!is.null(dots$layers)) {
     extra_layers <- dots$layers
     if (inherits(extra_layers, "wsi_viewer_layer") || is.data.frame(extra_layers) ||

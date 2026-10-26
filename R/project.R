@@ -128,10 +128,17 @@ wsi_project_stain_settings <- function(stain_settings = NULL, stains = NULL, vie
 }
 
 wsi_project_write_rois <- function(rois, path, name, overwrite = FALSE) {
+  file <- file.path(path, sprintf("%s.geojson", name))
   if (is.null(rois) || !inherits(rois, "wsi_roi") || !nrow(rois)) {
+    if (isTRUE(overwrite) && file.exists(file)) {
+      jsonlite::write_json(
+        list(type = "FeatureCollection", features = list()), file,
+        auto_unbox = TRUE, pretty = TRUE
+      )
+      return(list(type = "geojson", path = wsi_project_rel(file, path), count = 0L))
+    }
     return(NULL)
   }
-  file <- file.path(path, sprintf("%s.geojson", name))
   write_geojson(rois, file, overwrite = overwrite)
   list(type = "geojson", path = wsi_project_rel(file, path), count = nrow(rois))
 }

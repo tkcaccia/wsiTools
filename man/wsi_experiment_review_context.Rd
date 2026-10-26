@@ -51,9 +51,9 @@ own embedding space. A reduction is not a Virchow2 feature set. Cluster values
 remain metadata, separate from human labels and classifier predictions.
 
 Reviewed classifier fitting requires explicit training IDs, a matching
-checkpoint and confirmed \code{reviewed} records for compatible tile/token
-observations. Spatial spot/cell labels are never automatically promoted to image
-labels. The existing CPU classifier retains training-only preprocessing and
+checkpoint and confirmed \code{reviewed} records for compatible typed tile/token or cell
+observations. A cell feature descriptor and ordered predictor allowlist are
+required. Spatial cluster labels are never automatically promoted to targets. The existing CPU classifier retains training-only preprocessing and
 records the checkpoint revision, review digest and human-label provenance.
 Training and same-section agreement do not establish biological validation.
 }

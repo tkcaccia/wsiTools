@@ -4898,6 +4898,53 @@ wsi_viewer_geojson_mask_response <- function(slide, payload, state = NULL,
   )
 }
 
+wsi_viewer_mask_upload_file <- function(req, filename,
+                                        output_dir = file.path(tools::R_user_dir("wsiTools", "data"), "imported_masks")) {
+  filename <- as.character(filename %||% "")
+  if (length(filename) != 1L || is.na(filename) ||
+      !grepl("\\.tiff?$", filename, ignore.case = TRUE)) {
+    wsi_abort("Choose a TIFF or OME-TIFF annotation mask (.tif or .tiff).")
+  }
+  if (is.null(req$rook.input) || !is.function(req$rook.input$read)) {
+    wsi_abort("The mask upload has no file body.")
+  }
+  max_bytes <- getOption("wsiTools.max_mask_upload_bytes", 8 * 1024^3)
+  max_bytes <- wsi_check_scalar_number(max_bytes, "wsiTools.max_mask_upload_bytes", allow_zero = FALSE)
+  declared <- suppressWarnings(as.numeric(req$CONTENT_LENGTH %||% NA_real_))
+  if (length(declared) == 1L && is.finite(declared) && declared > max_bytes) {
+    wsi_abort("The annotation mask exceeds the configured upload size limit.")
+  }
+  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+  if (!dir.exists(output_dir)) wsi_abort("Could not create the annotation mask storage directory.")
+  safe_name <- gsub("[^A-Za-z0-9._-]", "_", basename(filename))
+  path <- file.path(output_dir, paste0(format(Sys.time(), "%Y%m%d_%H%M%S"), "_",
+                                         sprintf("%08x", sample.int(.Machine$integer.max, 1L)), "_", safe_name))
+  con <- file(path, open = "wb")
+  complete <- FALSE
+  on.exit({
+    close(con)
+    if (!complete) unlink(path)
+  }, add = TRUE)
+  total <- 0
+  repeat {
+    chunk <- req$rook.input$read(1024L * 1024L)
+    if (!is.raw(chunk)) chunk <- charToRaw(paste(as.character(chunk), collapse = ""))
+    if (!length(chunk)) break
+    total <- total + length(chunk)
+    if (total > max_bytes) wsi_abort("The annotation mask exceeds the configured upload size limit.")
+    writeBin(chunk, con)
+  }
+  if (total < 4L) wsi_abort("The selected annotation mask is empty or incomplete.")
+  flush(con)
+  header <- readBin(path, what = "raw", n = 4L)
+  signature <- paste(sprintf("%02x", as.integer(header)), collapse = "")
+  if (!signature %in% c("49492a00", "4d4d002a", "49492b00", "4d4d002b")) {
+    wsi_abort("The selected file is not a TIFF or OME-TIFF image.")
+  }
+  complete <- TRUE
+  path
+}
+
 wsi_start_viewer_state_server <- function(state, slide = NULL,
                                           host = "127.0.0.1", port = 8788,
                                           path = "/viewer-state", max_tries = 20L,
@@ -4913,6 +4960,8 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	                                          image_export_max_pixels = 50000000,
 	                                          geojson_mask_path = "/geojson-mask-overlay",
 	                                          geojson_mask_dir = file.path(tempdir(), "wsiTools_geojson_masks"),
+	                                          mask_import_path = "/annotation-mask-import",
+	                                          mask_geojson_path = "/annotation-mask-geojson",
 	                                          output_html = NULL,
 	                                          dense_geojson_context = NULL,
 	                                          dense_geojson_path = "/dense-geojson",
@@ -4952,6 +5001,8 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
   if (!startsWith(geojson_mask_path, "/")) {
     geojson_mask_path <- paste0("/", geojson_mask_path)
   }
+  if (!startsWith(mask_import_path, "/")) mask_import_path <- paste0("/", mask_import_path)
+  if (!startsWith(mask_geojson_path, "/")) mask_geojson_path <- paste0("/", mask_geojson_path)
   if (!startsWith(dense_geojson_path, "/")) {
     dense_geojson_path <- paste0("/", dense_geojson_path)
   }
@@ -6268,6 +6319,77 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	    })
 	  }
 
+	  mask_import_response <- function(req) {
+	    if (!identical(req$REQUEST_METHOD %||% "GET", "POST")) {
+	      return(wsi_http_json_response(status = 405L, body = list(error = "Use POST to import a TIFF annotation mask.")))
+	    }
+	    if (is.null(slide)) {
+	      return(wsi_http_json_response(status = 404L, body = list(error = "No slide is attached to this live viewer session.")))
+	    }
+	    tryCatch({
+	      if (!wsi_has_vips()) wsi_abort("Importing TIFF annotation masks requires libvips. Run wsi_diagnose() to check the backend.")
+	      query <- wsi_http_query_params(req$QUERY_STRING %||% "")
+	      target_path <- as.character(query$target_path %||% state$project$active$path %||% "")
+	      candidates <- c(list(slide), lapply(tile_sources, function(source) source$slide %||% NULL))
+	      candidates <- Filter(function(item) inherits(item, "wsi_slide"), candidates)
+	      target_slide <- slide
+	      if (nzchar(target_path)) {
+	        paths <- vapply(candidates, function(item) {
+	          normalizePath(item$path %||% "", winslash = "/", mustWork = FALSE)
+	        }, character(1))
+	        index <- match(normalizePath(target_path, winslash = "/", mustWork = FALSE), paths)
+	        if (is.na(index)) wsi_abort("The selected project image is not registered with this live viewer.")
+	        target_slide <- candidates[[index]]
+	      }
+	      kind <- match.arg(as.character(query$kind %||% "tissue"), c("tissue", "cell"))
+	      opacity <- wsi_channel_opacity(as.numeric(query$opacity %||% 0.6))
+	      filename <- as.character(query$filename %||% "annotation_mask.tif")
+	      mask_path <- wsi_viewer_mask_upload_file(req, filename)
+	      id <- paste0("imported_mask_", wsi_safe_id(basename(mask_path), "mask"))
+	      source <- wsi_annotation_mask_source(
+	        mask_path, slide = target_slide, id = id,
+	        name = paste(if (identical(kind, "cell")) "Cell" else "Tissue", "mask:", basename(filename)),
+	        opacity = opacity, annotation_kind = kind,
+	        target_path = target_slide$path %||% NULL
+	      )
+	      source$route <- tile_path
+	      source$access_token <- auth_token
+	      tile_sources <<- c(tile_sources, stats::setNames(list(source), id))
+	      base_url <- sprintf("http://%s:%d", host, candidate)
+	      channel <- wsi_channel_source_payload(wsi_channel_source_from_dynamic(source, base_url = base_url))
+	      state$channel_sources <- c(state$channel_sources %||% list(), list(channel))
+	      state$channel_settings <- wsi_channel_settings_from_sources(state$channel_sources)
+	      wsi_viewer_state_record_event(state, "channel_source_added", list(id = id, name = channel$name, kind = kind))
+	      wsi_http_json_response(body = list(ok = TRUE, source = channel, storage_path = mask_path))
+	    }, error = function(err) {
+	      wsi_http_json_response(status = 400L, body = list(ok = FALSE, error = conditionMessage(err)))
+	    })
+	  }
+
+	  mask_geojson_response <- function(req) {
+	    if (!identical(req$REQUEST_METHOD %||% "GET", "POST")) {
+	      return(wsi_http_json_response(status = 405L, body = list(error = "Use POST to convert an annotation mask to GeoJSON.")))
+	    }
+	    tryCatch({
+	      body <- wsi_http_request_body(req)
+	      payload <- jsonlite::fromJSON(body, simplifyVector = FALSE)
+	      id <- as.character(payload$id %||% "")
+	      source <- tile_sources[[id]]
+	      if (!inherits(source, "wsi_dynamic_annotation_mask_tile_source")) {
+	        wsi_abort("Choose an imported TIFF annotation mask before converting to GeoJSON.")
+	      }
+	      scope <- match.arg(as.character(payload$scope %||% "visible"), c("visible", "whole"))
+	      bounds <- if (identical(scope, "visible")) payload$bounds %||% NULL else NULL
+	      if (identical(scope, "visible") && is.null(bounds)) wsi_abort("The visible-area conversion needs viewport bounds.")
+	      rois <- wsi_annotation_mask_region_rois(source, bounds = bounds)
+	      geojson <- wsi_viewer_rois_to_geojson(rois)
+	      wsi_viewer_state_record_event(state, "roi_exported", list(source = "annotation_mask", id = id, count = nrow(rois)))
+	      wsi_http_json_response(body = list(ok = TRUE, geojson = geojson, count = nrow(rois)))
+	    }, error = function(err) {
+	      wsi_http_json_response(status = 400L, body = list(ok = FALSE, error = conditionMessage(err)))
+	    })
+	  }
+
 	  geojson_mask_response <- function(req) {
 	    method <- req$REQUEST_METHOD %||% "GET"
 	    if (!identical(method, "POST")) {
@@ -6416,6 +6538,12 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	      if (identical(request_path, geojson_mask_path)) {
 	        return(geojson_mask_response(req))
 	      }
+	      if (identical(request_path, mask_import_path)) {
+	        return(mask_import_response(req))
+	      }
+	      if (identical(request_path, mask_geojson_path)) {
+	        return(mask_geojson_response(req))
+	      }
 	      if (identical(request_path, dense_geojson_path)) {
 	        return(dense_geojson_response(req))
 	      }
@@ -6540,12 +6668,15 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	        spatial_object_save_path = spatial_object_save_path,
 	        image_export_path = image_export_path,
 	        geojson_mask_path = geojson_mask_path,
+	        mask_import_path = mask_import_path,
+	        mask_geojson_path = mask_geojson_path,
 	        dense_geojson_path = dense_geojson_path,
 	        prediction_path = prediction_path,
 	        proximity_path = proximity_path,
 	        native_renderer_path = native_renderer_path,
 	        native_state_path = native_state_path,
 	        native_points_path = native_points_path,
+	        review_path = review_path,
 	        seurat_gene_url = if (wsi_seurat_live_gene_available(seurat) ||
             wsi_prediction_context_enabled(proximity_context %||% prediction_context %||% list(spatial = seurat))) {
             auth_url(seurat_gene_path)
@@ -6556,6 +6687,8 @@ wsi_start_viewer_state_server <- function(state, slide = NULL,
 	        spatial_object_save_url = if (!is.null(seurat)) auth_url(spatial_object_save_path) else NULL,
 	        image_export_url = if (!is.null(slide)) auth_url(image_export_path) else NULL,
 	        geojson_mask_url = if (!is.null(slide)) auth_url(geojson_mask_path) else NULL,
+	        mask_import_url = if (!is.null(slide)) auth_url(mask_import_path) else NULL,
+	        mask_geojson_url = if (!is.null(slide)) auth_url(mask_geojson_path) else NULL,
 	        dense_geojson_url = auth_url(dense_geojson_path),
 	        prediction_url = if (wsi_prediction_context_enabled(prediction_context %||% list(spatial = seurat))) auth_url(prediction_path) else NULL,
 	        proximity_url = if (wsi_prediction_context_enabled(proximity_context %||% prediction_context %||% list(spatial = seurat))) auth_url(proximity_path) else NULL,
@@ -6946,6 +7079,12 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
   state <- wsi_new_viewer_state(name = name, envir = envir)
   state$autosave <- autosave_config
   state$pixel_size <- tryCatch(wsi_mpp(slide), error = function(err) NULL)
+  dots <- list(...)
+  if (!is.null(dots$review_context)) {
+    state$review_context <- wsi_validate_review_context(dots$review_context)
+    state$review_checkpoint <- if (is.null(dots$review_checkpoint)) wsi_review_checkpoint(state$review_context) else wsi_validate_review_checkpoint(dots$review_checkpoint, state$review_context)
+    dots$review_checkpoint <- state$review_checkpoint
+  }
   wsi_viewer_update_measurement_tables(state)
   wsi_assign_viewer_state(state)
   if (is.null(dense_geojson_context)) {
@@ -6955,12 +7094,6 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
     dense_geojson_context$sources <- list()
   }
 
-  dots <- list(...)
-  if (!is.null(dots$review_context)) {
-    state$review_context <- wsi_validate_review_context(dots$review_context)
-    state$review_checkpoint <- if (is.null(dots$review_checkpoint)) wsi_review_checkpoint(state$review_context) else wsi_validate_review_checkpoint(dots$review_checkpoint, state$review_context)
-    dots$review_checkpoint <- state$review_checkpoint
-  }
   if (is.null(dots$output)) {
     dots$output <- tempfile(fileext = ".html")
     dots$overwrite <- TRUE
@@ -7216,9 +7349,12 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
 	  dots$spatial_object_save_url <- bridge$spatial_object_save_url %||% NULL
 	  dots$image_export_url <- bridge$image_export_url %||% NULL
 	  dots$geojson_mask_url <- bridge$geojson_mask_url %||% NULL
+	  dots$mask_import_url <- bridge$mask_import_url %||% NULL
+	  dots$mask_geojson_url <- bridge$mask_geojson_url %||% NULL
 	  dots$dense_geojson_url <- bridge$dense_geojson_url %||% NULL
 	  dots$dense_geojson_sources <- dense_geojson_sources %||% list()
 	  dots$prediction_url <- bridge$prediction_url %||% NULL
+	  dots$review_url <- bridge$review_url %||% NULL
 	  dots$proximity_url <- bridge$proximity_url %||% NULL
   if (!is.null(dots$channel_sources)) {
     state$channel_sources <- wsi_channel_sources_payload(dots$channel_sources)
@@ -7262,6 +7398,8 @@ wsi_viewer_session <- function(slide, ..., name = "wsi_viewer_live_state",
         dynamic_tile_source = dynamic_source,
         dynamic_tile_sources = all_dynamic_sources,
         dense_geojson_context = dense_geojson_context,
+        review_context = state$review_context,
+        review_checkpoint = state$review_checkpoint,
         proximity_context = live_proximity_context,
         dynamic_tile_cache_dir = if (!is.null(dynamic_source)) dynamic_source$cache_dir else NULL,
         dynamic_channel_cache_dirs = unique(vapply(dynamic_channel_sources, function(x) as.character(x$cache_dir %||% ""), character(1))),

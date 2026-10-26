@@ -1,3 +1,16 @@
+# Development: full-slide cell and Bora projects
+
+- Open indexed CellViT++ full-slide outputs with bounded viewport queries,
+  native class colours, model switching and retained 1,280-D feature vectors.
+- Resume interrupted cell contours after navigation and coalesce repeated
+  viewport refreshes without delaying visible cell loading indefinitely.
+- Load accepted Bora GeoJSON as ordinary editable tissue annotations while
+  retaining prediction provenance and legacy review asset compatibility.
+- Honor registered native-pixel display pyramids and their explicit VIPS
+  reader, preserving image alignment without rewriting the analysis source.
+- Keep exact annotation IDs when selecting training regions and retain
+  upstream saved-review, marker and browser export workflows.
+
 # wsiTools 0.1.30
 
 - Accept browser vertex, trajectory-border, cell-layer and image-export events

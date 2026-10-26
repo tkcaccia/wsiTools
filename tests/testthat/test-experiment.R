@@ -57,6 +57,36 @@ test_that("experiment providers keep tile/token identity and native coordinates"
   expect_equal(wsi_prediction_points(context, "experiment:virchow")$id, features$observations$id)
 })
 
+test_that("registered viewing pyramids keep source identity and an explicit reader", {
+  skip_if_not_installed("openssl")
+  fixture <- experiment_fixture(1L)
+  on.exit(unlink(fixture$root, recursive = TRUE), add = TRUE)
+  original <- fixture$manifest$tissues[[1]]$image
+  viewing <- file.path(fixture$root, "viewing.ppm")
+  file.copy(file.path(fixture$root, original$path), viewing)
+  manifest <- fixture$manifest
+  manifest$tissues[[1]]$image$display <- list(path = basename(viewing),
+    sha256 = wsi_experiment_sha256(viewing), format = "native-pixel-pyramid",
+    backend = "vips", source_sha256 = original$sha256,
+    source_frame_id = original$frame_id)
+  jsonlite::write_json(manifest, fixture$path, auto_unbox = TRUE)
+  experiment <- wsi_read_experiment(fixture$path)
+  expect_identical(experiment$tissues[[1]]$image$sha256, original$sha256)
+  expect_equal(experiment$tissues[[1]]$image$resolved_path,
+               normalizePath(file.path(fixture$root, original$path), winslash = "/"))
+  display <- wsi_experiment_images(experiment)[[1]]
+  expect_equal(display$path, normalizePath(viewing, winslash = "/"))
+  expect_identical(display$backend, "vips")
+  expect_identical(display$frame_id, original$frame_id)
+  manifest$tissues[[1]]$image$display$source_frame_id <- "another-frame"
+  jsonlite::write_json(manifest, fixture$path, auto_unbox = TRUE)
+  expect_error(wsi_read_experiment(fixture$path), "preserve the analyzed image identity")
+  manifest$tissues[[1]]$image$display$source_frame_id <- original$frame_id
+  jsonlite::write_json(manifest, fixture$path, auto_unbox = TRUE)
+  cat("tampered", file = viewing, append = TRUE)
+  expect_error(wsi_read_experiment(fixture$path), "SHA-256 mismatch.*display pyramid")
+})
+
 test_that("experiment files fail closed on identity, order, unit and grid errors", {
   skip_if_not_installed("openssl")
   fixture <- experiment_fixture(1L)
@@ -234,9 +264,9 @@ test_that("prediction request annotations never replace synchronized active view
 
 test_that("optional Bora CPU bridge fits and replays frozen appearance without refitting", {
   skip_if_not_installed("openssl")
-  python <- Sys.getenv("BORA_TEST_PYTHON", "")
-  skip_if(!nzchar(python), "Set BORA_TEST_PYTHON for the optional installed Bora CPU bridge")
-  path <- Sys.getenv("BORA_TEST_PYTHONPATH", "")
+  python <- Sys.getenv("WSITOOLS_TEST_BORA_PYTHON", "")
+  skip_if(!nzchar(python), "Set WSITOOLS_TEST_BORA_PYTHON for the optional installed Bora CPU bridge")
+  path <- Sys.getenv("WSITOOLS_TEST_BORA_PYTHONPATH", "")
   old <- options(wsiTools.bora_python = python, wsiTools.bora_pythonpath = if (nzchar(path)) path else NULL)
   on.exit(options(old), add = TRUE)
   exp <- wsi_read_experiment(experiment_fixture(2L, "virchow2-spatial", rows = 16L)$path)

@@ -74,6 +74,87 @@ test_that("mask image files can be imported as annotations when magick is availa
   expect_equal(rois$ymax, 3)
 })
 
+test_that("TIFF annotation masks convert a bounded area to slide-coordinate GeoJSON", {
+  skip_if_not_installed("magick")
+  skip_if_not(wsi_has_vips())
+
+  pixels <- matrix("#000000", nrow = 6, ncol = 6)
+  pixels[2:3, 2:3] <- "#FF0000"
+  path <- tempfile(fileext = ".tif")
+  tissue <- tempfile(fileext = ".tif")
+  magick::image_write(magick::image_read(as.raster(pixels)), path, format = "tiff")
+  magick::image_write(
+    magick::image_read(as.raster(matrix("#DDCCBB", nrow = 12, ncol = 12))),
+    tissue, format = "tiff"
+  )
+  source <- wsi_annotation_mask_source(path, slide = tissue, annotation_kind = "cell")
+
+  expect_equal(source$metadata$source_type, "cell_segmentation_mask")
+  expect_false(source$metadata$editable_annotation_mask)
+  expect_equal(source$opacity, 0.55)
+  expect_error(
+    wsiTools:::wsi_annotation_mask_region_rois(source, max_pixels = 4),
+    "zoom in"
+  )
+  rois <- wsiTools:::wsi_annotation_mask_region_rois(
+    source, bounds = list(xmin = 0, ymin = 0, xmax = 8, ymax = 8)
+  )
+  expect_s3_class(rois, "wsi_roi")
+  expect_equal(nrow(rois), 1)
+  expect_equal(c(rois$xmin, rois$ymin, rois$xmax, rois$ymax), c(2, 2, 6, 6))
+  geojson <- wsiTools:::wsi_viewer_rois_to_geojson(rois)
+  expect_equal(length(geojson$features), 1)
+  expect_equal(geojson$features[[1]]$geometry$type, "Polygon")
+})
+
+test_that("mask uploads stream TIFF bytes and reject non-TIFF files", {
+  skip_if_not_installed("magick")
+
+  source <- tempfile(fileext = ".tif")
+  magick::image_write(
+    magick::image_read(as.raster(matrix("#FF0000", nrow = 2, ncol = 2))),
+    source, format = "tiff"
+  )
+  bytes <- readBin(source, "raw", n = file.info(source)$size)
+  make_request <- function(data) {
+    pos <- 0L
+    list(CONTENT_LENGTH = length(data), rook.input = list(read = function(n) {
+      if (pos >= length(data)) return(raw())
+      end <- min(length(data), pos + n)
+      chunk <- data[seq.int(pos + 1L, end)]
+      pos <<- end
+      chunk
+    }))
+  }
+  destination <- tempfile("mask_uploads_")
+  uploaded <- wsiTools:::wsi_viewer_mask_upload_file(
+    make_request(bytes), "annotation.ome.tif", output_dir = destination
+  )
+  expect_identical(readBin(uploaded, "raw", n = length(bytes)), bytes)
+  expect_error(
+    wsiTools:::wsi_viewer_mask_upload_file(
+      make_request(charToRaw("not a tiff")), "fake.tif", output_dir = destination
+    ), "not a TIFF"
+  )
+})
+
+test_that("viewer exposes live mask import, opacity, and GeoJSON controls", {
+  slide <- wsiTools:::wsi_mock_slide(width = 64, height = 64)
+  output <- tempfile(fileext = ".html")
+  wsi_viewer(
+    slide, output = output, open = FALSE,
+    mask_import_url = "http://127.0.0.1:8788/annotation-mask-import",
+    mask_geojson_url = "http://127.0.0.1:8788/annotation-mask-geojson"
+  )
+  html <- paste(readLines(output, warn = FALSE), collapse = "\n")
+  expect_match(html, "Import mask TIFF", fixed = TRUE)
+  expect_match(html, "Mask opacity", fixed = TRUE)
+  expect_match(html, "Mask to GeoJSON", fixed = TRUE)
+  expect_match(html, "annotation-mask-import", fixed = TRUE)
+  expect_match(html, "annotation-mask-geojson", fixed = TRUE)
+  expect_match(html, "bindAnnotationMaskControls", fixed = TRUE)
+})
+
 test_that("segmentation importer can vectorise mask files on request", {
   skip_if_not_installed("magick")
 

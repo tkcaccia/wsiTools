@@ -81,7 +81,22 @@ wsi_read_experiment <- function(path, verify_hashes = TRUE) {
     wsi_experiment_text(image$frame_id, paste0(id, ".image.frame_id"))
     if (!identical(image$coordinate_convention, "pixel-edge-origin_centres-in-native-pixels"))
       wsi_abort(sprintf("%s image must declare native-pixel centre coordinates.", id))
+    if (!is.null(image$display)) {
+      display <- image$display
+      display$backend <- display$backend %||% "auto"
+      if (!identical(display$format, "native-pixel-pyramid") ||
+          !identical(display$source_sha256, image$sha256) ||
+          !identical(display$source_frame_id, image$frame_id) ||
+          !is.character(display$backend) || length(display$backend) != 1L ||
+          !display$backend %in% c("vips", "openslide", "auto"))
+        wsi_abort("Display pyramid must preserve the analyzed image identity and declare its reader.")
+      image$display <- wsi_experiment_file(display, root,
+        paste0(id, ".display pyramid"), verify_hashes)
+    }
     tissue$image <- image
+    if (!is.null(tissue$registered_tissue))
+      tissue$registered_tissue <- wsi_experiment_registered_tissue_validate(
+        tissue$registered_tissue, root, image, verify_hashes)
     sets <- tissue$feature_sets %||% list()
     if (!is.list(sets) || (length(sets) && !is.null(names(sets))))
       wsi_abort(sprintf("%s.feature_sets must be an array.", id))
@@ -93,35 +108,14 @@ wsi_read_experiment <- function(path, verify_hashes = TRUE) {
       wsi_experiment_text(f$format, "format")
       if (fid %in% set_ids) wsi_abort(sprintf("Duplicate feature_set_id in %s: %s", id, fid))
       set_ids <- c(set_ids, fid)
-      expected <- switch(f$kind, "virchow2-pooled" = 2560L, "virchow2-spatial" = 1280L, NULL)
-      if (is.null(expected)) wsi_abort("Unsupported feature kind; declare virchow2-pooled or virchow2-spatial.")
-      unit <- if (identical(f$kind, "virchow2-pooled")) "tile" else "token"
-      if (!identical(f$observation_unit, unit)) wsi_abort("Feature kind and observation_unit disagree.")
-      if (!identical(f$coordinate_frame, "image")) wsi_abort("Feature coordinates must already be in the declared image frame.")
-      if (!f$format %in% c("csv", "csv.gz")) wsi_abort("Only explicit csv/csv.gz feature sets are supported.")
-      columns <- unlist(f$feature_columns, use.names = FALSE)
-      if (!is.character(columns) || length(columns) != expected ||
-          anyNA(columns) || any(!nzchar(columns)) || anyDuplicated(columns))
-        wsi_abort(sprintf("%s requires %d unique ordered feature_columns.", f$kind, expected))
-      for (field in c("id_column", "x_column", "y_column")) wsi_experiment_text(f[[field]], field)
-      if (any(columns %in% c(f$id_column, f$x_column, f$y_column)) ||
-          length(unique(c(f$id_column, f$x_column, f$y_column))) != 3L)
-        wsi_abort("Predictor allowlist must exclude identity and coordinate columns.")
-      wsi_experiment_number(f$row_count, "row_count", integer = TRUE)
-      for (field in c("name", "revision", "checkpoint_sha256"))
-        wsi_experiment_text(f$encoder[[field]], paste0("encoder.", field))
-      if (!identical(tolower(f$encoder$name), "virchow2") ||
-          !grepl("^[0-9a-fA-F]{64}$", f$encoder$checkpoint_sha256))
-        wsi_abort("Feature encoder must identify Virchow2 and a checkpoint SHA-256.")
-      definition <- if (unit == "tile") "CLS+mean_patch" else "spatial_patch_tokens"
-      if (!identical(f$preprocessing$feature_definition, definition))
-        wsi_abort("Feature definition disagrees with the declared feature kind.")
-      for (field in c("tile_width_px", "tile_height_px", "spacing_x_px", "spacing_y_px"))
-        wsi_experiment_number(f$grid[[field]], paste0("grid.", field))
-      for (field in c("origin_x_px", "origin_y_px"))
-        wsi_experiment_number(f$grid[[field]], paste0("grid.", field), positive = FALSE)
-      f$feature_columns <- columns
-      sets[[j]] <- wsi_experiment_file(f, root, paste0(id, ".", fid), verify_hashes)
+      f <- wsi_experiment_validate_feature(f)
+      if (f$kind %in% c("cellvit-cell", "cell-morphology") &&
+          !is.null(f$frame_id) && !identical(f$frame_id, image$frame_id))
+        wsi_abort("Cell feature frame_id differs from its tissue image.")
+      sets[[j]] <- if (!is.null(tissue$cell_classification$index) &&
+          f$kind %in% c("cellvit-cell", "cell-morphology"))
+        wsi_cell_index_checked_file(f, root, paste0(id, ".", fid)) else
+        wsi_experiment_file(f, root, paste0(id, ".", fid), verify_hashes)
     }
     tissue$feature_sets <- sets
     # Artifacts are optional display derivatives. Resolve only their declared paths.
@@ -144,6 +138,7 @@ wsi_read_experiment <- function(path, verify_hashes = TRUE) {
     wsi_experiment_spatial_bundle(result, tissue, pair,
       max_observations = getOption("wsiTools.review_max_observations", 10000L))
   wsi_experiment_gigatime_validate(result)
+  wsi_experiment_cell_catalog(result)
   result
 }
 
@@ -155,7 +150,7 @@ wsi_experiment_namespace_id <- function(experiment_id, tissue_id, feature_set_id
 wsi_experiment_feature_signature <- function(f) {
   list(kind = f$kind, observation_unit = f$observation_unit,
        feature_columns = unname(f$feature_columns), encoder = f$encoder,
-       preprocessing = f$preprocessing)
+       preprocessing = f$preprocessing, descriptor = f$descriptor)
 }
 
 #' Retrieve typed cached Virchow2 feature rows
@@ -173,6 +168,9 @@ wsi_experiment_features <- function(experiment, feature_set_id, tissue_ids = NUL
     if (anyDuplicated(tissue_ids) || any(!tissue_ids %in% ids)) wsi_abort("Unknown or duplicate tissue_ids.")
     tissues <- tissues[match(tissue_ids, ids)]
   }
+  if (any(vapply(tissues, function(t) any(vapply(t$feature_sets, function(f)
+      identical(f$feature_set_id, feature_set_id) && identical(f$format, "partitioned-sqlite"), logical(1))), logical(1))))
+    wsi_abort("Partitioned CellViT features require bounded indexed-cell selection; select explicit reviewed IDs.")
   cap <- getOption("wsiTools.experiment_max_rows", 10000L)
   total <- sum(vapply(tissues, function(t) {
     found <- Filter(function(f) identical(f$feature_set_id, feature_set_id), t$feature_sets)
@@ -277,18 +275,689 @@ wsi_experiment_images <- function(experiment) {
   lapply(seq_along(experiment$tissues), function(i) {
     t <- experiment$tissues[[i]]
     rois <- wsi_experiment_annotation_rois(experiment, t, i - 1L)
-    list(id = t$tissue_id, label = t$name,
-      path = t$image$resolved_path, width = t$image$width, height = t$image$height,
+    bora_review <- wsi_experiment_bora_review_layer(experiment, t, i - 1L)
+    bora_local <- wsi_experiment_bora_local_review_layer(experiment, t, i - 1L)
+    image <- list(id = t$tissue_id, label = t$name,
+      path = t$image$display$resolved_path %||% t$image$resolved_path,
+      backend = t$image$display$backend %||% "auto",
+      width = t$image$width, height = t$image$height,
       mpp = list(x = t$image$mpp_x, y = t$image$mpp_y), tissue_id = t$tissue_id,
       frame_id = t$image$frame_id, rois = wsi_viewer_roi_features(rois),
       artifact_references = t$artifacts)
+    # Bora vectors are tissue annotations in the viewer by default. An explicit
+    # legacy setting retains the historical separate review layer for old
+    # projects that intentionally depend on that presentation.
+    if (!identical(experiment$settings$bora_annotations_mode,
+                   "legacy_review_layer")) {
+      predictions <- Filter(Negate(is.null), list(bora_review, bora_local))
+      for (layer in predictions) {
+        for (item in layer$items %||% list()) {
+          item$name <- paste("Bora tissue annotation ·", item$class %||% "predicted region")
+          item$label <- item$name
+          item$locked <- FALSE
+          item$isLocked <- FALSE
+          item$review_only <- FALSE
+          item$tissue_annotation <- TRUE
+          item$source_type <- "tissue_annotation"
+          item$source <- "Bora tissue annotation"
+          item$properties <- wsi_geojson_list(item$properties)
+          item$properties$source_type <- "tissue_annotation"
+          item$properties$name <- item$name
+          item$properties$tissue_annotation <- TRUE
+          item$properties$review_only <- FALSE
+          item$properties$isLocked <- FALSE
+          item$properties$locked <- FALSE
+          item$properties$bora_prediction_sha256 <- layer$metadata$source_sha256
+          item$properties$bora_prediction_source <- layer$source_type
+          image$rois[[length(image$rois) + 1L]] <- item
+        }
+      }
+      image$layers <- list()
+    } else {
+      image$layers <- Filter(Negate(is.null), list(bora_review, bora_local))
+    }
+    image
   })
+}
+
+# Earlier CellPhenotyper exports assigned anonymous hard-group Bora vectors the
+# general tissue_annotations role. Recognize only a source-bound legacy artifact;
+# an incomplete hard-group claim must never enter editable/training ROIs.
+wsi_experiment_legacy_bora_review_artifact <- function(artifact, image) {
+  if (!identical(artifact$role, "tissue_annotations")) return(NULL)
+  provenance <- artifact$provenance %||% list()
+  # A continuous anonymous candidate must declare its review role explicitly.
+  # Otherwise the generic annotation path would make it editable and eligible
+  # for tissue training before biological identity has been established.
+  continuous_id <- is.character(artifact$artifact_id) &&
+    length(artifact$artifact_id) == 1L && !is.na(artifact$artifact_id) &&
+    startsWith(artifact$artifact_id, "bora-continuous-")
+  semantic_id <- is.character(artifact$artifact_id) &&
+    length(artifact$artifact_id) == 1L && !is.na(artifact$artifact_id) &&
+    startsWith(artifact$artifact_id, "bora-semantic-")
+  refined_semantic_id <- is.character(artifact$artifact_id) &&
+    length(artifact$artifact_id) == 1L && !is.na(artifact$artifact_id) &&
+    startsWith(artifact$artifact_id, "bora-refined-semantic-")
+  if (semantic_id || refined_semantic_id ||
+      identical(provenance$producer, "bora-wsi-semantic-chain-v1") ||
+      identical(provenance$producer, "bora-wsi-native-he-refined-semantic-chain-v1") ||
+      identical(provenance$prediction_unit,
+                "semantic_virchow2_spatial_token_native_probability") ||
+      identical(provenance$prediction_unit,
+                "semantic_virchow2_spatial_token_native_he_refined_probability"))
+    wsi_abort("Exploratory Bora semantic boundaries cannot be tissue_annotations; import them as review only.")
+  if (continuous_id ||
+      identical(provenance$producer, "bora-wsi-continuous-chain-v1") ||
+      identical(provenance$prediction_unit, "continuous_rgb9_rgb19_native_probability"))
+    wsi_abort("Continuous anonymous Bora boundaries cannot be tissue_annotations; import them as review only.")
+  scalar <- function(value) if (is.character(value) && length(value) == 1L && !is.na(value))
+    value else ""
+  marker <- startsWith(scalar(artifact$artifact_id), "bora-global-exact-") ||
+    identical(provenance$producer, "bora-wsi-global-v1") ||
+    identical(provenance$algorithm_id, "bora-global-hard-group-v1") ||
+    identical(provenance$prediction_unit, "global_anonymous_Bora-AF_group")
+  if (!marker) return(NULL)
+  hash <- function(value) is.character(value) && length(value) == 1L &&
+    grepl("^[0-9a-f]{64}$", value)
+  if (!identical(provenance$producer, "bora-wsi-global-v1") ||
+      !identical(provenance$algorithm_id, "bora-global-hard-group-v1") ||
+      !identical(provenance$prediction_unit, "global_anonymous_Bora-AF_group") ||
+      !isTRUE(provenance$identity_status %in% c("exploratory_transfer", "externally_validated")) ||
+      !hash(provenance$chain_complete_sha256) || !hash(provenance$manifest_sha256) ||
+      !hash(artifact$sha256) || !identical(artifact$source_frame_id, image$frame_id) ||
+      !identical(artifact$image_sha256, image$sha256))
+    wsi_abort("Legacy anonymous Bora tissue_annotations lack complete source binding; refusing ROI import.")
+  artifact$role <- "bora_exploratory_boundary_review"
+  artifact$review_only <- TRUE
+  artifact
+}
+
+# Anonymous global Bora boundaries are useful to inspect, but are not tissue
+# annotations or PLS-LDA training regions. Only their geometry enters a locked
+# project layer; semantic labels in the source GeoJSON are discarded.
+wsi_experiment_recovered_bora_receipts <- function(provenance, artifact, tissue,
+                                                    root) {
+  corner_stage <- identical(provenance$producer,
+    "bora-recovered-kodama-he-diagnostic-review-v1")
+  names <- c("mask", "diagnostic", "vector", "smoothing",
+             if (corner_stage) "corner")
+  receipts <- lapply(names, function(name) {
+    entry <- provenance[[paste0(name, "_receipt")]]
+    if (!is.list(entry)) wsi_abort(paste("Recovered Bora", name, "receipt is missing."))
+    entry <- wsi_experiment_file(entry, root, paste("Recovered Bora", name, "receipt"), TRUE)
+    if (file.info(entry$resolved_path)$size > 8 * 1024^2)
+      wsi_abort(paste("Recovered Bora", name, "receipt exceeds 8 MiB."))
+    jsonlite::fromJSON(entry$resolved_path, simplifyVector = FALSE)
+  })
+  names(receipts) <- names
+  m <- receipts$mask
+  d <- receipts$diagnostic
+  v <- receipts$vector
+  s <- receipts$smoothing
+  corner <- receipts$corner
+  receipt_sha <- function(name) provenance[[paste0(name, "_receipt")]]$sha256
+  source_hashes <- function(receipt) unlist(receipt$source_sha256, use.names = FALSE)
+  same_pair <- function(actual, expected) {
+    actual <- as.numeric(unlist(actual, use.names = FALSE))
+    length(actual) == 2L && isTRUE(all.equal(actual, expected, tolerance = 1e-8,
+                                              check.attributes = FALSE))
+  }
+  if (!identical(m$format, "pm016-recovered-bora-full-slide-diagnostic-v1") ||
+      !identical(m$algorithm, paste("Frozen r2 complete token field -> unchanged",
+                                    "COLON_BOUNDARY_SPEC native H&E refinement ->",
+                                    "optional global vectorizer")) ||
+      !identical(m$accepted_annotation, FALSE) ||
+      !identical(m$technical_seam_gate_pass, FALSE) ||
+      !identical(m$source_files_sha256$native_he, tissue$image$sha256) ||
+      !identical(m$r2_token_field_sha256, provenance$r2_token_field_sha256) ||
+      !identical(m$r2_model_receipt_sha256, provenance$r2_model_receipt_sha256) ||
+      !identical(m$native_refinement$mask_sha256,
+                 provenance$source_semantic_mask_sha256) ||
+      !identical(d$format, "pm016-recovered-bora-full-slide-diagnostic-v1") ||
+      !identical(d$status, "DIAGNOSTIC_ONLY_NOT_ACCEPTED") ||
+      !identical(d$accepted_annotation, FALSE) ||
+      !identical(d$technical_seam_gate_pass, FALSE) ||
+      !identical(d$biological_accuracy_qualified, FALSE) ||
+      !identical(d$mask_receipt_sha256, receipt_sha("mask")) ||
+      !identical(d$vector$receipt_sha256, receipt_sha("vector")) ||
+      !identical(v$format, "bora-wsi-global-vector-v1") ||
+      !identical(v$source_image_sha256, tissue$image$sha256) ||
+      !identical(v$source_frame_id, tissue$image$frame_id) ||
+      !same_pair(v$native_shape_yx, c(tissue$image$height, tissue$image$width)) ||
+      !same_pair(v$native_mpp_xy, c(tissue$image$mpp_x, tissue$image$mpp_y)) ||
+      !identical(v$source_semantic_mask_sha256,
+                 provenance$source_semantic_mask_sha256) ||
+      !identical(v$global_model_binding_sha256,
+                 provenance$global_model_binding_sha256) ||
+      !identical(v$output_sha256[["exact/mask.geojson"]],
+                 provenance$source_exact_geojson_sha256) ||
+      !is.numeric(v$minimum_area_um2) ||
+      length(v$minimum_area_um2) != 1L ||
+      v$minimum_area_um2 != 100 ||
+      !identical(v$minimum_area_strictly_less_removed, TRUE) ||
+      !identical(v$exact_vector_matches_cleaned_mask, TRUE) ||
+      !identical(v$global_contours, TRUE) ||
+      !identical(v$no_macroregion_cuts, TRUE) ||
+      !identical(v$independently_fitted_vector_windows, FALSE) ||
+      !identical(s$format, "bora-wsi-review-smoothing-v1") ||
+      !identical(s$status, "REVIEW_ONLY_NOT_ACCEPTED") ||
+      !identical(s$technical_r4_seam_failure_remains, TRUE) ||
+      !identical(s$exact_cleaned_mask_and_geojson_unchanged, TRUE) ||
+      !identical(s$new_tissue_classifier_used, FALSE) ||
+      !identical(s$biological_accuracy_qualified, FALSE) ||
+      !identical(s$selected$status, "PASSED_DIAGNOSTIC_REVIEW") ||
+      !identical(s$review_geojson_sha256,
+                 provenance$r6_review_geojson_sha256) ||
+      !receipt_sha("vector") %in% source_hashes(s) ||
+      !provenance$source_exact_geojson_sha256 %in% source_hashes(s) ||
+      !tissue$image$sha256 %in% source_hashes(s))
+    wsi_abort("Recovered Bora review receipts do not form a source-bound diagnostic chain.")
+  if (corner_stage &&
+      (!identical(corner$format, "bora-wsi-corner-rounding-v1") ||
+      !identical(corner$status, "REVIEW_ONLY_NOT_ACCEPTED") ||
+      !identical(corner$technical_r4_seam_failure_remains, TRUE) ||
+      !identical(corner$long_straight_model_seam_cannot_be_removed_by_local_rounding,
+                 TRUE) ||
+      !identical(corner$exact_r4_and_r6_unchanged, TRUE) ||
+      !identical(corner$biological_accuracy_qualified, FALSE) ||
+      !identical(corner$review_geojson_sha256, artifact$sha256) ||
+      !identical(corner$review_geojson_sha256, provenance$review_geojson_sha256) ||
+      !provenance$r6_review_geojson_sha256 %in% source_hashes(corner) ||
+      !receipt_sha("vector") %in% source_hashes(corner) ||
+      !provenance$source_exact_geojson_sha256 %in% source_hashes(corner) ||
+      !tissue$image$sha256 %in% source_hashes(corner) ||
+      !any(vapply(corner$attempts %||% list(), function(a)
+        identical(a$status, "PASSED_REVIEW_ONLY"), logical(1)))))
+    wsi_abort("Recovered Bora review receipts do not form a source-bound diagnostic chain.")
+  if (!corner_stage &&
+      (!identical(s$review_geojson_sha256, artifact$sha256) ||
+       !identical(provenance$r6_review_geojson_sha256, artifact$sha256) ||
+       !is.null(provenance$corner_receipt)))
+    wsi_abort("Recovered Bora r6 fallback must use its own signed review geometry.")
+  receipts
+}
+
+wsi_experiment_bora_review_layer <- function(experiment, tissue, image_index) {
+  matches <- Filter(Negate(is.null), lapply(tissue$artifacts %||% list(), function(a) {
+    if (identical(a$role, "bora_exploratory_boundary_review")) return(a)
+    wsi_experiment_legacy_bora_review_artifact(a, tissue$image)
+  }))
+  if (!length(matches)) return(NULL)
+  if (length(matches) != 1L) wsi_abort("Bora candidate review requires exactly one artifact per tissue.")
+  artifact <- matches[[1L]]
+  provenance <- artifact$provenance %||% list()
+  if (isTRUE(provenance$producer %in% c(
+      "bora-kodama-three-group-he-diagnostic-review-v1",
+      "bora-kodama-three-group-topology-guarded-review-v3")))
+    return(wsi_experiment_bora_three_group_review_layer(
+      experiment, tissue, image_index, artifact))
+  hash <- function(value) is.character(value) && length(value) == 1L &&
+    grepl("^[0-9a-f]{64}$", value)
+  continuous <- identical(provenance$producer, "bora-wsi-continuous-chain-v1") ||
+    identical(provenance$prediction_unit, "continuous_rgb9_rgb19_native_probability")
+  refined_semantic <- identical(provenance$producer,
+                                "bora-wsi-native-he-refined-semantic-chain-v1") ||
+    identical(provenance$prediction_unit,
+              "semantic_virchow2_spatial_token_native_he_refined_probability") ||
+    (is.character(artifact$artifact_id) && length(artifact$artifact_id) == 1L &&
+     !is.na(artifact$artifact_id) &&
+     startsWith(artifact$artifact_id, "bora-refined-semantic-"))
+  semantic <- refined_semantic ||
+    identical(provenance$producer, "bora-wsi-semantic-chain-v1") ||
+    identical(provenance$prediction_unit,
+              "semantic_virchow2_spatial_token_native_probability") ||
+    (is.character(artifact$artifact_id) && length(artifact$artifact_id) == 1L &&
+     !is.na(artifact$artifact_id) && startsWith(artifact$artifact_id, "bora-semantic-"))
+  manuscript_transfer <- identical(provenance$producer, "bora-wsi-global-v1") &&
+    identical(provenance$prediction_unit,
+              "global_bora_neighbor_context_classification") &&
+    identical(provenance$algorithm_id,
+              "bora-global-af-neighbor-context-v4-review")
+  manuscript_transfer_v5 <- identical(provenance$producer,
+    "bora-exploratory-transfer-unknown-aware-global-vector-v1") &&
+    identical(provenance$prediction_unit,
+              "Virchow2 spatial token; native H&E boundary refinement")
+  recovered_corner <- identical(provenance$producer,
+    "bora-recovered-kodama-he-diagnostic-review-v1")
+  recovered_kodama <- is.character(provenance$producer) &&
+    length(provenance$producer) == 1L && provenance$producer %in% c(
+    "bora-recovered-kodama-he-diagnostic-review-v1",
+    "bora-recovered-kodama-he-smoothed-diagnostic-review-v1") &&
+    identical(provenance$prediction_unit,
+              "KODAMA_two_group_token_field_native_HE_refinement")
+  named_prediction <- semantic || manuscript_transfer || manuscript_transfer_v5
+  recovered_receipts <- NULL
+  valid_provenance <- if (recovered_kodama) {
+    identical(provenance$identity_status, "exploratory_transfer") &&
+      identical(provenance$biological_accuracy_qualified, FALSE) &&
+      identical(provenance$accepted_annotation, FALSE) &&
+      identical(provenance$technical_seam_gate_pass, FALSE) &&
+      identical(artifact$training_eligible, FALSE) &&
+      identical(artifact$predicted_not_expert_annotation, TRUE) &&
+      is.numeric(provenance$minimum_area_um2) &&
+      length(provenance$minimum_area_um2) == 1L &&
+      provenance$minimum_area_um2 == 100 &&
+      identical(provenance$review_geojson_sha256, artifact$sha256) &&
+      all(vapply(c("r2_token_field_sha256", "r2_model_receipt_sha256",
+                   "source_semantic_mask_sha256", "global_model_binding_sha256",
+                   "source_exact_geojson_sha256", "r6_review_geojson_sha256"),
+                 function(field) hash(provenance[[field]]), logical(1))) &&
+      is.list(recovered_receipts <- wsi_experiment_recovered_bora_receipts(
+        provenance, artifact, tissue, experiment$root))
+  } else if (manuscript_transfer) {
+    identical(provenance$identity_status, "exploratory_transfer") &&
+      identical(artifact$training_eligible, FALSE) &&
+      identical(artifact$predicted_not_expert_annotation, TRUE) &&
+      identical(provenance$biological_accuracy_qualified, FALSE) &&
+      identical(provenance$review_geojson_sha256, artifact$sha256) &&
+      identical(as.numeric(unlist(provenance$native_shape_yx, use.names = FALSE)),
+                c(as.numeric(tissue$image$height), as.numeric(tissue$image$width))) &&
+      isTRUE(all.equal(as.numeric(unlist(provenance$native_mpp_xy,
+                                        use.names = FALSE)),
+                       c(tissue$image$mpp_x, tissue$image$mpp_y),
+                       tolerance = 1e-8, check.attributes = FALSE)) &&
+      is.numeric(provenance$minimum_area_um2) &&
+      length(provenance$minimum_area_um2) == 1L &&
+      provenance$minimum_area_um2 == 100 &&
+      identical(provenance$exact_vector_matches_cleaned_mask, TRUE) &&
+      all(vapply(c("chain_complete_sha256", "source_vector_complete_sha256",
+                   "review_complete_sha256", "source_exact_mask_sha256",
+                   "source_exact_geojson_sha256", "semantic_mask_sha256",
+                   "global_model_binding_sha256"),
+                 function(field) hash(provenance[[field]]), logical(1)))
+  } else if (manuscript_transfer_v5) {
+    identical(provenance$identity_status,
+              "exploratory_manuscript_transfer_unvalidated") &&
+      identical(provenance$biological_accuracy_qualified, FALSE) &&
+      identical(provenance$independent_pm016_validation, FALSE) &&
+      identical(provenance$unknown_semantics,
+                "abstention_not_background_or_tissue_class") &&
+      identical(provenance$global_contours, TRUE) &&
+      identical(provenance$no_stair_step_fallback, TRUE) &&
+      is.numeric(provenance$minimum_area_um2) &&
+      length(provenance$minimum_area_um2) == 1L &&
+      provenance$minimum_area_um2 == 100 &&
+      is.numeric(provenance$smoothing_tolerance_um) &&
+      length(provenance$smoothing_tolerance_um) == 1L &&
+      is.finite(provenance$smoothing_tolerance_um) &&
+      provenance$smoothing_tolerance_um > 0 &&
+      all(vapply(c("model_sha256", "policy_sha256",
+                   "materialization_receipt_sha256", "registration_sha256",
+                   "registered_support_source_sha256", "tissue_support_sha256",
+                   "native_label_sha256", "native_unknown_sha256",
+                   "global_vector_receipt_sha256"),
+                 function(field) hash(provenance[[field]]), logical(1)))
+  } else if (semantic) {
+    identical(provenance$producer, if (refined_semantic)
+      "bora-wsi-native-he-refined-semantic-chain-v1" else
+      "bora-wsi-semantic-chain-v1") &&
+      identical(provenance$prediction_unit,
+                if (refined_semantic)
+                  "semantic_virchow2_spatial_token_native_he_refined_probability" else
+                  "semantic_virchow2_spatial_token_native_probability") &&
+      identical(provenance$identity_status, "exploratory_same_slide_holdout") &&
+      identical(provenance$evidence_class,
+                "expert_trained_same_slide_holdout_not_independent_patient_validated") &&
+      identical(artifact$training_eligible, FALSE) &&
+      identical(artifact$predicted_not_expert_annotation, TRUE) &&
+      identical(provenance$predicted_not_expert_annotation, TRUE) &&
+      identical(provenance$native_he_boundary_refinement_applied,
+                refined_semantic) &&
+      identical(provenance$biological_accuracy_qualified, FALSE) &&
+      (!refined_semantic ||
+       (hash(provenance$native_he_source_sha256) &&
+        identical(provenance$native_he_source_sha256, tissue$image$sha256) &&
+        hash(provenance$token_materialization_receipt_sha256))) &&
+      all(vapply(c("chain_complete_sha256", "roi_spec_sha256",
+                   "expert_annotation_sha256", "same_slide_holdout_receipt_sha256",
+                   "model_sha256", "token_receipt_sha256", "registration_sha256",
+                   "registered_support_source_sha256", "tissue_support_sha256",
+                   "semantic_mask_sha256", "exact_mask_sha256",
+                   "exact_geojson_sha256", "review_geojson_sha256",
+                   "global_model_binding_sha256"),
+                 function(field) hash(provenance[[field]]), logical(1))) &&
+      is.numeric(provenance$minimum_area_um2) &&
+      length(provenance$minimum_area_um2) == 1L &&
+      is.finite(provenance$minimum_area_um2) &&
+      provenance$minimum_area_um2 == 100 &&
+      identical(provenance$exact_vector_matches_cleaned_mask, TRUE) &&
+      identical(provenance$review_geojson_sha256, artifact$sha256)
+  } else if (continuous) {
+    identical(provenance$producer, "bora-wsi-continuous-chain-v1") &&
+      identical(provenance$prediction_unit, "continuous_rgb9_rgb19_native_probability") &&
+      identical(provenance$identity_status, "anonymous_exploratory_review") &&
+      hash(provenance$chain_complete_sha256) &&
+      hash(provenance$semantic_mask_sha256) &&
+      hash(provenance$exact_mask_sha256) &&
+      hash(provenance$exact_geojson_sha256) &&
+      hash(provenance$review_geojson_sha256) &&
+      hash(provenance$global_model_binding_sha256) &&
+      hash(provenance$registration_sha256) &&
+      hash(provenance$registered_support_source_sha256) &&
+      hash(provenance$tissue_support_sha256) &&
+      identical(provenance$biological_accuracy_qualified, FALSE) &&
+      identical(provenance$exact_vector_matches_cleaned_mask, TRUE) &&
+      is.numeric(provenance$minimum_area_um2) &&
+      length(provenance$minimum_area_um2) == 1L &&
+      is.finite(provenance$minimum_area_um2) &&
+      provenance$minimum_area_um2 == 100 &&
+      identical(provenance$review_geojson_sha256, artifact$sha256)
+  } else {
+    identical(provenance$prediction_unit, "global_anonymous_Bora-AF_group") &&
+      isTRUE(provenance$identity_status %in% c("exploratory_transfer", "externally_validated")) &&
+      hash(provenance$chain_complete_sha256) && hash(provenance$manifest_sha256)
+  }
+  if (!identical(artifact$format, "geojson") || !identical(artifact$review_only, TRUE) ||
+      !valid_provenance ||
+      !identical(artifact$source_frame_id, tissue$image$frame_id) ||
+      !identical(artifact$image_sha256, tissue$image$sha256))
+    wsi_abort("Bora candidate review format, status, frame or image identity disagrees with its tissue.")
+  artifact <- wsi_experiment_file(artifact, experiment$root, "Bora candidate review", TRUE)
+  size <- file.info(artifact$resolved_path)$size
+  cap <- getOption("wsiTools.experiment_max_bora_review_bytes", 32 * 1024^2)
+  if (!is.numeric(cap) || length(cap) != 1L || !is.finite(cap) || cap < 1)
+    wsi_abort("wsiTools.experiment_max_bora_review_bytes must be a positive finite size.")
+  id <- paste0("experiment_bora_candidate_", tissue$tissue_id)
+  base <- list(id = id, name = if (recovered_kodama)
+      paste("Bora tissue annotations · KODAMA groups ·", if (recovered_corner) "corner-rounded" else "smoothed",
+            "diagnostic prediction · seam gate failed") else if (manuscript_transfer_v5)
+      "Bora tissue annotations · manuscript model transfer prediction" else if (manuscript_transfer)
+      "Bora tissue annotations · manuscript model transfer prediction" else if (refined_semantic)
+      "Bora tissue annotations · H&E-refined exploratory same-slide holdout prediction" else if (semantic)
+      "Bora tissue annotations · exploratory same-slide holdout prediction" else if (continuous)
+      "Bora tissue annotations · exploratory continuous anonymous prediction" else
+      "Bora tissue annotations · anonymous prediction",
+    type = "vector", source_type = "bora_candidate_review", colour = "#FBBF24",
+    visible = TRUE, opacity = 1, outline = TRUE,
+    project_image_index = image_index,
+    image_id = tissue$tissue_id, project_managed = TRUE,
+    metadata = list(review_only = TRUE, training_eligible = FALSE,
+      source_sha256 = artifact$sha256, source_frame_id = artifact$source_frame_id,
+      image_sha256 = artifact$image_sha256, identity_status = provenance$identity_status,
+      producer = provenance$producer, evidence_class = provenance$evidence_class,
+      model_sha256 = provenance$model_sha256,
+      global_vector_receipt_sha256 = provenance$global_vector_receipt_sha256,
+      native_label_sha256 = provenance$native_label_sha256,
+      native_unknown_sha256 = provenance$native_unknown_sha256,
+      native_he_boundary_refinement_applied =
+        provenance$native_he_boundary_refinement_applied,
+      native_he_source_sha256 = provenance$native_he_source_sha256,
+      biological_accuracy_qualified = provenance$biological_accuracy_qualified,
+      accepted_annotation = provenance$accepted_annotation,
+      technical_seam_gate_pass = provenance$technical_seam_gate_pass,
+      diagnostic_only = if (recovered_kodama) TRUE else NULL,
+      mask_receipt_sha256 = provenance$mask_receipt$sha256,
+      diagnostic_receipt_sha256 = provenance$diagnostic_receipt$sha256,
+      vector_receipt_sha256 = provenance$vector_receipt$sha256,
+      smoothing_receipt_sha256 = provenance$smoothing_receipt$sha256,
+      corner_receipt_sha256 = provenance$corner_receipt$sha256,
+      same_slide_holdout_receipt_sha256 = provenance$same_slide_holdout_receipt_sha256,
+      chain_complete_sha256 = provenance$chain_complete_sha256,
+      manifest_sha256 = provenance$manifest_sha256,
+      prediction_unit = provenance$prediction_unit,
+      semantic_mask_sha256 = provenance$semantic_mask_sha256,
+      exact_mask_sha256 = provenance$exact_mask_sha256,
+      exact_geojson_sha256 = provenance$exact_geojson_sha256))
+  unavailable <- function(reason) {
+    base$name <- paste0("Bora candidate boundaries unavailable · ", reason)
+    base$visible <- FALSE
+    base$items <- list()
+    base$count <- 0L
+    base$metadata$unavailable_reason <- reason
+    base
+  }
+  if (is.na(size) || size > cap)
+    return(unavailable("review GeoJSON exceeds the bounded viewer size; export an indexed derivative"))
+  geo <- jsonlite::fromJSON(artifact$resolved_path, simplifyVector = FALSE)
+  if (!identical(geo$type, "FeatureCollection") || !is.list(geo$features))
+    wsi_abort("Bora candidate review requires a FeatureCollection.")
+  # The artifact label alone cannot bind a native-pixel vector to an image:
+  # older exporters could stamp the working (0.5 um/px) frame on a vector
+  # produced in the native (often 0.25 um/px) frame. Check the signed file's
+  # own coordinate metadata before any polygon can enter the viewer.
+  numeric_pair <- function(value) {
+    if (!is.list(value) || length(value) != 2L) return(NULL)
+    parts <- unlist(value, use.names = FALSE)
+    if (!is.numeric(parts) || length(parts) != 2L || any(!is.finite(parts))) return(NULL)
+    as.numeric(parts)
+  }
+  shape <- numeric_pair(geo$native_shape_yx)
+  mpp <- numeric_pair(geo$native_mpp_xy)
+  expected_shape <- c(as.numeric(tissue$image$height), as.numeric(tissue$image$width))
+  expected_mpp <- c(as.numeric(tissue$image$mpp_x), as.numeric(tissue$image$mpp_y))
+  if (!identical(geo$coordinate_space, "native_image_pixel_edges") ||
+      !identical(geo$source_frame_id, artifact$source_frame_id) ||
+      !identical(geo$source_frame_id, tissue$image$frame_id) ||
+      !identical(geo$source_image_sha256, artifact$image_sha256) ||
+      !identical(geo$source_image_sha256, tissue$image$sha256) ||
+      is.null(shape) || !identical(shape, expected_shape) ||
+      is.null(mpp) || any(mpp <= 0) ||
+      !isTRUE(all.equal(mpp, expected_mpp, tolerance = 1e-8,
+                        check.attributes = FALSE)))
+    wsi_abort("Bora candidate review GeoJSON native frame, image, dimensions or mpp disagree with its tissue and artifact.")
+  if (manuscript_transfer_v5 &&
+      (!identical(geo$format, provenance$producer) ||
+       !identical(geo$identity_status, provenance$identity_status) ||
+       !identical(geo$biological_accuracy_qualified, FALSE) ||
+       !identical(geo$unknown_semantics, provenance$unknown_semantics) ||
+       !identical(geo$source_label_sha256, provenance$native_label_sha256) ||
+       !identical(geo$source_unknown_sha256, provenance$native_unknown_sha256) ||
+       !identical(geo$registered_support_source_sha256,
+                  provenance$registered_support_source_sha256) ||
+       !identical(geo$vector_export$geometry_role,
+                  "smoothed_review_unknown_preserved") ||
+       !identical(geo$vector_export$global_contours, TRUE) ||
+       !identical(geo$vector_export$independently_fitted_windows, FALSE) ||
+       !identical(geo$vector_export$unknown_holes_exempt_from_minimum, TRUE) ||
+       !identical(geo$vector_export$unsupported_holes_exempt_from_minimum, TRUE) ||
+       !is.numeric(geo$vector_export$minimum_part_and_unprotected_hole_area_um2) ||
+       length(geo$vector_export$minimum_part_and_unprotected_hole_area_um2) != 1L ||
+       geo$vector_export$minimum_part_and_unprotected_hole_area_um2 != 100 ||
+       !isTRUE(all.equal(geo$vector_export$smoothing_tolerance_um,
+                         provenance$smoothing_tolerance_um))))
+    wsi_abort("Unknown-aware Bora transfer review does not match its native geometry and source labels.")
+  if (recovered_kodama &&
+      (!identical(geo$source_semantic_mask_sha256,
+                  provenance$source_semantic_mask_sha256) ||
+       !identical(geo$global_model_binding_sha256,
+                  provenance$global_model_binding_sha256) ||
+       !identical(geo$predicted_not_expert_annotation, TRUE) ||
+       !identical(geo$tissue_identity_status, "exploratory_transfer") ||
+       !identical(geo$vector_export$format, "bora-wsi-global-vector-v1") ||
+       !identical(geo$vector_export$geometry_role,
+                  if (recovered_corner) "corner_rounded_review_only" else
+                    "smoothed_review_only") ||
+       !identical(geo$vector_export$global_contours, TRUE) ||
+       !identical(geo$vector_export$independently_fitted_windows, FALSE) ||
+       !is.numeric(geo$vector_export$minimum_part_and_hole_area_um2) ||
+       length(geo$vector_export$minimum_part_and_hole_area_um2) != 1L ||
+       geo$vector_export$minimum_part_and_hole_area_um2 != 100))
+    wsi_abort("Recovered Bora corner review disagrees with the source-bound diagnostic receipts.")
+  if (continuous && (is.null(numeric_pair(provenance$native_shape_yx)) ||
+      !identical(numeric_pair(provenance$native_shape_yx), expected_shape) ||
+      is.null(numeric_pair(provenance$native_mpp_xy)) ||
+      !isTRUE(all.equal(numeric_pair(provenance$native_mpp_xy), expected_mpp,
+                        tolerance = 1e-8, check.attributes = FALSE)) ||
+      (!is.null(tissue$registered_tissue) &&
+       (!identical(provenance$registration_sha256,
+                   tissue$registered_tissue$registration$sha256) ||
+        !identical(provenance$registered_support_source_sha256,
+                   tissue$registered_tissue$sidecar$full_support_mask$sha256)))))
+    wsi_abort("Continuous Bora review native registration or support identity differs from its project.")
+  if (semantic && (is.null(numeric_pair(provenance$native_shape_yx)) ||
+      !identical(numeric_pair(provenance$native_shape_yx), expected_shape) ||
+      is.null(numeric_pair(provenance$native_mpp_xy)) ||
+      !isTRUE(all.equal(numeric_pair(provenance$native_mpp_xy), expected_mpp,
+                        tolerance = 1e-8, check.attributes = FALSE)) ||
+      (!is.null(tissue$registered_tissue) &&
+       (!identical(provenance$registration_sha256,
+                   tissue$registered_tissue$registration$sha256) ||
+        !identical(provenance$registered_support_source_sha256,
+                   tissue$registered_tissue$sidecar$full_support_mask$sha256)))))
+    wsi_abort("Semantic Bora review native registration or support identity differs from its project.")
+  if (continuous && (!identical(geo$source_semantic_mask_sha256,
+                              provenance$semantic_mask_sha256) ||
+      !identical(geo$global_model_binding_sha256,
+                 provenance$global_model_binding_sha256) ||
+      !identical(geo$predicted_not_expert_annotation, TRUE) ||
+      !identical(geo$tissue_identity_status, "exploratory_transfer") ||
+      !is.list(geo$vector_export) ||
+      !identical(geo$vector_export$format, "bora-wsi-global-vector-v1") ||
+      !identical(geo$vector_export$geometry_role, "smoothed_review") ||
+      !identical(geo$vector_export$global_contours, TRUE) ||
+      !identical(geo$vector_export$independently_fitted_windows, FALSE) ||
+      !is.numeric(geo$vector_export$minimum_part_and_hole_area_um2) ||
+      length(geo$vector_export$minimum_part_and_hole_area_um2) != 1L ||
+      !is.finite(geo$vector_export$minimum_part_and_hole_area_um2) ||
+      geo$vector_export$minimum_part_and_hole_area_um2 < 100))
+    wsi_abort("Continuous Bora review provenance or global vector geometry disagrees with its completion receipt.")
+  if (manuscript_transfer &&
+      (!identical(geo$source_semantic_mask_sha256,
+                  provenance$semantic_mask_sha256) ||
+       !identical(geo$global_model_binding_sha256,
+                  provenance$global_model_binding_sha256) ||
+       !identical(geo$predicted_not_expert_annotation, TRUE) ||
+       !identical(geo$tissue_identity_status, "exploratory_transfer") ||
+       !identical(geo$vector_export$geometry_role, "smoothed_review") ||
+       !identical(geo$vector_export$global_contours, TRUE) ||
+       !identical(geo$vector_export$independently_fitted_windows, FALSE) ||
+       !is.numeric(geo$vector_export$minimum_part_and_hole_area_um2) ||
+       length(geo$vector_export$minimum_part_and_hole_area_um2) != 1L ||
+       geo$vector_export$minimum_part_and_hole_area_um2 != 100))
+    wsi_abort("Manuscript Bora transfer vector identity or geometry disagrees with its completion receipt.")
+  if (semantic && (!identical(geo$source_semantic_mask_sha256,
+                            provenance$semantic_mask_sha256) ||
+      !identical(geo$global_model_binding_sha256,
+                 provenance$global_model_binding_sha256) ||
+      !identical(geo$predicted_not_expert_annotation, TRUE) ||
+      !identical(geo$tissue_identity_status, "exploratory_transfer") ||
+      !is.list(geo$vector_export) ||
+      !identical(geo$vector_export$format, "bora-wsi-global-vector-v1") ||
+      !identical(geo$vector_export$geometry_role, "smoothed_review") ||
+      !identical(geo$vector_export$global_contours, TRUE) ||
+      !identical(geo$vector_export$independently_fitted_windows, FALSE) ||
+      !is.numeric(geo$vector_export$minimum_part_and_hole_area_um2) ||
+      length(geo$vector_export$minimum_part_and_hole_area_um2) != 1L ||
+      !is.finite(geo$vector_export$minimum_part_and_hole_area_um2) ||
+      geo$vector_export$minimum_part_and_hole_area_um2 != 100))
+    wsi_abort("Semantic Bora review provenance or global vector geometry disagrees with its completion receipt.")
+  if (length(geo$features) > 5000L)
+    return(unavailable("review GeoJSON exceeds 5,000 features; export an indexed derivative"))
+  vertices <- 0L
+  vertex_cap <- if (manuscript_transfer_v5) 150000L else 100000L
+  for (i in seq_along(geo$features)) {
+    feature <- geo$features[[i]]
+    predicted_tissue <- NULL
+    if (recovered_kodama) {
+      properties <- feature$properties %||% list()
+      group <- as.numeric(properties$value %||% NA_real_)
+      expected_name <- if (length(group) == 1L && group %in% c(1, 2))
+        paste("KODAMA Group", group) else ""
+      if (!nzchar(expected_name) ||
+          !identical(properties$name, expected_name) ||
+          !identical(properties$predicted_tissue, expected_name) ||
+          !identical(properties$predicted_not_expert_annotation, TRUE) ||
+          !identical(properties$tissue_identity_status, "exploratory_transfer") ||
+          !identical(properties$boundary_role,
+                     if (recovered_corner) "corner_rounded_review_only" else
+                       "smoothed_review_only") ||
+          !is.numeric(properties$area_um2) ||
+          length(properties$area_um2) != 1L ||
+          properties$area_um2 < 100)
+        wsi_abort("Recovered Bora review feature is not a 100 µm² KODAMA diagnostic component.")
+    }
+    if (named_prediction) {
+      properties <- feature$properties %||% list()
+      predicted_tissue <- properties$predicted_tissue
+      if (!is.character(predicted_tissue) || length(predicted_tissue) != 1L ||
+          is.na(predicted_tissue) || !nzchar(trimws(predicted_tissue)) ||
+          !identical(properties$predicted_not_expert_annotation, TRUE) ||
+          !identical(properties$tissue_identity_status,
+            if (manuscript_transfer_v5) "exploratory_manuscript_transfer_unvalidated"
+            else "exploratory_transfer"))
+        wsi_abort("Semantic Bora review feature lacks an exploratory predicted tissue identity.")
+    }
+    kind <- feature$geometry$type %||% ""
+    if (!kind %in% c("Polygon", "MultiPolygon"))
+      wsi_abort("Bora candidate review requires Polygon or MultiPolygon geometry.")
+    polygons <- if (identical(kind, "Polygon")) list(feature$geometry$coordinates) else
+      feature$geometry$coordinates
+    if (!is.list(polygons) || !length(polygons))
+      wsi_abort("Bora candidate review has empty polygon geometry.")
+    for (polygon in polygons) {
+      if (!is.list(polygon) || !length(polygon))
+        wsi_abort("Bora candidate review has an empty polygon.")
+      for (ring in polygon) {
+      if (!is.list(ring) || length(ring) < 4L)
+        wsi_abort("Bora candidate review has an invalid polygon ring.")
+      points <- lapply(ring, function(p) unlist(p, use.names = FALSE))
+      if (any(vapply(points, length, integer(1)) != 2L) ||
+          any(!vapply(points, is.numeric, logical(1))))
+        wsi_abort("Bora candidate review requires two-dimensional coordinates.")
+      xy <- do.call(rbind, points)
+      if (any(!is.finite(xy)) || any(xy[, 1L] < 0 | xy[, 1L] > tissue$image$width) ||
+          any(xy[, 2L] < 0 | xy[, 2L] > tissue$image$height) ||
+          !identical(unname(xy[1L, ]), unname(xy[nrow(xy), ])))
+        wsi_abort("Bora candidate review coordinates disagree with the native image frame.")
+      vertices <- vertices + nrow(xy)
+      if (vertices > vertex_cap)
+        return(unavailable(paste0("review geometry exceeds ",
+                                  format(vertex_cap, big.mark = ","),
+                                  " vertices; export an indexed derivative")))
+      }
+    }
+    label <- if (recovered_kodama)
+      paste(properties$name, "· Bora diagnostic · seam gate failed") else if (named_prediction)
+      paste("Bora predicted", gsub("_", " ", predicted_tissue, fixed = TRUE),
+            "· exploratory") else
+      paste("Bora candidate boundary", i)
+    geo$features[[i]] <- list(type = "Feature", id = paste0("candidate_", i),
+      geometry = list(type = kind, coordinates = feature$geometry$coordinates),
+      properties = list(name = label,
+        classification = list(name = if (recovered_kodama) properties$name else if (named_prediction)
+          paste("Predicted", gsub("_", " ", predicted_tissue, fixed = TRUE)) else
+          "Candidate boundary"), isLocked = TRUE,
+        source_type = "bora_candidate_review", tissue_annotation = TRUE,
+        review_only = TRUE, predicted_tissue = predicted_tissue,
+        diagnostic_only = recovered_kodama,
+        technical_seam_gate_pass = if (recovered_kodama) FALSE else NULL))
+  }
+  rois <- wsi_roi_from_geojson(geo)
+  items <- wsi_viewer_roi_features(rois, fill_alpha = 0.02)
+  for (i in seq_along(items)) {
+    colour <- if (recovered_kodama) switch(
+      as.character(geo$features[[i]]$properties$classification$name),
+      "KODAMA Group 1" = "#3B82F6", "KODAMA Group 2" = "#F43F5E",
+      "#FBBF24") else if (manuscript_transfer || manuscript_transfer_v5) switch(
+      geo$features[[i]]$properties$predicted_tissue,
+      stroma = "#3B82F6", tumor = "#F43F5E",
+      inflamed_stroma = "#F43F5E", "#FBBF24") else "#FBBF24"
+    items[[i]]$colour <- colour
+    items[[i]]$fill <- wsi_viewer_hex_to_rgba(colour, alpha = 0.02)
+    items[[i]]$locked <- TRUE
+    items[[i]]$tissue_annotation <- TRUE
+    items[[i]]$source <- "Bora tissue annotation · prediction · click to edit"
+    if (named_prediction) items[[i]]$predicted_tissue <-
+      geo$features[[i]]$properties$predicted_tissue
+    items[[i]]$project_image_index <- image_index
+    items[[i]]$image_id <- tissue$tissue_id
+    # The viewer paints the checked rings; retaining three more GeoJSON copies
+    # would needlessly enlarge full-slide HTML and browser memory.
+    items[[i]]$coordinates <- NULL
+    items[[i]]$geometry <- NULL
+    items[[i]]$feature <- NULL
+    items[[i]]$measurements <- NULL
+  }
+  base$items <- items
+  base$count <- length(items)
+  base
 }
 
 wsi_experiment_annotation_rois <- function(experiment, tissue, image_index) {
   all <- list()
   for (a in tissue$artifacts %||% list()) {
     if (!identical(a$role, "tissue_annotations")) next
+    if (!is.null(wsi_experiment_legacy_bora_review_artifact(a, tissue$image))) next
     a <- wsi_experiment_file(a, experiment$root, "tissue_annotations", TRUE)
     if (!is.null(a$frame_id) && !identical(a$frame_id, tissue$image$frame_id))
       wsi_abort("Annotation frame differs from image; a validated native-frame derivative is required.")
@@ -306,6 +975,7 @@ wsi_experiment_annotation_rois <- function(experiment, tissue, image_index) {
       properties$project_section_index <- -1L
       properties$source_role <- a$role
       properties$source_sha256 <- a$sha256
+      if (!is.null(a$description)) properties$source_description <- a$description
       rois$properties[[j]] <- properties
     }
     all[[length(all) + 1L]] <- rois
@@ -344,9 +1014,15 @@ wsi_viewer_experiment <- function(experiment, open = interactive(), wait = FALSE
   experiment <- wsi_read_experiment(if (is.null(previous)) experiment else previous$manifest_path)
   if (!is.null(previous) && !identical(previous$manifest_sha256, experiment$manifest_sha256))
     wsi_abort("The experiment index changed since it was opened. Reopen the updated index before viewing it.")
-  slide <- wsi_open(experiment$tissues[[1L]]$image$resolved_path)
+  image <- experiment$tissues[[1L]]$image
+  slide <- wsi_open(image$display$resolved_path %||% image$resolved_path,
+                    backend = image$display$backend %||% "auto")
   handed_off <- FALSE
   on.exit(if (!handed_off) wsi_close(slide), add = TRUE)
+  if (!identical(as.numeric(slide$dimensions[c("width", "height")]),
+                 as.numeric(c(image$width, image$height))))
+    wsi_abort("Viewer image dimensions differ from the registered experiment frame.")
+  display_artifacts <- wsi_experiment_viewer_artifacts(experiment)
   context <- wsi_experiment_prediction_context(experiment)
   args <- list(...)
   args$slide <- slide
@@ -365,6 +1041,13 @@ wsi_viewer_experiment <- function(experiment, open = interactive(), wait = FALSE
     wsi_experiment_review_context(experiment, strict = FALSE)
   args$experiment <- list(manifest_path = experiment$manifest_path,
     experiment_id = experiment$experiment_id, manifest_sha256 = experiment$manifest_sha256)
+  args$experiment$bora_annotations_mode <-
+    experiment$settings$bora_annotations_mode %||% "ordinary_editable"
+  args$experiment$cell_classification <- wsi_experiment_cell_catalog(experiment)
+  args$experiment$registered_tissue <- wsi_experiment_registered_tissue_catalog(experiment)
+  args$experiment$viewer_evidence <- display_artifacts[c("cell_coverage", "bora_interpretation", "bora_status")]
+  if (isTRUE(display_artifacts$kodama$enabled) && is.null(args$cellphenotyper))
+    args$cellphenotyper <- list(enabled = FALSE, kodama = display_artifacts$kodama)
   args$experiment_prediction <- wsi_prediction_config(experiment = experiment)
   args$title <- args$title %||% experiment$name
   args$session_inputs <- utils::modifyList(args$session_inputs %||% list(),
@@ -720,6 +1403,7 @@ wsi_experiment_roi_training <- function(points, rois, train_ids) {
   if (!inherits(rois, "wsi_roi") || !nrow(rois)) wsi_abort("Draw or import training annotations first.")
   selected <- wsi_prediction_selected_roi_indices(rois, train_ids, include_all = FALSE)
   if (!length(selected)) wsi_abort("Select training annotations explicitly.")
+  wsi_prediction_reject_review_training(rois, selected)
   assigned <- rep(NA_character_, nrow(points))
   centre_labels <- assigned
   for (i in selected) {
@@ -821,12 +1505,24 @@ wsi_experiment_appearance_response <- function(context, rois, payload) {
 }
 
 wsi_experiment_apply_saved_classifier <- function(context, state, payload) {
+  if (!is.null(payload$model_path))
+    wsi_experiment_verify_classifier_reference(state, context$experiment, payload$model_path)
   model <- if (!is.null(payload$model_path)) wsi_read_experiment_classifier(payload$model_path) else state$experiment_classifier
   if (!inherits(model, "wsi_experiment_classifier")) wsi_abort("Choose a saved experiment classifier first.")
   source <- paste0("experiment:", model$feature_set_id)
   if (!is.null(payload$feature_source) && !identical(payload$feature_source, source))
     wsi_abort("Selected feature source differs from the saved classifier.")
   tissues <- unlist(payload$tissue_ids, use.names = FALSE) %||% context$tissue_ids
+  indexed <- any(vapply(context$experiment$tissues, function(tissue)
+    (is.null(tissues) || tissue$tissue_id %in% tissues) && !is.null(tissue$cell_classification$index), logical(1)))
+  if (indexed) {
+    result <- wsi_experiment_index_apply_classifier(model, context$experiment, tissues,
+      model_path = payload$model_path %||% NULL)
+    if (!is.null(payload$model_path)) wsi_experiment_register_classifier(state, context$experiment, payload$model_path, model)
+    state$experiment_classifier <- model
+    if (!is.null(payload$model_path)) state$experiment_classifier_path <- payload$model_path
+    return(result)
+  }
   result <- wsi_experiment_predict_classifier(model, context$experiment, tissues)
   result$set <- "application"
   result$train_annotation_id <- NA_character_
@@ -846,286 +1542,4 @@ wsi_experiment_apply_saved_classifier <- function(context, state, payload) {
   attr(result, "feature_count") <- length(model$preprocessing$feature_columns)
   attr(result, "ncomp") <- model$ncomp
   result
-}
-
-# Read observation columns without allocating a Virchow2 predictor matrix.
-wsi_experiment_review_table <- function(entry, experiment, columns, label, max_rows) {
-  entry <- wsi_experiment_file(entry, experiment$root, label, TRUE)
-  count <- wsi_experiment_number(entry$row_count, paste0(label, ".row_count"), integer = TRUE)
-  if (count > max_rows) wsi_abort("Review observations exceed max_observations; select a smaller tissue/dataset scope.")
-  if (!entry$format %in% c("csv", "csv.gz")) wsi_abort("Review artifacts require csv or csv.gz format.")
-  if (identical(entry$format, "csv.gz") != grepl("\\.csv\\.gz$", entry$resolved_path, ignore.case = TRUE))
-    wsi_abort("Review artifact format must match its CSV/CSV.GZ filename.")
-  connection <- function() if (entry$format == "csv.gz") gzfile(entry$resolved_path, "rt") else file(entry$resolved_path, "rt")
-  stream <- connection()
-  header <- tryCatch(names(utils::read.csv(stream, nrows = 0L, check.names = FALSE)), finally = close(stream))
-  if (anyDuplicated(header) || any(!columns %in% header)) wsi_abort(paste(label, "has missing or duplicate declared columns."))
-  classes <- ifelse(header %in% columns, "character", "NULL")
-  stream <- connection()
-  table <- tryCatch(utils::read.csv(stream, colClasses = classes, nrows = count + 1L,
-    check.names = FALSE, stringsAsFactors = FALSE, fill = FALSE), finally = close(stream))
-  if (nrow(table) != count) wsi_abort(paste(label, "row_count disagrees with the CSV."))
-  list(table = table, header = header, entry = entry)
-}
-
-wsi_experiment_review_numeric <- function(values, label) {
-  if (is.factor(values)) values <- as.character(values)
-  result <- suppressWarnings(as.numeric(values))
-  if (anyNA(result) || any(!is.finite(result))) wsi_abort(paste(label, "must contain finite numeric values."))
-  result
-}
-
-wsi_experiment_review_rows <- function(experiment, tissue, entry, dataset_id, max_rows, feature = FALSE) {
-  columns <- c(entry$id_column, entry$x_column, entry$y_column)
-  if (length(columns) != 3L || anyDuplicated(columns)) wsi_abort("Review ID/X/Y columns must be declared and distinct.")
-  clusters <- as.character(unlist(entry$cluster_columns %||% list(), use.names = FALSE))
-  if (anyNA(clusters) || any(!nzchar(clusters)) || anyDuplicated(clusters)) wsi_abort("cluster_columns must be unique names.")
-  read <- wsi_experiment_review_table(entry, experiment, unique(c(columns, clusters)), dataset_id, max_rows)
-  table <- read$table
-  ids <- table[[entry$id_column]]
-  if (anyNA(ids) || any(!nzchar(trimws(ids))) || anyDuplicated(ids)) wsi_abort("Review observation IDs must be nonempty and unique within a dataset/tissue.")
-  x <- wsi_experiment_review_numeric(table[[entry$x_column]], "Review X")
-  y <- wsi_experiment_review_numeric(table[[entry$y_column]], "Review Y")
-  if (feature) {
-    if (any(!entry$feature_columns %in% read$header) ||
-        !identical(read$header[read$header %in% entry$feature_columns], entry$feature_columns))
-      wsi_abort("Review source feature columns are missing or appear in a different order.")
-    gx <- (x - entry$grid$origin_x_px - entry$grid$tile_width_px / 2) / entry$grid$spacing_x_px
-    gy <- (y - entry$grid$origin_y_px - entry$grid$tile_height_px / 2) / entry$grid$spacing_y_px
-    if (any(abs(gx - round(gx)) > 1e-5 | abs(gy - round(gy)) > 1e-5 | gx < -1e-5 | gy < -1e-5))
-      wsi_abort("Review feature centres disagree with the declared native grid.")
-  }
-  unit <- entry$observation_unit
-  if (!is.character(unit) || length(unit) != 1L || !unit %in% c("spot", "cell", "tile", "token"))
-    wsi_abort("Review observation_unit must be spot, cell, tile or token.")
-  if (!feature && !identical(entry$frame_id, tissue$image$frame_id))
-    wsi_abort("Review observation frame_id differs from the declared tissue image.")
-  fw <- if (feature) entry$grid$tile_width_px else entry$footprint_width_px
-  fh <- if (feature) entry$grid$tile_height_px else entry$footprint_height_px
-  if (!is.null(fw)) wsi_experiment_number(fw, "footprint_width_px")
-  if (!is.null(fh)) wsi_experiment_number(fh, "footprint_height_px")
-  if (xor(is.null(fw), is.null(fh))) wsi_abort("Declare both footprint dimensions or neither.")
-  if (unit %in% c("tile", "token") && is.null(fw)) wsi_abort("Tile/token review observations require explicit footprints.")
-  namespace <- if (feature) entry$feature_set_id else dataset_id
-  global <- wsi_experiment_namespace_id(experiment$experiment_id, tissue$tissue_id, namespace, ids)
-  lapply(seq_along(ids), function(i) {
-    values <- stats::setNames(lapply(clusters, function(column) {
-      value <- table[[column]][[i]]
-      if (is.na(value)) NULL else as.character(value)
-    }), clusters)
-    row <- list(id = global[[i]], original_id = ids[[i]], tissue_id = tissue$tissue_id,
-      frame_id = tissue$image$frame_id, observation_unit = unit, x = x[[i]], y = y[[i]],
-      dataset_id = dataset_id, cluster_values = values)
-    if (!is.null(fw)) { row$footprint_width_px <- fw; row$footprint_height_px <- fh }
-    if (feature) row$feature_set_id <- entry$feature_set_id
-    row
-  })
-}
-
-#' Construct a bounded review context from an experiment
-#'
-#' Optional tissue artifacts with role `review_observations` declare a CSV's
-#' dataset_id, observation_unit, frame_id, row_count, ID/X/Y columns and optional
-#' cluster_columns/footprints. Artifacts with role `observation_reduction` declare
-#' reduction_id, dataset_id (or source_feature_set_id), observation_unit, frame_id,
-#' row_count, id_column and exactly two dimension_columns. Both require path,
-#' sha256 and csv/csv.gz format. Reductions join the complete declared dataset by
-#' explicit local IDs; files are never discovered or matched by row position.
-#'
-#' @param experiment A typed experiment or its manifest path.
-#' @param tissue_ids Optional explicit tissue subset.
-#' @param feature_set_ids Optional typed feature subset; NULL includes all.
-#' @param max_observations Total bounded review row limit; no sampling is done.
-#' @param strict If FALSE, an exceeded row limit returns image metadata and an
-#'   unavailable status without reading observation/reduction artifacts. No
-#'   unvalidated observations are exposed in that metadata-only context.
-#' @return A plain validated wsitools-review-context; predictor matrices are not loaded.
-#' @export
-wsi_experiment_review_context <- function(experiment, tissue_ids = NULL, feature_set_ids = NULL,
-  max_observations = 10000L, strict = TRUE) {
-  experiment <- wsi_read_experiment(experiment)
-  max_observations <- wsi_experiment_number(max_observations, "max_observations", integer = TRUE)
-  if (!is.logical(strict) || length(strict) != 1L || is.na(strict)) wsi_abort("strict must be TRUE or FALSE.")
-  tissues <- experiment$tissues
-  ids <- vapply(tissues, `[[`, character(1), "tissue_id")
-  if (!is.null(tissue_ids)) {
-    if (!length(tissue_ids) || anyNA(tissue_ids) || anyDuplicated(tissue_ids) || any(!tissue_ids %in% ids))
-      wsi_abort("Unknown, duplicate or empty tissue_ids.")
-    tissues <- tissues[match(tissue_ids, ids)]
-  }
-  if (!is.null(feature_set_ids) && (anyNA(feature_set_ids) || anyDuplicated(feature_set_ids)))
-    wsi_abort("feature_set_ids must be unique and nonmissing.")
-  images <- lapply(tissues, function(t) {
-    image <- t$image
-    list(tissue_id = t$tissue_id, name = t$name, frame_id = image$frame_id, sha256 = image$sha256,
-      width = image$width, height = image$height, mpp_x = image$mpp_x, mpp_y = image$mpp_y,
-      path = image$resolved_path, coordinate_convention = image$coordinate_convention)
-  })
-  descriptors <- catalog <- list()
-  seen <- requested <- character()
-  for (tissue in tissues) {
-    for (feature in tissue$feature_sets) {
-      if (!is.null(feature_set_ids) && !feature$feature_set_id %in% feature_set_ids) next
-      requested <- union(requested, feature$feature_set_id)
-      dataset <- paste0("experiment:", feature$feature_set_id)
-      key <- paste(tissue$tissue_id, dataset, sep = "\034")
-      seen <- c(seen, key)
-      descriptors[[length(descriptors) + 1L]] <- list(tissue = tissue, entry = feature, dataset_id = dataset, feature = TRUE)
-      catalog[[length(catalog) + 1L]] <- list(tissue_id = tissue$tissue_id, dataset_id = dataset,
-        feature_set_id = feature$feature_set_id, observation_unit = feature$observation_unit, row_count = feature$row_count)
-    }
-    for (artifact in tissue$artifacts %||% list()) {
-      if (!identical(artifact$role, "review_observations")) next
-      dataset <- wsi_experiment_text(artifact$dataset_id, "review dataset_id")
-      key <- paste(tissue$tissue_id, dataset, sep = "\034")
-      if (key %in% seen) wsi_abort("Duplicate review dataset_id within a tissue.")
-      seen <- c(seen, key)
-      count <- wsi_experiment_number(artifact$row_count, "review row_count", integer = TRUE)
-      descriptors[[length(descriptors) + 1L]] <- list(tissue = tissue, entry = artifact, dataset_id = dataset, feature = FALSE)
-      catalog[[length(catalog) + 1L]] <- list(tissue_id = tissue$tissue_id, dataset_id = dataset,
-        observation_unit = artifact$observation_unit, row_count = count)
-    }
-    for (pair in wsi_experiment_spatial_pairs(tissue)) {
-      dataset <- pair$artifact$dataset_id
-      key <- paste(tissue$tissue_id, dataset, sep = "\034")
-      if (key %in% seen) wsi_abort("Duplicate review dataset_id within a tissue.")
-      seen <- c(seen, key)
-      descriptors[[length(descriptors) + 1L]] <- list(tissue = tissue, pair = pair,
-        dataset_id = dataset, spatial = TRUE)
-      catalog[[length(catalog) + 1L]] <- list(tissue_id = tissue$tissue_id, dataset_id = dataset,
-        observation_unit = pair$artifact$observation_unit, row_count = as.numeric(pair$artifact$row_count),
-        role = "spatial_transcriptomics_object", object_path = pair$object$path,
-        object_sha256 = pair$object$sha256)
-    }
-  }
-  if (!is.null(feature_set_ids) && any(!feature_set_ids %in% requested)) wsi_abort("Unknown feature_set_ids in the selected tissues.")
-  total <- sum(vapply(catalog, `[[`, numeric(1), "row_count"))
-  provenance <- list(source_reference = list(type = "cellphenotyper-experiment", manifest_path = experiment$manifest_path,
-    manifest_sha256 = experiment$manifest_sha256), dataset_catalog = catalog,
-    availability = list(status = "available", max_observations = max_observations, requested_observations = total))
-  construct <- function(observations, reductions) wsi_review_context(images, observations, reductions,
-    context_id = paste0("experiment:", experiment$experiment_id), experiment_id = experiment$experiment_id,
-    provenance = provenance)
-  if (total > max_observations) {
-    reason <- sprintf("Review needs %s observations, exceeding max_observations=%s. Select a bounded tissue/feature subset; no rows were sampled.", total, max_observations)
-    if (strict) wsi_abort(reason)
-    provenance$availability$status <- "unavailable"
-    provenance$availability$reason <- reason
-    return(construct(list(), list()))
-  }
-  observations <- list()
-  spatial_reductions <- list()
-  datasets <- list()
-  for (descriptor in descriptors) {
-    if (isTRUE(descriptor$spatial)) {
-      bundle <- wsi_experiment_spatial_bundle(experiment, descriptor$tissue, descriptor$pair, max_observations)
-      rows <- bundle$observations
-      spatial_reductions <- c(spatial_reductions, bundle$reductions)
-      provenance$spatial_attachments <- c(provenance$spatial_attachments %||% list(), list(bundle$attachment))
-    } else rows <- wsi_experiment_review_rows(experiment, descriptor$tissue, descriptor$entry,
-      descriptor$dataset_id, max_observations, descriptor$feature)
-    key <- paste(descriptor$tissue$tissue_id, descriptor$dataset_id, sep = "\034")
-    datasets[[key]] <- rows
-    observations <- c(observations, rows)
-  }
-  reductions <- spatial_reductions
-  for (tissue in tissues) for (artifact in tissue$artifacts %||% list()) {
-    if (!identical(artifact$role, "observation_reduction")) next
-    dataset <- artifact$dataset_id
-    if (!is.null(artifact$source_feature_set_id)) {
-      expected <- paste0("experiment:", artifact$source_feature_set_id)
-      if (!is.null(dataset) && !identical(dataset, expected)) wsi_abort("Reduction dataset_id and source_feature_set_id disagree.")
-      dataset <- expected
-    }
-    dataset <- wsi_experiment_text(dataset, "reduction dataset_id")
-    rows <- datasets[[paste(tissue$tissue_id, dataset, sep = "\034")]]
-    if (is.null(rows)) {
-      if (!is.null(feature_set_ids) && !is.null(artifact$source_feature_set_id) && !artifact$source_feature_set_id %in% feature_set_ids) next
-      wsi_abort("Reduction refers to an unknown review dataset in its tissue.")
-    }
-    if (!identical(artifact$frame_id, tissue$image$frame_id) ||
-        !identical(artifact$observation_unit, rows[[1L]]$observation_unit))
-      wsi_abort("Reduction frame/unit differs from its declared observation dataset.")
-    dims <- as.character(unlist(artifact$dimension_columns, use.names = FALSE))
-    id_column <- wsi_experiment_text(artifact$id_column, "reduction id_column")
-    if (length(dims) != 2L || anyNA(dims) || any(!nzchar(dims)) || anyDuplicated(c(id_column, dims)))
-      wsi_abort("Reduction requires two distinct dimension_columns separate from its ID column.")
-    read <- wsi_experiment_review_table(artifact, experiment, c(id_column, dims), "reduction", max_observations)
-    table <- read$table
-    local <- vapply(rows, `[[`, character(1), "original_id")
-    incoming <- table[[id_column]]
-    if (anyNA(incoming) || anyDuplicated(incoming) || length(incoming) != length(local) || !setequal(incoming, local))
-      wsi_abort("Reduction IDs must match every declared observation exactly once; row order is never used for joins.")
-    order <- match(local, incoming)
-    x <- wsi_experiment_review_numeric(table[[dims[[1L]]]][order], "Reduction dimension 1")
-    y <- wsi_experiment_review_numeric(table[[dims[[2L]]]][order], "Reduction dimension 2")
-    rid <- wsi_experiment_text(artifact$reduction_id, "reduction_id")
-    reductions[[length(reductions) + 1L]] <- list(
-      id = wsi_experiment_namespace_id(experiment$experiment_id, tissue$tissue_id, dataset, rid),
-      label = paste(tissue$name, artifact$label %||% artifact$method %||% rid, dataset, sep = " \u00b7 "),
-      observation_unit = artifact$observation_unit, frame_id = artifact$frame_id,
-      source_feature_set_id = artifact$source_feature_set_id, dataset_id = dataset,
-      source_reference = list(path = read$entry$resolved_path, sha256 = read$entry$sha256,
-        method = artifact$method, dimension_columns = as.list(dims)),
-      points = lapply(seq_along(rows), function(i) list(id = rows[[i]]$id, x = x[[i]], y = y[[i]])))
-  }
-  construct(observations, reductions)
-}
-
-#' Fit an image-feature classifier from explicitly confirmed human labels
-#' @param experiment A typed experiment or manifest.
-#' @param context The exact validated review context used for the checkpoint.
-#' @param checkpoint A validated human-review checkpoint.
-#' @param feature_set_id Compatible typed image feature set to train.
-#' @param train_ids Explicit canonical IDs to use as training observations.
-#' @param ... CPU fitting settings passed to wsi_experiment_train_classifier().
-#' @return A portable CPU experiment classifier with checkpoint revision and
-#'   human-label provenance. Spot/cell cluster labels are never promoted.
-#' @export
-wsi_experiment_train_reviewed_classifier <- function(experiment, context, checkpoint,
-  feature_set_id, train_ids, ...) {
-  context <- wsi_validate_review_context(context)
-  checkpoint <- wsi_validate_review_checkpoint(checkpoint, context)
-  train_ids <- wsi_review_ids(train_ids, "train_ids", vapply(context$observations, `[[`, character(1), "id"))
-  if (!length(train_ids)) wsi_abort("Select explicit reviewed image observations for training; empty selection never means all.")
-  records <- checkpoint$review_records
-  record_ids <- vapply(records, `[[`, character(1), "id")
-  selected <- match(train_ids, record_ids)
-  if (anyNA(selected)) wsi_abort("Every training observation requires an explicit human review record.")
-  records <- records[selected]
-  if (any(!vapply(records, function(record) identical(record$status, "reviewed"), logical(1))))
-    wsi_abort("Only confirmed reviewed labels can train a classifier; excluded/uncertain records are not training targets.")
-  rows <- context$observations[match(train_ids, vapply(context$observations, `[[`, character(1), "id"))]
-  if (any(!vapply(rows, function(row) row$observation_unit %in% c("tile", "token") &&
-      identical(row$feature_set_id, feature_set_id), logical(1))))
-    wsi_abort("Reviewed training IDs must belong to the compatible typed image feature set; spatial spot/cell labels are not image training labels.")
-  experiment <- wsi_read_experiment(experiment)
-  if (!identical(context$experiment_id, experiment$experiment_id)) wsi_abort("Review context belongs to another experiment.")
-  reference <- context$provenance$source_reference
-  if (!identical(reference$manifest_sha256, experiment$manifest_sha256))
-    wsi_abort("Review context experiment manifest identity changed; reopen and review the revised source.")
-  tissues <- unique(vapply(rows, `[[`, character(1), "tissue_id"))
-  features <- wsi_experiment_features(experiment, feature_set_id, tissues)
-  if (any(!train_ids %in% features$observations$id)) wsi_abort("Reviewed observations do not match current image feature IDs.")
-  expected <- features$observations[match(train_ids, features$observations$id), , drop = FALSE]
-  for (i in seq_along(rows)) {
-    tissue <- experiment$tissues[[match(rows[[i]]$tissue_id,
-      vapply(experiment$tissues, `[[`, character(1), "tissue_id"))]]
-    image <- context$images[[match(rows[[i]]$tissue_id, vapply(context$images, `[[`, character(1), "tissue_id"))]]
-    if (!identical(image$sha256, tolower(tissue$image$sha256)) ||
-        !identical(rows[[i]]$frame_id, tissue$image$frame_id) ||
-        !identical(rows[[i]]$observation_unit, expected$unit[[i]]) ||
-        abs(rows[[i]]$x - expected$x[[i]]) > 1e-8 || abs(rows[[i]]$y - expected$y[[i]]) > 1e-8 ||
-        is.null(rows[[i]]$footprint_width_px) || is.null(rows[[i]]$footprint_height_px) ||
-        abs(rows[[i]]$footprint_width_px - expected$footprint_width_px[[i]]) > 1e-8 ||
-        abs(rows[[i]]$footprint_height_px - expected$footprint_height_px[[i]]) > 1e-8)
-      wsi_abort("Review observations no longer match the current native image feature metadata.")
-  }
-  labels <- stats::setNames(vapply(records, `[[`, character(1), "label"), train_ids)
-  model <- wsi_experiment_train_classifier(features, feature_set_id, labels, train_ids = train_ids, ...)
-  model$human_review <- list(context_id = context$context_id, source_signature = context$source_signature,
-    checkpoint_revision = checkpoint$revision, records = records,
-    review_sha256 = wsi_review_digest(records), label_origin = "explicit_human_review",
-    fitted_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"))
-  model
 }

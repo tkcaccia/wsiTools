@@ -37,6 +37,21 @@ pixel data and feature caches are not copied into the project. Hashed
 namespaced IDs and tissue scope. These imported annotations retain source
 provenance and are not automatically an independent reference standard.
 
+## Full-slide cells and tissue annotations
+
+The experiment may register an indexed CellViT++ classification table and its
+lossless feature partitions. The viewer reads visible cells and selected review
+rows in bounded pages; it does not load every cell vector into the browser.
+Choose **Cell identification** to switch the registered taxonomy or classifier.
+Accepted Bora GeoJSON opens as ordinary editable tissue annotations with its
+prediction provenance preserved. Tissue groups and cell types remain separate.
+See [Cell identification](cell-identification.md) for model and review details.
+
+An optional `image.display` reference can point to a native-pixel pyramid with
+the same source hash, frame and dimensions, plus an explicit `vips`, `openslide`
+or `auto` backend. The viewer checks its hash and dimensions before opening it;
+annotation coordinates still use the analyzed image's unchanged native frame.
+
 ## Training and reuse
 
 ```r

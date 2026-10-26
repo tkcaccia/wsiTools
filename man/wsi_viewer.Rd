@@ -60,6 +60,8 @@ wsi_viewer(
   spatial_object_save_url = NULL,
   image_export_url = NULL,
   geojson_mask_url = NULL,
+  mask_import_url = NULL,
+  mask_geojson_url = NULL,
   dense_geojson_url = NULL,
   dense_geojson_sources = NULL,
   prediction_url = NULL,
@@ -238,6 +240,12 @@ PNG/JPEG/TIFF through R.}
 
 \item{geojson_mask_url}{Optional live HTTP endpoint used by the viewer to
 rasterize dense GeoJSON annotation files into tiled mask overlays.}
+
+\item{mask_import_url}{Optional live HTTP endpoint for importing TIFF masks
+as tiled tissue or cell annotation overlays.}
+
+\item{mask_geojson_url}{Optional live HTTP endpoint for converting a bounded
+annotation-mask region to GeoJSON.}
 
 \item{dense_geojson_url}{Optional live HTTP endpoint used by the viewer to
 load dense GeoJSON annotations progressively for visible regions.}
