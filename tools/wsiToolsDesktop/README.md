@@ -182,3 +182,15 @@ stays in R/wsiTools:
   capabilities.
 
 This keeps the desktop wrapper small and avoids duplicating backend logic.
+
+## Linux graphics startup
+
+Before creating the first WebKit window, the launcher uses compatible DMA-BUF
+presentation. On an NVIDIA X11 display it also selects a loadable NVIDIA EGL
+manifest, avoiding an incompatible Mesa DRI2 probe. It queries the active X
+display rather than assuming that an installed NVIDIA driver owns the display.
+Wayland, other graphics vendors, missing drivers, and explicit EGL overrides
+keep their existing EGL discovery. WebGL and browser hardware acceleration
+remain enabled; no driver, device permissions, or system settings are changed.
+
+Linux startup tests run with `cargo test --release --locked linux_webkit`.

@@ -24,6 +24,9 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 #[cfg(feature = "native-wgpu")]
 mod native_renderer;
 
+#[cfg(target_os = "linux")]
+mod linux_webkit;
+
 const VIEWER_WINDOW_LABEL: &str = "viewer-main";
 
 #[derive(Default)]
@@ -2047,6 +2050,10 @@ fn main() {
         }
         return;
     }
+    // Configure before GTK/WebKit initialize or worker threads are created.
+    #[cfg(target_os = "linux")]
+    linux_webkit::configure_before_webkit();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Arc::new(RViewerState::default()))
