@@ -1,0 +1,104 @@
+site_name: wsiTools
+site_description: Memory-efficient whole-slide image access, tiled viewing, annotations, spatial omics, and pathology preprocessing in R.
+site_author: Stefano Caccia
+repo_url: https://github.com/tkcaccia/wsiTools
+repo_name: tkcaccia/wsiTools
+edit_uri: edit/main/docs/
+use_directory_urls: true
+copyright: Copyright &copy; Stefano Caccia. Released under the MIT License.
+
+theme:
+  name: material
+  language: en
+  icon:
+    logo: material/microscope
+    repo: fontawesome/brands/github
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - content.action.edit
+    - content.code.copy
+    - search.highlight
+    - search.suggest
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: light blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+extra_css:
+  - stylesheets/extra.css
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/tkcaccia/wsiTools
+      name: wsiTools on GitHub
+
+exclude_docs: |
+  requirements.txt
+
+nav:
+  - Home: index.md
+  - Get started:
+      - Installation: installation.md
+      - Open one image: open-one-image.md
+      - Configure backends: backends.md
+      - Desktop downloads: downloads.md
+  - Tutorials:
+      - Learning path: tutorials/index.md
+      - Open your first slide: tutorials/first-slide.md
+      - Annotate and round-trip: tutorials/annotations-roundtrip.md
+      - Detect tissue and extract tiles: tutorials/tissue-and-tiles.md
+      - Segment a selected ROI: tutorials/segment-selected-roi.md
+      - Add spatial omics: tutorials/spatial-omics.md
+      - Export and save results: tutorials/export-results.md
+  - Viewer:
+      - Live viewer: live-viewer.md
+      - Architecture: architecture.md
+      - Visual gallery: screenshots.md
+  - Workflows:
+      - Examples gallery: examples.md
+      - Spatial omics: spatial-omics.md
+      - Cell segmentation: cell-segmentation.md
+      - Project format: projects.md
+      - Desktop app: desktop-app.md
+  - Help and reference:
+      - Troubleshooting: troubleshooting.md
+      - Compile the Tauri app: tauri-build.md
+      - Deploy on Read the Docs: read-the-docs.md
+      - R function reference: https://tkcaccia.github.io/wsiTools/reference/index.html
