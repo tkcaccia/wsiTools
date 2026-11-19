@@ -78,6 +78,11 @@ jobs:
         working-directory: tools/wsiToolsDesktop
         run: npm run build
 
+      - name: Test Linux graphics startup
+        if: runner.os == 'Linux'
+        working-directory: tools/wsiToolsDesktop/src-tauri
+        run: cargo test --release --locked linux_webkit
+
       - name: Collect desktop installers
         shell: bash
         working-directory: tools/wsiToolsDesktop
