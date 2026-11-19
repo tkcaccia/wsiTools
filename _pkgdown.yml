@@ -28,6 +28,7 @@ navbar:
       - intro
       - installation
       - downloads
+      - tissue_skill
       - viewer
       - tutorials
       - concepts
@@ -62,6 +63,9 @@ navbar:
           href: https://github.com/tkcaccia/wsiTools/blob/main/docs/tauri-build.md
         - text: R and dependencies
           href: https://github.com/tkcaccia/wsiTools/blob/main/docs/installation.md
+    tissue_skill:
+      text: AI skill
+      href: articles/tissue-visualizer-skill.html
     viewer:
       text: Viewer
       menu:
@@ -149,6 +153,7 @@ articles:
     navbar: Viewer
     contents:
       - viewer
+      - tissue-visualizer-skill
       - annotations
       - tile-extraction
       - desktop-app
@@ -377,14 +382,6 @@ reference:
       - wsi_proximity_context
       - wsi_has_fastpls
 
-  - title: Cached experiments, classifiers, and feature appearance
-    desc: Open multi-tissue experiments, reuse fitted PLS classifiers, and create local or shared feature contrasts.
-    contents:
-      - wsi_read_experiment
-      - wsi_experiment_registered_tissue_viewport
-      - wsi_experiment_train_classifier
-      - wsi_experiment_appearance
-
   - title: CellPhenotyper, cells, and segmentation overlays
     desc: Open CellPhenotyper projects and import or run optional segmentation outputs in ROI-aware workflows.
     contents:
@@ -424,22 +421,3 @@ reference:
       - wsi_case_report
       - write_case_report
       - wsi_write_case_report
-
-  - title: Human review and spatial selections
-    contents:
-      - wsi_review_context
-      - wsi_validate_review_context
-      - wsi_review_select
-      - wsi_review_checkpoint
-      - wsi_validate_review_checkpoint
-      - wsi_write_review_checkpoint
-      - wsi_read_review_checkpoint
-      - wsi_review_tile_plan
-      - wsi_experiment_review_context
-      - wsi_experiment_train_reviewed_classifier
-      - wsi_review_attach_spatial
-      - wsi_review_attach_seurat
-      - wsi_review_inspect_spatial
-      - wsi_review_context_from_linked
-      - wsi_rectangular_footprints_in_roi
-      - wsi_experiment_add_spatial

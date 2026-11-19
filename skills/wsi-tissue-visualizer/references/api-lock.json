@@ -1,0 +1,18 @@
+{
+  "R/region.R": [
+    "73c2b84c0eaa96c8857296b54cc3d427b5080d24"
+  ],
+  "R/roi.R": [
+    "87627d5bbf0ace052e4e2e7e0763eccd8b5109a1"
+  ],
+  "R/slide.R": [
+    "327757db0a7bd66549d46e57e9427f5a54997684"
+  ],
+  "R/thumbnail-crop.R": [
+    "67e07cb08df9e2be0f8e99063c1af2051f4d648b"
+  ],
+  "R/viewer.R": [
+    "e2922dff730a4aaaa03294beb3c6ddde8bd0c0a6",
+    "e9c3017d7ca2574dd892209c231f7c7ba1c0386e"
+  ]
+}

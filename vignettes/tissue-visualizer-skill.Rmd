@@ -1,0 +1,68 @@
+---
+title: "Tissue visualizer skill"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Tissue visualizer skill}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE, purl = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = FALSE, purl = FALSE)
+```
+
+## Download
+
+[Download the latest wsiTools tissue visualizer skill (ZIP)](https://tkcaccia.github.io/wsiTools/downloads/wsi-tissue-visualizer.zip).
+
+This skill gives Codex and other coding agents a tested way to build a focused,
+read-only tissue visualization from a whole-slide image and optional GeoJSON.
+The bundled builder uses wsiTools to generate full-resolution Deep Zoom tiles,
+then writes a compact viewer with pan, zoom, class visibility, opacity, outlines,
+and a scale bar when microns-per-pixel metadata is available. A second command
+exports a bounded, high-resolution PNG figure or slide overview. It copies the
+source GeoJSON exactly and leaves the slide and scored data unchanged.
+
+The [source files](https://github.com/tkcaccia/wsiTools/tree/main/skills/wsi-tissue-visualizer)
+can also be read directly on GitHub. The ZIP contains `SKILL.md`, the R builder,
+the viewer template, a PNG renderer, a bundle verifier, and `SOURCE_VERSION.json` identifying
+the wsiTools source revision used to build it.
+
+## Install and use
+
+Unzip the archive into `~/.codex/skills/` to let Codex discover
+`wsi-tissue-visualizer/SKILL.md`. Other agents can read that file and run the
+bundled scripts from the same directory. Building a viewer requires R with
+wsiTools 0.1.28 or newer and libvips.
+
+```sh
+Rscript ~/.codex/skills/wsi-tissue-visualizer/scripts/build_viewer.R \
+  --slide /absolute/path/slide.svs \
+  --geojson /absolute/path/regions.geojson \
+  --out /absolute/path/tissue-viewer \
+  --title "Tissue review"
+
+python3 ~/.codex/skills/wsi-tissue-visualizer/scripts/verify_bundle.py \
+  /absolute/path/tissue-viewer
+
+Rscript ~/.codex/skills/wsi-tissue-visualizer/scripts/render_figure.R \
+  --slide /absolute/path/slide.svs \
+  --geojson /absolute/path/regions.geojson \
+  --x 10000 --y 20000 --width 6000 --height 4000 \
+  --pixels 3000 --out /absolute/path/figure.png
+```
+
+Serve the output directory over HTTP to preview it, or publish its files on a
+static host. GeoJSON coordinates must be level-0 slide pixels; if another
+coordinate system was used, register it explicitly before visualization. PNG
+export also requires the optional `magick` R package.
+
+## Staying current
+
+The [pkgdown site workflow](https://github.com/tkcaccia/wsiTools/blob/main/.github/workflows/pkgdown.yaml)
+regenerates the download ZIP on every push to `main`. The ZIP includes a source
+fingerprint and revision. A separate CI check compares the wsiTools APIs used by
+the skill with reviewed source hashes. Changes to those APIs require the skill
+to be checked and its API lock refreshed before the updated download is built.
+This catches source changes that need a human or agent to adapt the skill's
+instructions or scripts; a hash refresh alone does not prove behavior is sound.

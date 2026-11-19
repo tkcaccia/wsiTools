@@ -1,0 +1,28 @@
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+name: Tissue visualizer skill
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check skill against wsiTools source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: r-lib/actions/setup-r@v2
+
+      - name: Check reviewed APIs
+        run: python3 scripts/package_tissue_skill.py --check
+
+      - name: Check skill scripts
+        run: |
+          Rscript -e 'parse(file="skills/wsi-tissue-visualizer/scripts/build_viewer.R")'
+          node --check skills/wsi-tissue-visualizer/assets/viewer.js
+          python3 -m py_compile skills/wsi-tissue-visualizer/scripts/verify_bundle.py scripts/package_tissue_skill.py

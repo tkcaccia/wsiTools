@@ -51,6 +51,12 @@ jobs:
             override = list(destination = "_site")
           )
 
+      - name: Package tissue visualizer skill
+        run: |
+          python3 scripts/package_tissue_skill.py --check \
+            --output _site/downloads/wsi-tissue-visualizer.zip \
+            --metadata-output _site/downloads/wsi-tissue-visualizer-source.json
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
