@@ -24,5 +24,7 @@ jobs:
       - name: Check skill scripts
         run: |
           Rscript -e 'parse(file="skills/wsi-tissue-visualizer/scripts/build_viewer.R")'
+          Rscript -e 'parse(file="skills/wsi-tissue-visualizer/scripts/build_remote.R")'
           node --check skills/wsi-tissue-visualizer/assets/viewer.js
-          python3 -m py_compile skills/wsi-tissue-visualizer/scripts/verify_bundle.py scripts/package_tissue_skill.py
+          node --check skills/wsi-tissue-visualizer/assets/remote.js
+          python3 -m py_compile skills/wsi-tissue-visualizer/scripts/verify_bundle.py skills/wsi-tissue-visualizer/scripts/check_source.py skills/wsi-tissue-visualizer/scripts/qa_viewer.py scripts/package_tissue_skill.py

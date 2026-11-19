@@ -148,6 +148,7 @@
     try {
       state.manifest = await readJSON('manifest.json');
       const manifest = state.manifest;
+      if (manifest.mode === 'remote-tiff') return; // remote.js owns source-only bundles.
       if (manifest.schema_version !== 1 || !manifest.image?.dzi || !(manifest.image.width > 0) || !(manifest.image.height > 0)) throw new Error('Invalid viewer manifest');
       el('title').textContent = manifest.title || 'Tissue viewer';
       document.title = `${manifest.title || 'Tissue viewer'} · wsiTools`;

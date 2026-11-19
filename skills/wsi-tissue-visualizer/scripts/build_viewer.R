@@ -10,6 +10,17 @@ usage <- function() {
     "  --tile-size INTEGER     Deep Zoom tile size (default: 512)",
     "  --tile-format jpg|png   Tile format (default: jpg)",
     "  --quality INTEGER       JPEG quality, 1-100 (default: 92)",
+    "  --remote-tiff-url URL   Use source-only publication mode instead of Deep Zoom tiles",
+    "  --source-identity-manifest FILE  Reviewed local/remote source identity JSON",
+    "  --preview-max-px N      Longest preview edge, 256-4096 (default: 1600)",
+    "  --display-tissue-mask FILE  Preview-pixel PNG with FILE.json identity sidecar",
+    "  --rgb-resample bilinear|nearest  Remote RGB sampling (default: bilinear)",
+    "  --label-resample nearest  Fixed label sampling (default: nearest)",
+    "  --contours exact|display-smoothed  Viewer contour layer (default: exact)",
+    "  --max-displacement-um N  Required bound for display smoothing",
+    "  --fragment-navigation   Navigate disconnected display-mask fragments",
+    "  --show-tile-progress    Show source tile loading indicator",
+    "  --qa-report DIR         Required source-only visual QA output directory",
     "  --force                 Replace an output made by this builder",
     sep = "\n"
   ), "\n")
@@ -19,13 +30,17 @@ fail <- function(message) stop(message, call. = FALSE)
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
 parse_args <- function(args) {
-  allowed <- c("slide", "out", "geojson", "title", "backend", "tile-size", "tile-format", "quality")
+  allowed <- c("slide", "out", "geojson", "title", "backend", "tile-size", "tile-format", "quality",
+               "remote-tiff-url", "source-identity-manifest", "preview-max-px", "display-tissue-mask",
+               "rgb-resample", "label-resample", "contours", "max-displacement-um", "qa-report")
   result <- list()
   i <- 1L
   while (i <= length(args)) {
     token <- args[[i]]
     if (token == "--help") { usage(); quit(save = "no", status = 0L) }
-    if (token == "--force") { result$force <- TRUE; i <- i + 1L; next }
+    if (token %in% c("--force", "--fragment-navigation", "--show-tile-progress")) {
+      result[[substring(token, 3L)]] <- TRUE; i <- i + 1L; next
+    }
     if (!startsWith(token, "--") || !substring(token, 3L) %in% allowed) fail(paste("Unknown option:", token))
     if (i == length(args) || startsWith(args[[i + 1L]], "--")) fail(paste("Missing value for", token))
     result[[substring(token, 3L)]] <- args[[i + 1L]]
@@ -39,7 +54,7 @@ args <- parse_args(commandArgs(trailingOnly = TRUE))
 if (!requireNamespace("wsiTools", quietly = TRUE)) fail("Install the wsiTools R package first.")
 if (utils::packageVersion("wsiTools") < "0.1.28") fail("wsiTools 0.1.28 or newer is required.")
 if (!requireNamespace("jsonlite", quietly = TRUE)) fail("The jsonlite R package is required.")
-if (!nzchar(Sys.which("vips"))) fail("libvips is required to build Deep Zoom tiles.")
+if (is.null(args[["remote-tiff-url"]]) && !nzchar(Sys.which("vips"))) fail("libvips is required to build Deep Zoom tiles.")
 
 slide_path <- normalizePath(args$slide, winslash = "/", mustWork = TRUE)
 geojson_path <- if (!is.null(args$geojson)) normalizePath(args$geojson, winslash = "/", mustWork = TRUE) else NULL
@@ -68,6 +83,16 @@ script_arg <- grep("^--file=", commandArgs(), value = TRUE)
 if (!length(script_arg)) fail("Run this file with Rscript.")
 skill_dir <- dirname(dirname(normalizePath(sub("^--file=", "", script_arg[[1L]]), winslash = "/", mustWork = TRUE)))
 asset_dir <- file.path(skill_dir, "assets")
+
+if (!is.null(args[["remote-tiff-url"]])) {
+  source(file.path(skill_dir, "scripts", "build_remote.R"), local = TRUE)
+  build_remote_viewer(args, skill_dir, slide_path, geojson_path, out)
+  quit(save = "no", status = 0L)
+}
+remote_options <- c("source-identity-manifest", "preview-max-px", "display-tissue-mask", "rgb-resample",
+                    "label-resample", "contours", "max-displacement-um", "fragment-navigation",
+                    "show-tile-progress", "qa-report")
+if (any(remote_options %in% names(args))) fail("Remote TIFF options require --remote-tiff-url.")
 
 slide <- wsiTools::wsi_open(slide_path, backend = backend)
 on.exit(wsiTools::wsi_close(slide), add = TRUE)

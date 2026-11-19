@@ -7,6 +7,7 @@
   <title>Tissue viewer</title>
   <link rel="stylesheet" href="viewer.css">
   <script defer src="https://cdn.jsdelivr.net/npm/openseadragon@5.0.1/build/openseadragon/openseadragon.min.js"></script>
+  <!--REMOTE_TIFF_SCRIPT-->
   <script defer src="viewer.js"></script>
 </head>
 <body>
@@ -16,7 +17,7 @@
         <p class="eyebrow">WSITOOLS · TISSUE VIEW</p>
         <h1 id="title">Tissue viewer</h1>
       </div>
-      <p class="mode">Read-only · full-resolution tiles</p>
+      <p class="mode" id="mode">Read-only · full-resolution tiles</p>
     </header>
 
     <section class="viewer-card" aria-label="Interactive tissue image">
@@ -29,18 +30,22 @@
         <div class="toolbar-rule"></div>
         <label class="opacity-control" for="opacity">Overlay opacity <input id="opacity" type="range" min="0" max="0.65" value="0.18" step="0.01"><output id="opacity-value" for="opacity">18%</output></label>
         <label class="check-control"><input id="outlines" type="checkbox" checked> Outlines</label>
+        <label class="check-control remote-only" id="contour-wrap" hidden>Contours <select id="contours"><option value="exact">Exact</option><option value="display">Display smoothed</option></select></label>
+        <label class="check-control remote-only" id="fragment-wrap" hidden>Fragment <select id="fragment"><option value="">Whole tissue</option></select></label>
       </div>
       <div class="stage" id="stage">
         <div id="osd" aria-label="Pan and zoom tissue image"></div>
         <canvas id="overlay" aria-hidden="true"></canvas>
         <div class="scale" id="scale" hidden><span class="scale-line" id="scale-line"></span><span id="scale-label"></span></div>
         <div class="loading" id="loading" role="status">Preparing tissue image…</div>
+        <div class="tile-progress remote-only" id="tile-progress" role="status" hidden>Loading source detail…</div>
       </div>
       <footer class="footer">
         <div id="legend" class="legend" aria-label="Annotation classes"></div>
         <div id="status" class="status" role="status">Loading viewer…</div>
       </footer>
     </section>
+    <p class="downloads remote-only" id="downloads" hidden></p>
     <p class="help">Scroll or pinch to zoom · Drag to pan · Double-click to zoom · Use Fit tissue to reset</p>
   </main>
 </body>
