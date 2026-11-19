@@ -431,6 +431,7 @@ reference:
       - wsi_experiment_registered_tissue_viewport
       - wsi_experiment_review_context
       - wsi_experiment_train_classifier
+      - starts_with("wsi_rectangular_footprints_in_roi")
       - wsi_review_attach_spatial
       - wsi_review_checkpoint
       - wsi_review_context
