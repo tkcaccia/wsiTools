@@ -37,5 +37,4 @@ Bounds exclusions are reported by canonical observation ID.}
 \code{row_count}, deduplicated \code{work_count}, image metadata, \code{tiles}
 and \code{excluded_ids}. Each tile has native x/y/width/height, read bounds,
 image/tissue/frame identity, and \code{observation_ids}.}
-\seealso{\code{\link{wsi_review_context}},
-\code{\link{wsi_rectangular_footprints_in_roi}}}
+\seealso{\code{\link{wsi_review_context}}}

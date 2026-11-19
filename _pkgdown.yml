@@ -421,3 +421,17 @@ reference:
       - wsi_case_report
       - write_case_report
       - wsi_write_case_report
+
+  - title: Experiment and spatial review workflows
+    desc: Build and inspect experimental tissue and spatial review contexts.
+    contents:
+      - wsi_read_experiment
+      - wsi_experiment_add_spatial
+      - wsi_experiment_appearance
+      - wsi_experiment_registered_tissue_viewport
+      - wsi_experiment_review_context
+      - wsi_experiment_train_classifier
+      - wsi_review_attach_spatial
+      - wsi_review_checkpoint
+      - wsi_review_context
+      - wsi_review_tile_plan
